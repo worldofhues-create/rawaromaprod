@@ -1,0 +1,76 @@
+/**
+ * AppModule — the HTTP composition root (doc 01 §0 deployment shape: the `api` process).
+ *
+ * Imports the reusable kernel (config, db, jwt, flags, event bus, health) + the Phase-1
+ * clusters (identity, platform), and installs the edge layer globally:
+ *   - guards (order matters): JwtAuthGuard → PermissionsGuard → FlagGuard
+ *   - ResponseEnvelopeInterceptor (every success → { data, meta, error })
+ *   - AllExceptionsFilter (every error → normalized envelope)
+ *   - RequestIdMiddleware (x-request-id on every route)
+ * Adding a cluster = one import line here (plus its package).
+ */
+import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
+import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import {
+  AllExceptionsFilter,
+  BackendKernelModule,
+  FlagGuard,
+  JwtAuthGuard,
+  PermissionsGuard,
+  RequestIdMiddleware,
+  ResponseEnvelopeInterceptor,
+} from '@core/backend-kernel';
+import { PlatformModule } from '@core/cluster-platform';
+// RA Phase-1A dictionary clusters (added as each is built on the new schema).
+// Auth is dictionary-backed (cluster-org, on USER_MASTER) — the generic @core identity
+// cluster is retired for RA.
+import { ClusterOrgModule } from '@ra/cluster-org';
+import { ReferenceModule } from '@ra/cluster-reference';
+import { LocationModule } from '@ra/cluster-location';
+import { ClusterMasterdataModule } from '@ra/cluster-masterdata';
+import { ClusterProcurementModule } from '@ra/cluster-procurement';
+import { ClusterInventoryModule } from '@ra/cluster-inventory';
+import { QualityModule } from '@ra/cluster-quality';
+import { FormulaModule } from '@ra/cluster-formula';
+import { ProductionModule } from '@ra/cluster-production';
+import { PackagingModule } from '@ra/cluster-packaging';
+import { SalesModule } from '@ra/cluster-sales';
+import { MaterialMaskingInterceptor } from './masking/material-masking.interceptor.js';
+import { CryptoModule } from './crypto/crypto.module.js';
+import { DashboardModule } from './dashboard/dashboard.module.js';
+
+@Module({
+  imports: [
+    BackendKernelModule.forRoot(),
+    CryptoModule,
+    PlatformModule,
+    ClusterOrgModule,
+    ReferenceModule,
+    LocationModule,
+    ClusterMasterdataModule,
+    ClusterProcurementModule,
+    ClusterInventoryModule,
+    QualityModule,
+    FormulaModule,
+    ProductionModule,
+    PackagingModule,
+    SalesModule,
+    DashboardModule,
+  ],
+  providers: [
+    // Edge guards run in registration order: authenticate, then authorize, then flag-gate.
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: FlagGuard },
+    { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
+    // Registered AFTER the envelope → on the response path it runs FIRST, masking material_id
+    // on the raw handler output before the envelope wraps it. Floor sees aliases, never real ids.
+    { provide: APP_INTERCEPTOR, useClass: MaterialMaskingInterceptor },
+    { provide: APP_FILTER, useClass: AllExceptionsFilter },
+  ],
+})
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer): void {
+    consumer.apply(RequestIdMiddleware).forRoutes('*');
+  }
+}

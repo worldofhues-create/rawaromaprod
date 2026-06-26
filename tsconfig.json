@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "//": "Root tsconfig so tsx/esbuild's per-file lookup finds decorator settings for workspace packages imported via node_modules symlinks (NestJS parameter decorators). Packages still extend tsconfig.base.json directly.",
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "emitDecoratorMetadata": true,
+    "useDefineForClassFields": false
+  }
+}

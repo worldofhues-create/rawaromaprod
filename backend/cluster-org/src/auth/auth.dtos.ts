@@ -1,0 +1,14 @@
+import { z } from "zod";
+
+/** POST /auth/login — identifier is the user_master email. */
+export const loginBody = z.object({
+  identifier: z.string().min(1),
+  password: z.string().min(1),
+});
+export type LoginBody = z.infer<typeof loginBody>;
+
+/** POST /auth/users/:id/password — set/reset a user's password. */
+export const setPasswordBody = z.object({
+  password: z.string().min(8).max(200),
+});
+export type SetPasswordBody = z.infer<typeof setPasswordBody>;

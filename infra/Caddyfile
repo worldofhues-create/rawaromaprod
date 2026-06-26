@@ -1,0 +1,27 @@
+# Reusable edge reverse-proxy (production). Caddy terminates TLS (auto-cert) and
+# load-balances the stateless api container(s). The app exposes ONE public origin;
+# everything else stays on the private network. Origin masking + Cloudflare sit in front
+# (see infra/README.md → network topology).
+#
+# Replace api.example.com with your domain. `api` / `web-admin` are container names.
+
+api.example.com {
+	encode zstd gzip
+	# Health probe bypasses auth.
+	@health path /health
+	handle @health {
+		reverse_proxy api:3000
+	}
+	reverse_proxy api:3000 {
+		# add more api replicas here to load-balance at scale:
+		# reverse_proxy api-1:3000 api-2:3000
+		lb_policy round_robin
+		health_uri /health
+	}
+}
+
+# Internal portals (ops/admin) — additionally put behind Cloudflare Access (zero-trust SSO).
+admin.example.com {
+	encode zstd gzip
+	reverse_proxy web-admin:3000
+}

@@ -1,0 +1,18 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "comment": "Static portal. Set the Vercel project's Root Directory to `web`. The two rewrites proxy the encrypted tunnel to Render so the backend host never appears in the browser network tab — only same-origin POST /rpc + /crypto/handshake (ciphertext). Replace RAW_AROMA_API_HOST with your Render hostname (e.g. raw-aroma-api.onrender.com).",
+  "rewrites": [
+    { "source": "/crypto/:path*", "destination": "https://RAW_AROMA_API_HOST/crypto/:path*" },
+    { "source": "/rpc", "destination": "https://RAW_AROMA_API_HOST/rpc" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Content-Type-Options", "value": "nosniff" },
+        { "key": "X-Frame-Options", "value": "DENY" },
+        { "key": "Referrer-Policy", "value": "no-referrer" }
+      ]
+    }
+  ]
+}

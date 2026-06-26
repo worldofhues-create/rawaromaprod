@@ -1,0 +1,53 @@
+{
+  "name": "raw-aroma",
+  "version": "0.0.0",
+  "private": true,
+  "description": "RAW AROMACHEM — formula-protected perfume oil manufacturing platform. Bootstrapped from the @core/* reusable template; @ra/* packages are the domain layer, @mfg/* the reusable manufacturing core.",
+  "packageManager": "pnpm@10.28.2",
+  "engines": {
+    "node": ">=22"
+  },
+  "type": "module",
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "build": "pnpm -r build",
+    "boundaries": "depcruise packages backend web mobile --config .dependency-cruiser.cjs",
+    "db:validate": "tsx scripts/db-validate.ts",
+    "db:push": "tsx scripts/db-push.ts",
+    "db:seed": "tsx scripts/db-seed.ts",
+    "db:seed:data": "tsx scripts/db-seed-data.ts"
+  },
+  "devDependencies": {
+    "@swc-node/register": "^1.11.1",
+    "@swc/core": "^1.15.41",
+    "argon2": "^0.41.1",
+    "dependency-cruiser": "^16.10.4",
+    "drizzle-kit": "^0.30.6",
+    "drizzle-orm": "^0.38.4",
+    "postgres": "^3.4.5",
+    "tsx": "^4.19.2",
+    "typescript": "^5.6.3",
+    "@core/data-kernel": "workspace:*",
+    "@core/data-iam": "workspace:*",
+    "@core/data-platform": "workspace:*",
+    "@ra/data-org": "workspace:*",
+    "@ra/data-reference": "workspace:*",
+    "@ra/data-location": "workspace:*",
+    "@ra/data-masterdata": "workspace:*",
+    "@ra/data-procurement": "workspace:*",
+    "@ra/data-inventory": "workspace:*",
+    "@ra/data-quality": "workspace:*",
+    "@ra/data-formula": "workspace:*",
+    "@ra/data-production": "workspace:*",
+    "@ra/data-packaging": "workspace:*",
+    "@ra/data-sales": "workspace:*",
+    "@ra/data-workflow-state": "workspace:*"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "argon2",
+      "@nestjs/core",
+      "esbuild"
+    ]
+  }
+}

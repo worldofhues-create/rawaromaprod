@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Raw Aroma Chem · Production Portal</title>
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#117C66">
+  <link rel="icon" href="/icon.svg">
+  <style>
+    @font-face { font-family: 'Urbanist'; src: url('/fonts/adf5f325-e87d-4401-84a9-246e380c6864.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+    @font-face { font-family: 'Urbanist'; src: url('/fonts/9b9b854c-5b1b-4e4a-88a5-0d3eec462f94.woff2') format('woff2'); font-weight: 100 900; font-display: swap; unicode-range: U+0100-024F,U+1E00-1EFF; }
+    @font-face { font-family: 'JetBrains Mono'; src: url('/fonts/ad1f26c5-34be-47f9-98b1-c73b902006f7.woff2') format('woff2'); font-weight: 100 900; font-display: swap; }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { min-height: 100%; }
+    body { background: #117C66; font-family: 'Urbanist', system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
+    #root { background: var(--page, #E7EAF0); }
+    .ra-shell { display: flex; min-height: 100vh; }
+    @media (max-width: 860px) { .ra-shell { display: block; } }
+    input::placeholder { color: var(--t3); }
+    ::-webkit-scrollbar { width: 9px; height: 9px; }
+    ::-webkit-scrollbar-thumb { background: var(--barmute, #ccc); border-radius: 9px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+  </style>
+</head>
+<body>
+  <div id="root" style="min-height:100vh">
+    <div id="app" class="ra-shell"></div>
+  </div>
+  <script src="/app.js"></script>
+</body>
+</html>

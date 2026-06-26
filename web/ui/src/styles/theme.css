@@ -1,0 +1,166 @@
+/* -----------------------------------------------------------------------------
+ * @core/ui — portal theme variables  (GENERATED STYLE — DO NOT HAND-EDIT VALUES)
+ *
+ * Source of truth: @core/tokens  (packages/tokens/src/portals.ts).
+ * This file is the CSS materialization of `allPortalThemeCss()` from
+ * `@core/tokens/css`. Each block sets the SEMANTIC custom properties consumed by
+ * the Tailwind preset (tailwind-preset.ts) and therefore by every component.
+ *
+ * REGENERATE (after editing token files) — run from repo root:
+ *
+ *   node --import tsx -e "import('@core/tokens/css').then(m => \
+ *     process.stdout.write(m.allPortalThemeCss()))" \
+ *     > web/ui/src/styles/theme.css
+ *
+ * (prepend this header again, or wrap the emitter in a script that does).
+ *
+ * REBRAND / NEW PORTAL = edit packages/tokens only, then regenerate. Components
+ * never change. Apps select a theme with  <html data-portal="admin">.
+ * -------------------------------------------------------------------------- */
+
+:root[data-portal="buyer"] {
+  --color-bg: #fffdf9;
+  --color-surface: #fdf6ec;
+  --color-surface-muted: #eeeef0;
+  --color-border: #e2e2e6;
+  --color-text: #16161a;
+  --color-text-muted: #6b6b75;
+  --color-accent: #e2630f;
+  --color-accent-text: #ffffff;
+  --color-trust: #0ea5a3;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: comfortable;
+}
+
+:root[data-portal="owner"] {
+  --color-bg: #ffffff;
+  --color-surface: #f7f7f8;
+  --color-surface-muted: #eeeef0;
+  --color-border: #e2e2e6;
+  --color-text: #16161a;
+  --color-text-muted: #6b6b75;
+  --color-accent: #4f46e5;
+  --color-accent-text: #ffffff;
+  --color-trust: #0ea5a3;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: comfortable;
+}
+
+:root[data-portal="builder"] {
+  --color-bg: #ffffff;
+  --color-surface: #f1f5f9;
+  --color-surface-muted: #eeeef0;
+  --color-border: #e2e2e6;
+  --color-text: #16161a;
+  --color-text-muted: #6b6b75;
+  --color-accent: #475569;
+  --color-accent-text: #ffffff;
+  --color-trust: #0ea5a3;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: compact;
+}
+
+:root[data-portal="inspector"] {
+  --color-bg: #0b0f14;
+  --color-surface: #141a21;
+  --color-surface-muted: #1d2530;
+  --color-border: #2a3340;
+  --color-text: #f2f5f8;
+  --color-text-muted: #9aa6b2;
+  --color-accent: #22d3ee;
+  --color-accent-text: #04141a;
+  --color-trust: #34d399;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: compact;
+}
+
+:root[data-portal="ops"] {
+  --color-bg: #0d1117;
+  --color-surface: #161b22;
+  --color-surface-muted: #21262d;
+  --color-border: #30363d;
+  --color-text: #e6edf3;
+  --color-text-muted: #8b949e;
+  --color-accent: #388bfd;
+  --color-accent-text: #ffffff;
+  --color-trust: #2dd4bf;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: comfortable;
+}
+
+:root[data-portal="finance"] {
+  --color-bg: #ffffff;
+  --color-surface: #f0fdf4;
+  --color-surface-muted: #eeeef0;
+  --color-border: #e2e2e6;
+  --color-text: #16161a;
+  --color-text-muted: #6b6b75;
+  --color-accent: #047857;
+  --color-accent-text: #ffffff;
+  --color-trust: #0ea5a3;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: comfortable;
+}
+
+:root[data-portal="admin"] {
+  --color-bg: #101013;
+  --color-surface: #191920;
+  --color-surface-muted: #23232c;
+  --color-border: #2f2f3a;
+  --color-text: #ededf2;
+  --color-text-muted: #9a9aa6;
+  --color-accent: #e5484d;
+  --color-accent-text: #ffffff;
+  --color-trust: #0ea5a3;
+  --color-success: #16a34a;
+  --color-warning: #d97706;
+  --color-danger: #dc2626;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --font-sans: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+  --density: comfortable;
+}

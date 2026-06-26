@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["react", "nativewind/types"],
+    "allowImportingTsExtensions": false,
+    "noEmit": true,
+    "rootDir": ".",
+    "verbatimModuleSyntax": false
+  },
+  "include": ["src/**/*", "tailwind.preset.ts", "nativewind-env.d.ts"]
+}

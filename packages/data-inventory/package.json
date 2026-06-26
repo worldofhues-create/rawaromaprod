@@ -1,0 +1,36 @@
+{
+  "name": "@ra/data-inventory",
+  "version": "0.1.0",
+  "description": "RAW AROMACHEM inventory cluster (inventory schema): gate entries + GRN/lines (M05 receiving), rm_batches genealogy, the event-sourced stock-movements ledger + inventory-batches projection, physical audits (M06). Domain layer (@ra).",
+  "license": "UNLICENSED",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json",
+    "generate": "drizzle-kit generate",
+    "migrate": "tsx src/migrate.ts",
+    "seed": "tsx src/seed.ts",
+    "clean": "rimraf dist *.tsbuildinfo"
+  },
+  "dependencies": {
+    "@core/data-kernel": "workspace:*",
+    "drizzle-orm": "^0.38.4",
+    "postgres": "^3.4.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.7",
+    "drizzle-kit": "^0.30.2",
+    "rimraf": "^6.0.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

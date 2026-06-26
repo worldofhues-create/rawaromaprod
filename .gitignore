@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.DS_Store
+.env
+.env.*
+!.env.example
+.turbo/
+coverage/
+.run/
+.expo/
+*.tsbuildinfo
+web/.next/
+ios/
+android/
+
+# CI workflow not pushed via gh OAuth (lacks workflow scope); re-add later with a PAT.
+.github/workflows/

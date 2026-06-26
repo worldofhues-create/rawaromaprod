@@ -1,0 +1,26 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["react", "node", "nativewind/types"],
+    "noEmit": true,
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "paths": {
+      "@/*": ["./*"]
+    }
+  },
+  "include": [
+    "app/**/*.ts",
+    "app/**/*.tsx",
+    "lib/**/*.ts",
+    "lib/**/*.tsx",
+    "tailwind.config.ts",
+    "nativewind-env.d.ts",
+    "expo-env.d.ts"
+  ],
+  "exclude": ["node_modules", ".expo"]
+}
