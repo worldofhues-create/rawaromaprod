@@ -49,7 +49,9 @@ Render → **New → Blueprint** → pick the repo (it reads `render.yaml`). The
 secrets in the service's Environment tab: `DATABASE_URL`, `JWT_SECRET`, `FORMULA_KEK`, and
 `CORS_ORIGINS` (your Vercel origin, e.g. `https://raw-aroma.vercel.app`).
 
-- Build: `pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build`
+- Node: pinned to 22.12.0 via `.node-version` (avoid Render's default bleeding-edge Node).
+- Build: `npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build`
+  (NOT `corepack enable` — it fails on Render's read-only `/usr/bin`.)
 - Start: `node backend/api/dist/main.js`  (worker runs in-process via `RUN_WORKER_IN_PROCESS=true`)
 - Health: `/health`. Free tier sleeps after 15 min idle → first request cold-starts (~30–60 s).
 - Verify: `curl https://<your-render-host>/health` → `{"data":{"status":"ok","deps":{"database":"up"}}}`

@@ -8,9 +8,11 @@ services:
     plan: free
     region: oregon
     healthCheckPath: /health
-    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build
+    buildCommand: npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build
     startCommand: node backend/api/dist/main.js
     envVars:
+      - key: NODE_VERSION
+        value: "22.12.0"
       - key: NODE_ENV
         value: production
       - key: APP_ENV
