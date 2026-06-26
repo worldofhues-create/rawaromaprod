@@ -8,8 +8,11 @@ services:
     plan: free
     region: oregon
     healthCheckPath: /health
-    buildCommand: npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build
-    startCommand: node backend/api/dist/main.js
+    # Workspace packages export src/*.ts (internal-packages pattern), so we run the API through the
+    # swc ESM loader from source — identical to the proven local runtime — rather than a compiled
+    # dist (which would resolve deps to .ts and crash). The worker runs in-process via main.ts.
+    buildCommand: npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false
+    startCommand: node --import @swc-node/register/esm-register backend/api/src/main.ts
     envVars:
       - key: NODE_VERSION
         value: "22.12.0"

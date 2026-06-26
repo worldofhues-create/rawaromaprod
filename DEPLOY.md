@@ -50,9 +50,12 @@ secrets in the service's Environment tab: `DATABASE_URL`, `JWT_SECRET`, `FORMULA
 `CORS_ORIGINS` (your Vercel origin, e.g. `https://raw-aroma.vercel.app`).
 
 - Node: pinned to 22.12.0 via `.node-version` (avoid Render's default bleeding-edge Node).
-- Build: `npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false && pnpm --filter "@core/api..." build`
+- Build: `npm install -g pnpm@10.28.2 && pnpm install --frozen-lockfile --prod=false`
   (NOT `corepack enable` — it fails on Render's read-only `/usr/bin`.)
-- Start: `node backend/api/dist/main.js`  (worker runs in-process via `RUN_WORKER_IN_PROCESS=true`)
+- Start: `node --import @swc-node/register/esm-register backend/api/src/main.ts`
+  (Run from source via the swc loader — the workspace packages export `src/*.ts`, so a compiled
+  `dist/main.js` resolves deps to `.ts` and crashes with `ERR_UNKNOWN_FILE_EXTENSION`. Worker runs
+  in-process via `RUN_WORKER_IN_PROCESS=true`.)
 - Health: `/health`. Free tier sleeps after 15 min idle → first request cold-starts (~30–60 s).
 - Verify: `curl https://<your-render-host>/health` → `{"data":{"status":"ok","deps":{"database":"up"}}}`
 
