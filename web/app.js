@@ -73,6 +73,7 @@
       ['perms', 'Permissions', 'lock', '/v1/permissions'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
+      ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
@@ -80,12 +81,13 @@
       ['batches', 'Batches', 'layers', '/v1/rm-batches'] ] },
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
-      ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
+      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock', 'box', '/v1/inventory-batches'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
       ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'], ['racks', 'Racks', 'shelf', '/v1/racks'] ] },
     compounding: { label: 'Compounding', dept: 'Compounding', user: 'Compounding', nav: [
       ['work', 'Worksheets', 'beaker', '/v1/production-order-ingredients', true], ['orders', 'Production orders', 'grid', '/v1/production-orders'],
+      ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['issues', 'Material issues', 'box', '/v1/material-issues'],
       ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions'], ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'] ] },
     filling: { label: 'Filling', dept: 'Filling', user: 'Filling', nav: [
       ['tickets', 'Fill tickets', 'droplet', '/v1/filling-sessions'], ['orders', 'Package orders', 'box', '/v1/package-orders'],
@@ -130,6 +132,11 @@
     '/v1/customers': ['customerCode', 'customerName', 'status'],
     '/v1/transporters': ['transporterCode', 'transporterName', 'status'],
     '/v1/stock-requirements': ['materialId', 'requiredQty', 'priority', 'status'],
+    '/v1/rfqs': ['rfqNumber', 'rfqDate', 'submissionDeadline', 'status'],
+    '/v1/quotations': ['quotationNumber', 'quotationDate', 'validUntilDate', 'status'],
+    '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
+    '/v1/material-issues': ['issuedDt', 'productionOrderId', 'status'],
+    '/v1/production-qc': ['result', 'observedValue', 'inspectionDt', 'status'],
     '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
@@ -510,6 +517,9 @@
     ],
     '/v1/filling-sessions': [
       { label: 'End fill', perm: 'packaging:filling_session:write', when: function (r) { return UP(r.status) !== 'DONE'; }, path: function (r) { return '/v1/filling-sessions/' + r.fillingSessionId + '/end'; }, body: {} }
+    ],
+    '/v1/production-orders': [
+      { label: 'Generate pick list', perm: 'production:material_pick_list:write', when: function (r) { return ['INPROGRESS', 'PLANNING'].indexOf(UP(r.status)) >= 0; }, path: function (r) { return '/v1/production-orders/' + r.productionOrderId + '/pick-list'; }, body: {} }
     ],
     '/v1/sales-orders': [
       { label: 'Confirm', perm: 'sales:sales_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/sales-orders/' + r.salesOrderId + '/confirm'; }, body: {} },
