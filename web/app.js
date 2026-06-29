@@ -72,7 +72,8 @@
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
-      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
+      ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
+      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
@@ -94,7 +95,7 @@
       ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
       ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
-      ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
+      ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
   };
   // Curated, readable columns per endpoint (DB field names). Fallback = a smart generic picker.
   var COLS = {
@@ -127,6 +128,8 @@
     '/v1/product-skus': ['skuCode', 'packSize', 'status'],
     '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'status'],
     '/v1/customers': ['customerCode', 'customerName', 'status'],
+    '/v1/transporters': ['transporterCode', 'transporterName', 'status'],
+    '/v1/stock-requirements': ['materialId', 'requiredQty', 'priority', 'status'],
     '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
@@ -553,6 +556,77 @@
     });
   }
 
+  /* ---------------- "+ New" create forms (existing POST create routes) ---------------- */
+  var CREATE = {
+    '/v1/materials': { title: 'New material', perm: 'masterdata:material:write', fields: [
+      { n: 'materialCode', l: 'Material code', t: 'text', req: true }, { n: 'materialName', l: 'Material name', t: 'text', req: true },
+      { n: 'materialTypeId', l: 'Type', t: 'select', fk: '/v1/material-types', fv: 'materialTypeId', fl: 'typeName' },
+      { n: 'materialCategoryId', l: 'Category', t: 'select', fk: '/v1/material-categories', fv: 'materialCategoryId', fl: 'categoryName' },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'description', l: 'Description', t: 'textarea' }
+    ] },
+    '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
+      { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' }
+    ] },
+    '/v1/customers': { title: 'New customer', perm: 'sales:customer_master:write', fields: [
+      { n: 'customerCode', l: 'Customer code', t: 'text', req: true }, { n: 'customerName', l: 'Customer name', t: 'text', req: true }
+    ] },
+    '/v1/transporters': { title: 'New transporter', perm: 'sales:transporter_master:write', fields: [
+      { n: 'transporterCode', l: 'Transporter code', t: 'text', req: true }, { n: 'transporterName', l: 'Transporter name', t: 'text', req: true }
+    ] },
+    '/v1/stock-requirements': { title: 'New stock requirement', perm: 'procurement:stock_requirement:write', fields: [
+      { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'requiredQty', l: 'Required qty', t: 'number', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
+      { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'requirementSource', l: 'Source', t: 'text' }
+    ] }
+  };
+  function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
+  function fStyle() { return 'width:100%;padding:11px 13px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);font-size:13.5px;color:var(--t1);font-family:inherit;outline:none'; }
+  function openCreate(endpoint) {
+    var cfg = CREATE[endpoint]; if (!cfg) return;
+    var rows = cfg.fields.map(function (f) {
+      var ctrl;
+      if (f.t === 'select') {
+        var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') : '');
+        ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' style="' + fStyle() + '">' + opts + '</select>';
+      } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">'; }
+      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
+    }).join('');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
+      '<button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
+      rows + '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
+      var sel = ov.querySelector('[data-name="' + f.n + '"][data-fk]'); if (!sel) return;
+      tunnel(f.fk + '?limit=100').then(function (res) {
+        ((res.json && res.json.data) || []).forEach(function (row) {
+          var val = row[f.fv] != null ? row[f.fv] : guessId(row); var lab = row[f.fl] != null ? row[f.fl] : (val ? String(val).slice(0, 8) : '');
+          if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); }
+        });
+      }).catch(function () {});
+    });
+    $('ra-cform').onsubmit = function (e) {
+      e.preventDefault(); var body = {}, err = '';
+      cfg.fields.forEach(function (f) {
+        var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim();
+        if (f.req && !v) { err = err || (f.l + ' is required.'); }
+        if (v) body[f.n] = f.t === 'number' ? Number(v) : v;
+      });
+      if (err) { $('ra-merr').textContent = err; return; }
+      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
+      tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        close(); toast(cfg.title + ' created ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+
   async function loadView() {
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
@@ -572,8 +646,10 @@
       (sKeys[1] ? kpi('flask', String(byStatus[sKeys[1]]), label(sKeys[1])) : kpi('layers', cols.length ? String(cols.length) : '—', 'Fields')) +
       kpi('lock', masked ? 'Masked' : 'Live', masked ? 'Alias-protected' : 'DB source of truth');
     var table;
+    var canNew = CREATE[item[3]] && can(CREATE[item[3]].perm);
+    var newBtn = canNew ? '<button id="ra-new" style="padding:8px 14px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm);white-space:nowrap">+ New</button>' : '';
     if (!rows.length) {
-      table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div></div>';
+      table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
     } else {
       var q = st.search.trim().toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
@@ -586,11 +662,12 @@
       table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
         '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
         '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)">' + shown.length + ' of ' + rows.length + '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div></div>' +
+        '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div>' + newBtn + '</div>' +
         '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
     }
     V.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>' + table;
     wireActions();
+    var nb = $('ra-new'); if (nb) nb.onclick = function () { openCreate(item[3]); };
     var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; loadView(); setTimeout(function () { var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 0); });
   }
   function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
@@ -654,9 +731,11 @@
         if (res.status >= 400 || !d || !d.accessToken) { le.textContent = (res.json && res.json.error && res.json.error.message) || 'Invalid email or password.'; return; }
         var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
         var role = (payload.roles || [])[0] || null;
-        session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: payload.permissions || [] };
+        session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [] };
         var v = roleView(role); if (!ROLES[v]) { le.textContent = 'No portal is assigned to your role yet.'; session = null; return; }
-        st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; shell();
+        st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
+        // JWT carries roles but not the flattened permissions — fetch them (GET /me) so action/create buttons gate accurately.
+        tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });
       }).catch(function () { lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;'; le.textContent = 'Cannot establish a secure connection.'; });
     };
   }
