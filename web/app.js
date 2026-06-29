@@ -587,6 +587,16 @@
       { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
       { n: 'requiredQty', l: 'Required qty', t: 'number', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
       { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'requirementSource', l: 'Source', t: 'text' }
+    ] },
+    '/v1/purchase-requests': { title: 'New purchase request', perm: 'procurement:purchase_request:write', fields: [
+      { n: 'prNumber', l: 'PR number', t: 'text', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
+      { n: 'expectedDeliveryDate', l: 'Expected delivery', t: 'date' },
+      { n: 'stockRequirementId', l: 'Stock requirement', t: 'select', fk: '/v1/stock-requirements', fv: 'stockRequirementId', fl: 'requirementSource' }
+    ] },
+    '/v1/gate-entries': { title: 'New gate entry', perm: 'inventory:gate_entry_master:write', fields: [
+      { n: 'gateEntryNumber', l: 'Gate entry no.', t: 'text', req: true },
+      { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName' },
+      { n: 'vehicleNumber', l: 'Vehicle no.', t: 'text' }, { n: 'driverName', l: 'Driver', t: 'text' }, { n: 'entryDt', l: 'Entry date', t: 'date' }
     ] }
   };
   function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
@@ -644,7 +654,10 @@
       item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
       header: [ { n: 'soNumber', l: 'SO number', t: 'text', req: true }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
-      item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] }
+      item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
+    '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
+      header: [ { n: 'grnNumber', l: 'GRN number', t: 'text', req: true }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date' } ],
+      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true } ] }
   };
   async function openCreateDoc(endpoint) {
     var cfg = CREATE_DOC[endpoint]; if (!cfg) return;
