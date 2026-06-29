@@ -68,6 +68,7 @@ export class DashboardService {
       mixByStatus, oilAgg, fillCount, pkgByStatus, fgAgg,
       custCount, soByStatus, userAgg, roleCount, poNumbers, oilNumbers, fgNumbers,
       events, qcRecent,
+      stockReqRows, prodQcByResult, dispatchByStatus, soNumbers, formulaList, qcBatches,
     ] = await Promise.all([
       // runs: production orders → formula (product identity) → output oil batch
       sql`select po.production_order_id id, po.order_qty qty, po.status, po.actual_start_dt sdt,
@@ -118,6 +119,19 @@ export class DashboardService {
           order by b.batch_number limit 3`,
       sql`select event_type t, event_dt dt, remarks r from formula.formula_event_hist order by event_dt desc limit 5`,
       sql`select overall_result r, inspection_dt dt from quality.qc_inspections order by inspection_dt desc limit 5`,
+      // ── corrected 24-step chain-of-custody: the stages the 5-node graph used to skip ──
+      sql`select sr.priority, m.material_code mcode, m.material_name mname, a.alias_name alias
+          from procurement.stock_requirement sr
+          left join masterdata.material m on m.material_id = sr.material_id
+          left join masterdata.rm_alias a on a.material_id = m.material_id
+          order by sr.priority limit 4`,
+      sql`select result r, count(*)::int c from production.production_qc group by result`,
+      sql`select status, count(*)::int c from sales.dispatch_master group by status`,
+      sql`select so_number n, status from sales.sales_order order by so_number desc limit 3`,
+      sql`select formula_code fcode, formula_name fname from formula.formula_master order by formula_code limit 3`,
+      sql`select i.overall_result r, b.batch_number batch from quality.qc_inspections i
+          left join inventory.rm_batch_master b on b.rm_batch_id = i.rm_batch_id
+          order by i.inspection_dt desc limit 3`,
     ]);
 
     // ── counts ────────────────────────────────────────────────────────────────
@@ -157,26 +171,59 @@ export class DashboardService {
       cls: classOf(String(r.product || '')),
     }));
 
-    // ── chain-of-custody stage tallies + real sample codes ──────────────────────
+    // ── corrected 24-step chain of custody (10 grouped stages, real codes, masked) ──────
+    // Identity is visible up to Formula Selection; everything below the vault shows aliases.
     const matLabel = (b: Record<string, unknown>) =>
       seeMaterial ? String(b.mcode) : String(b.alias || b.mcode);
+    const prodQc = { pass: 0, hold: 0, fail: 0 };
+    for (const r of prodQcByResult) {
+      const k = String(r.r).toUpperCase();
+      if (k === 'PASS') prodQc.pass = num(r.c);
+      else if (k === 'FAIL') prodQc.fail = num(r.c);
+      else prodQc.hold += num(r.c);
+    }
+    const dispatch = byStatus(dispatchByStatus);
     const flow = {
-      procurement: { count: po['ORDERED'] || 0 || runsTotal, codes: poNumbers.map((x) => String(x.n)) },
+      stockPlanning: {
+        count: stockReqRows.length,
+        codes: stockReqRows.slice(0, 2).map((r) => ({ code: matLabel(r), sub: String(r.priority || 'reorder').toLowerCase() + ' priority' })),
+      },
+      procurement: {
+        count: Object.values(po).reduce((a, b) => a + b, 0) || poNumbers.length,
+        codes: poNumbers.slice(0, 2).map((x) => ({ code: String(x.n), sub: 'PR → RFQ → quote → PO' })),
+      },
       receiving: {
         count: rmBatches.length,
-        codes: rmBatches.slice(0, 2).map((b) => ({ code: String(b.batch), sub: matLabel(b) + ' · masked' })),
+        codes: rmBatches.slice(0, 2).map((b) => ({ code: String(b.batch), sub: 'gate → GRN · ' + matLabel(b) })),
+      },
+      qc: {
+        count: qc.pass + qc.fail + qc.pending, pass: qc.pass, fail: qc.fail, pending: qc.pending,
+        codes: qcBatches.slice(0, 2).map((q) => ({ code: q.batch ? String(q.batch) : 'batch', sub: String(q.r || '').toLowerCase() })),
+      },
+      storage: {
+        count: num(invAgg[0]?.c),
+        codes: [{ code: Math.round(num(invAgg[0]?.q)) + ' units', sub: num(invAgg[0]?.c) + ' batches · zoned' }],
+      },
+      formula: {
+        count: formulaList.length,
+        codes: formulaList.slice(0, 2).map((f) => ({ code: seeProduct ? String(f.fname) : String(f.fcode), sub: seeProduct ? 'recipe sealed' : 'protected ◆' })),
       },
       compounding: {
-        count: mix['INPROGRESS'] || mix['ACTIVE'] || num(mixByStatus[0]?.c),
-        codes: rmBatches.slice(0, 2).map((b) => ({ code: seeMaterial ? String(b.mcode) : String(b.alias), sub: 'split batch' })),
+        count: num(mix['INPROGRESS']) || num(mix['ACTIVE']) || num(oilAgg[0]?.c),
+        codes: oilNumbers.slice(0, 2).map((x) => ({ code: String(x.n), sub: 'pick → issue → mix' })),
       },
-      filling: {
-        count: num(fillCount[0]?.c),
-        codes: oilNumbers.map((x) => ({ code: String(x.n), sub: 'bulk juice lot' })),
+      productionQc: {
+        count: prodQc.pass + prodQc.hold + prodQc.fail, pass: prodQc.pass, hold: prodQc.hold, fail: prodQc.fail,
+        codes: oilNumbers.slice(0, 2).map((x, i) => ({ code: String(x.n), sub: i === 0 ? 'pass' : 'hold' })),
       },
       packaging: {
         count: num(fgAgg[0]?.c),
-        codes: fgNumbers.map((x) => ({ code: String(x.n), sub: seeProduct && x.product ? String(x.product) : 'sealed & labelled' })),
+        codes: fgNumbers.slice(0, 2).map((x) => ({ code: String(x.n), sub: seeProduct && x.product ? String(x.product) : 'sealed & labelled' })),
+      },
+      salesDispatch: {
+        count: Object.values(so).reduce((a, b) => a + b, 0),
+        dispatched: Object.values(dispatch).reduce((a, b) => a + b, 0),
+        codes: soNumbers.slice(0, 2).map((x) => ({ code: String(x.n), sub: String(x.status || '').toLowerCase() })),
       },
     };
 

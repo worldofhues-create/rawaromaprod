@@ -334,40 +334,53 @@
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
     return card('<div style="font-weight:800;font-size:15px">' + spec[0] + '</div><div style="font-size:12px;color:var(--t3);margin:2px 0 12px">' + spec[1] + '</div>' + spec[2]);
   }
-  // Super-Admin chain-of-custody flow graph (mockup buildFlow), real codes + masked downstream.
-  function flowNode(ic, title, items, accent) {
-    var rows = items.map(function (it) {
-      return '<div style="display:flex;flex-direction:column;padding:5px 0"><span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + (accent ? 'var(--accent)' : 'var(--t1)') + '">' + it.code + '</span><span style="font-size:10.5px;color:var(--t3)">' + it.sub + '</span></div>';
-    }).join('');
-    return '<div style="display:flex;align-items:center;gap:9px;margin-bottom:8px"><span style="display:grid;place-items:center;width:30px;height:30px;border-radius:9px;background:var(--accent-soft);color:var(--accent);flex:none">' + icon(ic, 15) + '</span><span style="font-weight:800;font-size:13.5px">' + title + '</span></div>' + rows;
+  // Super-Admin chain of custody — the REAL 24-step flow grouped into 10 stages, with the formula-
+  // vault masking boundary in its true position (after Formula Selection). Flex layout (no absolute
+  // coords) so it stays correct + responsive. Data is live from /v1/dashboard.flow.
+  var FLOW_PRE = [['stockPlanning', 'Stock planning', 'list'], ['procurement', 'Procurement', 'clipboard'], ['receiving', 'Receiving', 'truck'], ['qc', 'Quality control', 'flask'], ['storage', 'Inventory storage', 'box']];
+  var FLOW_POST = [['compounding', 'Compounding', 'beaker'], ['productionQc', 'Production QC', 'activity'], ['packaging', 'Packaging', 'pkg'], ['salesDispatch', 'Sales & dispatch', 'truck']];
+  var ARROW_R = '<span style="display:grid;place-items:center;color:var(--t3);flex:none;align-self:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>';
+  var ARROW_D = '<div style="display:flex;justify-content:center;padding:3px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
+  function stageCard(num, name, ic, stage, masked) {
+    stage = stage || { count: 0, codes: [] };
+    var codes = (stage.codes || []).map(function (c) {
+      return '<div style="display:flex;flex-direction:column;padding:3px 0"><span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + (masked ? 'var(--t2)' : 'var(--accent)') + '">' + c.code + '</span><span style="font-size:10px;color:var(--t3)">' + c.sub + '</span></div>';
+    }).join('') || '<div style="font-size:11px;color:var(--t3);padding:3px 0">—</div>';
+    return '<div style="flex:1;min-width:152px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:14px;box-shadow:var(--rai-sm);padding:12px 13px">' +
+      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">' +
+      '<span style="width:21px;height:21px;border-radius:7px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none">' + num + '</span>' +
+      '<span style="display:grid;place-items:center;color:var(--t2);flex:none">' + icon(ic, 14) + '</span>' +
+      '<span style="font-weight:700;font-size:12.5px;flex:1;line-height:1.1;letter-spacing:-.01em">' + name + '</span>' +
+      '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3);flex:none">' + stage.count + '</span></div>' + codes + '</div>';
   }
-  function nodeBox(x, y, w, html) { return '<div style="position:absolute;left:' + x + 'px;top:' + y + 'px;width:' + w + 'px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:16px;box-shadow:var(--rai-sm);padding:13px 15px">' + html + '</div>'; }
+  function flowRow(metas, p, start, masked) {
+    var parts = [];
+    metas.forEach(function (m, i) {
+      parts.push(stageCard(start + i, m[1], m[2], p.flow[m[0]], masked));
+      if (i < metas.length - 1) parts.push(ARROW_R);
+    });
+    return '<div style="display:flex;align-items:stretch;gap:7px;flex-wrap:wrap">' + parts.join('') + '</div>';
+  }
   function flowGraph(p) {
-    var f = p.flow, rev = p.reveal.product;
-    var poCodes = (f.procurement.codes || []).slice(0, 2);
-    var edges = [
-      ['M202,104 C 250,104 254,150 300,150', 'var(--accent)', '0'],
-      ['M202,250 C 256,250 256,184 300,184', 'var(--accent)', '0'],
-      ['M486,167 C 517,167 517,167 548,167', 'var(--accent)', '0'],
-      ['M720,167 C 736,167 736,167 752,167', 'var(--accent)', '0'],
-      ['M524,66 C 470,96 412,110 393,128', 'var(--t3)', '5 5'],
-      ['M540,62 C 700,40 822,78 838,128', 'var(--t3)', '5 5']
-    ].map(function (e) { return '<path d="' + e[0] + '" fill="none" stroke="' + e[1] + '" stroke-width="2" stroke-dasharray="' + e[2] + '"/>'; }).join('');
-    var hub = '<div style="position:absolute;left:486px;top:6px;width:88px;text-align:center">' +
-      '<div style="width:60px;height:60px;margin:0 auto;border-radius:18px;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:var(--rai-sm)">' + icon('lock', 24) + '</div>' +
-      '<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);font-weight:700;margin-top:7px">FORMULA VAULT</div></div>';
-    var canvas =
-      '<div style="position:relative;width:940px;height:320px;margin:0 auto">' +
-      '<svg style="position:absolute;inset:0;width:940px;height:320px;overflow:visible">' + edges + '</svg>' + hub +
-      nodeBox(20, 56, 182, flowNode('clipboard', 'Procurement', [{ code: p.counts.runsTotal + ' runs', sub: 'opened' }, { code: poCodes[0] || ('PO ×' + f.procurement.count), sub: poCodes[1] ? poCodes[1] : 'materials ordered' }])) +
-      nodeBox(20, 196, 182, flowNode('flask', 'Receiving · QC', (f.receiving.codes || []).slice(0, 2))) +
-      nodeBox(300, 116, 186, flowNode('beaker', 'Compounding', (f.compounding.codes || []).slice(0, 2))) +
-      nodeBox(548, 120, 172, flowNode('droplet', 'Filling', (f.filling.codes || []).slice(0, 2))) +
-      nodeBox(752, 120, 172, flowNode('tag', 'Packaging', (f.packaging.codes || []).slice(0, 2).map(function (c, i) { return { code: c.code, sub: (rev && i === 0 ? '◆ ' : '') + c.sub }; }), rev)) +
-      '</div>';
-    return card('<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px"><div style="flex:1"><div style="font-weight:800;font-size:16px">Chain of custody</div><div style="font-size:12.5px;color:var(--t3)">Procurement → Receiving · QC → Vault → Compounding → Filling → Packaging</div></div>' +
-      '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:8px;padding:4px 9px">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
-      '<div style="overflow-x:auto;padding:8px 0 2px">' + canvas + '</div>', '18px 20px');
+    var rev = p.reveal.product, fv = p.flow.formula || { count: 0, codes: [] };
+    var fcodes = (fv.codes || []).map(function (c) { return c.code; }).join(' · ');
+    var sub = rev ? ('selects ' + (fcodes || 'the formula') + ' — everything below shows aliases only') : ('protected — ' + fv.count + ' formulas sealed');
+    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#fff;border-radius:16px;padding:14px 18px;box-shadow:var(--rai-sm)">' +
+      '<span style="width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
+      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span style="font-weight:800;font-size:14px">6 · Formula selection</span><span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;opacity:.85">VAULT · MASKING BOUNDARY</span></div>' +
+      '<div style="font-size:11.5px;opacity:.92;margin-top:2px">' + sub + '</div></div>' +
+      '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;opacity:.85;flex:none">' + fv.count + ' formulas</span></div>';
+    function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:10px;margin:4px 0"><span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:' + col + ';letter-spacing:.12em;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--border)"></div></div>'; }
+    return card(
+      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><div style="flex:1"><div style="font-weight:800;font-size:16px">Chain of custody</div><div style="font-size:12px;color:var(--t3)">The real 24-step flow · stock planning &rarr; customer delivery</div></div>' +
+      '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:8px;padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
+      divider('IDENTITY VISIBLE', 'var(--t3)') +
+      flowRow(FLOW_PRE, p, 1, false) +
+      ARROW_D + vault + ARROW_D +
+      divider('&#128274; ANONYMISED — ALIASES ONLY', 'var(--accent)') +
+      flowRow(FLOW_POST, p, 7, true) +
+      '<div style="font-size:10.5px;color:var(--t3);margin-top:12px;line-height:1.5">1 stock planning &middot; 2 procurement (PR&rarr;RFQ&rarr;quote&rarr;PO) &middot; 3 receiving (gate&rarr;GRN&rarr;batch) &middot; 4 QC &middot; 5 storage &middot; 6 formula vault &middot; 7 compounding (pick&rarr;issue&rarr;mix&rarr;oil) &middot; 8 production QC &middot; 9 packaging (fill&rarr;FG) &middot; 10 sales &amp; dispatch.</div>'
+    , '18px 20px');
   }
   function runsTable(p) {
     var head = ['Run', 'Product', 'Stage', 'Batch', 'Target', 'Status'].map(function (h) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + h + '</th>'; }).join('');
