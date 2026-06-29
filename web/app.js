@@ -627,6 +627,67 @@
     };
   }
 
+  /* ---------------- documents with line items (raise a PO / sales order from scratch) ---------------- */
+  var CREATE_DOC = {
+    '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
+      header: [ { n: 'poNumber', l: 'PO number', t: 'text', req: true }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
+      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
+    '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
+      header: [ { n: 'soNumber', l: 'SO number', t: 'text', req: true }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
+      item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] }
+  };
+  async function openCreateDoc(endpoint) {
+    var cfg = CREATE_DOC[endpoint]; if (!cfg) return;
+    var fkEps = {}; cfg.header.concat(cfg.item).forEach(function (f) { if (f.fk) fkEps[f.fk] = f; });
+    var fkCache = {};
+    await Promise.all(Object.keys(fkEps).map(function (ep) {
+      var f = fkEps[ep];
+      return tunnel(ep + '?limit=100').then(function (res) {
+        fkCache[ep] = ((res.json && res.json.data) || []).map(function (row) { var v = row[f.fv] != null ? row[f.fv] : guessId(row); return { v: v, l: row[f.fl] != null ? row[f.fl] : (v ? String(v).slice(0, 8) : '') }; }).filter(function (o) { return o.v; });
+      }).catch(function () { fkCache[ep] = []; });
+    }));
+    function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option>' + v + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
+    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" style="' + fStyle() + '">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">'; }
+    var headerRows = cfg.header.map(function (f) { return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl(f, 'h') + '</div>'; }).join('');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      headerRows +
+      '<div style="display:flex;align-items:center;gap:10px;margin:16px 0 8px"><div style="font-weight:800;font-size:13px;flex:1">Line items</div><button type="button" id="ra-addline" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer">+ Add line</button></div>' +
+      '<div id="ra-lines"></div><div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:6px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    var linesEl = ov.querySelector('#ra-lines');
+    function addLine() {
+      var row = document.createElement('div'); row.className = 'ra-line'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
+      row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none;font-size:15px">&times;</button>';
+      linesEl.appendChild(row); row.querySelector('.ra-rmline').onclick = function () { row.remove(); };
+    }
+    for (var i = 0; i < (cfg.itemMin || 1); i++) addLine();
+    $('ra-addline').onclick = addLine;
+    $('ra-cform').onsubmit = function (e) {
+      e.preventDefault(); var body = {}, err = '';
+      cfg.header.forEach(function (f) { var el = ov.querySelector('[data-h="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (f.req && !v) err = err || (f.l + ' is required.'); if (v) body[f.n] = f.t === 'number' ? Number(v) : v; });
+      var items = [];
+      [].forEach.call(ov.querySelectorAll('.ra-line'), function (row) {
+        var it = {}, has = false;
+        cfg.item.forEach(function (f) { var el = row.querySelector('[data-i="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (v) { it[f.n] = f.t === 'number' ? Number(v) : v; has = true; } if (f.req && !v && has) err = err || ('Line: ' + f.l + ' is required.'); });
+        if (has) items.push(it);
+      });
+      if (items.length < (cfg.itemMin || 1)) err = err || ('Add at least ' + (cfg.itemMin || 1) + ' line item.');
+      if (err) { $('ra-merr').textContent = err; return; }
+      body.items = items;
+      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
+      tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        close(); toast(cfg.title + ' created ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+
   async function loadView() {
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
@@ -646,7 +707,8 @@
       (sKeys[1] ? kpi('flask', String(byStatus[sKeys[1]]), label(sKeys[1])) : kpi('layers', cols.length ? String(cols.length) : '—', 'Fields')) +
       kpi('lock', masked ? 'Masked' : 'Live', masked ? 'Alias-protected' : 'DB source of truth');
     var table;
-    var canNew = CREATE[item[3]] && can(CREATE[item[3]].perm);
+    var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
+    var canNew = cdef && can(cdef.perm);
     var newBtn = canNew ? '<button id="ra-new" style="padding:8px 14px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm);white-space:nowrap">+ New</button>' : '';
     if (!rows.length) {
       table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
@@ -667,7 +729,7 @@
     }
     V.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>' + table;
     wireActions();
-    var nb = $('ra-new'); if (nb) nb.onclick = function () { openCreate(item[3]); };
+    var nb = $('ra-new'); if (nb) nb.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
     var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; loadView(); setTimeout(function () { var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 0); });
   }
   function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
