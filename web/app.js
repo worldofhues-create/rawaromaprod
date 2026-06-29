@@ -464,6 +464,73 @@
     });
   }
 
+  /* ---------------- flow actions: existing POST routes wired to per-row buttons ---------------- */
+  // The role must hold the permission (owner/super_admin hold all) AND the row must be in the
+  // action's precondition status. The backend re-checks both — this is UX only.
+  function can(perm) {
+    if (!session) return false;
+    var rs = session.roles || []; if (rs.indexOf('owner') >= 0 || rs.indexOf('super_admin') >= 0) return true;
+    var ps = session.perms || [];
+    if (!ps.length) return true; // JWT carries no permission list → don't gate client-side; the backend enforces (403 → toast)
+    return ps.indexOf('*') >= 0 || ps.indexOf(perm) >= 0;
+  }
+  var UP = function (v) { return String(v == null ? '' : v).toUpperCase(); };
+  var ACTIONS = {
+    '/v1/purchase-requests': [
+      { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
+      { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} }
+    ],
+    '/v1/purchase-orders': [
+      { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
+      { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
+      { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} }
+    ],
+    '/v1/rm-batches': [
+      { label: 'Release to stock', perm: 'inventory:rm_batch_master:write', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/rm-batches/' + r.rmBatchId + '/release'; }, body: {} }
+    ],
+    '/v1/qc-inspections': [
+      { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
+      { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
+      { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
+    ],
+    '/v1/mixing-sessions': [
+      { label: 'End session', perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }
+    ],
+    '/v1/filling-sessions': [
+      { label: 'End fill', perm: 'packaging:filling_session:write', when: function (r) { return UP(r.status) !== 'DONE'; }, path: function (r) { return '/v1/filling-sessions/' + r.fillingSessionId + '/end'; }, body: {} }
+    ]
+  };
+  function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
+  function rowActionsCell(endpoint, r) {
+    var avail = actionsFor(endpoint, r);
+    if (!avail || !avail.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
+    return avail.map(function (a) {
+      var bg = a.tone === 'bad' ? '#C0492E' : a.tone === 'warn' ? '#9A6B1E' : a.tone === 'good' ? '#2E7D55' : 'var(--accent)';
+      var body = a.body === null ? '' : JSON.stringify(a.body).replace(/'/g, '&#39;');
+      return '<button class="ra-act" data-path="' + a.path(r) + '" data-body=\'' + body + '\' style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#fff;background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + a.label + '</button>';
+    }).join('');
+  }
+  function toast(msg, tone) {
+    var t = document.createElement('div'); t.textContent = msg;
+    t.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:300;padding:11px 20px;border-radius:13px;font-size:13px;font-weight:700;color:#fff;box-shadow:0 12px 34px rgba(0,0,0,.28);background:' + (tone === 'bad' ? '#C0492E' : '#1D9E75');
+    document.body.appendChild(t);
+    setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, 1900);
+  }
+  function wireActions() {
+    [].forEach.call(document.querySelectorAll('.ra-act'), function (b) {
+      b.onclick = async function () {
+        var path = b.getAttribute('data-path'), bodyStr = b.getAttribute('data-body'), old = b.textContent;
+        b.disabled = true; b.style.opacity = '.6'; b.textContent = '…';
+        try {
+          var opts = { method: 'POST' }; if (bodyStr) { try { opts.body = JSON.parse(bodyStr); } catch (e) {} }
+          var res = await tunnel(path, opts);
+          if (res.status >= 400) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast((res.json && res.json.error && res.json.error.message) || ('Action failed (' + res.status + ')'), 'bad'); return; }
+          toast(old + ' done ✓', 'good'); loadView();
+        } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Could not reach the secure channel', 'bad'); }
+      };
+    });
+  }
+
   async function loadView() {
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
@@ -488,8 +555,11 @@
     } else {
       var q = st.search.trim().toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
-      var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('');
-      var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('');
+      var hasActions = !!ACTIONS[item[3]];
+      var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
+        (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
+      var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
+        (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
       table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
         '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
         '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)">' + shown.length + ' of ' + rows.length + '</div>' +
@@ -497,6 +567,7 @@
         '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
     }
     V.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>' + table;
+    wireActions();
     var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; loadView(); setTimeout(function () { var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 0); });
   }
   function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
@@ -558,8 +629,9 @@
         lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;';
         var d = res.json && res.json.data;
         if (res.status >= 400 || !d || !d.accessToken) { le.textContent = (res.json && res.json.error && res.json.error.message) || 'Invalid email or password.'; return; }
-        var role; try { role = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).roles[0]; } catch (x) { role = null; }
-        session = { token: d.accessToken, user: d.user };
+        var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
+        var role = (payload.roles || [])[0] || null;
+        session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: payload.permissions || [] };
         var v = roleView(role); if (!ROLES[v]) { le.textContent = 'No portal is assigned to your role yet.'; session = null; return; }
         st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; shell();
       }).catch(function () { lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;'; le.textContent = 'Cannot establish a secure connection.'; });
