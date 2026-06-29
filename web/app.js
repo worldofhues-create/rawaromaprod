@@ -65,6 +65,7 @@
   var ROLES = {
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
+      ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['users', 'Users', 'users', '/v1/users'],
       ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
@@ -90,7 +91,10 @@
       ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
       ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
-      ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] }
+      ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] },
+    sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
+      ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
+      ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
   };
   // Curated, readable columns per endpoint (DB field names). Fallback = a smart generic picker.
   var COLS = {
@@ -120,7 +124,11 @@
     '/v1/filling-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
     '/v1/package-orders': ['orderQty', 'productSkuId', 'status'],
     '/v1/finished-good-batches': ['batchNumber', 'producedQty', 'manufacturingDate', 'status'],
-    '/v1/product-skus': ['skuCode', 'packSize', 'status']
+    '/v1/product-skus': ['skuCode', 'packSize', 'status'],
+    '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'status'],
+    '/v1/customers': ['customerCode', 'customerName', 'status'],
+    '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
+    '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
   // Every role opens on a rich, DB-aggregated dashboard (endpoint sentinel '__dash__' → /v1/dashboard).
   Object.keys(ROLES).forEach(function (k) {
@@ -429,7 +437,8 @@
       warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg + '%', 'Avg capacity']],
       compounding: [['beaker', c.mixing, 'Mixing sessions'], ['layers', c.runsActive, 'Active runs'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString(), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],
-      packaging: [['box', c.packageOrders, 'Pack orders'], ['pkg', c.fgBatches, 'Finished batches'], ['activity', c.unitsPacked.toLocaleString(), 'Units packed'], ['truck', c.salesOrders, 'Sales orders']]
+      packaging: [['box', c.packageOrders, 'Pack orders'], ['pkg', c.fgBatches, 'Finished batches'], ['activity', c.unitsPacked.toLocaleString(), 'Units packed'], ['truck', c.salesOrders, 'Sales orders']],
+      sales: [['clipboard', c.salesOrders, 'Sales orders'], ['truck', (p.flow.salesDispatch && p.flow.salesDispatch.dispatched) || 0, 'Dispatched'], ['users', c.customers, 'Customers'], ['pkg', c.fgBatches, 'Finished goods']]
     };
     return (S[role] || S.superadmin).map(function (k) { var v = String(k[1]); return [k[0], v, k[2], '', (parseInt(v, 10) || v.length) * 13 + 3]; });
   }
@@ -498,16 +507,28 @@
     ],
     '/v1/filling-sessions': [
       { label: 'End fill', perm: 'packaging:filling_session:write', when: function (r) { return UP(r.status) !== 'DONE'; }, path: function (r) { return '/v1/filling-sessions/' + r.fillingSessionId + '/end'; }, body: {} }
+    ],
+    '/v1/sales-orders': [
+      { label: 'Confirm', perm: 'sales:sales_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/sales-orders/' + r.salesOrderId + '/confirm'; }, body: {} },
+      { label: 'Dispatch', perm: 'sales:dispatch_master:write', when: function (r) { return UP(r.status) === 'CONFIRMED'; }, path: function () { return '/v1/dispatches'; },
+        prepare: async function (r) {
+          var fg = await tunnel('/v1/finished-good-batches?limit=1'); var b = fg.json && fg.json.data && fg.json.data[0];
+          return { salesOrderId: r.salesOrderId, customerId: r.customerId, dispatchDate: new Date().toISOString().slice(0, 10), vehicleNumber: 'TN-22-0001', items: [{ finishedGoodBatchId: b && b.finishedGoodBatchId, dispatchedQty: 1 }] };
+        } }
+    ],
+    '/v1/formula-versions': [
+      { label: 'Approve', perm: 'formula:formula_approval:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/formula-versions/' + r.formulaVersionId + '/approve'; }, body: { approvalLevel: 1 } }
     ]
   };
+  var _acts = {}, _actSeq = 0;
   function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
   function rowActionsCell(endpoint, r) {
     var avail = actionsFor(endpoint, r);
     if (!avail || !avail.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
     return avail.map(function (a) {
       var bg = a.tone === 'bad' ? '#C0492E' : a.tone === 'warn' ? '#9A6B1E' : a.tone === 'good' ? '#2E7D55' : 'var(--accent)';
-      var body = a.body === null ? '' : JSON.stringify(a.body).replace(/'/g, '&#39;');
-      return '<button class="ra-act" data-path="' + a.path(r) + '" data-body=\'' + body + '\' style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#fff;background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + a.label + '</button>';
+      var k = 'ra' + (_actSeq++); _acts[k] = { a: a, r: r };
+      return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#fff;background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + a.label + '</button>';
     }).join('');
   }
   function toast(msg, tone) {
@@ -519,11 +540,12 @@
   function wireActions() {
     [].forEach.call(document.querySelectorAll('.ra-act'), function (b) {
       b.onclick = async function () {
-        var path = b.getAttribute('data-path'), bodyStr = b.getAttribute('data-body'), old = b.textContent;
+        var rec = _acts[b.getAttribute('data-k')]; if (!rec) return;
+        var a = rec.a, r = rec.r, old = b.textContent;
         b.disabled = true; b.style.opacity = '.6'; b.textContent = '…';
         try {
-          var opts = { method: 'POST' }; if (bodyStr) { try { opts.body = JSON.parse(bodyStr); } catch (e) {} }
-          var res = await tunnel(path, opts);
+          var body = a.prepare ? await a.prepare(r) : (a.body || {});
+          var res = await tunnel(a.path(r), { method: 'POST', body: body });
           if (res.status >= 400) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast((res.json && res.json.error && res.json.error.message) || ('Action failed (' + res.status + ')'), 'bad'); return; }
           toast(old + ' done ✓', 'good'); loadView();
         } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Could not reach the secure channel', 'bad'); }
@@ -555,6 +577,7 @@
     } else {
       var q = st.search.trim().toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
+      _acts = {}; _actSeq = 0;
       var hasActions = !!ACTIONS[item[3]];
       var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
         (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');

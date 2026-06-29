@@ -78,6 +78,6 @@ so the app calls same-origin and the backend host stays hidden.
 ## Demo logins (rotate before public!)
 
 Owner: `owner@rawaroma.local` (password in your local `.env` as `BOOTSTRAP_OWNER_PASSWORD`). The other
-8 role users (`admin|procurement|receiving|qc|warehouse|compounding|filling|packaging@rawaroma.local`)
-share one demo password set during seeding. Role is assigned by the DB, not self-selected. Reset all of
+9 role users (`admin|procurement|receiving|qc|warehouse|compounding|filling|packaging|sales@rawaroma.local`)
+share one demo password set during seeding (re-seed `sales` with `BOOTSTRAP_SALES_PASSWORD`). Role is assigned by the DB, not self-selected. Reset all of
 these via `pnpm db:seed` with fresh `BOOTSTRAP_*_PASSWORD` values before any public exposure.

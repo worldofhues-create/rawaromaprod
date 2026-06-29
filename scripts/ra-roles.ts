@@ -223,6 +223,27 @@ export const ROLES: RoleDef[] = [
     sampleEmail: 'packaging@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PACKAGING_PASSWORD',
   },
+  {
+    // Sales & Dispatch — customers, sales orders, dispatch. Sees finished-goods product identity
+    // (reveal) to fulfil orders; never sees upstream formulas/materials beyond FG.
+    code: 'sales',
+    name: 'Sales & Dispatch',
+    view: 'sales',
+    select: anyOf(
+      startsWith('sales:'),
+      oneOf(
+        'packaging:finished_good_batch_master:read',
+        'packaging:product_master:read',
+        'packaging:product_sku:read',
+        REVEAL,
+      ),
+      (p) => p.startsWith('masterdata:') && isRead(p),
+      (p) => p.startsWith('platform:') && isRead(p),
+      (p) => p.startsWith('location:') && isRead(p),
+    ),
+    sampleEmail: 'sales@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_SALES_PASSWORD',
+  },
 ];
 
 /** The one permission no role but owner may hold — enforced by the seed. */
