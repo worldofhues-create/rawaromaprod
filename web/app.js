@@ -30,14 +30,28 @@
   }
   async function seal(s) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, AES, te(s))); var o = new Uint8Array(12 + ct.length); o.set(iv, 0); o.set(ct, 12); return b64(o); }
   async function open(bl) { var b = ub64(bl); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, AES, b.slice(12)); return new TextDecoder().decode(pt); }
-  async function tunnel(path, opts) {
+  async function tunnel(path, opts, _retried) {
     opts = opts || {}; await handshake();
     var p = { method: (opts.method || 'GET').toUpperCase(), path: path };
     if (opts.body !== undefined) p.body = opts.body;
     if (session) p.token = session.token;
     var r = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': KID }, body: JSON.stringify({ enc: await seal(JSON.stringify(p)) }) });
     var outer = await r.json(); if (!outer.data || !outer.data.enc) { AES = null; hsP = null; throw new Error('channel'); }
-    var inner = JSON.parse(await open(outer.data.enc)); return { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
+    var inner = JSON.parse(await open(outer.data.enc));
+    // Access token expired mid-session (15-min TTL) → silently refresh once and retry, so the user isn't bounced.
+    if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login') {
+      var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
+      if (rt) {
+        var rr = await tunnel('/auth/refresh', { method: 'POST', body: { refreshToken: rt } }, true);
+        var d = rr.json && rr.json.data;
+        if (rr.status < 400 && d && d.accessToken) {
+          if (session) session.token = d.accessToken;
+          try { if (d.refreshToken) localStorage.setItem('ra_rt', d.refreshToken); } catch (e) {}
+          return tunnel(path, opts, true);
+        }
+      }
+    }
+    return { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
   }
   window.RA = { tunnel: tunnel };
 
@@ -908,7 +922,7 @@
     [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
     [].forEach.call(document.querySelectorAll('[data-skin]'), function (b) { b.onclick = function () { st.skin = b.getAttribute('data-skin'); repaintTheme(); }; });
     $('ra-dark').onclick = function () { st.dark = !st.dark; repaintTheme(); };
-    $('ra-logout').onclick = function () { session = null; st.role = null; showLogin(); };
+    $('ra-logout').onclick = function () { session = null; st.role = null; try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
@@ -953,20 +967,35 @@
         lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;';
         var d = res.json && res.json.data;
         if (res.status >= 400 || !d || !d.accessToken) { le.textContent = (res.json && res.json.error && res.json.error.message) || 'Invalid email or password.'; return; }
-        var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
-        var role = (payload.roles || [])[0] || null;
-        session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [] };
-        var v = roleView(role); if (!ROLES[v]) { le.textContent = 'No portal is assigned to your role yet.'; session = null; return; }
-        st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
-        // JWT carries roles but not the flattened permissions — fetch them (GET /me) so action/create buttons gate accurately.
-        tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });
+        if (!enterPortal(d)) { le.textContent = 'No portal is assigned to your role yet.'; session = null; }
       }).catch(function () { lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;'; le.textContent = 'Cannot establish a secure connection.'; });
     };
   }
 
+  // Establish the session from a login/refresh result, persist the refresh token (survives reloads),
+  // fetch real permissions, and render the shell. Returns false if the role has no portal.
+  function enterPortal(d) {
+    var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
+    var v = roleView((payload.roles || [])[0] || null);
+    if (!ROLES[v]) return false;
+    session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [] };
+    try { if (d.refreshToken) localStorage.setItem('ra_rt', d.refreshToken); } catch (e) {}
+    st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
+    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });
+    return true;
+  }
+
   function boot() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
-    showLogin();
+    var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
+    if (!rt) { showLogin(); return; }
+    // Returning user — restore the session from the stored refresh token instead of forcing re-login.
+    tunnel('/auth/refresh', { method: 'POST', body: { refreshToken: rt } }).then(function (res) {
+      var d = res.json && res.json.data;
+      if (res.status < 400 && d && d.accessToken && enterPortal(d)) return;
+      try { localStorage.removeItem('ra_rt'); } catch (e) {}
+      showLogin();
+    }).catch(function () { try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); });
   }
   if (document.readyState !== 'loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
 })();

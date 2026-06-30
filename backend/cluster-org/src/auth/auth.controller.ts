@@ -12,7 +12,14 @@ import {
   type AuthPrincipal,
 } from "@core/backend-kernel";
 import { AuthService, type LoginResult } from "./auth.service.js";
-import { loginBody, setPasswordBody, type LoginBody, type SetPasswordBody } from "./auth.dtos.js";
+import {
+  loginBody,
+  refreshBody,
+  setPasswordBody,
+  type LoginBody,
+  type RefreshBody,
+  type SetPasswordBody,
+} from "./auth.dtos.js";
 
 @Controller()
 export class AuthController {
@@ -24,6 +31,14 @@ export class AuthController {
     @Body(new ZodValidationPipe(loginBody)) body: LoginBody,
   ): Promise<LoginResult> {
     return this.auth.login(body.identifier, body.password);
+  }
+
+  @Public()
+  @Post("auth/refresh")
+  refresh(
+    @Body(new ZodValidationPipe(refreshBody)) body: RefreshBody,
+  ): Promise<LoginResult> {
+    return this.auth.refresh(body.refreshToken);
   }
 
   @Permissions("iam:user:write")

@@ -84,6 +84,49 @@ export class AuthService {
     };
   }
 
+  /** Stateless refresh — verify the refresh token, re-load roles/perms, re-mint the access token
+   * (so the portal survives a reload / 15-min access-token expiry). No reuse-detection yet (MVP). */
+  async refresh(refreshToken: string): Promise<LoginResult> {
+    let claims: { sub: string };
+    try {
+      claims = await this.jwt.verifyRefresh(refreshToken);
+    } catch {
+      throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "Invalid or expired refresh token");
+    }
+    const { userMaster } = orgSchema;
+    const row = (
+      await this.db
+        .select({
+          userId: userMaster.userId,
+          userName: userMaster.userName,
+          email: userMaster.email,
+          isActive: userMaster.isActive,
+        })
+        .from(userMaster)
+        .where(eq(userMaster.userId, claims.sub))
+        .limit(1)
+    )[0];
+    if (!row) throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "User not found");
+    if (row.isActive === false) throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
+    const roles = await this.rolesFor(row.userId);
+    const perms = await this.permissionsFor(row.userId);
+    const accessToken = await this.jwt.signAccess({
+      sub: row.userId,
+      portal: RA_PORTAL,
+      roles,
+      perms,
+      pv: 1,
+      sid: row.userId,
+    });
+    const newRefresh = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    return {
+      user: { userId: row.userId, userName: row.userName, email: row.email },
+      accessToken,
+      refreshToken: newRefresh,
+      expiresIn: this.jwt.accessTtlSeconds,
+    };
+  }
+
   /** Hash + store a user's password (admin-gated). */
   async setPassword(userId: string, password: string): Promise<{ userId: string }> {
     const { userMaster } = orgSchema;
