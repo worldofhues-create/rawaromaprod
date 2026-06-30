@@ -98,7 +98,7 @@
       ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
       ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
-      ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] },
+      ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
       ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
       ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
@@ -148,6 +148,7 @@
     '/v1/bins': ['binCode', 'binName', 'status'],
     '/v1/uoms': ['uomCode', 'uomName', 'status'],
     '/v1/business-units': ['businessUnitCode', 'businessUnitName', 'status'],
+    '/v1/packaging-qc': ['overallResult', 'leakageCheck', 'labelCheck', 'cartonCheck', 'inspectionDt'],
     '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
@@ -647,6 +648,12 @@
       { n: 'businessUnitCode', l: 'BU code', t: 'text', req: true }, { n: 'businessUnitName', l: 'BU name', t: 'text', req: true },
       { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/orgs', fv: 'organizationId', fl: 'organizationName', req: true },
       { n: 'parentBusinessUnitId', l: 'Parent BU', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' }
+    ] },
+    '/v1/packaging-qc': { title: 'Record packaging QC', perm: 'packaging:finished_good_batch_master:write', fields: [
+      { n: 'finishedGoodBatchId', l: 'Finished-good batch', t: 'select', fk: '/v1/finished-good-batches', fv: 'finishedGoodBatchId', fl: 'batchNumber', req: true },
+      { n: 'leakageCheck', l: 'Leakage check', t: 'select', en: ['PASS', 'FAIL'], req: true },
+      { n: 'labelCheck', l: 'Label check', t: 'select', en: ['PASS', 'FAIL'], req: true },
+      { n: 'cartonCheck', l: 'Carton check', t: 'select', en: ['PASS', 'FAIL'], req: true }
     ] }
   };
   function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
