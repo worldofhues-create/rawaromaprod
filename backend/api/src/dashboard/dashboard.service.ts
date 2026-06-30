@@ -376,4 +376,34 @@ export class DashboardService {
       })),
     };
   }
+
+  /**
+   * Module 12 dashboard alerts — pending approvals, QC failures, low stock, expiry warnings, all
+   * computed live from the DB and filtered to the categories the caller's role cares about. (The
+   * email-send half of M12 is a separate outbox-consumer service.)
+   */
+  async alerts(principal: AuthPrincipal) {
+    const sql = this.sql;
+    const roles = new Set(principal.roles || []);
+    const isOwner = roles.has('owner') || roles.has('super_admin');
+    const [prPend, poPend, qcFail, prodQcFail, pkgQcFail, lowStock, expiring] = await Promise.all([
+      sql`select count(*)::int c from procurement.purchase_request where upper(status) = 'SUBMITTED'`,
+      sql`select count(*)::int c from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL')`,
+      sql`select count(*)::int c from quality.qc_inspections where upper(overall_result) = 'FAIL'`,
+      sql`select count(*)::int c from production.production_qc where upper(result) in ('FAIL','HOLD')`,
+      sql`select count(*)::int c from packaging.packaging_qc where upper(overall_result) = 'FAIL'`,
+      sql`select count(*)::int c from procurement.stock_requirement where status is null or upper(status) <> 'CLOSED'`,
+      sql`select count(*)::int c from inventory.rm_batch_master where expiry_date is not null and expiry_date <= (now() + interval '30 days')`,
+    ]);
+    const all = [
+      { kind: 'approval', severity: 'med', title: 'Pending approvals', count: num(prPend[0]?.c) + num(poPend[0]?.c), sub: 'PRs + POs awaiting sign-off', for: ['admin', 'procurement'] },
+      { kind: 'qc', severity: 'high', title: 'QC failures', count: num(qcFail[0]?.c) + num(prodQcFail[0]?.c) + num(pkgQcFail[0]?.c), sub: 'inbound · production · packaging', for: ['qc', 'packaging'] },
+      { kind: 'stock', severity: 'med', title: 'Low stock / reorder', count: num(lowStock[0]?.c), sub: 'open stock requirements', for: ['procurement', 'warehouse'] },
+      { kind: 'expiry', severity: 'high', title: 'Expiry warnings', count: num(expiring[0]?.c), sub: 'RM batches expiring within 30 days', for: ['warehouse', 'receiving'] },
+    ];
+    const alerts = all
+      .filter((a) => a.count > 0 && (isOwner || a.for.some((r) => roles.has(r))))
+      .map(({ for: _f, ...a }) => a);
+    return { alerts, total: alerts.reduce((s, a) => s + a.count, 0) };
+  }
 }

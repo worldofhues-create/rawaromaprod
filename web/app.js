@@ -230,6 +230,11 @@
           '<button id="ra-burger" style="display:none;border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t1);width:42px;height:42px;border-radius:12px;cursor:pointer;place-items:center">' + icon('panel', 18) + '</button>' +
           '<div style="flex:1;min-width:120px"><div id="ra-title" style="font-size:21px;font-weight:800;letter-spacing:-.01em">' + R.label + '</div><div style="font-size:12.5px;color:var(--t3)">Raw Aroma Chem / ' + R.dept + '</div></div>' +
           '<div style="display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--cbord);border-radius:13px;padding:5px;box-shadow:var(--rai-sm)">' + skins + '</div>' +
+          '<div style="position:relative">' +
+            '<button id="ra-bell" title="Alerts" style="border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t2);width:42px;height:42px;border-radius:13px;cursor:pointer;display:grid;place-items:center;position:relative">' + icon('bell', 18) +
+              '<span id="ra-bell-badge" style="display:none;position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#C0492E;color:#fff;font-size:10px;font-weight:800;place-items:center"></span></button>' +
+            '<div id="ra-bell-pop" style="display:none;position:absolute;right:0;top:50px;width:300px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:16px;box-shadow:var(--rai);padding:8px;z-index:60"><div style="padding:14px;text-align:center;color:var(--t3);font-size:12px;font-family:\'JetBrains Mono\',monospace">LOADING…</div></div>' +
+          '</div>' +
           '<button id="ra-dark" title="Toggle light / dark" style="border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t2);width:42px;height:42px;border-radius:13px;cursor:pointer;display:grid;place-items:center">' + icon(st.dark ? 'sun' : 'moon', 18) + '</button>' +
         '</header>' +
         '<section id="ra-view"></section>' +
@@ -237,6 +242,7 @@
     wireShell();
     setTheme();
     loadView();
+    loadAlerts();
   }
 
   function kpi(ic, value, lab) {
@@ -885,11 +891,25 @@
     });
     var d = $('ra-dark'); if (d) d.innerHTML = icon(st.dark ? 'sun' : 'moon', 18);
   }
+  // Module 12 dashboard alerts — fill the header bell from /v1/alerts (real, role-filtered counts).
+  function loadAlerts() {
+    tunnel('/v1/alerts').then(function (res) {
+      var d = res.json && res.json.data; if (!d) return;
+      var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
+      var pop = $('ra-bell-pop'); if (!pop) return;
+      pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS</div>' + d.alerts.map(function (a) {
+        var col = a.severity === 'high' ? '#C0492E' : (a.severity === 'med' ? '#9A6B1E' : 'var(--accent)');
+        return '<div style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
+      }).join('')) : '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12.5px">No alerts &#10003;</div>';
+    }).catch(function () {});
+  }
   function wireShell() {
     [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
     [].forEach.call(document.querySelectorAll('[data-skin]'), function (b) { b.onclick = function () { st.skin = b.getAttribute('data-skin'); repaintTheme(); }; });
     $('ra-dark').onclick = function () { st.dark = !st.dark; repaintTheme(); };
     $('ra-logout').onclick = function () { session = null; st.role = null; showLogin(); };
+    var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
+    if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
     applyResponsive();

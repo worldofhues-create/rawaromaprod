@@ -17,6 +17,11 @@ export class DashboardController {
     return this.dashboard.snapshot(principal);
   }
 
+  @Get('v1/alerts')
+  alerts(@CurrentUser() principal: AuthPrincipal) {
+    return this.dashboard.alerts(principal);
+  }
+
   @Permissions('formula:actual:read')
   @Get('v1/trace/finished-good/:id')
   trace(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
