@@ -66,11 +66,12 @@
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
-      ['materials', 'Materials', 'box', '/v1/materials'], ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'],
+      ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
+      ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
-      ['perms', 'Permissions', 'lock', '/v1/permissions'] ] },
+      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
@@ -84,7 +85,10 @@
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock', 'box', '/v1/inventory-batches'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
-      ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'], ['racks', 'Racks', 'shelf', '/v1/racks'] ] },
+      ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'],
+      ['warehouses', 'Warehouses', 'building', '/v1/warehouses'], ['floors', 'Floors', 'layers', '/v1/floors'],
+      ['zones', 'Zones', 'grid', '/v1/zones'], ['racks', 'Racks', 'shelf', '/v1/racks'],
+      ['shelves', 'Shelves', 'shelf', '/v1/shelves'], ['bins', 'Bins', 'box', '/v1/bins'] ] },
     compounding: { label: 'Compounding', dept: 'Compounding', user: 'Compounding', nav: [
       ['work', 'Worksheets', 'beaker', '/v1/production-order-ingredients', true], ['orders', 'Production orders', 'grid', '/v1/production-orders'],
       ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['issues', 'Material issues', 'box', '/v1/material-issues'],
@@ -137,6 +141,13 @@
     '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
     '/v1/material-issues': ['issuedDt', 'productionOrderId', 'status'],
     '/v1/production-qc': ['result', 'observedValue', 'inspectionDt', 'status'],
+    '/v1/warehouses': ['warehouseCode', 'warehouseName', 'status'],
+    '/v1/floors': ['floorCode', 'floorName', 'status'],
+    '/v1/zones': ['zoneCode', 'zoneName', 'status'],
+    '/v1/shelves': ['shelfCode', 'shelfName', 'status'],
+    '/v1/bins': ['binCode', 'binName', 'status'],
+    '/v1/uoms': ['uomCode', 'uomName', 'status'],
+    '/v1/business-units': ['businessUnitCode', 'businessUnitName', 'status'],
     '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
@@ -604,6 +615,38 @@
       { n: 'gateEntryNumber', l: 'Gate entry no.', t: 'text', req: true },
       { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName' },
       { n: 'vehicleNumber', l: 'Vehicle no.', t: 'text' }, { n: 'driverName', l: 'Driver', t: 'text' }, { n: 'entryDt', l: 'Entry date', t: 'date' }
+    ] },
+    '/v1/warehouses': { title: 'New warehouse', perm: 'location:warehouse_master:write', fields: [
+      { n: 'warehouseCode', l: 'Warehouse code', t: 'text', req: true }, { n: 'warehouseName', l: 'Warehouse name', t: 'text', req: true },
+      { n: 'locationId', l: 'Location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' }
+    ] },
+    '/v1/floors': { title: 'New floor', perm: 'location:floor_master:write', fields: [
+      { n: 'floorCode', l: 'Floor code', t: 'text', req: true }, { n: 'floorName', l: 'Floor name', t: 'text', req: true },
+      { n: 'warehouseId', l: 'Warehouse', t: 'select', fk: '/v1/warehouses', fv: 'warehouseId', fl: 'warehouseName' }
+    ] },
+    '/v1/zones': { title: 'New zone', perm: 'location:zone_master:write', fields: [
+      { n: 'zoneCode', l: 'Zone code', t: 'text', req: true }, { n: 'zoneName', l: 'Zone name', t: 'text', req: true },
+      { n: 'floorId', l: 'Floor', t: 'select', fk: '/v1/floors', fv: 'floorId', fl: 'floorName' }
+    ] },
+    '/v1/racks': { title: 'New rack', perm: 'location:rack_master:write', fields: [
+      { n: 'rackCode', l: 'Rack code', t: 'text', req: true }, { n: 'rackName', l: 'Rack name', t: 'text', req: true },
+      { n: 'zoneId', l: 'Zone', t: 'select', fk: '/v1/zones', fv: 'zoneId', fl: 'zoneName' }
+    ] },
+    '/v1/shelves': { title: 'New shelf', perm: 'location:shelf_master:write', fields: [
+      { n: 'shelfCode', l: 'Shelf code', t: 'text', req: true }, { n: 'shelfName', l: 'Shelf name', t: 'text', req: true },
+      { n: 'rackId', l: 'Rack', t: 'select', fk: '/v1/racks', fv: 'rackId', fl: 'rackName' }
+    ] },
+    '/v1/bins': { title: 'New bin', perm: 'location:bin_master:write', fields: [
+      { n: 'binCode', l: 'Bin code', t: 'text', req: true }, { n: 'binName', l: 'Bin name', t: 'text', req: true },
+      { n: 'shelfId', l: 'Shelf', t: 'select', fk: '/v1/shelves', fv: 'shelfId', fl: 'shelfName' }
+    ] },
+    '/v1/uoms': { title: 'New unit of measure', perm: 'platform:uom_master:write', fields: [
+      { n: 'uomCode', l: 'UoM code', t: 'text', req: true }, { n: 'uomName', l: 'UoM name', t: 'text', req: true }
+    ] },
+    '/v1/business-units': { title: 'New business unit', perm: 'iam:business_unit_master:write', fields: [
+      { n: 'businessUnitCode', l: 'BU code', t: 'text', req: true }, { n: 'businessUnitName', l: 'BU name', t: 'text', req: true },
+      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/orgs', fv: 'organizationId', fl: 'organizationName', req: true },
+      { n: 'parentBusinessUnitId', l: 'Parent BU', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' }
     ] }
   };
   function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
