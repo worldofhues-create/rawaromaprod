@@ -180,7 +180,20 @@
   var st = { skin: 'neumorphic', dark: false, role: null, nav: null, search: '', collapsed: false, drawer: false };
   var ACCENT = '#117C66';
   var $ = function (id) { return document.getElementById(id); };
-  function setTheme() { $('root').setAttribute('style', skinTokens(st.skin, st.dark, ACCENT) + ";font-family:'Urbanist',system-ui,sans-serif;color:var(--t1);min-height:100vh;color-scheme:" + (st.dark ? 'dark' : 'light')); }
+  function setTheme() {
+    var tokens = skinTokens(st.skin, st.dark, ACCENT);
+    // Promote the design tokens to :root so the WHOLE document inherits them — not just #root.
+    // Modals/overlays are appended to <body> (siblings of #root, NOT descendants), so without
+    // this they resolve every var(--surface)/var(--accent)/var(--well)/… to nothing → transparent
+    // cards, invisible inputs, unfilled buttons (the "create form ignores my design" bug).
+    var docEl = document.documentElement;
+    tokens.split(';').forEach(function (decl) {
+      var i = decl.indexOf(':'); if (i < 0) return;
+      docEl.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim());
+    });
+    docEl.style.setProperty('color-scheme', st.dark ? 'dark' : 'light');
+    $('root').setAttribute('style', tokens + ";font-family:'Urbanist',system-ui,sans-serif;color:var(--t1);min-height:100vh;color-scheme:" + (st.dark ? 'dark' : 'light'));
+  }
 
   // Curate which fields to show + how, from a real row object (DB is the source).
   var HIDE = { createdDt: 1, updatedDt: 1, createdBy: 1, updatedBy: 1 };
