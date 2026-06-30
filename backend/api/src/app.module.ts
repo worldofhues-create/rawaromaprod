@@ -38,6 +38,7 @@ import { SalesModule } from '@ra/cluster-sales';
 import { MaterialMaskingInterceptor } from './masking/material-masking.interceptor.js';
 import { CryptoModule } from './crypto/crypto.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
+import { PackagingQcModule } from './packaging-qc/packaging-qc.module.js';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { DashboardModule } from './dashboard/dashboard.module.js';
     PackagingModule,
     SalesModule,
     DashboardModule,
+    PackagingQcModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then flag-gate.
