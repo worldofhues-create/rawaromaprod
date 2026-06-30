@@ -66,8 +66,8 @@
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
-      ['materials', 'Materials', 'box', '/v1/materials'], ['users', 'Users', 'users', '/v1/users'],
-      ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
+      ['materials', 'Materials', 'box', '/v1/materials'], ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'],
+      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'] ] },
@@ -534,6 +534,9 @@
     ],
     '/v1/users': [
       { label: 'Assign role', perm: 'iam:user_role_mapping:write', when: function () { return true; }, run: function (r) { openAssignRole(r); } }
+    ],
+    '/v1/finished-good-batches': [
+      { label: 'Trace', perm: 'formula:actual:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
     ]
   };
   var _acts = {}, _actSeq = 0;
@@ -740,6 +743,40 @@
         close(); toast('Role assigned ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
     };
+  }
+
+  /* ---------------- reverse traceability (M10): FG → oil → materials → vendor (owner only) ---------------- */
+  function openTrace(fg) {
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Traceability</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12px;color:var(--t3);margin-bottom:16px">Finished good → oil batch → raw materials → vendor</div>' +
+      '<div id="ra-trace" style="color:var(--t3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div></div>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    var down = '<div style="display:flex;justify-content:center;padding:2px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
+    function step(ic, title, sub, accent) {
+      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--well)') + ';' + (accent ? 'color:#fff;' : '') + 'border-radius:14px;padding:12px 15px;box-shadow:' + (accent ? 'var(--rai-sm)' : 'var(--ins-sm)') + '">' +
+        '<span style="width:34px;height:34px;border-radius:10px;background:' + (accent ? 'rgba(255,255,255,.18)' : 'var(--accent-soft)') + ';color:' + (accent ? '#fff' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px">' + title + '</div><div style="font-size:11.5px;' + (accent ? 'opacity:.92' : 'color:var(--t3)') + '">' + sub + '</div></div></div>';
+    }
+    tunnel('/v1/trace/finished-good/' + fg.finishedGoodBatchId).then(function (res) {
+      var el = $('ra-trace');
+      if (res.status >= 400 || !res.json || !res.json.data) { el.textContent = (res.json && res.json.error && res.json.error.message) || 'Trace unavailable.'; return; }
+      var t = res.json.data;
+      var mats = (t.materials || []).map(function (m) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--well);box-shadow:var(--ins-sm);border-radius:11px;margin-bottom:7px;flex-wrap:wrap">' +
+          '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:var(--accent)">' + m.material + '</span>' +
+          '<span style="color:var(--t3);font-size:11px">&larr; batch ' + m.rmBatch + '</span><span style="color:var(--t3);font-size:11px">&larr; ' + m.grn + '</span>' +
+          '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m.vendor + '</span></div>';
+      }).join('') || '<div style="color:var(--t3);font-size:12px;padding:6px 0">No upstream materials linked.</div>';
+      el.outerHTML = '<div id="ra-trace">' +
+        step('pkg', 'Finished good · ' + t.finishedGood.batch, t.finishedGood.product + ' · ' + t.finishedGood.sku, true) + down +
+        step('droplet', 'Oil batch · ' + (t.oilBatch ? t.oilBatch.batch : '—'), 'the compounded juice', false) + down +
+        '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:8px 0 9px">RAW MATERIALS &rarr; VENDOR</div>' + mats + '</div>';
+    }).catch(function () { $('ra-trace').textContent = 'Could not reach the secure channel.'; });
   }
 
   async function loadView() {

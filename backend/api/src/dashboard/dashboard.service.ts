@@ -312,4 +312,68 @@ export class DashboardService {
       pipeline,
     };
   }
+
+  /**
+   * Reverse traceability (M10): finished-good batch → product → oil batch → production run →
+   * materials → RM batch → GRN → vendor. Walks real FKs (FG → package_order → oil_batch →
+   * production_order → ingredients → rm_batch → grn → vendor). Reveals the recipe's sources, so
+   * it's owner-gated at the route; product/material identity still masked here as defence-in-depth.
+   */
+  async traceFinishedGood(id: string, principal: AuthPrincipal) {
+    const sql = this.sql;
+    const isOwner =
+      (principal.roles || []).includes('owner') || (principal.roles || []).includes('super_admin');
+    const perms = new Set(principal.permissions || []);
+    const seeProduct = isOwner || perms.has('formula:actual:read');
+    const seeMaterial = isOwner || perms.has('masterdata:material:reveal');
+
+    const head = (
+      await sql`select fg.batch_number fgno, fg.package_order_id, po.oil_batch_id,
+                       ps.sku_code, pm.product_name, f.formula_name, f.formula_code
+                from packaging.finished_good_batch_master fg
+                left join packaging.package_order po on po.package_order_id = fg.package_order_id
+                left join packaging.product_sku ps on ps.product_sku_id = fg.product_sku_id
+                left join packaging.product_master pm on pm.product_id = ps.product_id
+                left join formula.formula_master f on f.formula_id = pm.formula_id
+                where fg.finished_good_batch_id = ${id} limit 1`
+    )[0] as Record<string, unknown> | undefined;
+    if (!head) return null;
+
+    const oil = head.oil_batch_id
+      ? ((
+          await sql`select ob.batch_number oilno, ob.production_order_id, ob.produced_qty
+                    from production.oil_batch_master ob where ob.oil_batch_id = ${head.oil_batch_id as string} limit 1`
+        )[0] as Record<string, unknown> | undefined)
+      : undefined;
+
+    const mats = oil?.production_order_id
+      ? ((await sql`select distinct on (poi.material_id) poi.material_id, poi.required_qty,
+                           m.material_code, m.material_name, a.alias_name,
+                           b.batch_number rmbatch, g.grn_number, v.vendor_name, v.vendor_code
+                    from production.production_order_ingredients poi
+                    left join masterdata.material m on m.material_id = poi.material_id
+                    left join masterdata.rm_alias a on a.material_id = poi.material_id
+                    left join inventory.rm_batch_master b on b.material_id = poi.material_id
+                    left join inventory.grn_items gi on gi.grn_item_id = b.grn_item_id
+                    left join inventory.grn_master g on g.grn_id = gi.grn_id
+                    left join procurement.vendor_details v on v.vendor_id = g.vendor_id
+                    where poi.production_order_id = ${oil.production_order_id as string}
+                    order by poi.material_id, b.batch_number`) as Record<string, unknown>[])
+      : [];
+
+    return {
+      reveal: { product: seeProduct, material: seeMaterial },
+      finishedGood: {
+        batch: String(head.fgno || '—'), sku: String(head.sku_code || '—'),
+        product: seeProduct ? String(head.product_name || head.formula_name || '—') : 'Protected ◆',
+      },
+      oilBatch: oil ? { batch: String(oil.oilno || '—'), qty: num(oil.produced_qty) } : null,
+      materials: mats.map((r) => ({
+        material: seeMaterial ? String(r.material_code || r.material_name || '—') : String(r.alias_name || '—'),
+        rmBatch: r.rmbatch ? String(r.rmbatch) : '—',
+        grn: r.grn_number ? String(r.grn_number) : '—',
+        vendor: r.vendor_name ? String(r.vendor_name) : r.vendor_code ? String(r.vendor_code) : '—',
+      })),
+    };
+  }
 }
