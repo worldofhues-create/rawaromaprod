@@ -541,9 +541,10 @@
       { label: 'Release to stock', perm: 'inventory:rm_batch_master:write', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/rm-batches/' + r.rmBatchId + '/release'; }, body: {} }
     ],
     '/v1/qc-inspections': [
-      { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
-      { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
-      { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function () { return true; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
+      // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
+      { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
+      { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
+      { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
     ],
     '/v1/mixing-sessions': [
       { label: 'End session', perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }

@@ -7,7 +7,7 @@
  * uuid). rm_batch_id, role_id, user_id, document_id are cross-schema SOFT refs — plain uuid.
  * qc_disposition is TABLE-ONLY for schema completeness (CAPA workflow = Phase-1B).
  */
-import { index, numeric, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { index, numeric, text, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { quality } from "./_schema.js";
 
@@ -76,7 +76,8 @@ export const qcDisposition = quality.table(
     ...metaColumns(),
   },
   (t) => [
-    uniqueIndex("qc_disposition_code_uq").on(t.dispositionCode),
+    // one disposition per inspection (NOT a global unique on the ACCEPT/REJECT/REWORK code,
+    // which would let only three dispositions ever exist — that was a bug causing 500s).
     index("qc_disposition_inspection_idx").on(t.qcInspectionId),
   ],
 );
