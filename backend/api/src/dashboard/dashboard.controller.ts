@@ -23,6 +23,12 @@ export class DashboardController {
   }
 
   @Permissions('formula:actual:read')
+  @Get('v1/notifications')
+  notifications() {
+    return this.dashboard.notifications();
+  }
+
+  @Permissions('formula:actual:read')
   @Get('v1/trace/finished-good/:id')
   trace(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.dashboard.traceFinishedGood(id, principal);

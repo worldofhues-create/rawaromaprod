@@ -406,4 +406,14 @@ export class DashboardService {
       .map(({ for: _f, ...a }) => a);
     return { alerts, total: alerts.reduce((s, a) => s + a.count, 0) };
   }
+
+  /** The email-notification log (what the worker generated/dispatched). Owner-gated at the route. */
+  async notifications(limit = 50): Promise<{ items: unknown[]; nextCursor: null }> {
+    const rows = await this.sql.unsafe(
+      `select notification_log_id as "notificationLogId", event_type as "eventType", recipient,
+              subject, status, created_dt as "createdDt"
+       from platform.notification_log order by created_dt desc limit ${Math.min(Math.max(1, limit), 200)}`,
+    );
+    return { items: rows, nextCursor: null };
+  }
 }

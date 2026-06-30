@@ -67,7 +67,7 @@
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
-      ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'],
+      ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
@@ -149,6 +149,7 @@
     '/v1/uoms': ['uomCode', 'uomName', 'status'],
     '/v1/business-units': ['businessUnitCode', 'businessUnitName', 'status'],
     '/v1/packaging-qc': ['overallResult', 'leakageCheck', 'labelCheck', 'cartonCheck', 'inspectionDt'],
+    '/v1/notifications': ['eventType', 'subject', 'status', 'recipient', 'createdDt'],
     '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };

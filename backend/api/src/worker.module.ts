@@ -29,6 +29,7 @@ import { outbox as formulaOutbox } from '@ra/data-formula';
 import { outbox as productionOutbox } from '@ra/data-production';
 import { outbox as packagingOutbox } from '@ra/data-packaging';
 import { outbox as salesOutbox } from '@ra/data-sales';
+import { NotifyModule } from './notify/notify.module.js';
 
 @Module({
   imports: [
@@ -59,6 +60,7 @@ import { outbox as salesOutbox } from '@ra/data-sales';
     ProductionModule,
     PackagingModule,
     SalesModule,
+    NotifyModule,
   ],
 })
 export class WorkerModule {}
