@@ -1,25 +1,35 @@
 /**
- * EmailNotifierService — Module 12 email half. Runs in the worker process and POLLS every cluster's
- * transactional outbox for notification-worthy domain events, renders an email per event, dispatches
- * it via EmailTransport, and records the result in platform.notification_log (idempotent on the
- * outbox event id). Polling (rather than the in-proc EventBus) is deliberate: the bus is per-Nest-
- * context and the worker is a separate context from the API app, so polling the shared DB is robust.
+ * EmailNotifierService — Module 12 email half. Runs in the worker process. Two loops:
+ *   (1) drain()  — polls every cluster's transactional outbox for notification-worthy domain events,
+ *                  ROUTES each to the responsible role(s), renders a human email with a portal link +
+ *                  what-to-do, dispatches via EmailTransport, records platform.notification_log
+ *                  (idempotent on the outbox event id).
+ *   (2) scan()   — periodically checks time/threshold CONDITIONS the outbox can't express (low stock,
+ *                  expiry, pending-approval reminders, inbound QC HOLD, ≥₹25k PO stuck ≥24h) and
+ *                  emails the responsible role. Deduped via a deterministic synthetic event id
+ *                  (daily bucket for digests, per-row for per-item alerts) so it never spams.
+ *
+ * ROUTING vs DELIVERY: the log records the INTENDED recipients (the right role's users) so the
+ * routing is auditable. Actual delivery goes to NOTIFY_TO when set (a single verified inbox — the
+ * demo/free-Resend constraint), otherwise to the resolved role emails. Once the owner verifies a
+ * sending domain and gives the role users real addresses, unset NOTIFY_TO and it delivers directly.
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
+import { createHash, randomUUID } from 'node:crypto';
 import { EmailTransport } from './email-transport.service.js';
 
-/** event type → { subject } for the events worth emailing. */
-const RULES: Record<string, { subject: string }> = {
-  'quality.qc.failed': { subject: 'QC FAILED — batch needs attention' },
-  'procurement.po.issued': { subject: 'Purchase order issued' },
-  'procurement.pr.submitted': { subject: 'Purchase request awaiting approval' },
-  'formula.version.approved': { subject: 'Formula version approved & sealed' },
-  'sales.order.confirmed': { subject: 'Sales order confirmed' },
-  'sales.dispatch.created': { subject: 'Dispatch created' },
-  'packaging.fg_batch.created': { subject: 'Finished-goods batch released' },
-  'inventory.grn.created': { subject: 'Goods received (GRN raised)' },
+/** event type → { subject, roles, cta }. roles = who is responsible for acting on it. */
+const RULES: Record<string, { subject: string; roles: string[]; cta: string; screen: string }> = {
+  'quality.qc.failed':        { subject: 'QC FAILED — batch needs attention', roles: ['qc', 'owner'], cta: 'Review the failed inspection and disposition (reject / rework).', screen: 'Test queue' },
+  'procurement.po.issued':    { subject: 'Purchase order issued', roles: ['procurement', 'owner'], cta: 'Track vendor acknowledgement and expected dispatch.', screen: 'Purchase orders' },
+  'procurement.pr.submitted': { subject: 'Purchase request awaiting approval', roles: ['procurement', 'owner'], cta: 'Approve or reject the purchase request.', screen: 'Purchase requests' },
+  'formula.version.approved': { subject: 'Formula version approved & sealed', roles: ['owner'], cta: 'The version is now locked for production use.', screen: 'Formula versions' },
+  'sales.order.confirmed':    { subject: 'Sales order confirmed', roles: ['sales', 'owner'], cta: 'Allocate stock and plan dispatch before the delivery deadline.', screen: 'Sales orders' },
+  'sales.dispatch.created':   { subject: 'Dispatch created', roles: ['sales', 'owner'], cta: 'Assign transporter and confirm delivery.', screen: 'Dispatches' },
+  'packaging.fg_batch.created': { subject: 'Finished-goods batch released', roles: ['packaging', 'warehouse', 'owner'], cta: 'Put away to FG inventory and mark available for sale.', screen: 'Finished goods' },
+  'inventory.grn.created':    { subject: 'Goods received (GRN raised)', roles: ['warehouse', 'qc', 'owner'], cta: 'Run incoming QC before releasing to stock.', screen: 'Goods receipt' },
 };
 const COND_TYPE = 'production.qc.recorded'; // only notify on FAIL/HOLD
 const TYPES = [...Object.keys(RULES), COND_TYPE];
@@ -28,10 +38,16 @@ const SCHEMAS = ['procurement', 'quality', 'production', 'packaging', 'sales', '
 @Injectable()
 export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailNotifierService.name);
-  private readonly to = process.env.NOTIFY_TO || 'owner@rawaroma.local';
+  private readonly notifyTo = process.env.NOTIFY_TO || '';           // single deliverable inbox (demo)
+  private readonly ownerFallback = process.env.NOTIFY_OWNER || 'owner@rawaroma.local';
+  private readonly portal = process.env.PORTAL_URL || 'https://raw-aroma-api-9jn6.vercel.app';
   private readonly pollMs = Number(process.env.NOTIFY_POLL_MS) || 5000;
-  private timer?: NodeJS.Timeout;
+  private readonly scanMs = Number(process.env.NOTIFY_SCAN_MS) || 900000; // 15 min
+  private pollTimer?: NodeJS.Timeout;
+  private scanTimer?: NodeJS.Timeout;
   private running = false;
+  private scanning = false;
+  private emailCache = new Map<string, { at: number; emails: string[] }>();
 
   constructor(
     @Inject(PG_CLIENT) private readonly sql: Sql,
@@ -39,14 +55,79 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
   ) {}
 
   onModuleInit(): void {
-    this.timer = setInterval(() => void this.drain(), this.pollMs);
-    if (this.timer.unref) this.timer.unref();
-    this.logger.log(`email notifier polling outbox every ${this.pollMs}ms`);
+    this.pollTimer = setInterval(() => void this.drain(), this.pollMs);
+    if (this.pollTimer.unref) this.pollTimer.unref();
+    // first condition scan shortly after boot, then on the slower cadence
+    setTimeout(() => void this.scan(), 30000).unref?.();
+    this.scanTimer = setInterval(() => void this.scan(), this.scanMs);
+    if (this.scanTimer.unref) this.scanTimer.unref();
+    this.logger.log(`email notifier: outbox every ${this.pollMs}ms, condition scan every ${this.scanMs}ms`);
   }
   onModuleDestroy(): void {
-    if (this.timer) clearInterval(this.timer);
+    if (this.pollTimer) clearInterval(this.pollTimer);
+    if (this.scanTimer) clearInterval(this.scanTimer);
   }
 
+  /** Resolve the active user emails for a set of role codes (60s cache). */
+  private async emailsForRoles(roles: string[]): Promise<string[]> {
+    const key = [...roles].sort().join(',');
+    const hit = this.emailCache.get(key);
+    if (hit && Date.now() - hit.at < 60000) return hit.emails;
+    let emails: string[] = [];
+    try {
+      const rows = (await this.sql`
+        select distinct u.email from iam.user_master u
+        join iam.user_role_mapping urm on urm.user_id = u.user_id
+        join iam.role_master r on r.role_id = urm.role_id
+        where lower(r.role_code) = any(${roles}) and coalesce(u.is_active, true) = true and u.email is not null
+      `) as Array<{ email: string }>;
+      emails = rows.map((r) => r.email).filter(Boolean);
+    } catch (e) {
+      this.logger.warn(`role email lookup failed: ${(e as Error).message}`);
+    }
+    this.emailCache.set(key, { at: Date.now(), emails });
+    return emails;
+  }
+
+  private body(subject: string, summary: string, facts: Record<string, unknown>, cta: string, screen: string): string {
+    const factLines = Object.entries(facts)
+      .filter(([, v]) => v != null && typeof v !== 'object' && String(v) !== '')
+      .slice(0, 8)
+      .map(([k, v]) => `  • ${k}: ${String(v)}`)
+      .join('\n');
+    return [
+      subject,
+      '',
+      summary,
+      factLines ? `\nDetails:\n${factLines}` : '',
+      `\nWhat to do: ${cta}`,
+      `Open the portal → ${this.portal}  (${screen})`,
+      '',
+      '— RAW AROMACHEM notifications',
+    ].filter((l) => l !== null).join('\n');
+  }
+
+  /** Send + record. `intended` = the routed role emails (audit truth); delivery respects NOTIFY_TO. */
+  private async deliver(eventId: string, eventType: string, subject: string, body: string, intended: string[]): Promise<void> {
+    const intendedList = intended.length ? intended : [this.ownerFallback];
+    const deliverTo = this.notifyTo ? [this.notifyTo] : intendedList;
+    let result;
+    try { result = await this.transport.send(deliverTo, subject, body); }
+    catch (err) { result = { status: 'FAILED' as const, error: (err as Error).message }; }
+    await this.sql`
+      insert into platform.notification_log
+        (notification_log_id, event_id, event_type, channel, recipient, subject, body, status, error)
+      values (${randomUUID()}, ${eventId}, ${eventType}, 'email', ${intendedList.join(', ')}, ${subject}, ${body}, ${result.status}, ${(result as { error?: string }).error ?? null})
+      on conflict (event_id) do nothing`;
+  }
+
+  /** Deterministic uuid from a string so condition alerts dedupe (daily bucket / per-row). */
+  private synthId(s: string): string {
+    const h = createHash('md5').update(s).digest('hex');
+    return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20, 32)}`;
+  }
+
+  // ---------------- (1) event-driven outbox drain ----------------
   private async drain(): Promise<void> {
     if (this.running) return;
     this.running = true;
@@ -59,7 +140,7 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
            and not exists (select 1 from platform.notification_log nl where nl.event_id = e.id)
          order by e.occurred_at desc limit 50`,
       )) as Array<{ id: string; type: string; payload: string | null }>;
-      for (const r of rows) await this.notify(r);
+      for (const r of rows) await this.notifyEvent(r);
     } catch (e) {
       this.logger.warn(`notifier drain failed: ${(e as Error).message}`);
     } finally {
@@ -67,28 +148,71 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async notify(r: { id: string; type: string; payload: string | null }): Promise<void> {
+  private async notifyEvent(r: { id: string; type: string; payload: string | null }): Promise<void> {
     let payload: Record<string, unknown> = {};
     try { payload = r.payload ? JSON.parse(r.payload) : {}; } catch { /* ignore */ }
     let rule = RULES[r.type];
     if (r.type === COND_TYPE) {
       const res = String(payload.result ?? '');
       if (!/FAIL|HOLD/i.test(res)) return;
-      rule = { subject: `Production QC ${res.toUpperCase()}` };
+      rule = { subject: `Production QC ${res.toUpperCase()} — action needed`, roles: ['qc', 'production', 'owner'], cta: 'Review the oil batch and decide rework / reject.', screen: 'Production QC' };
     }
     if (!rule) return;
-    const body = `${rule.subject}\n\nEvent: ${r.type}\nDetails: ${r.payload ?? '{}'}\n\n— RAW AROMACHEM notifications`;
-    let result;
-    try { result = await this.transport.send(this.to, rule.subject, body); }
-    catch (err) { result = { status: 'FAILED' as const, error: (err as Error).message }; }
-    await this.sql`
-      insert into platform.notification_log
-        (notification_log_id, event_id, event_type, channel, recipient, subject, body, status, error)
-      values (${this.uuid()}, ${r.id}, ${r.type}, 'email', ${this.to}, ${rule.subject}, ${body}, ${result.status}, ${result.error ?? null})
-      on conflict (event_id) do nothing`;
+    const intended = await this.emailsForRoles(rule.roles);
+    const body = this.body(rule.subject, `A ${r.type} event needs the ${rule.roles.filter((x) => x !== 'owner').join('/') || 'owner'} team.`, payload, rule.cta, rule.screen);
+    await this.deliver(r.id, r.type, rule.subject, body, intended);
   }
 
-  private uuid(): string {
-    return (globalThis.crypto?.randomUUID?.() ?? require('node:crypto').randomUUID()) as string;
+  // ---------------- (2) periodic condition scan ----------------
+  private async scan(): Promise<void> {
+    if (this.scanning) return;
+    this.scanning = true;
+    const day = new Date().toISOString().slice(0, 10);
+    try {
+      // -- daily digests (one email/day/condition while the condition holds) --
+      const low = ((await this.sql`select count(*)::int c from procurement.stock_requirement where status is null or upper(status) <> 'CLOSED'`) as Array<{ c: number }>)[0] ?? { c: 0 };
+      if (low.c > 0) {
+        await this.condition(`lowstock:${day}`, 'stock.low', 'Low stock / reorder required',
+          `${low.c} material(s) are below reorder level and need a purchase request.`, { openRequirements: low.c }, ['procurement', 'owner'],
+          'Raise purchase requests for the short materials.', 'Stock planning');
+      }
+      const exp = ((await this.sql`select count(*)::int c, min(expiry_date)::text soonest from inventory.rm_batch_master where expiry_date is not null and expiry_date <= (now() + interval '30 days')`) as Array<{ c: number; soonest: string | null }>)[0] ?? { c: 0, soonest: null };
+      if (exp.c > 0) {
+        await this.condition(`expiry:${day}`, 'inventory.expiry', 'Expiry warning — RM batches expiring soon',
+          `${exp.c} raw-material batch(es) expire within 30 days (soonest ${exp.soonest ?? '?'}). Use or quarantine them first (FEFO).`, { batchesExpiring: exp.c, soonest: exp.soonest }, ['warehouse', 'owner'],
+          'Prioritise these batches for production or quarantine before expiry.', 'RM batches');
+      }
+      const appr = ((await this.sql`select
+          (select count(*) from procurement.purchase_request where upper(status) = 'SUBMITTED')
+        + (select count(*) from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL')) c`) as Array<{ c: number }>)[0] ?? { c: 0 };
+      if (appr.c > 0) {
+        await this.condition(`approvals:${day}`, 'workflow.approval.pending', 'Approvals waiting for sign-off',
+          `${appr.c} purchase request(s)/order(s) are waiting for approval. Delays here stall procurement.`, { pending: appr.c }, ['procurement', 'owner'],
+          'Review and approve/reject the pending items.', 'Purchase orders');
+      }
+      // -- per-row alerts (one email per offending record, ever) --
+      const holds = (await this.sql`select qc_inspection_id id, rm_batch_id, overall_result from quality.qc_inspections where upper(overall_result) = 'HOLD' and inspection_dt >= now() - interval '3 days'`) as Array<Record<string, unknown>>;
+      for (const h of holds) {
+        await this.condition(`qc-hold:${h.id}`, 'quality.qc.hold', 'QC HOLD — batch quarantined',
+          'An inbound batch was placed on QC HOLD and needs a decision.', h, ['qc', 'owner'],
+          'Re-test or disposition the held batch (accept / reject / rework).', 'Test queue');
+      }
+      const stuck = (await this.sql`select purchase_order_id id, po_number, total_amount::text total_amount, created_dt::text created_dt from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL') and total_amount >= 25000 and created_dt <= now() - interval '24 hours'`) as Array<Record<string, unknown>>;
+      for (const p of stuck) {
+        await this.condition(`po-escalate:${p.id}`, 'procurement.po.escalation', 'PO escalation — high-value order stuck >24h',
+          `A purchase order ≥ ₹25,000 has been awaiting approval for over 24 hours and needs owner sign-off (it is above the auto-approve threshold).`, p, ['owner'],
+          'Approve or reject this high-value purchase order.', 'Purchase orders');
+      }
+    } catch (e) {
+      this.logger.warn(`notifier scan failed: ${(e as Error).message}`);
+    } finally {
+      this.scanning = false;
+    }
+  }
+
+  private async condition(dedupeKey: string, type: string, subject: string, summary: string, facts: Record<string, unknown>, roles: string[], cta: string, screen: string): Promise<void> {
+    const intended = await this.emailsForRoles(roles);
+    const body = this.body(subject, summary, facts, cta, screen);
+    await this.deliver(this.synthId(dedupeKey), type, subject, body, intended);
   }
 }

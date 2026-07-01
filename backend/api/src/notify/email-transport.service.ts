@@ -16,13 +16,15 @@ export class EmailTransport {
   private readonly apiKey = process.env.RESEND_API_KEY;
   private readonly from = process.env.EMAIL_FROM || 'alerts@rawaroma.local';
 
-  async send(to: string, subject: string, body: string): Promise<SendResult> {
+  async send(to: string | string[], subject: string, body: string, html?: string): Promise<SendResult> {
+    const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
+    if (!recipients.length) return { status: 'FAILED', error: 'no recipient' };
     if (!this.apiKey) return { status: 'LOGGED' }; // no provider → consume + record, don't dispatch
     try {
       const res = await fetch('https://api.resend.com/emails', {
         method: 'POST',
         headers: { authorization: `Bearer ${this.apiKey}`, 'content-type': 'application/json' },
-        body: JSON.stringify({ from: this.from, to, subject, text: body }),
+        body: JSON.stringify({ from: this.from, to: recipients, subject, text: body, ...(html ? { html } : {}) }),
       });
       if (!res.ok) return { status: 'FAILED', error: `provider ${res.status}` };
       return { status: 'SENT' };

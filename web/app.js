@@ -921,15 +921,33 @@
     var d = $('ra-dark'); if (d) d.innerHTML = icon(st.dark ? 'sun' : 'moon', 18);
   }
   // Module 12 dashboard alerts — fill the header bell from /v1/alerts (real, role-filtered counts).
+  // Map an alert kind → the nav key of the screen that resolves it, for the CURRENT role.
+  function alertNavKey(kind) {
+    var nav = (ROLES[st.role] && ROLES[st.role].nav) || [];
+    var frags = {
+      approval: ['purchase-orders', 'purchase-requests', 'rfqs'],
+      qc: ['qc-inspections', 'packaging-qc', 'production-qc', 'qc-result'],
+      stock: ['stock-requirements', 'inventory-batches', '/v1/materials'],
+      expiry: ['rm-batches', 'inventory-batches', 'rm-batch']
+    }[kind] || [];
+    for (var f = 0; f < frags.length; f++) {
+      for (var i = 0; i < nav.length; i++) { if (String(nav[i][3]).indexOf(frags[f]) >= 0) return nav[i][0]; }
+    }
+    return null;
+  }
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
       var d = res.json && res.json.data; if (!d) return;
       var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
-      pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS</div>' + d.alerts.map(function (a) {
+      pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS · tap to act</div>' + d.alerts.map(function (a) {
         var col = a.severity === 'high' ? '#C0492E' : (a.severity === 'med' ? '#9A6B1E' : 'var(--accent)');
-        return '<div style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px"><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
+        var nk = alertNavKey(a.kind);
+        return '<div ' + (nk ? 'data-alert-nav="' + nk + '"' : '') + ' style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.background=\'var(--well)\'" onmouseout="this.style.background=\'transparent\'"' : '') + '><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
       }).join('')) : '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12.5px">No alerts &#10003;</div>';
+      [].forEach.call(pop.querySelectorAll('[data-alert-nav]'), function (el) {
+        el.onclick = function (e) { e.stopPropagation(); st.nav = el.getAttribute('data-alert-nav'); st.search = ''; pop.style.display = 'none'; shell(); };
+      });
     }).catch(function () {});
   }
   function wireShell() {
