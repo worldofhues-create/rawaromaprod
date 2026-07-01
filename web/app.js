@@ -589,16 +589,84 @@
       { label: 'Trace', perm: 'formula:actual:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
     ]
   };
+  /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */
+  var EDIT = {
+    '/v1/materials': { resource: 'materials', idKey: 'materialId', perm: 'masterdata:material:write', statusField: 'status', title: 'Edit material',
+      fields: [{ n: 'materialName', l: 'Material name' }, { n: 'description', l: 'Description', t: 'textarea' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
+      fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/customers': { resource: 'customers', idKey: 'customerId', perm: 'sales:customer_master:write', statusField: 'status', title: 'Edit customer',
+      fields: [{ n: 'customerName', l: 'Customer name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/transporters': { resource: 'transporters', idKey: 'transporterId', perm: 'sales:transporter_master:write', statusField: 'status', title: 'Edit transporter',
+      fields: [{ n: 'transporterName', l: 'Transporter name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/users': { resource: 'users', idKey: 'userId', perm: 'iam:user_master:write', statusField: 'isActive', title: 'Edit user',
+      fields: [{ n: 'userName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] }
+  };
+  function openEdit(endpoint, row) {
+    var cfg = EDIT[endpoint]; if (!cfg) return;
+    var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
+    var rows = cfg.fields.map(function (f) {
+      var ctrl;
+      if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
+      else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="text" style="' + fStyle() + '">'; }
+      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + '</label>' + ctrl + '</div>';
+    }).join('');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-eform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
+      '<button type="button" id="ra-eclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
+      rows + '<div id="ra-eerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-esave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save changes</button></form>';
+    document.body.appendChild(ov); setTheme();
+    // prefill current values (via JS so quotes/markup in data can't break the form)
+    cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var cur = row[f.n]; el.value = cur == null ? '' : String(cur); });
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-eclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    $('ra-eform').onsubmit = function (e) {
+      e.preventDefault(); var body = {};
+      cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); if (f.n === 'isActive') body[f.n] = (v === 'true'); else body[f.n] = v; });
+      var save = $('ra-esave'); save.disabled = true; save.textContent = 'Saving…';
+      tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
+        close(); toast('Saved ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+  function toggleActive(endpoint, cfg, row) {
+    var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
+    var active = cfg.statusField === 'isActive' ? (row.isActive === true || String(row.isActive) === 'true') : String(row[cfg.statusField]).toUpperCase() === 'ACTIVE';
+    var body = cfg.statusField === 'isActive' ? { isActive: !active } : { status: active ? 'INACTIVE' : 'ACTIVE' };
+    var verb = active ? 'Deactivate' : 'Activate';
+    if (!window.confirm(verb + ' this record?')) return;
+    tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
+      toast(verb + 'd ✓', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+
   var _acts = {}, _actSeq = 0;
   function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
+  function actBtn(k, label, bg, fg) { return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>'; }
   function rowActionsCell(endpoint, r) {
-    var avail = actionsFor(endpoint, r);
-    if (!avail || !avail.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
-    return avail.map(function (a) {
+    var out = [];
+    var avail = actionsFor(endpoint, r) || [];
+    avail.forEach(function (a) {
       var bg = a.tone === 'bad' ? '#C0492E' : a.tone === 'warn' ? '#9A6B1E' : a.tone === 'good' ? '#2E7D55' : 'var(--accent)';
       var k = 'ra' + (_actSeq++); _acts[k] = { a: a, r: r };
-      return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:#fff;background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + a.label + '</button>';
-    }).join('');
+      out.push(actBtn(k, a.label, bg));
+    });
+    var cfg = EDIT[endpoint];
+    if (cfg && can(cfg.perm)) {
+      var kE = 'ra' + (_actSeq++); _acts[kE] = { a: { label: 'Edit', run: function (row) { openEdit(endpoint, row); } }, r: r };
+      out.push(actBtn(kE, 'Edit', 'var(--well)', 'var(--t1)'));
+      var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
+      var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
+      out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? '#C0492E' : '#2E7D55'));
+    }
+    if (!out.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
+    return out.join('');
   }
   function toast(msg, tone) {
     var t = document.createElement('div'); t.textContent = msg;
@@ -895,7 +963,7 @@
       var q = st.search.trim().toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
       _acts = {}; _actSeq = 0;
-      var hasActions = !!ACTIONS[item[3]];
+      var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]];
       var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
         (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
       var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
