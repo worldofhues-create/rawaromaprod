@@ -39,6 +39,7 @@ import { MaterialMaskingInterceptor } from './masking/material-masking.intercept
 import { CryptoModule } from './crypto/crypto.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { PackagingQcModule } from './packaging-qc/packaging-qc.module.js';
+import { InventoryViewModule } from './inventory-view/inventory-view.module.js';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { PackagingQcModule } from './packaging-qc/packaging-qc.module.js';
     SalesModule,
     DashboardModule,
     PackagingQcModule,
+    InventoryViewModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then flag-gate.

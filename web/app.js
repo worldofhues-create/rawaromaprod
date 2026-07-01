@@ -98,7 +98,7 @@
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
-      ['stock', 'Stock', 'box', '/v1/inventory-batches'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
+      ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
       ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'],
       ['warehouses', 'Warehouses', 'building', '/v1/warehouses'], ['floors', 'Floors', 'layers', '/v1/floors'],
       ['zones', 'Zones', 'grid', '/v1/zones'], ['racks', 'Racks', 'shelf', '/v1/racks'],
@@ -138,6 +138,7 @@
     '/v1/qc-inspections': ['rmBatchId', 'overallResult', 'inspectionDt', 'status'],
     '/v1/qc-result-details': ['observedValue', 'result', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
+    '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/stock-transfers': ['transferNumber', 'status'],
     '/v1/racks': ['rackCode', 'rackName', 'status'],
     '/v1/mixing-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
@@ -203,6 +204,8 @@
   function fmt(k, v) {
     if (v === null || v === undefined || v === '') return '<span style="color:var(--t3)">—</span>';
     if (typeof v === 'boolean') return v ? '<span style="color:#2E7D55;font-weight:700">Yes</span>' : '<span style="color:var(--t3)">No</span>';
+    if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 0 ? '#C0492E' : (d <= 30 ? '#C0492E' : (d <= 90 ? '#9A6B1E' : 'var(--t2)')); return '<span style="font-weight:700;color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
+    if (k === 'available') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + v + '</span>'; }
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var s = STATUS[String(v).toLowerCase()] || ['var(--well)', 'var(--t2)', '#9298A2']; return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:' + s[0] + ';color:' + s[1] + '"><i style="width:6px;height:6px;border-radius:50%;background:' + s[2] + '"></i>' + v + '</span>'; }
     if (isUuid(v)) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:var(--t2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
     if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--t2)">' + v.slice(0, 10) + '</span>';
