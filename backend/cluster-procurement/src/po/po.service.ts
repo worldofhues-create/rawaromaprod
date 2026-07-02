@@ -80,7 +80,7 @@ export class PoService {
                 orderedQty: it.orderedQty != null ? String(it.orderedQty) : null,
                 uomId: it.uomId ?? null,
                 rate: it.rate != null ? String(it.rate) : null,
-                amount: String(it.amount),
+                amount: String(it.amount != null ? it.amount : Number(it.orderedQty || 0) * Number(it.rate || 0)),
                 status: 'ACTIVE',
                 createdBy: principal.userId,
                 updatedBy: principal.userId,

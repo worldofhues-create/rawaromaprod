@@ -172,7 +172,7 @@ export const purchaseOrderItemInput = z.object({
   orderedQty: num.nullish(),
   uomId: z.string().uuid().nullish(),
   rate: num.nullish(),
-  amount: num,
+  amount: num.nullish(),
 });
 export type PurchaseOrderItemInput = z.infer<typeof purchaseOrderItemInput>;
 
