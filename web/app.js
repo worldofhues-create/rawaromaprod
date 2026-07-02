@@ -88,6 +88,7 @@
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'],
+      ['contacts', 'Contacts', 'users', '/v1/contacts'], ['countries', 'Countries', 'building', '/v1/countries'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
@@ -149,6 +150,8 @@
     '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'required', 'shortage'],
     '/v1/formula-access-audit': ['occurredAt', 'action', 'actor', 'entityType', 'ip'],
     '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
+    '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
+    '/v1/countries': ['countryCode', 'countryName', 'status'],
     '/v1/stock-transfers': ['transferNumber', 'status'],
     '/v1/racks': ['rackCode', 'rackName', 'status'],
     '/v1/mixing-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
@@ -656,6 +659,8 @@
       fields: [{ n: 'transporterName', l: 'Transporter name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/users': { resource: 'users', idKey: 'userId', perm: 'iam:user_master:write', statusField: 'isActive', title: 'Edit user',
       fields: [{ n: 'userName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] },
+    '/v1/product-skus': { resource: 'product-skus', idKey: 'productSkuId', perm: 'packaging:product_sku:write', statusField: 'status', title: 'Edit product SKU',
+      fields: [{ n: 'skuCode', l: 'SKU code' }, { n: 'packSize', l: 'Pack size' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/document-registry': { resource: 'documents', idKey: 'documentRegistryId', perm: 'platform:document_master:write', statusField: 'status', title: 'Edit document',
       fields: [{ n: 'title', l: 'Title' }, { n: 'documentType', l: 'Type' }, { n: 'referenceNo', l: 'Reference no.' }, { n: 'sourceUrl', l: 'Document link' }, { n: 'issueDate', l: 'Issue date' }, { n: 'expiryDate', l: 'Expiry date' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'SUPERSEDED', 'INACTIVE'] }] }
   };
@@ -845,6 +850,12 @@
       { n: 'vendorCreditReasonId', l: 'Reason', t: 'select', fk: '/v1/vendor-credit-reasons', fv: 'vendorCreditReasonId', fl: 'reasonName' },
       { n: 'creditNoteNumber', l: 'Credit note no.', t: 'text', req: true }, { n: 'amount', l: 'Amount', t: 'number' },
       { n: 'creditNoteDate', l: 'Date', t: 'date' }
+    ] },
+    '/v1/contacts': { title: 'New contact', perm: 'platform:contact_master:write', fields: [
+      { n: 'contactName', l: 'Name', t: 'text', req: true }, { n: 'email', l: 'Email', t: 'text', req: true }, { n: 'mobileNumber', l: 'Mobile', t: 'text', req: true }
+    ] },
+    '/v1/countries': { title: 'New country', perm: 'platform:country_master:write', fields: [
+      { n: 'countryCode', l: 'Country code (e.g. IN)', t: 'text', req: true }, { n: 'countryName', l: 'Country name', t: 'text', req: true }
     ] },
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },

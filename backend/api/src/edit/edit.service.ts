@@ -67,6 +67,10 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'production', table: 'oil_batch_master', pk: 'oil_batch_id', perm: 'production:oil_batch_master:write',
     cols: { status: 'status' },
   },
+  'product-skus': {
+    schema: 'packaging', table: 'product_sku', pk: 'product_sku_id', perm: 'packaging:product_sku:write',
+    cols: { skuCode: 'sku_code', packSize: 'pack_size', status: 'status' },
+  },
 };
 
 @Injectable()
