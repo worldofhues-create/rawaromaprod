@@ -92,7 +92,7 @@
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
-      ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
+      ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
       ['batches', 'Batches', 'layers', '/v1/rm-batches'] ] },
@@ -552,6 +552,9 @@
     '/v1/reorder-suggestions': [
       { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, path: function () { return '/v1/stock-requirements'; }, prepare: function (r) { return { materialId: r.materialId, requiredQty: r.shortage, requirementSource: 'REORDER_SUGGESTION', priority: 'HIGH' }; } }
     ],
+    '/v1/roles': [
+      { label: 'Assign perms', perm: 'iam:role_permission_mapping:write', when: function () { return true; }, run: function (r) { openAssignPerm(r); } }
+    ],
     '/v1/purchase-requests': [
       { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
       { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} }
@@ -703,6 +706,24 @@
 
   /* ---------------- "+ New" create forms (existing POST create routes) ---------------- */
   var CREATE = {
+    '/v1/roles': { title: 'New role', perm: 'iam:role_master:write', fields: [
+      { n: 'roleCode', l: 'Role code', t: 'text', req: true }, { n: 'roleName', l: 'Role name', t: 'text', req: true }
+    ] },
+    '/v1/permissions': { title: 'New permission', perm: 'iam:permission_master:write', fields: [
+      { n: 'permissionCode', l: 'Permission code (e.g. sales:customer_master:read)', t: 'text', req: true },
+      { n: 'permissionName', l: 'Permission name', t: 'text', req: true }, { n: 'moduleName', l: 'Module', t: 'text' }
+    ] },
+    '/v1/vendor-contacts': { title: 'New vendor contact', perm: 'procurement:vendor_contact:write', fields: [
+      { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
+      { n: 'contactName', l: 'Contact name', t: 'text', req: true }, { n: 'designation', l: 'Designation', t: 'text' },
+      { n: 'email', l: 'Email', t: 'text' }, { n: 'mobileNumber', l: 'Mobile', t: 'text' }
+    ] },
+    '/v1/quotations': { title: 'New quotation', perm: 'procurement:quotation:write', fields: [
+      { n: 'quotationNumber', l: 'Quotation no.', t: 'text', req: true },
+      { n: 'rfqId', l: 'Against RFQ', t: 'select', fk: '/v1/rfqs', fv: 'rfqId', fl: 'rfqNumber' },
+      { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
+      { n: 'quotationDate', l: 'Quotation date', t: 'date' }, { n: 'validUntilDate', l: 'Valid until', t: 'date' }
+    ] },
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },
       { n: 'documentType', l: 'Type', t: 'select', en: ['GST Certificate', 'FSSAI Licence', 'COA', 'MSDS', 'Allergen Declaration', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
@@ -922,6 +943,47 @@
   }
 
   /* ---------------- reverse traceability (M10): FG → oil → materials → vendor (owner only) ---------------- */
+  /* fetch every page of a list endpoint (cursor paginated), up to a sane cap. */
+  function fetchAllPages(endpoint, done) {
+    var out = [], n = 0;
+    function step(cursor) {
+      return tunnel(endpoint + '?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')).then(function (res) {
+        var j = res.json || {}; out = out.concat((j.data) || []);
+        var next = j.meta && j.meta.cursor; n++;
+        if (next && n < 6) return step(next);
+        done(out);
+      }).catch(function () { done(out); });
+    }
+    return step(null);
+  }
+  /* assign a permission to a role (admin-gated — the RBAC operation that had no screen) */
+  function openAssignPerm(role) {
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign permission</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Role: ' + (role.roleName || role.roleCode || 'role') + '</div>' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Permission <span style="color:#C0492E">*</span></label>' +
+      '<select id="ra-perm" style="' + fStyle() + '"><option value="">Loading…</option></select>' +
+      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    fetchAllPages('/v1/permissions', function (perms) {
+      var sel = $('ra-perm'); if (!sel) return;
+      sel.innerHTML = '<option value="">Select…</option>' + perms.map(function (p) { var v = p.permissionId != null ? p.permissionId : guessId(p); var l = p.permissionCode || p.permissionName || (v ? String(v).slice(0, 8) : ''); return v ? '<option value="' + v + '">' + l + '</option>' : ''; }).join('');
+    });
+    $('ra-cform').onsubmit = function (e) {
+      e.preventDefault(); var pid = $('ra-perm').value; if (!pid) { $('ra-merr').textContent = 'Pick a permission.'; return; }
+      var rid = role.roleId != null ? role.roleId : guessId(role);
+      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
+      tunnel('/v1/role-permissions', { method: 'POST', body: { roleId: rid, permissionId: pid } }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        close(); toast('Permission assigned ✓', 'good');
+      }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
   function openTrace(fg) {
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
