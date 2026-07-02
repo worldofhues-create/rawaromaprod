@@ -217,6 +217,15 @@ export class InspectionsService {
           { qcInspectionId: inspectionId, rmBatchId },
           inspectionId,
         );
+      } else if (body.dispositionCode === 'HOLD' && rmBatchId) {
+        // HOLD quarantines the batch (not released) and signals QC/owner for a re-test decision.
+        await recordOutbox(
+          tx,
+          outbox,
+          qualityEvents.qcHold,
+          { qcInspectionId: inspectionId, rmBatchId },
+          inspectionId,
+        );
       }
 
       return { inspection: updated, disposition };

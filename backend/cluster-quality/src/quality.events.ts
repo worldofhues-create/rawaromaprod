@@ -18,4 +18,8 @@ export const qualityEvents = {
     'quality.qc.failed',
     z.object({ qcInspectionId: uuid, rmBatchId: uuid }),
   ),
+  qcHold: defineEvent(
+    'quality.qc.hold',
+    z.object({ qcInspectionId: uuid, rmBatchId: uuid }),
+  ),
 } as const;

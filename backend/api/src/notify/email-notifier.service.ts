@@ -23,6 +23,7 @@ import { EmailTransport } from './email-transport.service.js';
 /** event type → { subject, roles, cta }. roles = who is responsible for acting on it. */
 const RULES: Record<string, { subject: string; roles: string[]; cta: string; screen: string }> = {
   'quality.qc.failed':        { subject: 'QC FAILED — batch needs attention', roles: ['qc', 'owner'], cta: 'Review the failed inspection and disposition (reject / rework).', screen: 'Test queue' },
+  'quality.qc.hold':          { subject: 'QC HOLD — batch quarantined', roles: ['qc', 'owner'], cta: 'Re-test or disposition the held batch (accept / reject / rework).', screen: 'Test queue' },
   'procurement.po.issued':    { subject: 'Purchase order issued', roles: ['procurement', 'owner'], cta: 'Track vendor acknowledgement and expected dispatch.', screen: 'Purchase orders' },
   'procurement.pr.submitted': { subject: 'Purchase request awaiting approval', roles: ['procurement', 'owner'], cta: 'Approve or reject the purchase request.', screen: 'Purchase requests' },
   'formula.version.approved': { subject: 'Formula version approved & sealed', roles: ['owner'], cta: 'The version is now locked for production use.', screen: 'Formula versions' },
@@ -197,12 +198,7 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
           'Review and approve/reject the pending items.', 'Purchase orders');
       }
       // -- per-row alerts (one email per offending record, ever) --
-      const holds = (await this.sql`select qc_inspection_id id, rm_batch_id, overall_result from quality.qc_inspections where upper(overall_result) = 'HOLD' and inspection_dt >= now() - interval '3 days'`) as Array<Record<string, unknown>>;
-      for (const h of holds) {
-        await this.condition(`qc-hold:${h.id}`, 'quality.qc.hold', 'QC HOLD — batch quarantined',
-          'An inbound batch was placed on QC HOLD and needs a decision.', h, ['qc', 'owner'],
-          'Re-test or disposition the held batch (accept / reject / rework).', 'Test queue');
-      }
+      // (inbound QC HOLD now notifies immediately via the quality.qc.hold outbox event, not here.)
       const stuck = (await this.sql`select purchase_order_id id, po_number, total_amount::text total_amount, created_dt::text created_dt from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL') and total_amount >= 25000 and created_dt <= now() - interval '24 hours'`) as Array<Record<string, unknown>>;
       for (const p of stuck) {
         await this.condition(`po-escalate:${p.id}`, 'procurement.po.escalation', 'PO escalation — high-value order stuck >24h',

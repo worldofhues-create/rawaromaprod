@@ -92,7 +92,8 @@
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
-      ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
+      ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
+      ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
       ['batches', 'Batches', 'layers', '/v1/rm-batches'] ] },
@@ -587,9 +588,10 @@
     ],
     '/v1/qc-inspections': [
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
-      { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
-      { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
-      { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
+      { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
+      { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
+      { label: 'Hold', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'HOLD' } },
+      { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
     ],
     '/v1/mixing-sessions': [
       { label: 'End session', perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }
@@ -741,6 +743,13 @@
       { n: 'rfqId', l: 'Against RFQ', t: 'select', fk: '/v1/rfqs', fv: 'rfqId', fl: 'rfqNumber' },
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
       { n: 'quotationDate', l: 'Quotation date', t: 'date' }, { n: 'validUntilDate', l: 'Valid until', t: 'date' }
+    ] },
+    '/v1/vendor-credit-notes': { title: 'New vendor settlement', perm: 'procurement:vendor_credit_note:write', fields: [
+      { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
+      { n: 'grnId', l: 'Against GRN (rejected batch)', t: 'select', fk: '/v1/grns', fv: 'grnId', fl: 'grnNumber' },
+      { n: 'vendorCreditReasonId', l: 'Reason', t: 'select', fk: '/v1/vendor-credit-reasons', fv: 'vendorCreditReasonId', fl: 'reasonName' },
+      { n: 'creditNoteNumber', l: 'Credit note no.', t: 'text', req: true }, { n: 'amount', l: 'Amount', t: 'number' },
+      { n: 'creditNoteDate', l: 'Date', t: 'date' }
     ] },
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },

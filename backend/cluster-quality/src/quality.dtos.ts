@@ -59,7 +59,7 @@ export type CreateQcAttachment = z.infer<typeof createQcAttachment>;
 /* ── qc disposition (flow body) ───────────────────────────────────────── */
 
 export const disposeInspection = z.object({
-  dispositionCode: z.enum(['ACCEPT', 'REJECT', 'REWORK']),
+  dispositionCode: z.enum(['ACCEPT', 'REJECT', 'REWORK', 'HOLD']),
   dispositionReason: z.string().optional(),
   conditions: z.string().optional(),
   disposedBy: z.string().uuid().optional(),
