@@ -679,6 +679,48 @@
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
 
+  /* ---------------- printable records (PO / GRN / dispatch note / CoA / batch certificate) ---------------- */
+  var PRINTABLE = {
+    '/v1/purchase-orders': 'PURCHASE ORDER', '/v1/grns': 'GOODS RECEIPT NOTE', '/v1/dispatches': 'DISPATCH / DELIVERY NOTE',
+    '/v1/qc-inspections': 'CERTIFICATE OF ANALYSIS', '/v1/finished-good-batches': 'FINISHED-GOODS BATCH CERTIFICATE',
+    '/v1/package-orders': 'PACKAGING ORDER', '/v1/sales-orders': 'SALES ORDER', '/v1/document-registry': 'DOCUMENT RECORD'
+  };
+  function printDoc(endpoint, row) {
+    var docTitle = PRINTABLE[endpoint] || 'DOCUMENT';
+    function rowsHtml(obj) {
+      return Object.keys(obj).filter(function (k) { return !HIDE[k] && !sensitive(k) && obj[k] != null && typeof obj[k] !== 'object' && obj[k] !== ''; }).map(function (k) {
+        var v = obj[k]; if (isUuid(v)) v = String(v).slice(0, 8).toUpperCase();
+        return '<tr><td class="k">' + label(k) + '</td><td class="v">' + String(v) + '</td></tr>';
+      }).join('');
+    }
+    function open(extra) {
+      var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print', 'bad'); return; }
+      var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + docTitle + '</title><style>' +
+        'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;padding:40px;max-width:720px;margin:auto}' +
+        'h1{font-size:14px;letter-spacing:.16em;color:#117C66;margin:0}h2{font-size:20px;margin:4px 0}.sub{color:#666;font-size:12px}' +
+        'hr{border:none;border-top:2px solid #117C66;margin:14px 0}table{width:100%;border-collapse:collapse;margin-top:8px}' +
+        'td{padding:7px 10px;border-bottom:1px solid #eee;font-size:13px}.k{color:#666;width:42%;font-weight:600}.v{font-weight:700}' +
+        '.sec{margin-top:20px;font-size:11px;letter-spacing:.1em;color:#117C66;font-weight:800}' +
+        '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #999;padding-top:6px;font-size:12px;color:#666;width:210px;text-align:center}' +
+        '@media print{.noprint{display:none}}</style></head><body>' +
+        '<h1>RAW AROMACHEM</h1><div class="sub">Formula-Protected Perfume-Oil Manufacturing Platform</div><hr>' +
+        '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
+        '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
+        '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
+        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#117C66;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
+        '</body></html>';
+      w.document.write(html); w.document.close();
+    }
+    // CoA: enrich with the inspection's test-result rows.
+    if (endpoint === '/v1/qc-inspections') {
+      tunnel('/v1/qc-result-details?limit=100').then(function (res) {
+        var mine = ((res.json && res.json.data) || []).filter(function (x) { return x.qcInspectionId === row.qcInspectionId; });
+        var extra = mine.length ? ('<div class="sec">TEST RESULTS</div><table>' + mine.map(function (m) { return '<tr><td class="k">' + (m.parameterName || m.parameter || m.testName || 'Result') + '</td><td class="v">' + (m.observedValue != null ? m.observedValue : '') + ' ' + (m.result || '') + '</td></tr>'; }).join('') + '</table>') : '';
+        open(extra);
+      }).catch(function () { open(''); });
+    } else open('');
+  }
+
   var _acts = {}, _actSeq = 0;
   function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
   function actBtn(k, label, bg, fg) { return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>'; }
@@ -697,6 +739,10 @@
       var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
       var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
       out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? '#C0492E' : '#2E7D55'));
+    }
+    if (PRINTABLE[endpoint]) {
+      var kP = 'ra' + (_actSeq++); _acts[kP] = { a: { label: 'Print', run: function (row) { printDoc(endpoint, row); } }, r: r };
+      out.push(actBtn(kP, 'Print', 'var(--well)', 'var(--t1)'));
     }
     if (!out.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
     return out.join('');
@@ -1072,7 +1118,7 @@
       var q = st.search.trim().toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
       _acts = {}; _actSeq = 0;
-      var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]];
+      var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]];
       var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
         (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
       var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
