@@ -144,7 +144,7 @@ export class RequirementService {
         await this.db
           .insert(purchaseRequest)
           .values({
-            prNumber: body.prNumber ?? null,
+            prNumber: (body.prNumber && String(body.prNumber).trim()) || ('PR-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
             stockRequirementId: body.stockRequirementId ?? null,
             requestLocationId: body.requestLocationId ?? null,
             deliveryLocationId: body.deliveryLocationId ?? null,

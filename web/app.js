@@ -134,7 +134,7 @@
     '/v1/formulas': ['formulaCode', 'formulaName', 'status'],
     '/v1/formula-types': ['typeCode', 'typeName', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
-    '/v1/materials': ['materialCode', 'materialName', 'status'],
+    '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
     '/v1/rm-aliases': ['aliasName', 'materialId', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'status'],
     '/v1/purchase-orders': ['poNumber', 'totalAmount', 'vendorId', 'status'],
@@ -147,7 +147,7 @@
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
-    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'required', 'shortage'],
+    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'openReq', 'shortage'],
     '/v1/formula-access-audit': ['occurredAt', 'action', 'actor', 'entityType', 'ip'],
     '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
     '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
@@ -580,7 +580,7 @@
       { label: 'Attach IFRA cert', perm: 'platform:document_master:write', when: function () { return true; }, run: function (r) { openAttachIfra(r); } }
     ],
     '/v1/reorder-suggestions': [
-      { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, path: function () { return '/v1/stock-requirements'; }, prepare: function (r) { return { materialId: r.materialId, requiredQty: r.shortage, requirementSource: 'REORDER_SUGGESTION', priority: 'HIGH' }; } }
+      { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, run: function (r) { openRaiseRequirement(r); } }
     ],
     '/v1/roles': [
       { label: 'Assign perms', perm: 'iam:role_permission_mapping:write', when: function () { return true; }, run: function (r) { openAssignPerm(r); } }
@@ -653,7 +653,42 @@
   /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */
   var EDIT = {
     '/v1/materials': { resource: 'materials', idKey: 'materialId', perm: 'masterdata:material:write', statusField: 'status', title: 'Edit material',
-      fields: [{ n: 'materialName', l: 'Material name' }, { n: 'description', l: 'Description', t: 'textarea' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'materialName', l: 'Material name' }, { n: 'uomId', l: 'Unit', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
+        { n: 'scientificName', l: 'Scientific name' }, { n: 'casNumber', l: 'CAS number' }, { n: 'density', l: 'Density', t: 'number' }, { n: 'shelfLifeDays', l: 'Shelf life (days)', t: 'number' },
+        { n: 'reorderLevel', l: 'Reorder level', t: 'number' }, { n: 'minStock', l: 'Min stock', t: 'number' }, { n: 'maxStock', l: 'Max stock', t: 'number' },
+        { n: 'qcRequired', l: 'QC required?', t: 'select', en: ['true', 'false'] }, { n: 'description', l: 'Description', t: 'textarea' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/stock-requirements': { resource: 'stock-requirements', idKey: 'stockRequirementId', perm: 'procurement:stock_requirement:write', statusField: 'status', title: 'Edit requirement',
+      fields: [{ n: 'requiredQty', l: 'Required qty', t: 'number' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] }, { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED'] }] },
+    '/v1/vendor-contacts': { resource: 'vendor-contacts', idKey: 'vendorContactId', perm: 'procurement:vendor_contact:write', statusField: 'status', title: 'Edit vendor contact',
+      fields: [{ n: 'contactName', l: 'Name' }, { n: 'designation', l: 'Designation' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/contacts': { resource: 'contacts', idKey: 'contactId', perm: 'platform:contact_master:write', statusField: 'status', title: 'Edit contact',
+      fields: [{ n: 'contactName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/countries': { resource: 'countries', idKey: 'countryId', perm: 'platform:country_master:write', statusField: 'status', title: 'Edit country',
+      fields: [{ n: 'countryName', l: 'Country name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/uoms': { resource: 'uoms', idKey: 'uomId', perm: 'platform:uom_master:write', statusField: 'status', title: 'Edit unit',
+      fields: [{ n: 'uomName', l: 'Unit name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/business-units': { resource: 'business-units', idKey: 'businessUnitId', perm: 'iam:business_unit_master:write', statusField: 'status', title: 'Edit business unit',
+      fields: [{ n: 'businessUnitName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-types': { resource: 'material-types', idKey: 'materialTypeId', perm: 'masterdata:material_type_master:write', statusField: 'status', title: 'Edit material type',
+      fields: [{ n: 'typeName', l: 'Type name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-categories': { resource: 'material-categories', idKey: 'materialCategoryId', perm: 'masterdata:material_category_master:write', statusField: 'status', title: 'Edit material category',
+      fields: [{ n: 'categoryName', l: 'Category name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
+      fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
+      fields: [{ n: 'floorName', l: 'Floor name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/zones': { resource: 'zones', idKey: 'zoneId', perm: 'location:zone_master:write', statusField: 'status', title: 'Edit zone',
+      fields: [{ n: 'zoneName', l: 'Zone name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/racks': { resource: 'racks', idKey: 'rackId', perm: 'location:rack_master:write', statusField: 'status', title: 'Edit rack',
+      fields: [{ n: 'rackName', l: 'Rack name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/shelves': { resource: 'shelves', idKey: 'shelfId', perm: 'location:shelf_master:write', statusField: 'status', title: 'Edit shelf',
+      fields: [{ n: 'shelfName', l: 'Shelf name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/bins': { resource: 'bins', idKey: 'binId', perm: 'location:bin_master:write', statusField: 'status', title: 'Edit bin',
+      fields: [{ n: 'binName', l: 'Bin name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/grns': { resource: 'grns', idKey: 'grnId', perm: 'inventory:grn_master:write', statusField: 'status', title: 'Edit GRN',
+      fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'POSTED', 'CANCELLED'] }] },
+    '/v1/rfqs': { resource: 'rfqs', idKey: 'rfqId', perm: 'procurement:rfq_master:write', statusField: 'status', title: 'Edit RFQ',
+      fields: [{ n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED', 'CANCELLED'] }] },
     '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
       fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/customers': { resource: 'customers', idKey: 'customerId', perm: 'sales:customer_master:write', statusField: 'status', title: 'Edit customer',
@@ -672,9 +707,10 @@
     var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
     var rows = cfg.fields.map(function (f) {
       var ctrl;
-      if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
+      if (f.fk) { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '"><option value="">— none —</option></select>'; }
+      else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
       else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="text" style="' + fStyle() + '">'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '" style="' + fStyle() + '">'; }
       return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + '</label>' + ctrl + '</div>';
     }).join('');
     var ov = document.createElement('div');
@@ -687,6 +723,14 @@
     document.body.appendChild(ov); setTheme();
     // prefill current values (via JS so quotes/markup in data can't break the form)
     cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var cur = row[f.n]; el.value = cur == null ? '' : String(cur); });
+    // FK dropdowns: fetch options, then re-select the current value.
+    cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
+      var sel = ov.querySelector('[data-name="' + f.n + '"]'); if (!sel) return;
+      tunnel(f.fk + '?limit=100').then(function (res) {
+        ((res.json && res.json.data) || []).forEach(function (r) { var val = r[f.fv] != null ? r[f.fv] : guessId(r); var lab = r[f.fl] != null ? r[f.fl] : (val ? String(val).slice(0, 8) : ''); if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); } });
+        if (row[f.n] != null) sel.value = String(row[f.n]);
+      }).catch(function () {});
+    });
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-eclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     $('ra-eform').onsubmit = function (e) {
@@ -726,6 +770,35 @@
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Reject failed', 'bad'); return; }
       toast('Rejected ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+  // reorder → raise requirement: a confirmation dialog (editable qty/priority/date), not a one-click.
+  // Vendor is NOT chosen here — that happens later at RFQ/quotation/PO (per the procurement flow).
+  function openRaiseRequirement(row) {
+    var mat = row.materialCode || row.materialName || 'material';
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-rform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Raise requirement</div><button type="button" id="ra-rclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + mat + ' · available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Order quantity <span style="color:#C0492E">*</span></label><input id="ra-rq" type="number" value="' + row.shortage + '" style="' + fStyle() + '">' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Priority</label><select id="ra-rp" style="' + fStyle() + '"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by</label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
+      '<div id="ra-rerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
+      '<button type="submit" id="ra-rsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Raise requirement</button>' +
+      '<div style="font-size:11px;color:var(--t3);text-align:center;margin-top:10px">Vendor is chosen later at RFQ / quotation / PO.</div></form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-rclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    $('ra-rform').onsubmit = function (e) {
+      e.preventDefault(); var qty = Number($('ra-rq').value); if (!(qty > 0)) { $('ra-rerr').textContent = 'Enter a quantity.'; return; }
+      var body = { materialId: row.materialId, requiredQty: qty, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION' };
+      var d = $('ra-rd').value; if (d) body.requiredByDate = d;
+      var save = $('ra-rsave'); save.disabled = true; save.textContent = 'Raising…';
+      tunnel('/v1/stock-requirements', { method: 'POST', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        close(); toast('Requirement raised ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = 'Could not reach the secure channel.'; });
+    };
   }
   // delivery confirmation — the last flow stage (dispatch → delivered).
   function markDelivered(row) {
@@ -928,7 +1001,11 @@
       { n: 'materialCode', l: 'Material code', t: 'text', req: true }, { n: 'materialName', l: 'Material name', t: 'text', req: true },
       { n: 'materialTypeId', l: 'Type', t: 'select', fk: '/v1/material-types', fv: 'materialTypeId', fl: 'typeName' },
       { n: 'materialCategoryId', l: 'Category', t: 'select', fk: '/v1/material-categories', fv: 'materialCategoryId', fl: 'categoryName' },
-      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'description', l: 'Description', t: 'textarea' }
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
+      { n: 'scientificName', l: 'Scientific name', t: 'text' }, { n: 'casNumber', l: 'CAS number', t: 'text' },
+      { n: 'density', l: 'Density', t: 'number' }, { n: 'shelfLifeDays', l: 'Shelf life (days)', t: 'number' },
+      { n: 'reorderLevel', l: 'Reorder level', t: 'number' }, { n: 'minStock', l: 'Min stock', t: 'number' }, { n: 'maxStock', l: 'Max stock', t: 'number' },
+      { n: 'qcRequired', l: 'QC required?', t: 'select', en: ['true', 'false'] }, { n: 'description', l: 'Description', t: 'textarea' }
     ] },
     '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
       { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' }
@@ -945,7 +1022,7 @@
       { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'requirementSource', l: 'Source', t: 'text' }
     ] },
     '/v1/purchase-requests': { title: 'New purchase request', perm: 'procurement:purchase_request:write', fields: [
-      { n: 'prNumber', l: 'PR number', t: 'text', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
+      { n: 'prNumber', l: 'PR number (auto if blank)', t: 'text' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
       { n: 'expectedDeliveryDate', l: 'Expected delivery', t: 'date' },
       { n: 'stockRequirementId', l: 'Stock requirement', t: 'select', fk: '/v1/stock-requirements', fv: 'stockRequirementId', fl: 'requirementSource' }
     ] },
@@ -1044,13 +1121,13 @@
   /* ---------------- documents with line items (raise a PO / sales order from scratch) ---------------- */
   var CREATE_DOC = {
     '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
-      header: [ { n: 'poNumber', l: 'PO number', t: 'text', req: true }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
+      header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
       item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
-      header: [ { n: 'soNumber', l: 'SO number', t: 'text', req: true }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
+      header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
-      header: [ { n: 'grnNumber', l: 'GRN number', t: 'text', req: true }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date' } ],
+      header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date' } ],
       item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true } ] }
   };
   async function openCreateDoc(endpoint) {

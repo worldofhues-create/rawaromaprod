@@ -48,7 +48,7 @@ export type SalesOrderItemInput = z.infer<typeof salesOrderItemInput>;
 
 /** Flow body for POST /v1/sales-orders — header + lines, in one transaction. */
 export const createSalesOrder = z.object({
-  soNumber: z.string(),
+  soNumber: z.string().nullish(),
   customerId: z.string().uuid(),
   orderDate: z.string().optional(),
   deliveryLocationId: z.string().uuid().optional(),

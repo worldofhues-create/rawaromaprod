@@ -51,7 +51,7 @@ export class PoService {
             .insert(purchaseOrder)
             .values({
               purchaseOrderId: poId,
-              poNumber: body.poNumber ?? null,
+              poNumber: (body.poNumber && String(body.poNumber).trim()) || ('PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
               vendorId: body.vendorId ?? null,
               quotationId: body.quotationId ?? null,
               purchaseRequestId: body.purchaseRequestId ?? null,

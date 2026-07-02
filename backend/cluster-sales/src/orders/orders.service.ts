@@ -51,7 +51,7 @@ export class OrdersService {
           .insert(salesOrder)
           .values({
             salesOrderId,
-            soNumber: body.soNumber,
+            soNumber: (body.soNumber && String(body.soNumber).trim()) || ('SO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
             customerId: body.customerId,
             orderDate: body.orderDate ?? null,
             deliveryLocationId: body.deliveryLocationId ?? null,

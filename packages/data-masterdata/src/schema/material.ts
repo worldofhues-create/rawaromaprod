@@ -9,7 +9,7 @@
  * inventory_batch_id→inventory.inventory_batch, storage_location_id→
  * location.storage_location_master) are plain id-only SOFT refs — no FK.
  */
-import { date, index, integer, numeric, text, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, numeric, text, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { masterdata } from "./_schema.js";
 import {
@@ -35,6 +35,15 @@ export const material = masterdata.table(
     materialName: varchar("material_name", { length: 200 }),
     uomId: uuid("uom_id"),
     description: text("description"),
+    // physical + planning attributes (M02 material master depth)
+    scientificName: text("scientific_name"),
+    density: numeric("density", { precision: 12, scale: 4 }),
+    casNumber: text("cas_number"),
+    shelfLifeDays: integer("shelf_life_days"),
+    reorderLevel: numeric("reorder_level", { precision: 18, scale: 4 }),
+    minStock: numeric("min_stock", { precision: 18, scale: 4 }),
+    maxStock: numeric("max_stock", { precision: 18, scale: 4 }),
+    qcRequired: boolean("qc_required"),
     ...metaColumns(),
   },
   (t) => [

@@ -24,7 +24,8 @@ interface ResourceCfg {
 const REGISTRY: Record<string, ResourceCfg> = {
   materials: {
     schema: 'masterdata', table: 'material', pk: 'material_id', perm: 'masterdata:material:write',
-    cols: { materialName: 'material_name', description: 'description', uomId: 'uom_id', materialGroupId: 'material_group_id', materialTypeId: 'material_type_id', materialCategoryId: 'material_category_id', status: 'status' },
+    cols: { materialName: 'material_name', description: 'description', uomId: 'uom_id', materialGroupId: 'material_group_id', materialTypeId: 'material_type_id', materialCategoryId: 'material_category_id', scientificName: 'scientific_name', density: 'density', casNumber: 'cas_number', shelfLifeDays: 'shelf_life_days', reorderLevel: 'reorder_level', minStock: 'min_stock', maxStock: 'max_stock', qcRequired: 'qc_required', status: 'status' },
+    bool: ['qc_required'],
   },
   vendors: {
     schema: 'procurement', table: 'vendor_details', pk: 'vendor_id', perm: 'procurement:vendor_details:write',
@@ -71,6 +72,25 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'packaging', table: 'product_sku', pk: 'product_sku_id', perm: 'packaging:product_sku:write',
     cols: { skuCode: 'sku_code', packSize: 'pack_size', status: 'status' },
   },
+  'stock-requirements': {
+    schema: 'procurement', table: 'stock_requirement', pk: 'stock_requirement_id', perm: 'procurement:stock_requirement:write',
+    cols: { requiredQty: 'required_qty', priority: 'priority', requiredByDate: 'required_by_date', status: 'status' },
+  },
+  grns: { schema: 'inventory', table: 'grn_master', pk: 'grn_id', perm: 'inventory:grn_master:write', cols: { status: 'status' } },
+  rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
+  'vendor-contacts': { schema: 'procurement', table: 'vendor_contact', pk: 'vendor_contact_id', perm: 'procurement:vendor_contact:write', cols: { contactName: 'contact_name', designation: 'designation', email: 'email', mobileNumber: 'mobile_number', status: 'status' } },
+  contacts: { schema: 'platform', table: 'contact_master', pk: 'contact_id', perm: 'platform:contact_master:write', cols: { contactName: 'contact_name', email: 'email', mobileNumber: 'mobile_number', status: 'status' } },
+  countries: { schema: 'platform', table: 'country_master', pk: 'country_id', perm: 'platform:country_master:write', cols: { countryName: 'country_name', status: 'status' } },
+  uoms: { schema: 'platform', table: 'uom_master', pk: 'uom_id', perm: 'platform:uom_master:write', cols: { uomName: 'uom_name', status: 'status' } },
+  'business-units': { schema: 'iam', table: 'business_unit_master', pk: 'business_unit_id', perm: 'iam:business_unit_master:write', cols: { businessUnitName: 'business_unit_name', status: 'status' } },
+  'material-types': { schema: 'masterdata', table: 'material_type_master', pk: 'material_type_id', perm: 'masterdata:material_type_master:write', cols: { typeName: 'type_name', status: 'status' } },
+  'material-categories': { schema: 'masterdata', table: 'material_category_master', pk: 'material_category_id', perm: 'masterdata:material_category_master:write', cols: { categoryName: 'category_name', status: 'status' } },
+  warehouses: { schema: 'location', table: 'warehouse_master', pk: 'warehouse_id', perm: 'location:warehouse_master:write', cols: { warehouseName: 'warehouse_name', status: 'status' } },
+  floors: { schema: 'location', table: 'floor_master', pk: 'floor_id', perm: 'location:floor_master:write', cols: { floorName: 'floor_name', status: 'status' } },
+  zones: { schema: 'location', table: 'zone_master', pk: 'zone_id', perm: 'location:zone_master:write', cols: { zoneName: 'zone_name', status: 'status' } },
+  racks: { schema: 'location', table: 'rack_master', pk: 'rack_id', perm: 'location:rack_master:write', cols: { rackName: 'rack_name', status: 'status' } },
+  shelves: { schema: 'location', table: 'shelf_master', pk: 'shelf_id', perm: 'location:shelf_master:write', cols: { shelfName: 'shelf_name', status: 'status' } },
+  bins: { schema: 'location', table: 'bin_master', pk: 'bin_id', perm: 'location:bin_master:write', cols: { binName: 'bin_name', status: 'status' } },
 };
 
 @Injectable()

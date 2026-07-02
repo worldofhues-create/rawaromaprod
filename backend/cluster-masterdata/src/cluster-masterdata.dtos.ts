@@ -58,6 +58,14 @@ export const createMaterial = z.object({
   materialName: z.string(),
   uomId: z.string().uuid().optional(),
   description: z.string().optional(),
+  scientificName: z.string().optional(),
+  density: z.number().optional(),
+  casNumber: z.string().optional(),
+  shelfLifeDays: z.number().int().optional(),
+  reorderLevel: z.number().optional(),
+  minStock: z.number().optional(),
+  maxStock: z.number().optional(),
+  qcRequired: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional()),
 });
 export type CreateMaterial = z.infer<typeof createMaterial>;
 
