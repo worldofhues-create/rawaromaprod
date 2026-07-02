@@ -102,6 +102,8 @@
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
+      ['movements', 'Movements', 'activity', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
+      ['reserve', 'Reservations', 'lock', '/v1/stock-reservations'], ['counts', 'Stock counts', 'clipboard', '/v1/stock-audits'],
       ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'],
       ['warehouses', 'Warehouses', 'building', '/v1/warehouses'], ['floors', 'Floors', 'layers', '/v1/floors'],
       ['zones', 'Zones', 'grid', '/v1/zones'], ['racks', 'Racks', 'shelf', '/v1/racks'],
@@ -577,6 +579,15 @@
     '/v1/dispatches': [
       { label: 'Mark delivered', perm: 'sales:dispatch_master:write', tone: 'good', when: function (r) { return UP(r.status) !== 'DELIVERED'; }, run: function (r) { markDelivered(r); } }
     ],
+    '/v1/stock-reservations': [
+      { label: 'Release', perm: 'inventory:stock_reservation:write', tone: 'warn', when: function (r) { return UP(r.status) !== 'RELEASED'; }, run: function (r) {
+        var id = r.stockReservationId != null ? r.stockReservationId : guessId(r);
+        tunnel('/v1/masters/reservations/' + id, { method: 'PATCH', body: { status: 'RELEASED' } }).then(function (res) {
+          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+          toast('Released ✓', 'good'); loadView();
+        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      } }
+    ],
     '/v1/purchase-requests': [
       { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
       { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} }
@@ -847,6 +858,30 @@
       { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
       { n: 'batchNumber', l: 'FG batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty (units)', t: 'number', req: true },
       { n: 'expiryDate', l: 'Expiry date', t: 'date' }
+    ] },
+    // ---- M06 stock operations (record movements / adjust / transfer / reserve / count from the UI) ----
+    '/v1/inventory-transactions': { title: 'Record stock movement', perm: 'inventory:inventory_transaction:write', fields: [
+      { n: 'inventoryBatchId', l: 'Batch', t: 'select', fk: '/v1/inventory-availability', fv: 'inventoryBatchId', fl: 'batchNumber', req: true },
+      { n: 'eventType', l: 'Movement', t: 'select', en: ['RECEIPT', 'ISSUE', 'TRANSFER', 'ADJUSTMENT', 'RETURN'], req: true },
+      { n: 'transactionQty', l: 'Quantity', t: 'number', req: true }, { n: 'remarks', l: 'Remarks', t: 'text' }
+    ] },
+    '/v1/stock-adjustments': { title: 'New stock adjustment', perm: 'inventory:stock_adjustment:write', fields: [
+      { n: 'inventoryBatchId', l: 'Batch', t: 'select', fk: '/v1/inventory-availability', fv: 'inventoryBatchId', fl: 'batchNumber', req: true },
+      { n: 'adjustmentQty', l: 'Adjustment qty (+/−)', t: 'number', req: true }, { n: 'adjustmentReason', l: 'Reason', t: 'text' }
+    ] },
+    '/v1/stock-transfers': { title: 'New stock transfer', perm: 'inventory:stock_transfer:write', fields: [
+      { n: 'inventoryBatchId', l: 'Batch', t: 'select', fk: '/v1/inventory-availability', fv: 'inventoryBatchId', fl: 'batchNumber', req: true },
+      { n: 'toLocationId', l: 'To rack/location', t: 'select', fk: '/v1/racks', fv: 'rackId', fl: 'rackCode' },
+      { n: 'transferQty', l: 'Transfer qty', t: 'number', req: true }
+    ] },
+    '/v1/stock-reservations': { title: 'New stock reservation', perm: 'inventory:stock_reservation:write', fields: [
+      { n: 'inventoryBatchId', l: 'Batch', t: 'select', fk: '/v1/inventory-availability', fv: 'inventoryBatchId', fl: 'batchNumber', req: true },
+      { n: 'reservedQty', l: 'Reserve qty', t: 'number', req: true }
+    ] },
+    '/v1/stock-audits': { title: 'New stock count', perm: 'inventory:stock_audit:write', fields: [
+      { n: 'auditCode', l: 'Count reference', t: 'text', req: true },
+      { n: 'auditType', l: 'Type', t: 'select', en: ['CYCLE', 'FULL', 'SPOT'] },
+      { n: 'locationId', l: 'Location', t: 'select', fk: '/v1/racks', fv: 'rackId', fl: 'rackCode' }
     ] },
     '/v1/materials': { title: 'New material', perm: 'masterdata:material:write', fields: [
       { n: 'materialCode', l: 'Material code', t: 'text', req: true }, { n: 'materialName', l: 'Material name', t: 'text', req: true },

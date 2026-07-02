@@ -37,7 +37,7 @@ export class InventoryViewService {
       left join (
         select inventory_batch_id, sum(reserved_qty) reserved
         from inventory.stock_reservation
-        where released_dt is null
+        where released_dt is null and coalesce(status, 'ACTIVE') <> 'RELEASED'
         group by inventory_batch_id
       ) r on r.inventory_batch_id = ib.inventory_batch_id
       ${where}

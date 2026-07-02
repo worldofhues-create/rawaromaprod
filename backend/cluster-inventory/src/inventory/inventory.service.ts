@@ -6,7 +6,7 @@
  * an inventory_event_history row in one transaction. numeric → String(n); timestamps → Date.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -232,6 +232,19 @@ export class InventoryService {
             .returning()
         )[0],
       );
+
+      // Ledger→balance: apply the movement to the batch on-hand (IN adds, OUT subtracts).
+      if (body.inventoryBatchId && body.transactionQty != null) {
+        const isOut = /ISSUE|OUT|CONSUME|PICK|DISPATCH|REMOVE/i.test(body.eventType ?? '');
+        const delta = (isOut ? -1 : 1) * Number(body.transactionQty);
+        await tx
+          .update(inventoryBatch)
+          .set({
+            quantityOnHand: sql`coalesce(${inventoryBatch.quantityOnHand}, 0) + ${delta}`,
+            updatedBy: principal.userId,
+          })
+          .where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId));
+      }
 
       return { transaction: txn, history };
     });

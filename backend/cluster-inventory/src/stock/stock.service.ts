@@ -5,7 +5,7 @@
  * String(n); timestamps → Date; date columns kept as ISO strings.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -31,6 +31,7 @@ const {
   stockReservation,
   stockTransfer,
   expiryTracker,
+  inventoryBatch,
 } = inventorySchema;
 
 @Injectable()
@@ -40,24 +41,38 @@ export class StockService {
   /* ── stock_adjustment ───────────────────────────────────────────────── */
 
   async createStockAdjustment(body: CreateStockAdjustment, principal: AuthPrincipal) {
-    return ensure(
-      (
-        await this.db
-          .insert(stockAdjustment)
-          .values({
-            inventoryBatchId: body.inventoryBatchId ?? null,
-            adjustmentQty: body.adjustmentQty != null ? String(body.adjustmentQty) : null,
-            uomId: body.uomId ?? null,
-            adjustmentReason: body.adjustmentReason ?? null,
-            adjustmentDt: body.adjustmentDt ? new Date(body.adjustmentDt) : new Date(),
-            approvedBy: body.approvedBy ?? null,
-            status: 'ACTIVE',
-            createdBy: principal.userId,
+    // Ledger→balance: the adjustment qty (signed) is applied to the batch on-hand in the same
+    // transaction, so a physical-count correction actually moves the stock figure.
+    return this.db.transaction(async (tx) => {
+      const adj = ensure(
+        (
+          await tx
+            .insert(stockAdjustment)
+            .values({
+              inventoryBatchId: body.inventoryBatchId ?? null,
+              adjustmentQty: body.adjustmentQty != null ? String(body.adjustmentQty) : null,
+              uomId: body.uomId ?? null,
+              adjustmentReason: body.adjustmentReason ?? null,
+              adjustmentDt: body.adjustmentDt ? new Date(body.adjustmentDt) : new Date(),
+              approvedBy: body.approvedBy ?? null,
+              status: 'ACTIVE',
+              createdBy: principal.userId,
+              updatedBy: principal.userId,
+            })
+            .returning()
+        )[0],
+      );
+      if (body.inventoryBatchId && body.adjustmentQty != null) {
+        await tx
+          .update(inventoryBatch)
+          .set({
+            quantityOnHand: sql`coalesce(${inventoryBatch.quantityOnHand}, 0) + ${Number(body.adjustmentQty)}`,
             updatedBy: principal.userId,
           })
-          .returning()
-      )[0],
-    );
+          .where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId));
+      }
+      return adj;
+    });
   }
 
   async listStockAdjustments(
