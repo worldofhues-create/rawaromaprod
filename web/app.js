@@ -516,7 +516,9 @@
     st.dash = p;
     var role = st.role, kset = kpiSet(p, role);
     var kpis = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
-    var html = kpis;
+    // "My work" — the role's actionable queue at the top of the home (tap a tile to jump to the screen that resolves it)
+    var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.json && ar.json.data; } catch (e) {}
+    var html = myWorkPanel(ad) + kpis;
     if (role === 'warehouse') {
       html += warehouseMap(p);
     } else if (role === 'superadmin') {
@@ -526,7 +528,23 @@
       html += '<div style="margin-bottom:16px">' + heroBand(p, role, kset) + '</div>' + sidePanel(p, role);
     }
     V.innerHTML = html;
+    [].forEach.call(document.querySelectorAll('#ra-view [data-work-nav]'), function (el) {
+      el.onclick = function () { st.nav = el.getAttribute('data-work-nav'); st.search = ''; shell(); };
+    });
     applyDashCols();
+  }
+  // The role's actionable queue: clickable tiles from the role-filtered alerts.
+  function myWorkPanel(ad) {
+    var alerts = (ad && ad.alerts) || [];
+    var head = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="font-weight:800;font-size:15px">My work</div><div style="font-size:11.5px;color:var(--t3)">what needs your attention · tap to act</div></div>';
+    var inner;
+    if (!alerts.length) inner = '<div style="color:var(--t3);font-size:13px;padding:4px 2px">All clear — nothing needs your action right now &#10003;</div>';
+    else inner = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + alerts.map(function (a) {
+      var col = a.severity === 'high' ? '#C0492E' : (a.severity === 'med' ? '#9A6B1E' : 'var(--accent)');
+      var nk = alertNavKey(a.kind);
+      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);box-shadow:var(--ins-sm);border-radius:14px;padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.boxShadow=\'var(--rai-sm)\'" onmouseout="this.style.boxShadow=\'var(--ins-sm)\'"' : '') + '><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
+    }).join('') + '</div>';
+    return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:18px 20px;margin-bottom:16px">' + head + inner + '</div>';
   }
   // Stack multi-column dashboard grids on narrow screens (remembers each grid's desktop template).
   function applyDashCols() {
