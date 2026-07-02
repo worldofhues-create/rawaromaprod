@@ -574,6 +574,9 @@
     '/v1/roles': [
       { label: 'Assign perms', perm: 'iam:role_permission_mapping:write', when: function () { return true; }, run: function (r) { openAssignPerm(r); } }
     ],
+    '/v1/dispatches': [
+      { label: 'Mark delivered', perm: 'sales:dispatch_master:write', tone: 'good', when: function (r) { return UP(r.status) !== 'DELIVERED'; }, run: function (r) { markDelivered(r); } }
+    ],
     '/v1/purchase-requests': [
       { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
       { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} }
@@ -676,6 +679,14 @@
     tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
       toast(verb + 'd ✓', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+  // delivery confirmation — the last flow stage (dispatch → delivered).
+  function markDelivered(row) {
+    var id = row.dispatchId != null ? row.dispatchId : guessId(row);
+    tunnel('/v1/masters/dispatches/' + id, { method: 'PATCH', body: { status: 'DELIVERED' } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+      toast('Marked delivered ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
 
@@ -806,6 +817,36 @@
       { n: 'sourceUrl', l: 'Document link (URL)', t: 'text' },
       { n: 'issueDate', l: 'Issue date', t: 'date' }, { n: 'expiryDate', l: 'Expiry date', t: 'date' },
       { n: 'notes', l: 'Notes', t: 'textarea' }
+    ] },
+    // ---- mid-flow production/packaging creates (make the 20-stage chain walkable from the UI) ----
+    '/v1/production-orders': { title: 'New production order', perm: 'production:production_order:write', fields: [
+      { n: 'formulaVersionId', l: 'Formula version', t: 'select', fk: '/v1/formula-versions', fv: 'formulaVersionId', fl: 'versionNumber', req: true },
+      { n: 'orderQty', l: 'Batch size / order qty', t: 'number', req: true }
+    ] },
+    '/v1/mixing-sessions': { title: 'New mixing session', perm: 'production:secure_mixing_session:write', fields: [
+      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true }
+    ] },
+    '/v1/oil-batches': { title: 'New oil batch', perm: 'production:oil_batch_master:write', fields: [
+      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true },
+      { n: 'batchNumber', l: 'Oil batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty', t: 'number', req: true }
+    ] },
+    '/v1/production-qc': { title: 'Record production QC', perm: 'production:production_qc:write', fields: [
+      { n: 'oilBatchId', l: 'Oil batch', t: 'select', fk: '/v1/oil-batches', fv: 'oilBatchId', fl: 'batchNumber', req: true },
+      { n: 'result', l: 'Result', t: 'select', en: ['PASS', 'FAIL', 'HOLD', 'REWORK'], req: true }, { n: 'observedValue', l: 'Observed value', t: 'number' }
+    ] },
+    '/v1/package-orders': { title: 'New package order', perm: 'packaging:package_order:write', fields: [
+      { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
+      { n: 'oilBatchId', l: 'Oil batch', t: 'select', fk: '/v1/oil-batches', fv: 'oilBatchId', fl: 'batchNumber', req: true },
+      { n: 'orderQty', l: 'Order qty (units)', t: 'number', req: true }
+    ] },
+    '/v1/filling-sessions': { title: 'New filling session', perm: 'packaging:filling_session:write', fields: [
+      { n: 'packageOrderId', l: 'Package order', t: 'select', fk: '/v1/package-orders', fv: 'packageOrderId', fl: 'packageOrderId', req: true }
+    ] },
+    '/v1/finished-good-batches': { title: 'New finished-goods batch', perm: 'packaging:finished_good_batch_master:write', fields: [
+      { n: 'packageOrderId', l: 'Package order', t: 'select', fk: '/v1/package-orders', fv: 'packageOrderId', fl: 'packageOrderId', req: true },
+      { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
+      { n: 'batchNumber', l: 'FG batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty (units)', t: 'number', req: true },
+      { n: 'expiryDate', l: 'Expiry date', t: 'date' }
     ] },
     '/v1/materials': { title: 'New material', perm: 'masterdata:material:write', fields: [
       { n: 'materialCode', l: 'Material code', t: 'text', req: true }, { n: 'materialName', l: 'Material name', t: 'text', req: true },

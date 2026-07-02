@@ -47,6 +47,10 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'platform', table: 'document_registry', pk: 'document_registry_id', perm: 'platform:document_master:write',
     cols: { title: 'title', documentType: 'document_type', entityType: 'entity_type', entityId: 'entity_id', referenceNo: 'reference_no', sourceUrl: 'source_url', fileName: 'file_name', issueDate: 'issue_date', expiryDate: 'expiry_date', notes: 'notes', status: 'status' },
   },
+  dispatches: {
+    schema: 'sales', table: 'dispatch_master', pk: 'dispatch_id', perm: 'sales:dispatch_master:write',
+    cols: { status: 'status', vehicleNumber: 'vehicle_number', transporterId: 'transporter_id', dispatchDate: 'dispatch_date' },
+  },
 };
 
 @Injectable()
