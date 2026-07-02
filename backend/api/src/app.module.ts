@@ -43,6 +43,7 @@ import { InventoryViewModule } from './inventory-view/inventory-view.module.js';
 import { EditModule } from './edit/edit.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { PlanningModule } from './planning/planning.module.js';
+import { AuditModule } from './audit/audit.module.js';
 
 @Module({
   imports: [
@@ -66,6 +67,7 @@ import { PlanningModule } from './planning/planning.module.js';
     EditModule,
     DocumentsModule,
     PlanningModule,
+    AuditModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then flag-gate.

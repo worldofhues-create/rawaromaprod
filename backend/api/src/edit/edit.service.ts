@@ -55,6 +55,14 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'inventory', table: 'stock_reservation', pk: 'stock_reservation_id', perm: 'inventory:stock_reservation:write',
     cols: { status: 'status', reservedQty: 'reserved_qty' },
   },
+  'purchase-requests': {
+    schema: 'procurement', table: 'purchase_request', pk: 'purchase_request_id', perm: 'procurement:purchase_request:write',
+    cols: { status: 'status', priority: 'priority' },
+  },
+  'purchase-orders': {
+    schema: 'procurement', table: 'purchase_order', pk: 'purchase_order_id', perm: 'procurement:purchase_order:write',
+    cols: { status: 'status' },
+  },
 };
 
 @Injectable()

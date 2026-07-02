@@ -83,11 +83,12 @@
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
-      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
+      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
+      ['facaudit', 'Formula access', 'lock', '/v1/formula-access-audit'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'],
-      ['docs', 'Documents', 'clipboard', '/v1/document-registry'] ] },
+      ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
@@ -146,6 +147,8 @@
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
     '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'required', 'shortage'],
+    '/v1/formula-access-audit': ['occurredAt', 'action', 'actor', 'entityType', 'ip'],
+    '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
     '/v1/stock-transfers': ['transferNumber', 'status'],
     '/v1/racks': ['rackCode', 'rackName', 'status'],
     '/v1/mixing-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
@@ -590,12 +593,14 @@
     ],
     '/v1/purchase-requests': [
       { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
-      { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} }
+      { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} },
+      { label: 'Reject', perm: 'procurement:purchase_request:write', tone: 'bad', when: function (r) { return ['DRAFT', 'SUBMITTED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-requests', 'purchaseRequestId', r); } }
     ],
     '/v1/purchase-orders': [
       { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
-      { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
-      { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} }
+      { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT', 'REJECTED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
+      { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} },
+      { label: 'Reject', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'ISSUED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-orders', 'purchaseOrderId', r); } }
     ],
     '/v1/rm-batches': [
       { label: 'Release to stock', perm: 'inventory:rm_batch_master:write', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/rm-batches/' + r.rmBatchId + '/release'; }, body: {} }
@@ -690,6 +695,15 @@
     tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
       toast(verb + 'd ✓', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+  // workflow reject — send a PR/PO back (status → REJECTED). Approvals were one-way before.
+  function rejectDoc(resource, idKey, row) {
+    var id = row[idKey] != null ? row[idKey] : guessId(row);
+    if (!window.confirm('Reject this ' + resource.replace(/-/g, ' ').replace(/s$/, '') + '?')) return;
+    tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: 'REJECTED' } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Reject failed', 'bad'); return; }
+      toast('Rejected ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
   // delivery confirmation — the last flow stage (dispatch → delivered).
