@@ -43,6 +43,10 @@ const REGISTRY: Record<string, ResourceCfg> = {
     cols: { userName: 'user_name', email: 'email', mobileNumber: 'mobile_number', isActive: 'is_active', status: 'status' },
     bool: ['is_active'],
   },
+  documents: {
+    schema: 'platform', table: 'document_registry', pk: 'document_registry_id', perm: 'platform:document_master:write',
+    cols: { title: 'title', documentType: 'document_type', entityType: 'entity_type', entityId: 'entity_id', referenceNo: 'reference_no', sourceUrl: 'source_url', fileName: 'file_name', issueDate: 'issue_date', expiryDate: 'expiry_date', notes: 'notes', status: 'status' },
+  },
 };
 
 @Injectable()

@@ -82,10 +82,12 @@
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
+      ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
-      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'] ] },
+      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'],
+      ['docs', 'Documents', 'clipboard', '/v1/document-registry'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
@@ -139,6 +141,7 @@
     '/v1/qc-result-details': ['observedValue', 'result', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
+    '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
     '/v1/stock-transfers': ['transferNumber', 'status'],
     '/v1/racks': ['rackCode', 'rackName', 'status'],
     '/v1/mixing-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
@@ -600,7 +603,9 @@
     '/v1/transporters': { resource: 'transporters', idKey: 'transporterId', perm: 'sales:transporter_master:write', statusField: 'status', title: 'Edit transporter',
       fields: [{ n: 'transporterName', l: 'Transporter name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/users': { resource: 'users', idKey: 'userId', perm: 'iam:user_master:write', statusField: 'isActive', title: 'Edit user',
-      fields: [{ n: 'userName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] }
+      fields: [{ n: 'userName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] },
+    '/v1/document-registry': { resource: 'documents', idKey: 'documentRegistryId', perm: 'platform:document_master:write', statusField: 'status', title: 'Edit document',
+      fields: [{ n: 'title', l: 'Title' }, { n: 'documentType', l: 'Type' }, { n: 'referenceNo', l: 'Reference no.' }, { n: 'sourceUrl', l: 'Document link' }, { n: 'issueDate', l: 'Issue date' }, { n: 'expiryDate', l: 'Expiry date' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'SUPERSEDED', 'INACTIVE'] }] }
   };
   function openEdit(endpoint, row) {
     var cfg = EDIT[endpoint]; if (!cfg) return;
@@ -693,6 +698,16 @@
 
   /* ---------------- "+ New" create forms (existing POST create routes) ---------------- */
   var CREATE = {
+    '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
+      { n: 'title', l: 'Title', t: 'text', req: true },
+      { n: 'documentType', l: 'Type', t: 'select', en: ['GST Certificate', 'FSSAI Licence', 'COA', 'MSDS', 'Allergen Declaration', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
+      { n: 'entityType', l: 'Relates to', t: 'select', en: ['vendor', 'material', 'formula', 'customer', 'other'] },
+      { n: 'entityId', l: 'Entity ID (optional)', t: 'text' },
+      { n: 'referenceNo', l: 'Reference no.', t: 'text' },
+      { n: 'sourceUrl', l: 'Document link (URL)', t: 'text' },
+      { n: 'issueDate', l: 'Issue date', t: 'date' }, { n: 'expiryDate', l: 'Expiry date', t: 'date' },
+      { n: 'notes', l: 'Notes', t: 'textarea' }
+    ] },
     '/v1/materials': { title: 'New material', perm: 'masterdata:material:write', fields: [
       { n: 'materialCode', l: 'Material code', t: 'text', req: true }, { n: 'materialName', l: 'Material name', t: 'text', req: true },
       { n: 'materialTypeId', l: 'Type', t: 'select', fk: '/v1/material-types', fv: 'materialTypeId', fl: 'typeName' },

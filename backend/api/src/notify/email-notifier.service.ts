@@ -182,6 +182,12 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
           `${exp.c} raw-material batch(es) expire within 30 days (soonest ${exp.soonest ?? '?'}). Use or quarantine them first (FEFO).`, { batchesExpiring: exp.c, soonest: exp.soonest }, ['warehouse', 'owner'],
           'Prioritise these batches for production or quarantine before expiry.', 'RM batches');
       }
+      const doc = ((await this.sql`select count(*)::int c, min(expiry_date)::text soonest from platform.document_registry where status = 'ACTIVE' and expiry_date is not null and expiry_date <= (now() + interval '45 days')`) as Array<{ c: number; soonest: string | null }>)[0] ?? { c: 0, soonest: null };
+      if (doc.c > 0) {
+        await this.condition(`docexpiry:${day}`, 'document.expiry', 'Document expiry — compliance docs lapsing soon',
+          `${doc.c} document(s) (vendor licences / COAs / contracts) expire within 45 days (soonest ${doc.soonest ?? '?'}). Renew them before they lapse.`, { documentsExpiring: doc.c, soonest: doc.soonest }, ['admin', 'owner'],
+          'Renew or replace the expiring documents.', 'Documents');
+      }
       const appr = ((await this.sql`select
           (select count(*) from procurement.purchase_request where upper(status) = 'SUBMITTED')
         + (select count(*) from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL')) c`) as Array<{ c: number }>)[0] ?? { c: 0 };
