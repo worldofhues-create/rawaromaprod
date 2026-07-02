@@ -637,6 +637,11 @@
     ],
     '/v1/finished-good-batches': [
       { label: 'Trace', perm: 'formula:actual:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
+    ],
+    '/v1/oil-batches': [
+      { label: 'Start maturation', perm: 'production:oil_batch_master:write', when: function (r) { return ['IN_MATURATION', 'MATURING', 'RELEASED'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'IN_MATURATION', 'Maturation started'); } },
+      { label: 'Release', perm: 'production:oil_batch_master:write', tone: 'good', when: function (r) { return ['IN_MATURATION', 'MATURING', 'HOLD'].indexOf(UP(r.status)) >= 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'RELEASED', 'Released'); } },
+      { label: 'Hold', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'HOLD'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'HOLD', 'Held'); } }
     ]
   };
   /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */
@@ -695,6 +700,14 @@
     tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
       toast(verb + 'd ✓', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+  // generic status transition via the guarded edit registry (maturation, etc.).
+  function setStatus(resource, idKey, row, status, verb) {
+    var id = row[idKey] != null ? row[idKey] : guessId(row);
+    tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: status } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
+      toast(verb + ' ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
   // workflow reject — send a PR/PO back (status → REJECTED). Approvals were one-way before.
