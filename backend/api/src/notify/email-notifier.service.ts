@@ -209,6 +209,27 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
           `A purchase order ≥ ₹25,000 has been awaiting approval for over 24 hours and needs owner sign-off (it is above the auto-approve threshold).`, p, ['owner'],
           'Approve or reject this high-value purchase order.', 'Purchase orders');
       }
+
+      // M04 rule (owner decision O5): PO < ₹25,000 pending > 24h → AUTO-APPROVE; ≥ ₹25k escalates (above).
+      const autoApproved = (await this.sql`
+        update procurement.purchase_order
+           set status = 'APPROVED', updated_dt = now(), updated_by = 'auto-approve-24h'
+         where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL')
+           and total_amount < 25000 and created_dt <= now() - interval '24 hours'
+         returning purchase_order_id id, po_number, total_amount::text total_amount`) as Array<Record<string, unknown>>;
+      for (const p of autoApproved) {
+        await this.condition(`po-autoapprove:${p.id}`, 'procurement.po.auto_approved', 'PO auto-approved (< ₹25k, > 24h)',
+          `Purchase order ${String(p.po_number)} (₹${String(p.total_amount)}) was auto-approved after 24 hours per the ₹25,000 policy.`, p, ['procurement', 'owner'],
+          'No approval needed — the PO is approved and can be issued.', 'Purchase orders');
+      }
+
+      // Vendor acknowledgement overdue — PO issued > 2 days ago, vendor hasn't acknowledged.
+      const ackOverdue = (await this.sql`select purchase_order_id id, po_number from procurement.purchase_order where upper(status) = 'ISSUED' and updated_dt <= now() - interval '2 days'`) as Array<Record<string, unknown>>;
+      for (const p of ackOverdue) {
+        await this.condition(`po-ack:${p.id}`, 'procurement.po.ack_overdue', 'PO acknowledgement overdue',
+          `PO ${String(p.po_number)} was issued more than 2 days ago and the vendor has not acknowledged it yet.`, p, ['procurement', 'owner'],
+          'Chase the vendor for acknowledgement + expected dispatch date.', 'Purchase orders');
+      }
     } catch (e) {
       this.logger.warn(`notifier scan failed: ${(e as Error).message}`);
     } finally {
