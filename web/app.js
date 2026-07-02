@@ -576,6 +576,9 @@
   }
   var UP = function (v) { return String(v == null ? '' : v).toUpperCase(); };
   var ACTIONS = {
+    '/v1/formulas': [
+      { label: 'Attach IFRA cert', perm: 'platform:document_master:write', when: function () { return true; }, run: function (r) { openAttachIfra(r); } }
+    ],
     '/v1/reorder-suggestions': [
       { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, path: function () { return '/v1/stock-requirements'; }, prepare: function (r) { return { materialId: r.materialId, requiredQty: r.shortage, requirementSource: 'REORDER_SUGGESTION', priority: 'HIGH' }; } }
     ],
@@ -859,7 +862,7 @@
     ] },
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },
-      { n: 'documentType', l: 'Type', t: 'select', en: ['GST Certificate', 'FSSAI Licence', 'COA', 'MSDS', 'Allergen Declaration', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
+      { n: 'documentType', l: 'Type', t: 'select', en: ['IFRA Certificate', 'IFRA Conformity Certificate', 'Allergen Declaration', 'COA', 'MSDS', 'GST Certificate', 'FSSAI Licence', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
       { n: 'entityType', l: 'Relates to', t: 'select', en: ['vendor', 'material', 'formula', 'customer', 'other'] },
       { n: 'entityId', l: 'Entity ID (optional)', t: 'text' },
       { n: 'referenceNo', l: 'Reference no.', t: 'text' },
@@ -1169,6 +1172,44 @@
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
         close(); toast('Permission assigned ✓', 'good');
       }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+  /* attach an IFRA (or IFRA conformity) certificate to a formula — one-click from the formula row.
+   * Generated externally from the composition; stored + expiry-tracked here, linked to the formula. */
+  function openAttachIfra(formula) {
+    var fid = formula.formulaId != null ? formula.formulaId : guessId(formula);
+    var fname = formula.formulaName || formula.formulaCode || 'formula';
+    var fields = [
+      { n: 'referenceNo', l: 'Certificate no.', t: 'text', req: true },
+      { n: 'sourceUrl', l: 'Certificate link (URL / drive)', t: 'text' },
+      { n: 'issueDate', l: 'Issue date', t: 'date' }, { n: 'expiryDate', l: 'Valid until', t: 'date' },
+      { n: 'notes', l: 'Notes (category, IFRA amendment…)', t: 'textarea' }
+    ];
+    var rows = fields.map(function (f) {
+      var ctrl = f.t === 'textarea' ? '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>' : '<input data-name="' + f.n + '" type="' + (f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">';
+      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
+    }).join('');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-iform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Attach IFRA certificate</div><button type="button" id="ra-iclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Formula: ' + fname + '</div>' + rows +
+      '<div id="ra-ierr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-isave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Attach certificate</button></form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-iclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    $('ra-iform').onsubmit = function (e) {
+      e.preventDefault();
+      var body = { title: 'IFRA Certificate — ' + fname, documentType: 'IFRA Certificate', entityType: 'formula', entityId: fid };
+      var err = '';
+      fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (f.req && !v) err = err || (f.l + ' is required.'); if (v) body[f.n] = v; });
+      if (err) { $('ra-ierr').textContent = err; return; }
+      var save = $('ra-isave'); save.disabled = true; save.textContent = 'Attaching…';
+      tunnel('/v1/document-registry', { method: 'POST', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Attach certificate'; $('ra-ierr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        close(); toast('IFRA certificate attached ✓', 'good');
+      }).catch(function () { save.disabled = false; save.textContent = 'Attach certificate'; $('ra-ierr').textContent = 'Could not reach the secure channel.'; });
     };
   }
   function openTrace(fg) {
