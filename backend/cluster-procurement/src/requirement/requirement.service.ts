@@ -9,7 +9,7 @@
  * change. numeric → String(n); dates → new Date(iso). Soft refs are plain uuids.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -65,18 +65,21 @@ export class RequirementService {
     );
   }
 
-  async listStockRequirements(
-    query: ListQuery,
-  ): Promise<Page<typeof stockRequirement.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(stockRequirement)
-      .where(
-        query.cursor ? lt(stockRequirement.stockRequirementId, query.cursor) : undefined,
-      )
-      .orderBy(desc(stockRequirement.stockRequirementId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.stockRequirementId);
+  async listStockRequirements(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with material code/name (PROC-02 — the stock-planning list showed a raw uuid).
+    // Read by procurement (material reveal), so the name is not a masking concern; material_id is
+    // still surfaced so the interceptor masks it for any non-reveal caller.
+    const rows = (await this.db.execute(sql`
+      select sr.stock_requirement_id as "stockRequirementId", sr.material_id as "materialId",
+             m.material_code as "materialCode", m.material_name as "materialName",
+             sr.required_qty as "requiredQty", sr.required_by_date as "requiredByDate",
+             sr.priority as "priority", sr.requirement_source as "requirementSource", sr.status as "status"
+        from procurement.stock_requirement sr
+        left join masterdata.material m on m.material_id = sr.material_id
+       ${query.cursor ? sql`where sr.stock_requirement_id < ${query.cursor}` : sql``}
+       order by sr.stock_requirement_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.stockRequirementId as string);
   }
 
   async getStockRequirement(id: string) {

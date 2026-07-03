@@ -102,16 +102,23 @@ export class PoService {
     });
   }
 
-  async listPurchaseOrders(
-    query: ListQuery,
-  ): Promise<Page<typeof purchaseOrder.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(purchaseOrder)
-      .where(query.cursor ? lt(purchaseOrder.purchaseOrderId, query.cursor) : undefined)
-      .orderBy(desc(purchaseOrder.purchaseOrderId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.purchaseOrderId);
+  async listPurchaseOrders(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with vendor code/name (PROC-22 — no more raw uuid) + the original PO number when
+    // this is a replacement (FAIL-04 display). Vendor identity is not the formula, so it's safe.
+    const rows = (await this.db.execute(sql`
+      select po.purchase_order_id as "purchaseOrderId", po.po_number as "poNumber",
+             po.vendor_id as "vendorId", v.vendor_code as "vendorCode", v.vendor_name as "vendorName",
+             po.quotation_id as "quotationId", po.purchase_request_id as "purchaseRequestId",
+             po.order_date as "orderDate", po.total_amount as "totalAmount",
+             po.replacement_of_po_id as "replacementOfPoId", op.po_number as "replacementOfPo",
+             po.status as "status"
+        from procurement.purchase_order po
+        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
+        left join procurement.purchase_order op on op.purchase_order_id = po.replacement_of_po_id
+       ${query.cursor ? sql`where po.purchase_order_id < ${query.cursor}` : sql``}
+       order by po.purchase_order_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.purchaseOrderId as string);
   }
 
   async getPurchaseOrder(id: string) {

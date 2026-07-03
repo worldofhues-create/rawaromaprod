@@ -29,7 +29,16 @@ export class PlanningService {
              (coalesce(oh.onhand, 0) - coalesce(rs.reserved, 0))::float as "available",
              coalesce(m.reorder_level, m.min_stock, 0)::float as "reorderLevel",
              coalesce(req.required, 0)::float as "openReq",
-             greatest(0, coalesce(m.reorder_level, m.min_stock, 0) - (coalesce(oh.onhand, 0) - coalesce(rs.reserved, 0)))::float as "shortage"
+             greatest(0, coalesce(m.reorder_level, m.min_stock, 0) - (coalesce(oh.onhand, 0) - coalesce(rs.reserved, 0)))::float as "shortage",
+             coalesce(
+               (select v.vendor_name from procurement.vendor_rm_mapping vm
+                  join procurement.vendor_details v on v.vendor_id = vm.vendor_id
+                 where vm.material_id = m.material_id and vm.is_preferred = true limit 1),
+               (select v.vendor_name from procurement.purchase_order_items poi
+                  join procurement.purchase_order po on po.purchase_order_id = poi.purchase_order_id
+                  join procurement.vendor_details v on v.vendor_id = po.vendor_id
+                 where poi.material_id = m.material_id order by po.order_date desc nulls last limit 1)
+             ) as "suggestedVendor"
       from masterdata.material m
       left join (select material_id, sum(quantity_on_hand) onhand from inventory.inventory_batch group by material_id) oh on oh.material_id = m.material_id
       left join (select ib.material_id, sum(r.reserved_qty) reserved

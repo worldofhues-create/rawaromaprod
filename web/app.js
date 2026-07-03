@@ -192,19 +192,19 @@
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
-    '/v1/purchase-orders': ['poNumber', 'totalAmount', 'vendorId', 'status'],
+    '/v1/purchase-orders': ['poNumber', 'vendorName', 'totalAmount', 'replacementOfPo', 'status'],
     '/v1/purchase-requests': ['prNumber', 'requiredDate', 'status'],
     '/v1/gate-entries': ['gateEntryNumber', 'vehicleNumber', 'driverName', 'status'],
     '/v1/grns': ['grnNumber', 'batchId', 'status'],
     '/v1/grn-items': ['grnNumber', 'orderedQty', 'receivedQty', 'acceptedQty', 'rejectedQty', 'damagedQty', 'varianceType', 'status'],
     '/v1/rm-batches': ['batchNumber', 'expiryDate', 'fefoFlag', 'status'],
-    '/v1/qc-inspections': ['rmBatchId', 'overallResult', 'inspectionDt', 'status'],
+    '/v1/qc-inspections': ['batchNumber', 'overallResult', 'inspectionDt', 'status'],
     '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
     '/v1/qc-parameters': ['parameterCode', 'parameterName', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
-    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'openReq', 'shortage'],
+    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'shortage', 'suggestedVendor'],
     '/v1/formula-access-audit': ['occurredAt', 'action', 'actor', 'entityType', 'ip'],
     '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
     '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
@@ -220,7 +220,7 @@
     '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'status'],
     '/v1/customers': ['customerCode', 'customerName', 'status'],
     '/v1/transporters': ['transporterCode', 'transporterName', 'status'],
-    '/v1/stock-requirements': ['materialId', 'requiredQty', 'priority', 'status'],
+    '/v1/stock-requirements': ['materialCode', 'materialName', 'requiredQty', 'requiredByDate', 'priority', 'status'],
     '/v1/rfqs': ['rfqNumber', 'rfqDate', 'submissionDeadline', 'status'],
     '/v1/quotations': ['quotationNumber', 'quotationDate', 'validUntilDate', 'status'],
     '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
@@ -884,7 +884,7 @@
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + mat + ' · available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
       '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Order quantity <span style="color:#C0492E">*</span></label><input id="ra-rq" type="number" value="' + row.shortage + '" style="' + fStyle() + '">' +
       '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Priority</label><select id="ra-rp" style="' + fStyle() + '"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by</label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by <span style="color:#C0492E">*</span></label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
       '<div id="ra-rerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
       '<button type="submit" id="ra-rsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Raise requirement</button>' +
       '<div style="font-size:11px;color:var(--t3);text-align:center;margin-top:10px">Vendor is chosen later at RFQ / quotation / PO.</div></form>';
@@ -893,8 +893,8 @@
     $('ra-rclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     $('ra-rform').onsubmit = function (e) {
       e.preventDefault(); var qty = Number($('ra-rq').value); if (!(qty > 0)) { $('ra-rerr').textContent = 'Enter a quantity.'; return; }
-      var body = { materialId: row.materialId, requiredQty: qty, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION' };
-      var d = $('ra-rd').value; if (d) body.requiredByDate = d;
+      var d = $('ra-rd').value; if (!d) { $('ra-rerr').textContent = 'A "Required by" date is required.'; return; }
+      var body = { materialId: row.materialId, requiredQty: qty, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION', requiredByDate: d };
       var save = $('ra-rsave'); save.disabled = true; save.textContent = 'Raising…';
       tunnel('/v1/stock-requirements', { method: 'POST', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
@@ -1153,8 +1153,8 @@
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
-      { n: 'purchaseRequestId', l: 'From purchase request', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' },
-      { n: 'rfqDate', l: 'RFQ date', t: 'date' }, { n: 'submissionDeadline', l: 'Submission deadline', t: 'text' }
+      { n: 'purchaseRequestId', l: 'From purchase request', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber', req: true },
+      { n: 'rfqDate', l: 'RFQ date', t: 'date', req: true }, { n: 'submissionDeadline', l: 'Submission deadline', t: 'date' }
     ] },
     '/v1/formulas': { title: 'New formula', perm: 'formula:formula_master:write', fields: [
       { n: 'formulaCode', l: 'Formula code', t: 'text', req: true }, { n: 'formulaName', l: 'Formula name', t: 'text', req: true },
@@ -1253,7 +1253,7 @@
     '/v1/stock-requirements': { title: 'New stock requirement', perm: 'procurement:stock_requirement:write', fields: [
       { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
       { n: 'requiredQty', l: 'Required qty', t: 'number', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
-      { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'requirementSource', l: 'Source', t: 'text' }
+      { n: 'requiredByDate', l: 'Required by', t: 'date', req: true }, { n: 'requirementSource', l: 'Source', t: 'text' }
     ] },
     '/v1/purchase-requests': { title: 'New purchase request', perm: 'procurement:purchase_request:write', fields: [
       { n: 'prNumber', l: 'PR number (auto if blank)', t: 'text' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
@@ -1357,8 +1357,8 @@
   /* ---------------- documents with line items (raise a PO / sales order from scratch) ---------------- */
   var CREATE_DOC = {
     '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
-      header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
-      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
+      header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date', req: true } ],
+      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Unit price', t: 'number', req: true } ] },
     '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
       header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
@@ -1377,7 +1377,9 @@
       }).catch(function () { fkCache[ep] = []; });
     }));
     function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option>' + v + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
-    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" style="' + fStyle() + '">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">'; }
+    // Line-item fields have no label above them (they sit in a compact row), so carry the field
+    // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
+    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" style="' + fStyle() + '">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" placeholder="' + escHtml(f.l) + '" style="' + fStyle() + '">'; }
     var headerRows = cfg.header.map(function (f) { return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl(f, 'h') + '</div>'; }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';

@@ -172,7 +172,7 @@ export class ProcAnalyticsService {
     if (!lines.length) throw new BadRequestException('This GRN has no rejected/short/damaged lines to replace');
 
     const poId = randomUUID();
-    const poNumber = 'PO-' + new Date(0).toISOString().slice(0, 7).replace('-', '') + '-R' + String(Date.now()).slice(-5);
+    const poNumber = 'PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-R' + String(Date.now()).slice(-5);
     let total = 0;
     const items = lines.map((l) => {
       const ordered = Number(l.ordered_qty ?? 0);

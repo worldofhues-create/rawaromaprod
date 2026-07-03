@@ -63,14 +63,19 @@ export class InspectionsService {
     return row;
   }
 
-  async listInspections(query: ListQuery): Promise<Page<typeof qcInspections.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(qcInspections)
-      .where(query.cursor ? lt(qcInspections.qcInspectionId, query.cursor) : undefined)
-      .orderBy(desc(qcInspections.qcInspectionId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.qcInspectionId);
+  async listInspections(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with the RM batch number (QC-03 — the Test queue showed a raw uuid). The batch
+    // number isn't the formula; rm_batch_id is retained so masking still applies to the id itself.
+    const rows = (await this.db.execute(sql`
+      select qi.qc_inspection_id as "qcInspectionId", qi.rm_batch_id as "rmBatchId",
+             b.batch_number as "batchNumber", qi.overall_result as "overallResult",
+             qi.inspection_dt as "inspectionDt", qi.status as "status"
+        from quality.qc_inspections qi
+        left join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
+       ${query.cursor ? sql`where qi.qc_inspection_id < ${query.cursor}` : sql``}
+       order by qi.qc_inspection_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.qcInspectionId as string);
   }
 
   async getInspection(id: string) {
