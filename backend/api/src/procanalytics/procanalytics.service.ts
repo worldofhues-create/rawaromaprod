@@ -16,7 +16,7 @@ import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { randomUUID } from 'node:crypto';
 
-const NEG_WRITE_PERM = 'procurement:quotation:write';
+const NEG_WRITE_PERM = 'procurement:quotation_items:write';
 
 @Injectable()
 export class ProcAnalyticsService {

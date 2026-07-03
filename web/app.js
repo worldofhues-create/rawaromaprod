@@ -734,7 +734,7 @@
       fields: [{ n: 'requiredQty', l: 'Qty per unit', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/quotation-items': { resource: 'quotation-items', idKey: 'quotationItemId', perm: 'procurement:quotation_items:write', statusField: 'status', title: 'Edit quotation line',
       fields: [{ n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
-    '/v1/vendor-negotiations': { resource: 'vendor-negotiations', idKey: 'vendorNegotiationId', perm: 'procurement:quotation:write', statusField: 'status', title: 'Edit negotiation',
+    '/v1/vendor-negotiations': { resource: 'vendor-negotiations', idKey: 'vendorNegotiationId', perm: 'procurement:quotation_items:write', statusField: 'status', title: 'Edit negotiation',
       fields: [{ n: 'revisedRate', l: 'Revised rate', t: 'number' }, { n: 'recommendation', l: 'Recommendation', t: 'select', en: ['APPROVE', 'REJECT', 'HOLD', 'RENEGOTIATE'] }, { n: 'notes', l: 'Notes', t: 'textarea' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
@@ -1084,7 +1084,7 @@
       { n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
       { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }
     ] },
-    '/v1/vendor-negotiations': { title: 'New negotiation', perm: 'procurement:quotation:write', fields: [
+    '/v1/vendor-negotiations': { title: 'New negotiation', perm: 'procurement:quotation_items:write', fields: [
       { n: 'quotationId', l: 'Against quotation', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' },
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
       { n: 'materialId', l: 'Material (optional)', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName' },

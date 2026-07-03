@@ -27,7 +27,7 @@ export class ProcAnalyticsController {
     return this.svc.vendorPerformance(limit ? Number(limit) : 200);
   }
 
-  @Permissions('procurement:quotation:read')
+  @Permissions('procurement:quotation_items:read')
   @Get('v1/vendor-negotiations')
   listNegotiations(@Query('limit') limit?: string) {
     return this.svc.listNegotiations(limit ? Number(limit) : 200);
