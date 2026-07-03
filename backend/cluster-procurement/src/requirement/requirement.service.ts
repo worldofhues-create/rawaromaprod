@@ -8,7 +8,7 @@
  * in a db.transaction and write the purchase_request_approval row alongside the status
  * change. numeric → String(n); dates → new Date(iso). Soft refs are plain uuids.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -359,6 +359,14 @@ export class RequirementService {
           .limit(1)
       )[0];
       if (!pr) throw new Error(`purchase_request not found: ${id}`);
+
+      // Segregation of duties (owner's approval matrix): the creator of a PR cannot approve it,
+      // even if they hold the approver role. It stays pending for the next eligible approver.
+      if (pr.createdBy && pr.createdBy === principal.userId) {
+        throw new ForbiddenException(
+          'Segregation of duties: you created this purchase request, so you cannot approve it. It remains pending for another authorized approver (Purchase Manager).',
+        );
+      }
 
       const now = new Date();
 

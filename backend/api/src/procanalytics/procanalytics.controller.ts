@@ -28,6 +28,11 @@ export class ProcAnalyticsController {
     return this.svc.createReplacementPo(String(body.grnId), principal);
   }
 
+  @Get('v1/approval-matrix')
+  approvalMatrix(@Query('limit') limit?: string) {
+    return this.svc.approvalMatrix(limit ? Number(limit) : 200);
+  }
+
   @Permissions('procurement:purchase_order:read')
   @Get('v1/vendor-dispatches')
   listVendorDispatches(@Query('limit') limit?: string) {

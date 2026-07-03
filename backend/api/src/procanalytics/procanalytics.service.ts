@@ -81,6 +81,20 @@ export class ProcAnalyticsService {
     return { items, nextCursor: null };
   }
 
+  /** Approval matrix — the governance table (who creates / submits / approves / final authority /
+   * auto-approval) for every transaction, per the owner's spec. Reference data, auth-only. */
+  async approvalMatrix(limit = 200) {
+    const lim = Math.min(Math.max(1, limit), 500);
+    const items = await this.sql`
+      select approval_matrix_id as "approvalMatrixId", module, transaction as "transaction",
+             created_by as "createdBy", submitted_to as "submittedTo", approved_by as "approvedBy",
+             final_authority as "finalAuthority", auto_approval as "autoApproval", remarks
+        from iam.approval_matrix
+       order by ord asc
+       limit ${lim}`;
+    return { items, nextCursor: null };
+  }
+
   /* ── vendor dispatch (scope-freeze step 15) ────────────────────────── */
 
   async listVendorDispatches(limit = 200) {

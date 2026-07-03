@@ -106,10 +106,10 @@
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
-      ['facaudit', 'Formula access', 'lock', '/v1/formula-access-audit'] ] },
+      ['facaudit', 'Formula access', 'lock', '/v1/formula-access-audit'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
-      ['perms', 'Permissions', 'lock', '/v1/permissions'],
+      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
       ['orgs', 'Organizations', 'building', '/v1/organizations'], ['bunits', 'Business units', 'building', '/v1/business-units'],
       ['loctypes', 'Location types', 'sliders', '/v1/location-types'], ['locations', 'Locations', 'building', '/v1/locations'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'sliders', '/v1/uoms'],
@@ -190,6 +190,7 @@
     '/v1/po-advance-payments': ['poNumber', 'vendorName', 'amount', 'paymentDate', 'reference', 'status'],
     '/v1/vendor-dispatches': ['poNumber', 'vendorName', 'dispatchDate', 'transporter', 'docketNumber', 'status'],
     '/v1/qc-sample-retentions': ['sampleCode', 'sampleQty', 'retainedDt', 'status'],
+    '/v1/approval-matrix': ['module', 'transaction', 'createdBy', 'approvedBy', 'finalAuthority', 'autoApproval', 'remarks'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
@@ -636,6 +637,9 @@
     return ps.indexOf('*') >= 0 || ps.indexOf(perm) >= 0;
   }
   var UP = function (v) { return String(v == null ? '' : v).toUpperCase(); };
+  // Segregation of duties: a document's creator may not approve it (the backend enforces this
+  // authoritatively; this just hides the button so the button isn't offered in the first place).
+  function isCreator(r) { return !!(r && session && session.user && r.createdBy && r.createdBy === session.user.userId); }
   var ACTIONS = {
     '/v1/formulas': [
       { label: 'Attach IFRA cert', perm: 'platform:document_master:write', when: function () { return true; }, run: function (r) { openAttachIfra(r); } }
@@ -660,11 +664,11 @@
     ],
     '/v1/purchase-requests': [
       { label: 'Submit', perm: 'procurement:purchase_request:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/submit'; }, body: { approvalLevel: 1 } },
-      { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED'; }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} },
+      { label: 'Approve', perm: 'procurement:purchase_request:write', tone: 'good', when: function (r) { return UP(r.status) === 'SUBMITTED' && !isCreator(r); }, path: function (r) { return '/v1/purchase-requests/' + r.purchaseRequestId + '/approve'; }, body: {} },
       { label: 'Reject', perm: 'procurement:purchase_request:write', tone: 'bad', when: function (r) { return ['DRAFT', 'SUBMITTED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-requests', 'purchaseRequestId', r); } }
     ],
     '/v1/purchase-orders': [
-      { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
+      { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT' && !isCreator(r); }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
       { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT', 'REJECTED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
       { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} },
       { label: 'Reject', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'ISSUED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-orders', 'purchaseOrderId', r); } }

@@ -9,7 +9,7 @@
  * approval/ack rows; issue also records a `procurement.po.issued` outbox event so downstream
  * inventory/GRN can cold-read the PO. numeric → String(n); dates → ISO date strings.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
@@ -111,7 +111,7 @@ export class PoService {
              po.quotation_id as "quotationId", po.purchase_request_id as "purchaseRequestId",
              po.order_date as "orderDate", po.total_amount as "totalAmount",
              po.replacement_of_po_id as "replacementOfPoId", op.po_number as "replacementOfPo",
-             po.status as "status"
+             po.created_by as "createdBy", po.status as "status"
         from procurement.purchase_order po
         left join procurement.vendor_details v on v.vendor_id = po.vendor_id
         left join procurement.purchase_order op on op.purchase_order_id = po.replacement_of_po_id
@@ -296,6 +296,15 @@ export class PoService {
           .limit(1)
       )[0];
       if (!po) throw new Error(`purchase_order not found: ${id}`);
+
+      // Segregation of duties (owner's approval matrix + system rule): the user who CREATED a PO
+      // cannot approve it — even if they temporarily hold the approver role. The document stays
+      // pending, rerouted to the next eligible approver (any other holder of the approve perm).
+      if (po.createdBy && po.createdBy === principal.userId) {
+        throw new ForbiddenException(
+          'Segregation of duties: you created this purchase order, so you cannot approve it. It remains pending for another authorized approver (Procurement Head).',
+        );
+      }
 
       const now = new Date();
 
