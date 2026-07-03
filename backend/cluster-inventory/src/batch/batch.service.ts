@@ -61,14 +61,24 @@ export class BatchService {
     );
   }
 
-  async listRmBatches(query: ListQuery): Promise<Page<typeof rmBatchMaster.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(rmBatchMaster)
-      .where(query.cursor ? lt(rmBatchMaster.rmBatchId, query.cursor) : undefined)
-      .orderBy(desc(rmBatchMaster.rmBatchId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.rmBatchId);
+  async listRmBatches(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // FEFO indication: surface the expiry date + a flag (EXPIRED / EXPIRING within 30d / OK) so
+    // the floor can consume earliest-expiry stock first. material_id is kept (the global masking
+    // interceptor still nulls it + adds the alias for non-reveal roles); no real material name is
+    // added here, so the masking boundary is preserved. Pagination stays id-cursored.
+    const rows = (await this.db.execute(sql`
+      select b.rm_batch_id as "rmBatchId", b.batch_number as "batchNumber", b.material_id as "materialId",
+             b.received_qty as "receivedQty", b.manufacturing_date as "manufacturingDate", b.expiry_date as "expiryDate",
+             case when b.expiry_date is null then null
+                  when b.expiry_date < now() then 'EXPIRED'
+                  when b.expiry_date <= now() + interval '30 days' then 'EXPIRING'
+                  else 'OK' end as "fefoFlag",
+             b.storage_location_id as "storageLocationId", b.status as "status"
+        from inventory.rm_batch_master b
+       ${query.cursor ? sql`where b.rm_batch_id < ${query.cursor}` : sql``}
+       order by b.rm_batch_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.rmBatchId as string);
   }
 
   async getRmBatch(id: string) {

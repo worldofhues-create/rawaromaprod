@@ -162,7 +162,7 @@
     '/v1/purchase-requests': ['prNumber', 'requiredDate', 'status'],
     '/v1/gate-entries': ['gateEntryNumber', 'vehicleNumber', 'driverName', 'status'],
     '/v1/grns': ['grnNumber', 'batchId', 'status'],
-    '/v1/rm-batches': ['batchNumber', 'vendorId', 'status'],
+    '/v1/rm-batches': ['batchNumber', 'expiryDate', 'fefoFlag', 'status'],
     '/v1/qc-inspections': ['rmBatchId', 'overallResult', 'inspectionDt', 'status'],
     '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
     '/v1/qc-parameters': ['parameterCode', 'parameterName', 'status'],
