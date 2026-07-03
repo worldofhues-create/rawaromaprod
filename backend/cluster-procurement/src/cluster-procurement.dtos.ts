@@ -51,14 +51,16 @@ export const createVendorContact = z.object({
   email: z.string().max(150).nullish(),
   mobileNumber: z.string().max(20).nullish(),
   isPrimary: z.boolean().nullish(),
+  contactType: z.string().nullish(),
 });
 export type CreateVendorContact = z.infer<typeof createVendorContact>;
 
 export const createVendorRmMapping = z.object({
   vendorId: z.string().uuid().nullish(),
   materialId: z.string().uuid().nullish(),
-  isPreferred: z.boolean().nullish(),
-  leadTimeDays: z.number().int().nullish(),
+  isPreferred: z.preprocess((v) => (v === '' || v == null ? undefined : v === true || v === 'true' || v === 'on' || v === 1), z.boolean().nullish()),
+  leadTimeDays: z.coerce.number().int().nullish(),
+  minOrderQty: num.nullish(),
 });
 export type CreateVendorRmMapping = z.infer<typeof createVendorRmMapping>;
 

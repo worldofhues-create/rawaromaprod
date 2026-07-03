@@ -5,7 +5,7 @@
  * address_id, base_currency_id, material_id) are inserted as plain uuids.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import {
   PROCUREMENT_DB,
@@ -94,6 +94,7 @@ export class VendorService {
             email: body.email ?? null,
             mobileNumber: body.mobileNumber ?? null,
             isPrimary: body.isPrimary ?? null,
+            contactType: body.contactType ?? null,
             status: 'ACTIVE',
             createdBy: principal.userId,
             updatedBy: principal.userId,
@@ -139,6 +140,7 @@ export class VendorService {
             materialId: body.materialId ?? null,
             isPreferred: body.isPreferred ?? null,
             leadTimeDays: body.leadTimeDays ?? null,
+            minOrderQty: body.minOrderQty != null ? String(body.minOrderQty) : null,
             status: 'ACTIVE',
             createdBy: principal.userId,
             updatedBy: principal.userId,
@@ -148,18 +150,23 @@ export class VendorService {
     );
   }
 
-  async listVendorRmMappings(
-    query: ListQuery,
-  ): Promise<Page<typeof vendorRmMapping.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(vendorRmMapping)
-      .where(
-        query.cursor ? lt(vendorRmMapping.vendorRmMappingId, query.cursor) : undefined,
-      )
-      .orderBy(desc(vendorRmMapping.vendorRmMappingId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.vendorRmMappingId);
+  /** List enriched with the vendor name + material code/name so the grid is readable
+   * (raw materialId uuids are meaningless on screen). Raw join because material lives in
+   * another cluster's schema; procurement is allowed to see material identity to source it. */
+  async listVendorRmMappings(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select vrm.vendor_rm_mapping_id as "vendorRmMappingId",
+             vrm.vendor_id as "vendorId", v.vendor_name as "vendorName",
+             vrm.material_id as "materialId", m.material_code as "materialCode", m.material_name as "materialName",
+             vrm.is_preferred as "isPreferred", vrm.lead_time_days as "leadTimeDays",
+             vrm.min_order_qty as "minOrderQty", vrm.status as "status"
+        from procurement.vendor_rm_mapping vrm
+        left join procurement.vendor_details v on v.vendor_id = vrm.vendor_id
+        left join masterdata.material m on m.material_id = vrm.material_id
+       ${query.cursor ? sql`where vrm.vendor_rm_mapping_id < ${query.cursor}` : sql``}
+       order by vrm.vendor_rm_mapping_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.vendorRmMappingId as string);
   }
 
   async getVendorRmMapping(id: string) {

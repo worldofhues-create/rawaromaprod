@@ -96,6 +96,7 @@
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
+      ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
       ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
@@ -138,6 +139,8 @@
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
     '/v1/rm-aliases': ['aliasName', 'materialId', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
+    '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
+    '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
     '/v1/purchase-orders': ['poNumber', 'totalAmount', 'vendorId', 'status'],
     '/v1/purchase-requests': ['prNumber', 'requiredDate', 'status'],
     '/v1/gate-entries': ['gateEntryNumber', 'vehicleNumber', 'driverName', 'status'],
@@ -662,7 +665,9 @@
     '/v1/stock-requirements': { resource: 'stock-requirements', idKey: 'stockRequirementId', perm: 'procurement:stock_requirement:write', statusField: 'status', title: 'Edit requirement',
       fields: [{ n: 'requiredQty', l: 'Required qty', t: 'number' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] }, { n: 'requiredByDate', l: 'Required by', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED'] }] },
     '/v1/vendor-contacts': { resource: 'vendor-contacts', idKey: 'vendorContactId', perm: 'procurement:vendor_contact:write', statusField: 'status', title: 'Edit vendor contact',
-      fields: [{ n: 'contactName', l: 'Name' }, { n: 'designation', l: 'Designation' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'contactName', l: 'Name' }, { n: 'contactType', l: 'Contact type', t: 'select', en: ['PRIMARY', 'SECONDARY', 'PURCHASE', 'ACCOUNTS', 'TECHNICAL'] }, { n: 'designation', l: 'Designation' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/vendor-rm-mappings': { resource: 'vendor-rm-mappings', idKey: 'vendorRmMappingId', perm: 'procurement:vendor_rm_mapping:write', statusField: 'status', title: 'Edit material↔supplier',
+      fields: [{ n: 'isPreferred', l: 'Preferred supplier', t: 'select', en: ['true', 'false'] }, { n: 'leadTimeDays', l: 'Lead time (days)', t: 'number' }, { n: 'minOrderQty', l: 'Min order qty (MOQ)', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/contacts': { resource: 'contacts', idKey: 'contactId', perm: 'platform:contact_master:write', statusField: 'status', title: 'Edit contact',
       fields: [{ n: 'contactName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/countries': { resource: 'countries', idKey: 'countryId', perm: 'platform:country_master:write', statusField: 'status', title: 'Edit country',
@@ -915,8 +920,17 @@
     ] },
     '/v1/vendor-contacts': { title: 'New vendor contact', perm: 'procurement:vendor_contact:write', fields: [
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
-      { n: 'contactName', l: 'Contact name', t: 'text', req: true }, { n: 'designation', l: 'Designation', t: 'text' },
+      { n: 'contactName', l: 'Contact name', t: 'text', req: true },
+      { n: 'contactType', l: 'Contact type', t: 'select', en: ['PRIMARY', 'SECONDARY', 'PURCHASE', 'ACCOUNTS', 'TECHNICAL'] },
+      { n: 'designation', l: 'Designation', t: 'text' },
       { n: 'email', l: 'Email', t: 'text' }, { n: 'mobileNumber', l: 'Mobile', t: 'text' }
+    ] },
+    '/v1/vendor-rm-mappings': { title: 'Map material to supplier', perm: 'procurement:vendor_rm_mapping:write', fields: [
+      { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
+      { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'isPreferred', l: 'Preferred supplier', t: 'select', en: ['true', 'false'] },
+      { n: 'leadTimeDays', l: 'Lead time (days)', t: 'number' },
+      { n: 'minOrderQty', l: 'Min order qty (MOQ)', t: 'number' }
     ] },
     '/v1/quotations': { title: 'New quotation', perm: 'procurement:quotation:write', fields: [
       { n: 'quotationNumber', l: 'Quotation no.', t: 'text', req: true },
