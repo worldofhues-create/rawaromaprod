@@ -37,7 +37,13 @@ export type CreateQcInspection = z.infer<typeof createQcInspection>;
 
 export const createQcResultDetail = z.object({
   qcParameterId: z.string().uuid().optional(),
-  observedValue: z.number().optional(),
+  // Quantitative reading — accept numeric strings from the form; blank → undefined.
+  observedValue: z.preprocess(
+    (v) => (v === '' || v == null ? undefined : v),
+    z.coerce.number().optional(),
+  ),
+  // Qualitative observation (color / odor / clarity), which has no numeric value.
+  observedText: z.string().optional(),
   result: z.string().optional(),
 });
 export type CreateQcResultDetail = z.infer<typeof createQcResultDetail>;

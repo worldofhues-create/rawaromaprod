@@ -38,6 +38,7 @@ export const qcResultDetails = quality.table(
     qcInspectionId: uuid("qc_inspection_id").references(() => qcInspections.qcInspectionId),
     qcParameterId: uuid("qc_parameter_id"),
     observedValue: numeric("observed_value", { precision: 18, scale: 4 }),
+    observedText: text("observed_text"),
     result: varchar("result", { length: 255 }),
     ...metaColumns(),
   },

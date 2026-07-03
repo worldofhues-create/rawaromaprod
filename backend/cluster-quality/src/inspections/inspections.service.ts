@@ -15,7 +15,7 @@
  * parameter are cross-schema or dict-soft refs (plain uuid, no FK at this layer).
  */
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { QUALITY_DB, qualitySchema, type QualityDb } from '../quality.tokens.js';
@@ -91,6 +91,7 @@ export class InspectionsService {
       qcInspectionId: inspectionId,
       qcParameterId: r.qcParameterId ?? null,
       observedValue: r.observedValue === undefined ? null : String(r.observedValue),
+      observedText: r.observedText ?? null,
       result: r.result ?? null,
       status: 'ACTIVE',
       createdBy: principal.userId,
@@ -102,16 +103,21 @@ export class InspectionsService {
 
   /* ── qc result details (CRUD) ─────────────────────────────────────── */
 
-  async listResultDetails(
-    query: ListQuery,
-  ): Promise<Page<typeof qcResultDetails.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(qcResultDetails)
-      .where(query.cursor ? lt(qcResultDetails.qcResultDetailId, query.cursor) : undefined)
-      .orderBy(desc(qcResultDetails.qcResultDetailId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.qcResultDetailId);
+  /** Enriched with the parameter name so the grid reads "Density = 0.87 (PASS)" rather than
+   * a raw parameter uuid. Raw join because qc_parameter_master is a soft ref. */
+  async listResultDetails(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select d.qc_result_detail_id as "qcResultDetailId",
+             d.qc_inspection_id as "qcInspectionId",
+             d.qc_parameter_id as "qcParameterId", p.parameter_name as "parameterName",
+             d.observed_value as "observedValue", d.observed_text as "observedText",
+             d.result as "result", d.status as "status"
+        from quality.qc_result_details d
+        left join quality.qc_parameter_master p on p.qc_parameter_id = d.qc_parameter_id
+       ${query.cursor ? sql`where d.qc_result_detail_id < ${query.cursor}` : sql``}
+       order by d.qc_result_detail_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.qcResultDetailId as string);
   }
 
   async getResultDetail(id: string) {

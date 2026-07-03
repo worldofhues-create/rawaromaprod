@@ -103,7 +103,8 @@
       ['batches', 'Batches', 'layers', '/v1/rm-batches'] ] },
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
-      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'] ] },
+      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
+      ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
       ['movements', 'Movements', 'activity', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
@@ -147,7 +148,8 @@
     '/v1/grns': ['grnNumber', 'batchId', 'status'],
     '/v1/rm-batches': ['batchNumber', 'vendorId', 'status'],
     '/v1/qc-inspections': ['rmBatchId', 'overallResult', 'inspectionDt', 'status'],
-    '/v1/qc-result-details': ['observedValue', 'result', 'status'],
+    '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
+    '/v1/qc-parameters': ['parameterCode', 'parameterName', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
@@ -617,6 +619,7 @@
     ],
     '/v1/qc-inspections': [
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
+      { label: 'Record results', perm: 'quality:qc_inspections:write', tone: 'accent', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, run: function (r) { openRecordQc(r); } },
       { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },
       { label: 'Reject', perm: 'quality:qc_inspections:write', tone: 'bad', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REJECT' } },
       { label: 'Hold', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'HOLD' } },
@@ -670,6 +673,8 @@
       fields: [{ n: 'isPreferred', l: 'Preferred supplier', t: 'select', en: ['true', 'false'] }, { n: 'leadTimeDays', l: 'Lead time (days)', t: 'number' }, { n: 'minOrderQty', l: 'Min order qty (MOQ)', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/contacts': { resource: 'contacts', idKey: 'contactId', perm: 'platform:contact_master:write', statusField: 'status', title: 'Edit contact',
       fields: [{ n: 'contactName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/qc-parameters': { resource: 'qc-parameters', idKey: 'qcParameterId', perm: 'quality:qc_parameter_master:write', statusField: 'status', title: 'Edit QC parameter',
+      fields: [{ n: 'parameterCode', l: 'Code' }, { n: 'parameterName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/countries': { resource: 'countries', idKey: 'countryId', perm: 'platform:country_master:write', statusField: 'status', title: 'Edit country',
       fields: [{ n: 'countryName', l: 'Country name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/uoms': { resource: 'uoms', idKey: 'uomId', perm: 'platform:uom_master:write', statusField: 'status', title: 'Edit unit',
@@ -954,6 +959,10 @@
     '/v1/qc-inspections': { title: 'New QC inspection', perm: 'quality:qc_inspections:write', fields: [
       { n: 'rmBatchId', l: 'RM batch', t: 'select', fk: '/v1/rm-batches', fv: 'rmBatchId', fl: 'batchNumber', req: true },
       { n: 'inspectionDt', l: 'Inspection date', t: 'date' }
+    ] },
+    '/v1/qc-parameters': { title: 'New QC parameter', perm: 'quality:qc_parameter_master:write', fields: [
+      { n: 'parameterCode', l: 'Parameter code (e.g. DENSITY)', t: 'text', req: true },
+      { n: 'parameterName', l: 'Parameter name', t: 'text', req: true }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
@@ -1369,6 +1378,57 @@
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Seal into vault'; $('ra-gerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
         close(); toast('Ingredients sealed ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Seal into vault'; $('ra-gerr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+  function openRecordQc(inspection) {
+    var iid = inspection.qcInspectionId != null ? inspection.qcInspectionId : guessId(inspection);
+    var params = [];
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-qform" style="width:100%;max-width:640px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Record QC results</div><button type="button" id="ra-qclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Physical (color/odor/clarity) → text · Technical (density/solubility…) → value. Each line marked Pass/Fail.</div>' +
+      '<div id="ra-qlines"></div><button type="button" id="ra-qadd" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add parameter</button>' +
+      '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:10px 0"></div>' +
+      '<button type="submit" id="ra-qsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save results</button></form>';
+    document.body.appendChild(ov); setTheme();
+    var linesEl = ov.querySelector('#ra-qlines');
+    function paramOptions() { return '<option value="">Parameter…</option>' + params.map(function (p) { var v = p.qcParameterId != null ? p.qcParameterId : guessId(p); return v ? '<option value="' + v + '">' + (p.parameterName || p.parameterCode || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
+    function addLine() {
+      var row = document.createElement('div'); row.className = 'ra-qline'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px;flex-wrap:wrap';
+      row.innerHTML = '<div style="flex:2;min-width:150px"><select data-param style="' + fStyle() + '">' + paramOptions() + '</select></div>' +
+        '<div style="flex:1;min-width:70px"><input data-val type="number" step="0.0001" placeholder="Value" style="' + fStyle() + '"></div>' +
+        '<div style="flex:1.4;min-width:90px"><input data-text placeholder="Observation" style="' + fStyle() + '"></div>' +
+        '<div style="flex:1;min-width:80px"><select data-res style="' + fStyle() + '"><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>' +
+        '<button type="button" class="ra-qrm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none">&times;</button>';
+      linesEl.appendChild(row); row.querySelector('.ra-qrm').onclick = function () { row.remove(); };
+    }
+    tunnel('/v1/qc-parameters?limit=100').then(function (res) { params = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-param]'), function (s) { s.innerHTML = paramOptions(); }); });
+    addLine();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-qclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    $('ra-qadd').onclick = addLine;
+    $('ra-qform').onsubmit = function (e) {
+      e.preventDefault(); var results = [], err = '';
+      [].forEach.call(ov.querySelectorAll('.ra-qline'), function (row) {
+        var pid = row.querySelector('[data-param]').value;
+        var val = row.querySelector('[data-val]').value;
+        var txt = row.querySelector('[data-text]').value.trim();
+        var res = row.querySelector('[data-res]').value;
+        if (!pid) { if (val || txt) err = 'Pick a parameter for each row.'; return; }
+        if (val === '' && !txt) { err = 'Each parameter needs a value or an observation.'; return; }
+        var r = { qcParameterId: pid, result: res };
+        if (val !== '') r.observedValue = val;
+        if (txt) r.observedText = txt;
+        results.push(r);
+      });
+      if (!results.length) err = err || 'Add at least one parameter reading.';
+      if (err) { $('ra-qerr').textContent = err; return; }
+      var save = $('ra-qsave'); save.disabled = true; save.textContent = 'Saving…';
+      tunnel('/v1/qc-inspections/' + iid + '/results', { method: 'POST', body: { results: results } }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        close(); toast('QC results recorded ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Could not reach the secure channel.'; });
     };
   }
   function openTrace(fg) {

@@ -79,6 +79,7 @@ const REGISTRY: Record<string, ResourceCfg> = {
   grns: { schema: 'inventory', table: 'grn_master', pk: 'grn_id', perm: 'inventory:grn_master:write', cols: { status: 'status' } },
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
   'formula-versions': { schema: 'formula', table: 'formula_version', pk: 'formula_version_id', perm: 'formula:formula_version:write', cols: { status: 'status' } },
+  'qc-parameters': { schema: 'quality', table: 'qc_parameter_master', pk: 'qc_parameter_id', perm: 'quality:qc_parameter_master:write', cols: { parameterCode: 'parameter_code', parameterName: 'parameter_name', status: 'status' } },
   'vendor-contacts': { schema: 'procurement', table: 'vendor_contact', pk: 'vendor_contact_id', perm: 'procurement:vendor_contact:write', cols: { contactName: 'contact_name', designation: 'designation', email: 'email', mobileNumber: 'mobile_number', contactType: 'contact_type', status: 'status' } },
   'vendor-rm-mappings': { schema: 'procurement', table: 'vendor_rm_mapping', pk: 'vendor_rm_mapping_id', perm: 'procurement:vendor_rm_mapping:write', cols: { isPreferred: 'is_preferred', leadTimeDays: 'lead_time_days', minOrderQty: 'min_order_qty', status: 'status' }, bool: ['is_preferred'] },
   contacts: { schema: 'platform', table: 'contact_master', pk: 'contact_id', perm: 'platform:contact_master:write', cols: { contactName: 'contact_name', email: 'email', mobileNumber: 'mobile_number', status: 'status' } },
