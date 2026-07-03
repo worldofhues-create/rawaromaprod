@@ -85,6 +85,7 @@
       ['msubcats', 'Sub-categories', 'sliders', '/v1/material-subcategories'], ['mgroups', 'Material groups', 'sliders', '/v1/material-groups'],
       ['mqcspec', 'Material QC specs', 'flask', '/v1/material-qc-specifications'], ['mstorage', 'Storage rules', 'box', '/v1/material-storage-rules'],
       ['maliases', 'RM aliases', 'lock', '/v1/rm-aliases'],
+      ['splitc', 'Split containers', 'layers', '/v1/batch-container-mappings'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
@@ -104,7 +105,7 @@
       ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
-      ['batches', 'Batches', 'layers', '/v1/rm-batches'] ] },
+      ['batches', 'Batches', 'layers', '/v1/rm-batches'], ['containers', 'Containers', 'box', '/v1/grn-containers'] ] },
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
@@ -149,6 +150,8 @@
     '/v1/material-groups': ['groupCode', 'groupName', 'status'],
     '/v1/material-qc-specifications': ['materialCode', 'materialName', 'parameterName', 'minValue', 'maxValue', 'targetValue', 'status'],
     '/v1/material-storage-rules': ['materialCode', 'materialName', 'minTemperature', 'maxTemperature', 'storageCondition', 'status'],
+    '/v1/grn-containers': ['grnNumber', 'containerCode', 'containerQty', 'status'],
+    '/v1/batch-container-mappings': ['batchNumber', 'containerCode', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -705,6 +708,8 @@
       fields: [{ n: 'minTemperature', l: 'Min temperature' }, { n: 'maxTemperature', l: 'Max temperature' }, { n: 'storageCondition', l: 'Storage condition / handling' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/rm-aliases': { resource: 'rm-aliases', idKey: 'rmAliasId', perm: 'masterdata:rm_alias:write', statusField: 'status', title: 'Edit RM alias',
       fields: [{ n: 'aliasName', l: 'Alias name' }, { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/grn-containers': { resource: 'grn-containers', idKey: 'grnContainerId', perm: 'inventory:grn_container:write', statusField: 'status', title: 'Edit container',
+      fields: [{ n: 'containerCode', l: 'Container number' }, { n: 'containerQty', l: 'Container qty', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
@@ -1013,6 +1018,16 @@
       { n: 'materialId', l: 'Material (real)', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
       { n: 'aliasName', l: 'Alias (masked name)', t: 'text', req: true },
       { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }
+    ] },
+    '/v1/grn-containers': { title: 'New container', perm: 'inventory:grn_container:write', fields: [
+      { n: 'grnId', l: 'GRN', t: 'select', fk: '/v1/grns', fv: 'grnId', fl: 'grnNumber', req: true },
+      { n: 'containerCode', l: 'Container number', t: 'text', req: true },
+      { n: 'containerQty', l: 'Container qty', t: 'number' },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
+    ] },
+    '/v1/batch-container-mappings': { title: 'Split batch into container', perm: 'inventory:batch_container_mappings:write', fields: [
+      { n: 'rmBatchId', l: 'RM batch', t: 'select', fk: '/v1/rm-batches', fv: 'rmBatchId', fl: 'batchNumber', req: true },
+      { n: 'grnContainerId', l: 'Container', t: 'select', fk: '/v1/grn-containers', fv: 'grnContainerId', fl: 'containerCode', req: true }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },

@@ -77,6 +77,8 @@ const REGISTRY: Record<string, ResourceCfg> = {
     cols: { requiredQty: 'required_qty', priority: 'priority', requiredByDate: 'required_by_date', status: 'status' },
   },
   grns: { schema: 'inventory', table: 'grn_master', pk: 'grn_id', perm: 'inventory:grn_master:write', cols: { status: 'status' } },
+  'grn-containers': { schema: 'inventory', table: 'grn_container', pk: 'grn_container_id', perm: 'inventory:grn_container:write', cols: { containerCode: 'container_code', containerQty: 'container_qty', status: 'status' } },
+  'batch-container-mappings': { schema: 'inventory', table: 'batch_container_mappings', pk: 'batch_container_mapping_id', perm: 'inventory:batch_container_mappings:write', cols: { status: 'status' } },
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
   'formula-versions': { schema: 'formula', table: 'formula_version', pk: 'formula_version_id', perm: 'formula:formula_version:write', cols: { status: 'status' } },
   'qc-parameters': { schema: 'quality', table: 'qc_parameter_master', pk: 'qc_parameter_id', perm: 'quality:qc_parameter_master:write', cols: { parameterCode: 'parameter_code', parameterName: 'parameter_name', status: 'status' } },

@@ -6,7 +6,7 @@
  * batch. numeric → String(n); date columns kept as ISO strings.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -264,16 +264,17 @@ export class GrnService {
     );
   }
 
-  async listGrnContainers(
-    query: ListQuery,
-  ): Promise<Page<typeof grnContainer.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(grnContainer)
-      .where(query.cursor ? lt(grnContainer.grnContainerId, query.cursor) : undefined)
-      .orderBy(desc(grnContainer.grnContainerId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.grnContainerId);
+  async listGrnContainers(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select c.grn_container_id as "grnContainerId", c.grn_id as "grnId", g.grn_number as "grnNumber",
+             c.grn_item_id as "grnItemId", c.container_code as "containerCode",
+             c.container_qty as "containerQty", c.status as "status"
+        from inventory.grn_container c
+        left join inventory.grn_master g on g.grn_id = c.grn_id
+       ${query.cursor ? sql`where c.grn_container_id < ${query.cursor}` : sql``}
+       order by c.grn_container_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.grnContainerId as string);
   }
 
   async getGrnContainer(id: string) {

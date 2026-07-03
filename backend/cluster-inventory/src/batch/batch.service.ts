@@ -6,7 +6,7 @@
  * transaction. numeric → String(n); date columns kept as ISO strings; timestamps → Date.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -107,18 +107,19 @@ export class BatchService {
 
   async listBatchContainerMappings(
     query: ListQuery,
-  ): Promise<Page<typeof batchContainerMappings.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(batchContainerMappings)
-      .where(
-        query.cursor
-          ? lt(batchContainerMappings.batchContainerMappingId, query.cursor)
-          : undefined,
-      )
-      .orderBy(desc(batchContainerMappings.batchContainerMappingId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.batchContainerMappingId);
+  ): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select bcm.batch_container_mapping_id as "batchContainerMappingId",
+             bcm.rm_batch_id as "rmBatchId", b.batch_number as "batchNumber",
+             bcm.grn_container_id as "grnContainerId", c.container_code as "containerCode",
+             bcm.status as "status"
+        from inventory.batch_container_mappings bcm
+        left join inventory.rm_batch_master b on b.rm_batch_id = bcm.rm_batch_id
+        left join inventory.grn_container c on c.grn_container_id = bcm.grn_container_id
+       ${query.cursor ? sql`where bcm.batch_container_mapping_id < ${query.cursor}` : sql``}
+       order by bcm.batch_container_mapping_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.batchContainerMappingId as string);
   }
 
   async getBatchContainerMapping(id: string) {
