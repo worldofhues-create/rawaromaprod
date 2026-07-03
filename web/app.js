@@ -100,10 +100,11 @@
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
-      ['qitems', 'Quotation items', 'list', '/v1/quotation-items'],
+      ['qitems', 'Quotation items', 'list', '/v1/quotation-items'], ['negotiate', 'Negotiation', 'activity', '/v1/vendor-negotiations'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
       ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
+      ['ratehist', 'Rate history', 'list', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'activity', '/v1/vendor-performance'],
       ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
@@ -160,6 +161,9 @@
     '/v1/products': ['productCode', 'productName', 'status'],
     '/v1/packaging-boms': ['skuCode', 'packagingMaterialName', 'requiredQty', 'status'],
     '/v1/quotation-items': ['quotationNumber', 'vendorName', 'materialName', 'quotedQty', 'quotedRate', 'status'],
+    '/v1/vendor-negotiations': ['quotationNumber', 'vendorName', 'materialName', 'originalRate', 'revisedRate', 'recommendation', 'status'],
+    '/v1/vendor-rate-history': ['asOf', 'vendorName', 'materialName', 'rate', 'source'],
+    '/v1/vendor-performance': ['vendorName', 'poCount', 'grnCount', 'qcPass', 'qcFail', 'qcPassPct'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -730,6 +734,8 @@
       fields: [{ n: 'requiredQty', l: 'Qty per unit', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/quotation-items': { resource: 'quotation-items', idKey: 'quotationItemId', perm: 'procurement:quotation_items:write', statusField: 'status', title: 'Edit quotation line',
       fields: [{ n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/vendor-negotiations': { resource: 'vendor-negotiations', idKey: 'vendorNegotiationId', perm: 'procurement:quotation:write', statusField: 'status', title: 'Edit negotiation',
+      fields: [{ n: 'revisedRate', l: 'Revised rate', t: 'number' }, { n: 'recommendation', l: 'Recommendation', t: 'select', en: ['APPROVE', 'REJECT', 'HOLD', 'RENEGOTIATE'] }, { n: 'notes', l: 'Notes', t: 'textarea' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
@@ -1077,6 +1083,14 @@
       { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
       { n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
       { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }
+    ] },
+    '/v1/vendor-negotiations': { title: 'New negotiation', perm: 'procurement:quotation:write', fields: [
+      { n: 'quotationId', l: 'Against quotation', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' },
+      { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
+      { n: 'materialId', l: 'Material (optional)', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName' },
+      { n: 'originalRate', l: 'Original rate', t: 'number' }, { n: 'revisedRate', l: 'Revised rate', t: 'number' },
+      { n: 'recommendation', l: 'Recommendation', t: 'select', en: ['APPROVE', 'REJECT', 'HOLD', 'RENEGOTIATE'] },
+      { n: 'notes', l: 'Negotiation notes', t: 'textarea' }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
