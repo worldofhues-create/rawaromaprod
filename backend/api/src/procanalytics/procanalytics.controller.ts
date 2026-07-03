@@ -29,6 +29,17 @@ export class ProcAnalyticsController {
   }
 
   @Permissions('procurement:purchase_order:read')
+  @Get('v1/po-advance-payments')
+  listAdvancePayments(@Query('limit') limit?: string) {
+    return this.svc.listAdvancePayments(limit ? Number(limit) : 200);
+  }
+
+  @Post('v1/po-advance-payments')
+  createAdvancePayment(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
+    return this.svc.createAdvancePayment(body, principal);
+  }
+
+  @Permissions('procurement:purchase_order:read')
   @Get('v1/vendor-rate-history')
   rateHistory(
     @Query('materialId') materialId?: string,

@@ -93,6 +93,8 @@ const REGISTRY: Record<string, ResourceCfg> = {
   'grn-containers': { schema: 'inventory', table: 'grn_container', pk: 'grn_container_id', perm: 'inventory:grn_container:write', cols: { containerCode: 'container_code', containerQty: 'container_qty', status: 'status' } },
   'batch-container-mappings': { schema: 'inventory', table: 'batch_container_mappings', pk: 'batch_container_mapping_id', perm: 'inventory:batch_container_mappings:write', cols: { status: 'status' } },
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
+  quotations: { schema: 'procurement', table: 'quotations', pk: 'quotation_id', perm: 'procurement:quotation_items:write', cols: { status: 'status' } },
+  'po-advance-payments': { schema: 'procurement', table: 'po_advance_payment', pk: 'po_advance_payment_id', perm: 'procurement:purchase_order:write', cols: { amount: 'amount', reference: 'reference', status: 'status' } },
   'formula-versions': { schema: 'formula', table: 'formula_version', pk: 'formula_version_id', perm: 'formula:formula_version:write', cols: { status: 'status' } },
   'qc-parameters': { schema: 'quality', table: 'qc_parameter_master', pk: 'qc_parameter_id', perm: 'quality:qc_parameter_master:write', cols: { parameterCode: 'parameter_code', parameterName: 'parameter_name', status: 'status' } },
   'vendor-contacts': { schema: 'procurement', table: 'vendor_contact', pk: 'vendor_contact_id', perm: 'procurement:vendor_contact:write', cols: { contactName: 'contact_name', designation: 'designation', email: 'email', mobileNumber: 'mobile_number', contactType: 'contact_type', status: 'status' } },

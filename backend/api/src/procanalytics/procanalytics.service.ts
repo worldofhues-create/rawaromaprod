@@ -81,6 +81,38 @@ export class ProcAnalyticsService {
     return { items, nextCursor: null };
   }
 
+  /* ── advance payment (scope-freeze step 13) ────────────────────────── */
+
+  async listAdvancePayments(limit = 200) {
+    const lim = Math.min(Math.max(1, limit), 500);
+    const items = await this.sql`
+      select ap.po_advance_payment_id as "poAdvancePaymentId", ap.purchase_order_id as "purchaseOrderId",
+             po.po_number as "poNumber", v.vendor_name as "vendorName",
+             ap.amount as "amount", ap.payment_date as "paymentDate", ap.reference as "reference", ap.status as "status"
+        from procurement.po_advance_payment ap
+        left join procurement.purchase_order po on po.purchase_order_id = ap.purchase_order_id
+        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
+       order by ap.created_dt desc
+       limit ${lim}`;
+    return { items, nextCursor: null };
+  }
+
+  async createAdvancePayment(body: Record<string, unknown>, principal: AuthPrincipal) {
+    if (!(principal.permissions || []).includes('procurement:purchase_order:write')) {
+      throw new ForbiddenException('Missing permission procurement:purchase_order:write');
+    }
+    const g = (k: string): string | null => {
+      const v = body[k];
+      return v == null || v === '' ? null : String(v);
+    };
+    if (!g('purchaseOrderId')) throw new BadRequestException('purchaseOrderId is required');
+    const rows = (await this.sql`
+      insert into procurement.po_advance_payment (po_advance_payment_id, purchase_order_id, amount, payment_date, reference, status, created_by, updated_by)
+      values (${randomUUID()}, ${g('purchaseOrderId')}, ${g('amount')}, ${g('paymentDate')}, ${g('reference')}, 'PAID', ${principal.userId}, ${principal.userId})
+      returning po_advance_payment_id as "poAdvancePaymentId", amount as "amount", status as "status"`) as Array<Record<string, unknown>>;
+    return rows[0];
+  }
+
   /* ── negotiation ────────────────────────────────────────────────────── */
 
   async listNegotiations(limit = 200) {

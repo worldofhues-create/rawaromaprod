@@ -119,7 +119,7 @@
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
       ['qitems', 'Quotation items', 'list', '/v1/quotation-items'], ['negotiate', 'Negotiation', 'activity', '/v1/vendor-negotiations'],
-      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
+      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'], ['advpay', 'Advance payments', 'clipboard', '/v1/po-advance-payments'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
       ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
       ['ratehist', 'Rate history', 'list', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'activity', '/v1/vendor-performance'],
@@ -186,6 +186,7 @@
     '/v1/vendor-performance': ['vendorName', 'poCount', 'grnCount', 'qcPass', 'qcFail', 'qcPassPct'],
     '/v1/qc-rejected-grns': ['grnNumber', 'vendorName', 'poNumber', 'qcResult'],
     '/v1/vendor-ledger': ['vendorName', 'poTotal', 'creditNotes', 'creditTotal', 'netBalance'],
+    '/v1/po-advance-payments': ['poNumber', 'vendorName', 'amount', 'paymentDate', 'reference', 'status'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
@@ -675,6 +676,12 @@
     '/v1/qc-rejected-grns': [
       { label: 'Replacement PO', perm: 'procurement:purchase_order:write', tone: 'accent', when: function () { return true; }, run: function (r) { generateReplacementPo(r); } }
     ],
+    '/v1/rfqs': [
+      { label: 'Send to vendors', perm: 'procurement:rfq_master:write', tone: 'accent', when: function (r) { return UP(r.status) !== 'SENT' && UP(r.status) !== 'CLOSED'; }, run: function (r) { setStatus('rfqs', 'rfqId', r, 'SENT', 'Sent to vendors'); } }
+    ],
+    '/v1/quotations': [
+      { label: 'Select as final vendor', perm: 'procurement:quotation_items:write', tone: 'good', when: function (r) { return UP(r.status) !== 'SELECTED'; }, run: function (r) { setStatus('quotations', 'quotationId', r, 'SELECTED', 'Vendor selected'); } }
+    ],
     '/v1/qc-inspections': [
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
       { label: 'Record results', perm: 'quality:qc_inspections:write', tone: 'accent', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, run: function (r) { openRecordQc(r); } },
@@ -1142,6 +1149,11 @@
       { n: 'locationTypeId', l: 'Location type', t: 'select', fk: '/v1/location-types', fv: 'locationTypeId', fl: 'typeName' },
       { n: 'parentLocationId', l: 'Parent location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' },
       { n: 'locationCode', l: 'Location code', t: 'text', req: true }, { n: 'locationName', l: 'Location name', t: 'text', req: true }
+    ] },
+    '/v1/po-advance-payments': { title: 'Record advance payment', perm: 'procurement:purchase_order:write', fields: [
+      { n: 'purchaseOrderId', l: 'Purchase order', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber', req: true },
+      { n: 'amount', l: 'Advance amount', t: 'number', req: true }, { n: 'paymentDate', l: 'Payment date', t: 'date', req: true },
+      { n: 'reference', l: 'Payment reference (UTR/cheque no.)', t: 'text' }
     ] },
     '/v1/vendor-negotiations': { title: 'New negotiation', perm: 'procurement:quotation_items:write', fields: [
       { n: 'quotationId', l: 'Against quotation', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' },
