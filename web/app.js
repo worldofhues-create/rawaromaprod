@@ -93,7 +93,9 @@
       ['facaudit', 'Formula access', 'lock', '/v1/formula-access-audit'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
-      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['bunits', 'Business units', 'building', '/v1/business-units'],
+      ['perms', 'Permissions', 'lock', '/v1/permissions'],
+      ['orgs', 'Organizations', 'building', '/v1/organizations'], ['bunits', 'Business units', 'building', '/v1/business-units'],
+      ['loctypes', 'Location types', 'sliders', '/v1/location-types'], ['locations', 'Locations', 'building', '/v1/locations'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'sliders', '/v1/uoms'],
       ['contacts', 'Contacts', 'users', '/v1/contacts'], ['countries', 'Countries', 'building', '/v1/countries'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'] ] },
@@ -164,6 +166,9 @@
     '/v1/vendor-negotiations': ['quotationNumber', 'vendorName', 'materialName', 'originalRate', 'revisedRate', 'recommendation', 'status'],
     '/v1/vendor-rate-history': ['asOf', 'vendorName', 'materialName', 'rate', 'source'],
     '/v1/vendor-performance': ['vendorName', 'poCount', 'grnCount', 'qcPass', 'qcFail', 'qcPassPct'],
+    '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
+    '/v1/locations': ['locationCode', 'locationName', 'status'],
+    '/v1/location-types': ['typeCode', 'typeName', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -701,11 +706,17 @@
     '/v1/vendor-rm-mappings': { resource: 'vendor-rm-mappings', idKey: 'vendorRmMappingId', perm: 'procurement:vendor_rm_mapping:write', statusField: 'status', title: 'Edit material↔supplier',
       fields: [{ n: 'isPreferred', l: 'Preferred supplier', t: 'select', en: ['true', 'false'] }, { n: 'leadTimeDays', l: 'Lead time (days)', t: 'number' }, { n: 'minOrderQty', l: 'Min order qty (MOQ)', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/contacts': { resource: 'contacts', idKey: 'contactId', perm: 'platform:contact_master:write', statusField: 'status', title: 'Edit contact',
-      fields: [{ n: 'contactName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'contactName', l: 'Name' }, { n: 'email', l: 'Email' }, { n: 'mobileNumber', l: 'Mobile' }, { n: 'phone', l: 'Phone' }, { n: 'whatsapp', l: 'WhatsApp' }, { n: 'facebook', l: 'Facebook' }, { n: 'instagram', l: 'Instagram' }, { n: 'xHandle', l: 'X (Twitter)' }, { n: 'linkedin', l: 'LinkedIn' }, { n: 'preferredLanguage', l: 'Preferred language' }, { n: 'preferredContactMethod', l: 'Preferred contact', t: 'select', en: ['EMAIL', 'PHONE', 'WHATSAPP', 'SMS'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/qc-parameters': { resource: 'qc-parameters', idKey: 'qcParameterId', perm: 'quality:qc_parameter_master:write', statusField: 'status', title: 'Edit QC parameter',
       fields: [{ n: 'parameterCode', l: 'Code' }, { n: 'parameterName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/countries': { resource: 'countries', idKey: 'countryId', perm: 'platform:country_master:write', statusField: 'status', title: 'Edit country',
-      fields: [{ n: 'countryName', l: 'Country name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'countryName', l: 'Country name' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }, { n: 'timezone', l: 'Time zone (e.g. Asia/Kolkata)' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/organizations': { resource: 'organizations', idKey: 'id', perm: 'iam:business_unit_master:write', statusField: 'status', editPath: function (id) { return '/v1/organizations/' + id; }, title: 'Edit organization',
+      fields: [{ n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] }, { n: 'name', l: 'Name' }, { n: 'reraNo', l: 'Registration no.' }, { n: 'gstin', l: 'GSTIN' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/locations': { resource: 'locations', idKey: 'locationId', perm: 'location:location_master:write', statusField: 'status', title: 'Edit location',
+      fields: [{ n: 'locationCode', l: 'Code' }, { n: 'locationName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/location-types': { resource: 'location-types', idKey: 'locationTypeId', perm: 'location:location_type_master:write', statusField: 'status', title: 'Edit location type',
+      fields: [{ n: 'typeCode', l: 'Code' }, { n: 'typeName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/uoms': { resource: 'uoms', idKey: 'uomId', perm: 'platform:uom_master:write', statusField: 'status', title: 'Edit unit',
       fields: [{ n: 'uomCode', l: 'Unit code' }, { n: 'uomName', l: 'Unit name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/business-units': { resource: 'business-units', idKey: 'businessUnitId', perm: 'iam:business_unit_master:write', statusField: 'status', title: 'Edit business unit',
@@ -1084,6 +1095,21 @@
       { n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
       { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }
     ] },
+    '/v1/organizations': { title: 'New organization', perm: 'iam:business_unit_master:write', fields: [
+      { n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] },
+      { n: 'name', l: 'Organization name', t: 'text', req: true },
+      { n: 'reraNo', l: 'Registration no.', t: 'text' }, { n: 'gstin', l: 'GSTIN (tax)', t: 'text' }
+    ] },
+    '/v1/location-types': { title: 'New location type', perm: 'location:location_type_master:write', fields: [
+      { n: 'typeCode', l: 'Type code (e.g. FACTORY)', t: 'text', req: true }, { n: 'typeName', l: 'Type name', t: 'text', req: true }
+    ] },
+    '/v1/locations': { title: 'New location', perm: 'location:location_master:write', fields: [
+      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/organizations', fv: 'id', fl: 'name' },
+      { n: 'businessUnitId', l: 'Business unit', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' },
+      { n: 'locationTypeId', l: 'Location type', t: 'select', fk: '/v1/location-types', fv: 'locationTypeId', fl: 'typeName' },
+      { n: 'parentLocationId', l: 'Parent location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' },
+      { n: 'locationCode', l: 'Location code', t: 'text', req: true }, { n: 'locationName', l: 'Location name', t: 'text', req: true }
+    ] },
     '/v1/vendor-negotiations': { title: 'New negotiation', perm: 'procurement:quotation_items:write', fields: [
       { n: 'quotationId', l: 'Against quotation', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' },
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
@@ -1237,7 +1263,7 @@
     ] },
     '/v1/business-units': { title: 'New business unit', perm: 'iam:business_unit_master:write', fields: [
       { n: 'businessUnitCode', l: 'BU code', t: 'text', req: true }, { n: 'businessUnitName', l: 'BU name', t: 'text', req: true },
-      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/orgs', fv: 'organizationId', fl: 'organizationName', req: true },
+      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/organizations', fv: 'id', fl: 'name', req: true },
       { n: 'parentBusinessUnitId', l: 'Parent BU', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' }
     ] },
     '/v1/packaging-qc': { title: 'Record packaging QC', perm: 'packaging:finished_good_batch_master:write', fields: [

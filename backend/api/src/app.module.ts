@@ -47,6 +47,7 @@ import { AuditModule } from './audit/audit.module.js';
 import { SearchModule } from './search/search.module.js';
 import { GeoModule } from './geo/geo.module.js';
 import { ProcAnalyticsModule } from './procanalytics/procanalytics.module.js';
+import { OrgUnitsModule } from './orgunits/orgunits.module.js';
 
 @Module({
   imports: [
@@ -74,6 +75,7 @@ import { ProcAnalyticsModule } from './procanalytics/procanalytics.module.js';
     SearchModule,
     GeoModule,
     ProcAnalyticsModule,
+    OrgUnitsModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then flag-gate.
