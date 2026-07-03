@@ -10,7 +10,7 @@
  * FKs + cross-schema soft refs are inserted as plain uuids.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -139,14 +139,17 @@ export class MaterialService {
     });
   }
 
-  async listRmAliases(query: ListQuery): Promise<Page<typeof rmAlias.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(rmAlias)
-      .where(query.cursor ? lt(rmAlias.rmAliasId, query.cursor) : undefined)
-      .orderBy(desc(rmAlias.rmAliasId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.rmAliasId);
+  async listRmAliases(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select a.rm_alias_id as "rmAliasId", a.material_id as "materialId",
+             m.material_code as "materialCode", m.material_name as "materialName",
+             a.alias_name as "aliasName", a.alias_type as "aliasType", a.status as "status"
+        from masterdata.rm_alias a
+        left join masterdata.material m on m.material_id = a.material_id
+       ${query.cursor ? sql`where a.rm_alias_id < ${query.cursor}` : sql``}
+       order by a.rm_alias_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.rmAliasId as string);
   }
 
   async getRmAlias(id: string) {
@@ -183,18 +186,19 @@ export class MaterialService {
 
   async listMaterialQcSpecifications(
     query: ListQuery,
-  ): Promise<Page<typeof materialQcSpecifications.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(materialQcSpecifications)
-      .where(
-        query.cursor
-          ? lt(materialQcSpecifications.materialQcSpecificationId, query.cursor)
-          : undefined,
-      )
-      .orderBy(desc(materialQcSpecifications.materialQcSpecificationId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.materialQcSpecificationId);
+  ): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select s.material_qc_specification_id as "materialQcSpecificationId",
+             s.material_id as "materialId", m.material_code as "materialCode", m.material_name as "materialName",
+             s.qc_parameter_id as "qcParameterId", p.parameter_name as "parameterName",
+             s.min_value as "minValue", s.max_value as "maxValue", s.target_value as "targetValue", s.status as "status"
+        from masterdata.material_qc_specifications s
+        left join masterdata.material m on m.material_id = s.material_id
+        left join quality.qc_parameter_master p on p.qc_parameter_id = s.qc_parameter_id
+       ${query.cursor ? sql`where s.material_qc_specification_id < ${query.cursor}` : sql``}
+       order by s.material_qc_specification_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.materialQcSpecificationId as string);
   }
 
   async getMaterialQcSpecification(id: string) {
@@ -236,18 +240,18 @@ export class MaterialService {
 
   async listMaterialStorageRules(
     query: ListQuery,
-  ): Promise<Page<typeof materialStorageRules.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(materialStorageRules)
-      .where(
-        query.cursor
-          ? lt(materialStorageRules.materialStorageRuleId, query.cursor)
-          : undefined,
-      )
-      .orderBy(desc(materialStorageRules.materialStorageRuleId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.materialStorageRuleId);
+  ): Promise<Page<Record<string, unknown>>> {
+    const rows = (await this.db.execute(sql`
+      select r.material_storage_rule_id as "materialStorageRuleId",
+             r.material_id as "materialId", m.material_code as "materialCode", m.material_name as "materialName",
+             r.min_temperature as "minTemperature", r.max_temperature as "maxTemperature",
+             r.storage_condition as "storageCondition", r.status as "status"
+        from masterdata.material_storage_rules r
+        left join masterdata.material m on m.material_id = r.material_id
+       ${query.cursor ? sql`where r.material_storage_rule_id < ${query.cursor}` : sql``}
+       order by r.material_storage_rule_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.materialStorageRuleId as string);
   }
 
   async getMaterialStorageRule(id: string) {

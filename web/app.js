@@ -81,6 +81,10 @@
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
+      ['mtypes', 'Material types', 'sliders', '/v1/material-types'], ['mcats', 'Categories', 'sliders', '/v1/material-categories'],
+      ['msubcats', 'Sub-categories', 'sliders', '/v1/material-subcategories'], ['mgroups', 'Material groups', 'sliders', '/v1/material-groups'],
+      ['mqcspec', 'Material QC specs', 'flask', '/v1/material-qc-specifications'], ['mstorage', 'Storage rules', 'box', '/v1/material-storage-rules'],
+      ['maliases', 'RM aliases', 'lock', '/v1/rm-aliases'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
@@ -138,7 +142,13 @@
     '/v1/formula-types': ['typeCode', 'typeName', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
-    '/v1/rm-aliases': ['aliasName', 'materialId', 'status'],
+    '/v1/rm-aliases': ['materialCode', 'materialName', 'aliasName', 'aliasType', 'status'],
+    '/v1/material-types': ['typeCode', 'typeName', 'status'],
+    '/v1/material-categories': ['categoryCode', 'categoryName', 'status'],
+    '/v1/material-subcategories': ['subCategoryCode', 'subCategoryName', 'status'],
+    '/v1/material-groups': ['groupCode', 'groupName', 'status'],
+    '/v1/material-qc-specifications': ['materialCode', 'materialName', 'parameterName', 'minValue', 'maxValue', 'targetValue', 'status'],
+    '/v1/material-storage-rules': ['materialCode', 'materialName', 'minTemperature', 'maxTemperature', 'storageCondition', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -685,6 +695,16 @@
       fields: [{ n: 'typeName', l: 'Type name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/material-categories': { resource: 'material-categories', idKey: 'materialCategoryId', perm: 'masterdata:material_category_master:write', statusField: 'status', title: 'Edit material category',
       fields: [{ n: 'categoryName', l: 'Category name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-subcategories': { resource: 'material-subcategories', idKey: 'materialSubcategoryId', perm: 'masterdata:material_subcategory_master:write', statusField: 'status', title: 'Edit sub-category',
+      fields: [{ n: 'subCategoryCode', l: 'Code' }, { n: 'subCategoryName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-groups': { resource: 'material-groups', idKey: 'materialGroupId', perm: 'masterdata:material_group:write', statusField: 'status', title: 'Edit material group',
+      fields: [{ n: 'groupCode', l: 'Code' }, { n: 'groupName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-qc-specifications': { resource: 'material-qc-specifications', idKey: 'materialQcSpecificationId', perm: 'masterdata:material_qc_specifications:write', statusField: 'status', title: 'Edit material QC spec',
+      fields: [{ n: 'minValue', l: 'Min value', t: 'number' }, { n: 'maxValue', l: 'Max value', t: 'number' }, { n: 'targetValue', l: 'Target value', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/material-storage-rules': { resource: 'material-storage-rules', idKey: 'materialStorageRuleId', perm: 'masterdata:material_storage_rules:write', statusField: 'status', title: 'Edit storage rule',
+      fields: [{ n: 'minTemperature', l: 'Min temperature' }, { n: 'maxTemperature', l: 'Max temperature' }, { n: 'storageCondition', l: 'Storage condition / handling' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/rm-aliases': { resource: 'rm-aliases', idKey: 'rmAliasId', perm: 'masterdata:rm_alias:write', statusField: 'status', title: 'Edit RM alias',
+      fields: [{ n: 'aliasName', l: 'Alias name' }, { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
@@ -963,6 +983,36 @@
     '/v1/qc-parameters': { title: 'New QC parameter', perm: 'quality:qc_parameter_master:write', fields: [
       { n: 'parameterCode', l: 'Parameter code (e.g. DENSITY)', t: 'text', req: true },
       { n: 'parameterName', l: 'Parameter name', t: 'text', req: true }
+    ] },
+    '/v1/material-types': { title: 'New material type', perm: 'masterdata:material_type_master:write', fields: [
+      { n: 'typeCode', l: 'Type code', t: 'text', req: true }, { n: 'typeName', l: 'Type name', t: 'text', req: true }
+    ] },
+    '/v1/material-categories': { title: 'New material category', perm: 'masterdata:material_category_master:write', fields: [
+      { n: 'materialTypeId', l: 'Material type', t: 'select', fk: '/v1/material-types', fv: 'materialTypeId', fl: 'typeName' },
+      { n: 'categoryCode', l: 'Category code', t: 'text', req: true }, { n: 'categoryName', l: 'Category name', t: 'text', req: true }
+    ] },
+    '/v1/material-subcategories': { title: 'New sub-category', perm: 'masterdata:material_subcategory_master:write', fields: [
+      { n: 'materialCategoryId', l: 'Category', t: 'select', fk: '/v1/material-categories', fv: 'materialCategoryId', fl: 'categoryName' },
+      { n: 'subCategoryCode', l: 'Sub-category code', t: 'text', req: true }, { n: 'subCategoryName', l: 'Sub-category name', t: 'text', req: true }
+    ] },
+    '/v1/material-groups': { title: 'New material group', perm: 'masterdata:material_group:write', fields: [
+      { n: 'materialSubcategoryId', l: 'Sub-category', t: 'select', fk: '/v1/material-subcategories', fv: 'materialSubcategoryId', fl: 'subCategoryName' },
+      { n: 'groupCode', l: 'Group code', t: 'text', req: true }, { n: 'groupName', l: 'Group name', t: 'text', req: true }
+    ] },
+    '/v1/material-qc-specifications': { title: 'New material QC spec', perm: 'masterdata:material_qc_specifications:write', fields: [
+      { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'qcParameterId', l: 'QC parameter', t: 'select', fk: '/v1/qc-parameters', fv: 'qcParameterId', fl: 'parameterName' },
+      { n: 'minValue', l: 'Min value', t: 'number' }, { n: 'maxValue', l: 'Max value', t: 'number' }, { n: 'targetValue', l: 'Target value', t: 'number' }
+    ] },
+    '/v1/material-storage-rules': { title: 'New storage rule', perm: 'masterdata:material_storage_rules:write', fields: [
+      { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'minTemperature', l: 'Min temperature (e.g. 15°C)', t: 'text' }, { n: 'maxTemperature', l: 'Max temperature (e.g. 25°C)', t: 'text' },
+      { n: 'storageCondition', l: 'Storage condition / handling', t: 'text' }
+    ] },
+    '/v1/rm-aliases': { title: 'New RM alias', perm: 'masterdata:rm_alias:write', fields: [
+      { n: 'materialId', l: 'Material (real)', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'aliasName', l: 'Alias (masked name)', t: 'text', req: true },
+      { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
