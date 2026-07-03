@@ -29,7 +29,7 @@ const REGISTRY: Record<string, ResourceCfg> = {
   },
   vendors: {
     schema: 'procurement', table: 'vendor_details', pk: 'vendor_id', perm: 'procurement:vendor_details:write',
-    cols: { vendorName: 'vendor_name', paymentTerms: 'payment_terms', baseCurrencyId: 'base_currency_id', addressId: 'address_id', status: 'status' },
+    cols: { vendorName: 'vendor_name', paymentTerms: 'payment_terms', baseCurrencyId: 'base_currency_id', addressId: 'address_id', gstin: 'gstin', panNumber: 'pan_number', bankName: 'bank_name', bankAccountNumber: 'bank_account_number', bankIfsc: 'bank_ifsc', contactEmail: 'contact_email', contactPhone: 'contact_phone', status: 'status' },
   },
   customers: {
     schema: 'sales', table: 'customer_master', pk: 'customer_id', perm: 'sales:customer_master:write',

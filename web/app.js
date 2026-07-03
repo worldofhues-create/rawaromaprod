@@ -131,13 +131,13 @@
     '/v1/roles': ['roleCode', 'roleName', 'status'],
     '/v1/permissions': ['permissionCode', 'moduleName', 'permissionName', 'status'],
     '/v1/production-orders': ['productionOrderId', 'orderQty', 'formulaVersionId', 'actualStartDt', 'status'],
-    '/v1/production-order-ingredients': ['aliasName', 'rmAliasId', 'requiredQty', 'issuedQty', 'status'],
+    '/v1/production-order-ingredients': ['aliasName', 'requiredQty', 'issuedQty', 'status'],
     '/v1/formulas': ['formulaCode', 'formulaName', 'status'],
     '/v1/formula-types': ['typeCode', 'typeName', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
     '/v1/rm-aliases': ['aliasName', 'materialId', 'status'],
-    '/v1/vendors': ['vendorCode', 'vendorName', 'status'],
+    '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/purchase-orders': ['poNumber', 'totalAmount', 'vendorId', 'status'],
     '/v1/purchase-requests': ['prNumber', 'requiredDate', 'status'],
     '/v1/gate-entries': ['gateEntryNumber', 'vehicleNumber', 'driverName', 'status'],
@@ -694,7 +694,7 @@
     '/v1/formula-versions': { resource: 'formula-versions', idKey: 'formulaVersionId', perm: 'formula:formula_version:write', statusField: 'status', title: 'Edit formula version',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'ARCHIVED', 'REJECTED'] }] },
     '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
-      fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'gstin', l: 'GSTIN' }, { n: 'panNumber', l: 'PAN' }, { n: 'bankName', l: 'Bank name' }, { n: 'bankAccountNumber', l: 'Bank account no.' }, { n: 'bankIfsc', l: 'IFSC' }, { n: 'contactEmail', l: 'Contact email' }, { n: 'contactPhone', l: 'Contact phone' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/customers': { resource: 'customers', idKey: 'customerId', perm: 'sales:customer_master:write', statusField: 'status', title: 'Edit customer',
       fields: [{ n: 'customerName', l: 'Customer name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/transporters': { resource: 'transporters', idKey: 'transporterId', perm: 'sales:transporter_master:write', statusField: 'status', title: 'Edit transporter',
@@ -1029,7 +1029,10 @@
       { n: 'qcRequired', l: 'QC required?', t: 'select', en: ['true', 'false'] }, { n: 'description', l: 'Description', t: 'textarea' }
     ] },
     '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
-      { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' }
+      { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' },
+      { n: 'gstin', l: 'GSTIN', t: 'text' }, { n: 'panNumber', l: 'PAN', t: 'text' },
+      { n: 'bankName', l: 'Bank name', t: 'text' }, { n: 'bankAccountNumber', l: 'Bank account no.', t: 'text' }, { n: 'bankIfsc', l: 'IFSC', t: 'text' },
+      { n: 'contactEmail', l: 'Contact email', t: 'text' }, { n: 'contactPhone', l: 'Contact phone', t: 'text' }
     ] },
     '/v1/customers': { title: 'New customer', perm: 'sales:customer_master:write', fields: [
       { n: 'customerCode', l: 'Customer code', t: 'text', req: true }, { n: 'customerName', l: 'Customer name', t: 'text', req: true }

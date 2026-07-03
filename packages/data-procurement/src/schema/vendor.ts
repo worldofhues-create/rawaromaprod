@@ -4,7 +4,7 @@
  * base_currency_id/material_id are id-only SOFT refs to other schemas (no cross-schema
  * FK). vendor_contact + vendor_rm_mapping are in-schema FKs to vendor_details.
  */
-import { boolean, index, integer, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, index, integer, text, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { procurement } from "./_schema.js";
 
@@ -19,6 +19,13 @@ export const vendorDetails = procurement.table(
     addressId: uuid("address_id"),
     baseCurrencyId: uuid("base_currency_id"),
     paymentTerms: varchar("payment_terms", { length: 255 }),
+    gstin: text("gstin"),
+    panNumber: text("pan_number"),
+    bankName: text("bank_name"),
+    bankAccountNumber: text("bank_account_number"),
+    bankIfsc: text("bank_ifsc"),
+    contactEmail: text("contact_email"),
+    contactPhone: text("contact_phone"),
     ...metaColumns(),
   },
   (t) => [

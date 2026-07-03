@@ -34,6 +34,13 @@ export const createVendorDetails = z.object({
   addressId: z.string().uuid().nullish(),
   baseCurrencyId: z.string().uuid().nullish(),
   paymentTerms: z.string().max(255).nullish(),
+  gstin: z.string().nullish(),
+  panNumber: z.string().nullish(),
+  bankName: z.string().nullish(),
+  bankAccountNumber: z.string().nullish(),
+  bankIfsc: z.string().nullish(),
+  contactEmail: z.string().nullish(),
+  contactPhone: z.string().nullish(),
 });
 export type CreateVendorDetails = z.infer<typeof createVendorDetails>;
 

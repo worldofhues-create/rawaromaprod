@@ -7,10 +7,12 @@
  * MVP note: no server-side session store yet (the dictionary has no sessions table), so
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.
  */
-import { Inject, Injectable } from "@nestjs/common";
+import { Inject, Injectable, Logger } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import * as argon2 from "argon2";
-import { DomainError, JwtService, type AuthPrincipal } from "@core/backend-kernel";
+import { randomUUID } from "node:crypto";
+import type { Sql } from "postgres";
+import { DomainError, JwtService, PG_CLIENT, type AuthPrincipal } from "@core/backend-kernel";
 import type { Portal } from "@core/contracts";
 import { ORG_DB, orgSchema, type OrgDb } from "../cluster-org.tokens.js";
 
@@ -33,10 +35,24 @@ export interface LoginResult {
 
 @Injectable()
 export class AuthService {
+  private readonly logger = new Logger(AuthService.name);
+
   constructor(
     @Inject(ORG_DB) private readonly db: OrgDb,
     @Inject(JwtService) private readonly jwt: JwtService,
+    @Inject(PG_CLIENT) private readonly sql: Sql,
   ) {}
+
+  /** Record a login in iam.sessions so the admin Login-history view has data (audit requirement). */
+  private async recordSession(userId: string): Promise<void> {
+    try {
+      await this.sql`
+        insert into iam.sessions (id, user_id, portal_audience, expires_at, created_by, updated_by)
+        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, now() + interval '30 days', ${userId}, ${userId})`;
+    } catch (e) {
+      this.logger.warn(`session record failed: ${(e as Error).message}`);
+    }
+  }
 
   /** Password login against user_master (identifier = email). */
   async login(identifier: string, password: string): Promise<LoginResult> {
@@ -76,6 +92,7 @@ export class AuthService {
       sid: row.userId,
     });
     const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    await this.recordSession(row.userId);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,
