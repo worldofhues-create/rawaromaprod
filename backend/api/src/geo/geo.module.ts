@@ -1,0 +1,10 @@
+/** GeoModule — geographic hierarchy (region types + regions) below Country. Shared PG_CLIENT. */
+import { Module } from '@nestjs/common';
+import { GeoController } from './geo.controller.js';
+import { GeoService } from './geo.service.js';
+
+@Module({
+  controllers: [GeoController],
+  providers: [GeoService],
+})
+export class GeoModule {}

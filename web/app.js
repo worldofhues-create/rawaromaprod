@@ -86,6 +86,7 @@
       ['mqcspec', 'Material QC specs', 'flask', '/v1/material-qc-specifications'], ['mstorage', 'Storage rules', 'box', '/v1/material-storage-rules'],
       ['maliases', 'RM aliases', 'lock', '/v1/rm-aliases'],
       ['splitc', 'Split containers', 'layers', '/v1/batch-container-mappings'],
+      ['geotypes', 'Geo levels', 'sliders', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'building', '/v1/geo-regions'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
@@ -152,6 +153,8 @@
     '/v1/material-storage-rules': ['materialCode', 'materialName', 'minTemperature', 'maxTemperature', 'storageCondition', 'status'],
     '/v1/grn-containers': ['grnNumber', 'containerCode', 'containerQty', 'status'],
     '/v1/batch-container-mappings': ['batchNumber', 'containerCode', 'status'],
+    '/v1/geo-region-types': ['key', 'name', 'displayOrder', 'typicalParent'],
+    '/v1/geo-regions': ['name', 'typeName', 'code', 'parentName', 'isActive'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -714,6 +717,8 @@
       fields: [{ n: 'aliasName', l: 'Alias name' }, { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/grn-containers': { resource: 'grn-containers', idKey: 'grnContainerId', perm: 'inventory:grn_container:write', statusField: 'status', title: 'Edit container',
       fields: [{ n: 'containerCode', l: 'Container number' }, { n: 'containerQty', l: 'Container qty', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/geo-regions': { resource: 'geo-regions', idKey: 'id', perm: 'platform:geo_location_master:write', statusField: 'isActive', editPath: function (id) { return '/v1/geo-regions/' + id; }, title: 'Edit geo region',
+      fields: [{ n: 'name', l: 'Region name' }, { n: 'code', l: 'Code' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
@@ -780,7 +785,8 @@
       e.preventDefault(); var body = {};
       cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); if (f.n === 'isActive') body[f.n] = (v === 'true'); else body[f.n] = v; });
       var save = $('ra-esave'); save.disabled = true; save.textContent = 'Saving…';
-      tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
+      var editUrl = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
+      tunnel(editUrl, { method: 'PATCH', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
         close(); toast('Saved ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = 'Could not reach the secure channel.'; });
@@ -792,7 +798,8 @@
     var body = cfg.statusField === 'isActive' ? { isActive: !active } : { status: active ? 'INACTIVE' : 'ACTIVE' };
     var verb = active ? 'Deactivate' : 'Activate';
     if (!window.confirm(verb + ' this record?')) return;
-    tunnel('/v1/masters/' + cfg.resource + '/' + id, { method: 'PATCH', body: body }).then(function (res) {
+    var url = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
+    tunnel(url, { method: 'PATCH', body: body }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
       toast(verb + 'd ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
@@ -1032,6 +1039,16 @@
     '/v1/batch-container-mappings': { title: 'Split batch into container', perm: 'inventory:batch_container_mappings:write', fields: [
       { n: 'rmBatchId', l: 'RM batch', t: 'select', fk: '/v1/rm-batches', fv: 'rmBatchId', fl: 'batchNumber', req: true },
       { n: 'grnContainerId', l: 'Container', t: 'select', fk: '/v1/grn-containers', fv: 'grnContainerId', fl: 'containerCode', req: true }
+    ] },
+    '/v1/geo-region-types': { title: 'New geo level', perm: 'platform:geo_location_master:write', fields: [
+      { n: 'key', l: 'Key (e.g. STATE)', t: 'text', req: true }, { n: 'name', l: 'Level name', t: 'text', req: true },
+      { n: 'displayOrder', l: 'Display order', t: 'number' },
+      { n: 'typicalParent', l: 'Typical parent level', t: 'select', fk: '/v1/geo-region-types', fv: 'key', fl: 'name' }
+    ] },
+    '/v1/geo-regions': { title: 'New geo region', perm: 'platform:geo_location_master:write', fields: [
+      { n: 'typeKey', l: 'Level', t: 'select', fk: '/v1/geo-region-types', fv: 'key', fl: 'name', req: true },
+      { n: 'parentId', l: 'Parent region', t: 'select', fk: '/v1/geo-regions', fv: 'id', fl: 'name' },
+      { n: 'name', l: 'Region name', t: 'text', req: true }, { n: 'code', l: 'Code (e.g. KA, 560001)', t: 'text' }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
