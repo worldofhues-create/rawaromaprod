@@ -1547,7 +1547,7 @@
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
     ov.innerHTML = '<div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Traceability</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12px;color:var(--t3);margin-bottom:16px">Finished good → oil batch → raw materials → vendor</div>' +
+      '<div style="font-size:12px;color:var(--t3);margin-bottom:16px">Customer → finished good → oil batch → raw materials → vendor</div>' +
       '<div id="ra-trace" style="color:var(--t3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div></div>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
@@ -1568,7 +1568,9 @@
           '<span style="color:var(--t3);font-size:11px">&larr; batch ' + m.rmBatch + '</span><span style="color:var(--t3);font-size:11px">&larr; ' + m.grn + '</span>' +
           '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m.vendor + '</span></div>';
       }).join('') || '<div style="color:var(--t3);font-size:12px;padding:6px 0">No upstream materials linked.</div>';
+      var custStep = t.customer ? (step('users', 'Customer · ' + t.customer.name, t.customer.soNumber ? ('Sales order ' + t.customer.soNumber) : 'shipped to', false) + down) : '';
       el.outerHTML = '<div id="ra-trace">' +
+        custStep +
         step('pkg', 'Finished good · ' + t.finishedGood.batch, t.finishedGood.product + ' · ' + t.finishedGood.sku, true) + down +
         step('droplet', 'Oil batch · ' + (t.oilBatch ? t.oilBatch.batch : '—'), 'the compounded juice', false) + down +
         '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:8px 0 9px">RAW MATERIALS &rarr; VENDOR</div>' + mats + '</div>';

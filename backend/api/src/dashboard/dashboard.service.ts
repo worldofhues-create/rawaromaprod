@@ -341,6 +341,18 @@ export class DashboardService {
     )[0] as Record<string, unknown> | undefined;
     if (!head) return null;
 
+    // Who received this batch — customer + sales order (forward end of the chain). Not secret
+    // (the buyer isn't the recipe), so shown to anyone allowed to run the trace.
+    const cust = (
+      await sql`select c.customer_name, c.customer_code, so.so_number, dm.dispatch_date
+                from sales.dispatch_items di
+                join sales.dispatch_master dm on dm.dispatch_id = di.dispatch_id
+                left join sales.customer_master c on c.customer_id = dm.customer_id
+                left join sales.sales_order so on so.sales_order_id = dm.sales_order_id
+                where di.finished_good_batch_id = ${id}
+                order by dm.dispatch_date desc nulls last limit 1`
+    )[0] as Record<string, unknown> | undefined;
+
     const oil = head.oil_batch_id
       ? ((
           await sql`select ob.batch_number oilno, ob.production_order_id, ob.produced_qty
@@ -365,6 +377,12 @@ export class DashboardService {
 
     return {
       reveal: { product: seeProduct, material: seeMaterial },
+      customer: cust
+        ? {
+            name: String(cust.customer_name || cust.customer_code || '—'),
+            soNumber: cust.so_number ? String(cust.so_number) : null,
+          }
+        : null,
       finishedGood: {
         batch: String(head.fgno || '—'), sku: String(head.sku_code || '—'),
         product: seeProduct ? String(head.product_name || head.formula_name || '—') : 'Protected ◆',
