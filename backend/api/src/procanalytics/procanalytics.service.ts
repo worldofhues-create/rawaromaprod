@@ -81,6 +81,39 @@ export class ProcAnalyticsService {
     return { items, nextCursor: null };
   }
 
+  /* ── vendor dispatch (scope-freeze step 15) ────────────────────────── */
+
+  async listVendorDispatches(limit = 200) {
+    const lim = Math.min(Math.max(1, limit), 500);
+    const items = await this.sql`
+      select vd.vendor_dispatch_id as "vendorDispatchId", vd.purchase_order_id as "purchaseOrderId",
+             po.po_number as "poNumber", v.vendor_name as "vendorName",
+             vd.dispatch_date as "dispatchDate", vd.transporter as "transporter",
+             vd.docket_number as "docketNumber", vd.vehicle_number as "vehicleNumber", vd.status as "status"
+        from procurement.vendor_dispatch vd
+        left join procurement.purchase_order po on po.purchase_order_id = vd.purchase_order_id
+        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
+       order by vd.created_dt desc
+       limit ${lim}`;
+    return { items, nextCursor: null };
+  }
+
+  async createVendorDispatch(body: Record<string, unknown>, principal: AuthPrincipal) {
+    if (!(principal.permissions || []).includes('procurement:purchase_order:read')) {
+      throw new ForbiddenException('Missing permission procurement:purchase_order:read');
+    }
+    const g = (k: string): string | null => {
+      const v = body[k];
+      return v == null || v === '' ? null : String(v);
+    };
+    if (!g('purchaseOrderId')) throw new BadRequestException('purchaseOrderId is required');
+    const rows = (await this.sql`
+      insert into procurement.vendor_dispatch (vendor_dispatch_id, purchase_order_id, dispatch_date, transporter, docket_number, vehicle_number, status, created_by, updated_by)
+      values (${randomUUID()}, ${g('purchaseOrderId')}, ${g('dispatchDate')}, ${g('transporter')}, ${g('docketNumber')}, ${g('vehicleNumber')}, 'DISPATCHED', ${principal.userId}, ${principal.userId})
+      returning vendor_dispatch_id as "vendorDispatchId", status as "status"`) as Array<Record<string, unknown>>;
+    return rows[0];
+  }
+
   /* ── advance payment (scope-freeze step 13) ────────────────────────── */
 
   async listAdvancePayments(limit = 200) {

@@ -95,6 +95,7 @@ const REGISTRY: Record<string, ResourceCfg> = {
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
   quotations: { schema: 'procurement', table: 'quotations', pk: 'quotation_id', perm: 'procurement:quotation_items:write', cols: { status: 'status' } },
   'po-advance-payments': { schema: 'procurement', table: 'po_advance_payment', pk: 'po_advance_payment_id', perm: 'procurement:purchase_order:write', cols: { amount: 'amount', reference: 'reference', status: 'status' } },
+  'vendor-dispatches': { schema: 'procurement', table: 'vendor_dispatch', pk: 'vendor_dispatch_id', perm: 'procurement:purchase_order:read', cols: { dispatchDate: 'dispatch_date', transporter: 'transporter', docketNumber: 'docket_number', vehicleNumber: 'vehicle_number', status: 'status' } },
   'formula-versions': { schema: 'formula', table: 'formula_version', pk: 'formula_version_id', perm: 'formula:formula_version:write', cols: { status: 'status' } },
   'qc-parameters': { schema: 'quality', table: 'qc_parameter_master', pk: 'qc_parameter_id', perm: 'quality:qc_parameter_master:write', cols: { parameterCode: 'parameter_code', parameterName: 'parameter_name', status: 'status' } },
   'vendor-contacts': { schema: 'procurement', table: 'vendor_contact', pk: 'vendor_contact_id', perm: 'procurement:vendor_contact:write', cols: { contactName: 'contact_name', designation: 'designation', email: 'email', mobileNumber: 'mobile_number', contactType: 'contact_type', status: 'status' } },

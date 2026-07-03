@@ -59,7 +59,9 @@ export class GrnService {
               vendorId: body.vendorId ?? null,
               locationId: body.locationId ?? null,
               grnDate: body.grnDate ?? null,
-              status: 'ACTIVE',
+              // RECV-05: a GRN means goods were received — use the canonical vocabulary
+              // (RECEIVED / PENDING / CANCELLED) that the edit dropdown now offers.
+              status: 'RECEIVED',
               createdBy: principal.userId,
               updatedBy: principal.userId,
             })

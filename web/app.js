@@ -126,6 +126,7 @@
       ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['rejgrns', 'Rejected GRNs', 'alert', '/v1/qc-rejected-grns'],
       ['vledger', 'Vendor ledger', 'clipboard', '/v1/vendor-ledger'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
+      ['vdispatch', 'Vendor dispatch', 'truck', '/v1/vendor-dispatches'],
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
       ['grnitems', 'Qty verification', 'activity', '/v1/grn-items'],
       ['batches', 'Batches', 'layers', '/v1/rm-batches'], ['containers', 'Containers', 'box', '/v1/grn-containers'] ] },
@@ -187,6 +188,8 @@
     '/v1/qc-rejected-grns': ['grnNumber', 'vendorName', 'poNumber', 'qcResult'],
     '/v1/vendor-ledger': ['vendorName', 'poTotal', 'creditNotes', 'creditTotal', 'netBalance'],
     '/v1/po-advance-payments': ['poNumber', 'vendorName', 'amount', 'paymentDate', 'reference', 'status'],
+    '/v1/vendor-dispatches': ['poNumber', 'vendorName', 'dispatchDate', 'transporter', 'docketNumber', 'status'],
+    '/v1/qc-sample-retentions': ['sampleCode', 'sampleQty', 'retainedDt', 'status'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
@@ -743,7 +746,7 @@
     '/v1/countries': { resource: 'countries', idKey: 'countryId', perm: 'platform:country_master:write', statusField: 'status', title: 'Edit country',
       fields: [{ n: 'countryName', l: 'Country name' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }, { n: 'timezone', l: 'Time zone (e.g. Asia/Kolkata)' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/organizations': { resource: 'organizations', idKey: 'id', perm: 'iam:business_unit_master:write', statusField: 'status', editPath: function (id) { return '/v1/organizations/' + id; }, title: 'Edit organization',
-      fields: [{ n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] }, { n: 'name', l: 'Name' }, { n: 'reraNo', l: 'Registration no.' }, { n: 'gstin', l: 'GSTIN' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] }, { n: 'name', l: 'Name' }, { n: 'reraNo', l: 'Registration no.' }, { n: 'gstin', l: 'GSTIN', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/locations': { resource: 'locations', idKey: 'locationId', perm: 'location:location_master:write', statusField: 'status', title: 'Edit location',
       fields: [{ n: 'locationCode', l: 'Code' }, { n: 'locationName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/location-types': { resource: 'location-types', idKey: 'locationTypeId', perm: 'location:location_type_master:write', statusField: 'status', title: 'Edit location type',
@@ -791,13 +794,13 @@
     '/v1/bins': { resource: 'bins', idKey: 'binId', perm: 'location:bin_master:write', statusField: 'status', title: 'Edit bin',
       fields: [{ n: 'binName', l: 'Bin name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/grns': { resource: 'grns', idKey: 'grnId', perm: 'inventory:grn_master:write', statusField: 'status', title: 'Edit GRN',
-      fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'POSTED', 'CANCELLED'] }] },
+      fields: [{ n: 'status', l: 'Status', t: 'select', en: ['RECEIVED', 'PENDING', 'CANCELLED'] }] },
     '/v1/rfqs': { resource: 'rfqs', idKey: 'rfqId', perm: 'procurement:rfq_master:write', statusField: 'status', title: 'Edit RFQ',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED', 'CANCELLED'] }] },
     '/v1/formula-versions': { resource: 'formula-versions', idKey: 'formulaVersionId', perm: 'formula:formula_version:write', statusField: 'status', title: 'Edit formula version',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'ARCHIVED', 'REJECTED'] }] },
     '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
-      fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'gstin', l: 'GSTIN' }, { n: 'panNumber', l: 'PAN' }, { n: 'bankName', l: 'Bank name' }, { n: 'bankAccountNumber', l: 'Bank account no.' }, { n: 'bankIfsc', l: 'IFSC' }, { n: 'contactEmail', l: 'Contact email' }, { n: 'contactPhone', l: 'Contact phone' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+      fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'gstin', l: 'GSTIN', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'panNumber', l: 'PAN', maxlen: 10, pat: '[A-Z]{5}[0-9]{4}[A-Z]', patMsg: 'PAN must be 10 characters, e.g. ABCDE1234F' }, { n: 'bankName', l: 'Bank name' }, { n: 'bankAccountNumber', l: 'Bank account no.', maxlen: 20, pat: '[0-9]{6,20}', patMsg: 'Account number must be 6–20 digits' }, { n: 'bankIfsc', l: 'IFSC', maxlen: 11, pat: '[A-Z]{4}0[A-Z0-9]{6}', patMsg: 'IFSC must be 11 characters, e.g. HDFC0001234' }, { n: 'contactEmail', l: 'Contact email', pat: '[^@ ]+@[^@ ]+[.][^@ ]+', patMsg: 'Enter a valid email' }, { n: 'contactPhone', l: 'Contact phone', pat: '[+]?[0-9][0-9 -]{6,18}', patMsg: 'Enter a valid phone number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/customers': { resource: 'customers', idKey: 'customerId', perm: 'sales:customer_master:write', statusField: 'status', title: 'Edit customer',
       fields: [{ n: 'customerName', l: 'Customer name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/transporters': { resource: 'transporters', idKey: 'transporterId', perm: 'sales:transporter_master:write', statusField: 'status', title: 'Edit transporter',
@@ -841,8 +844,9 @@
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-eclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     $('ra-eform').onsubmit = function (e) {
-      e.preventDefault(); var body = {};
-      cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); if (f.n === 'isActive') body[f.n] = (v === 'true'); else body[f.n] = v; });
+      e.preventDefault(); var body = {}, verr = '';
+      cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); var fe = validateField(f, v); if (fe) verr = verr || fe; if (f.n === 'isActive') body[f.n] = (v === 'true'); else body[f.n] = v; });
+      if (verr) { $('ra-eerr').textContent = verr; return; }
       var save = $('ra-esave'); save.disabled = true; save.textContent = 'Saving…';
       var editUrl = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
       tunnel(editUrl, { method: 'PATCH', body: body }).then(function (res) {
@@ -1138,7 +1142,7 @@
     '/v1/organizations': { title: 'New organization', perm: 'iam:business_unit_master:write', fields: [
       { n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] },
       { n: 'name', l: 'Organization name', t: 'text', req: true },
-      { n: 'reraNo', l: 'Registration no.', t: 'text' }, { n: 'gstin', l: 'GSTIN (tax)', t: 'text' }
+      { n: 'reraNo', l: 'Registration no.', t: 'text' }, { n: 'gstin', l: 'GSTIN (tax)', t: 'text', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }
     ] },
     '/v1/location-types': { title: 'New location type', perm: 'location:location_type_master:write', fields: [
       { n: 'typeCode', l: 'Type code (e.g. FACTORY)', t: 'text', req: true }, { n: 'typeName', l: 'Type name', t: 'text', req: true }
@@ -1149,6 +1153,16 @@
       { n: 'locationTypeId', l: 'Location type', t: 'select', fk: '/v1/location-types', fv: 'locationTypeId', fl: 'typeName' },
       { n: 'parentLocationId', l: 'Parent location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' },
       { n: 'locationCode', l: 'Location code', t: 'text', req: true }, { n: 'locationName', l: 'Location name', t: 'text', req: true }
+    ] },
+    '/v1/vendor-dispatches': { title: 'Record vendor dispatch', perm: 'procurement:purchase_order:read', fields: [
+      { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber', req: true },
+      { n: 'dispatchDate', l: 'Dispatch date', t: 'date', req: true }, { n: 'transporter', l: 'Transporter', t: 'text' },
+      { n: 'docketNumber', l: 'Docket / LR no.', t: 'text' }, { n: 'vehicleNumber', l: 'Vehicle no.', t: 'text' }
+    ] },
+    '/v1/qc-sample-retentions': { title: 'Retain QC sample', perm: 'quality:qc_sample_retention:write', fields: [
+      { n: 'sampleCode', l: 'Sample code', t: 'text', req: true },
+      { n: 'rmBatchId', l: 'RM batch', t: 'select', fk: '/v1/rm-batches', fv: 'rmBatchId', fl: 'batchNumber' },
+      { n: 'sampleQty', l: 'Retained qty (ml)', t: 'number', def: 10 }
     ] },
     '/v1/po-advance-payments': { title: 'Record advance payment', perm: 'procurement:purchase_order:write', fields: [
       { n: 'purchaseOrderId', l: 'Purchase order', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber', req: true },
@@ -1252,9 +1266,9 @@
     ] },
     '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
       { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' },
-      { n: 'gstin', l: 'GSTIN', t: 'text' }, { n: 'panNumber', l: 'PAN', t: 'text' },
-      { n: 'bankName', l: 'Bank name', t: 'text' }, { n: 'bankAccountNumber', l: 'Bank account no.', t: 'text' }, { n: 'bankIfsc', l: 'IFSC', t: 'text' },
-      { n: 'contactEmail', l: 'Contact email', t: 'text' }, { n: 'contactPhone', l: 'Contact phone', t: 'text' }
+      { n: 'gstin', l: 'GSTIN', t: 'text', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'panNumber', l: 'PAN', t: 'text', maxlen: 10, pat: '[A-Z]{5}[0-9]{4}[A-Z]', patMsg: 'PAN must be 10 characters, e.g. ABCDE1234F' },
+      { n: 'bankName', l: 'Bank name', t: 'text' }, { n: 'bankAccountNumber', l: 'Bank account no.', t: 'text', maxlen: 20, pat: '[0-9]{6,20}', patMsg: 'Account number must be 6–20 digits' }, { n: 'bankIfsc', l: 'IFSC', t: 'text', maxlen: 11, pat: '[A-Z]{4}0[A-Z0-9]{6}', patMsg: 'IFSC must be 11 characters, e.g. HDFC0001234' },
+      { n: 'contactEmail', l: 'Contact email', t: 'text', pat: '[^@ ]+@[^@ ]+[.][^@ ]+', patMsg: 'Enter a valid email' }, { n: 'contactPhone', l: 'Contact phone', t: 'text', pat: '[+]?[0-9][0-9 -]{6,18}', patMsg: 'Enter a valid phone number' }
     ] },
     '/v1/customers': { title: 'New customer', perm: 'sales:customer_master:write', fields: [
       { n: 'customerCode', l: 'Customer code', t: 'text', req: true }, { n: 'customerName', l: 'Customer name', t: 'text', req: true }
@@ -1327,8 +1341,8 @@
       if (f.t === 'select') {
         var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') : '');
         ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' style="' + fStyle() + '">' + opts + '</select>';
-      } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">'; }
+      } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' style="' + fStyle() + '">'; }
       return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
     }).join('');
     var ov = document.createElement('div');
@@ -1354,7 +1368,7 @@
       e.preventDefault(); var body = {}, err = '';
       cfg.fields.forEach(function (f) {
         var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim();
-        if (f.req && !v) { err = err || (f.l + ' is required.'); }
+        var fe = validateField(f, v); if (fe) { err = err || fe; }
         if (v) body[f.n] = f.t === 'number' ? Number(v) : v;
       });
       if (err) { $('ra-merr').textContent = err; return; }
@@ -1414,11 +1428,11 @@
     $('ra-addline').onclick = addLine;
     $('ra-cform').onsubmit = function (e) {
       e.preventDefault(); var body = {}, err = '';
-      cfg.header.forEach(function (f) { var el = ov.querySelector('[data-h="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (f.req && !v) err = err || (f.l + ' is required.'); if (v) body[f.n] = f.t === 'number' ? Number(v) : v; });
+      cfg.header.forEach(function (f) { var el = ov.querySelector('[data-h="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; var fe = validateField(f, v); if (fe) err = err || fe; if (v) body[f.n] = f.t === 'number' ? Number(v) : v; });
       var items = [];
       [].forEach.call(ov.querySelectorAll('.ra-line'), function (row) {
         var it = {}, has = false;
-        cfg.item.forEach(function (f) { var el = row.querySelector('[data-i="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (v) { it[f.n] = f.t === 'number' ? Number(v) : v; has = true; } if (f.req && !v && has) err = err || ('Line: ' + f.l + ' is required.'); });
+        cfg.item.forEach(function (f) { var el = row.querySelector('[data-i="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (v) { it[f.n] = f.t === 'number' ? Number(v) : v; has = true; } var fe = (f.req && !v && has) ? (f.l + ' is required.') : (v ? validateField(f, v) : null); if (fe) err = err || ('Line: ' + fe); });
         if (has) items.push(it);
       });
       if (items.length < (cfg.itemMin || 1)) err = err || ('Add at least ' + (cfg.itemMin || 1) + ' line item.');
@@ -1755,6 +1769,16 @@
     if (st._searching) { st._searching = false; var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }
   }
   function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; }); }
+  // SYS-04 — shared field validation: required, max length, format (regex), numeric bounds.
+  function validateField(f, v) {
+    v = v == null ? '' : String(v).trim();
+    if (f.req && !v) return f.l + ' is required.';
+    if (!v) return null;
+    if (f.maxlen && v.length > f.maxlen) return f.l + ' must be at most ' + f.maxlen + ' characters.';
+    if (f.pat) { try { if (!(new RegExp('^(?:' + f.pat + ')$', 'i').test(v))) return f.patMsg || (f.l + ' is not in the expected format.'); } catch (e) {} }
+    if (f.t === 'number') { var n = Number(v); if (isNaN(n)) return f.l + ' must be a number.'; if (f.min != null && n < f.min) return f.l + ' must be at least ' + f.min + '.'; if (f.max != null && n > f.max) return f.l + ' must be at most ' + f.max + '.'; }
+    return null;
+  }
   function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
 
   // Theme changes only re-apply the CSS variables + restyle the toggles — NO data re-fetch.

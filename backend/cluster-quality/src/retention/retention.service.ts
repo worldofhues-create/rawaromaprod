@@ -35,8 +35,9 @@ export class RetentionService {
           sampleQty: body.sampleQty === undefined ? null : String(body.sampleQty),
           uomId: body.uomId ?? null,
           retentionLocationId: body.retentionLocationId ?? null,
-          retainedDt: body.retainedDt ? new Date(body.retainedDt) : null,
-          retainedBy: body.retainedBy ?? null,
+          retainedDt: body.retainedDt ? new Date(body.retainedDt) : new Date(),
+          // QC-02: stamp the QC user who retained the sample (was left null).
+          retainedBy: body.retainedBy ?? principal.userId,
           retentionExpiryDt: body.retentionExpiryDt ? new Date(body.retentionExpiryDt) : null,
           status: 'ACTIVE',
           createdBy: principal.userId,

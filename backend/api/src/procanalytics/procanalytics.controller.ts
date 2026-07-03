@@ -29,6 +29,17 @@ export class ProcAnalyticsController {
   }
 
   @Permissions('procurement:purchase_order:read')
+  @Get('v1/vendor-dispatches')
+  listVendorDispatches(@Query('limit') limit?: string) {
+    return this.svc.listVendorDispatches(limit ? Number(limit) : 200);
+  }
+
+  @Post('v1/vendor-dispatches')
+  createVendorDispatch(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
+    return this.svc.createVendorDispatch(body, principal);
+  }
+
+  @Permissions('procurement:purchase_order:read')
   @Get('v1/po-advance-payments')
   listAdvancePayments(@Query('limit') limit?: string) {
     return this.svc.listAdvancePayments(limit ? Number(limit) : 200);
