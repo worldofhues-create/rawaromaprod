@@ -139,17 +139,18 @@ export class MaterialService {
     });
   }
 
-  async listRmAliases(query: ListQuery): Promise<Page<Record<string, unknown>>> {
-    const rows = (await this.db.execute(sql`
-      select a.rm_alias_id as "rmAliasId", a.material_id as "materialId",
-             m.material_code as "materialCode", m.material_name as "materialName",
-             a.alias_name as "aliasName", a.alias_type as "aliasType", a.status as "status"
-        from masterdata.rm_alias a
-        left join masterdata.material m on m.material_id = a.material_id
-       ${query.cursor ? sql`where a.rm_alias_id < ${query.cursor}` : sql``}
-       order by a.rm_alias_id desc
-       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
-    return paginate(Array.from(rows), query.limit, (r) => r.rmAliasId as string);
+  async listRmAliases(query: ListQuery): Promise<Page<typeof rmAlias.$inferSelect>> {
+    // SECURITY: rm_alias is readable by Compounding + Production Floor (they must see aliases),
+    // and those roles are masked. So this list must NOT carry the real material code/name — that
+    // would defeat the mask. We return the raw row (material_id gets nulled + alias attached by the
+    // global MaterialMaskingInterceptor for non-reveal callers); the alias name is the readable key.
+    const rows = await this.db
+      .select()
+      .from(rmAlias)
+      .where(query.cursor ? lt(rmAlias.rmAliasId, query.cursor) : undefined)
+      .orderBy(desc(rmAlias.rmAliasId))
+      .limit(query.limit + 1);
+    return paginate(rows, query.limit, (r) => r.rmAliasId);
   }
 
   async getRmAlias(id: string) {

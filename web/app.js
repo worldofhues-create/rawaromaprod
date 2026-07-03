@@ -144,7 +144,7 @@
     '/v1/formula-types': ['typeCode', 'typeName', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
-    '/v1/rm-aliases': ['materialCode', 'materialName', 'aliasName', 'aliasType', 'status'],
+    '/v1/rm-aliases': ['aliasName', 'aliasType', 'status'],
     '/v1/material-types': ['typeCode', 'typeName', 'status'],
     '/v1/material-categories': ['categoryCode', 'categoryName', 'status'],
     '/v1/material-subcategories': ['subCategoryCode', 'subCategoryName', 'status'],
