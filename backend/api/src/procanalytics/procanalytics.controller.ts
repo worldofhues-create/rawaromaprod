@@ -11,6 +11,23 @@ import { ProcAnalyticsService } from './procanalytics.service.js';
 export class ProcAnalyticsController {
   constructor(private readonly svc: ProcAnalyticsService) {}
 
+  @Permissions('inventory:grn_master:read')
+  @Get('v1/qc-rejected-grns')
+  qcRejectedGrns(@Query('limit') limit?: string) {
+    return this.svc.qcRejectedGrns(limit ? Number(limit) : 200);
+  }
+
+  @Permissions('procurement:purchase_order:read')
+  @Get('v1/vendor-ledger')
+  vendorLedger(@Query('limit') limit?: string) {
+    return this.svc.vendorLedger(limit ? Number(limit) : 200);
+  }
+
+  @Post('v1/replacement-po')
+  createReplacementPo(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
+    return this.svc.createReplacementPo(String(body.grnId), principal);
+  }
+
   @Permissions('procurement:purchase_order:read')
   @Get('v1/vendor-rate-history')
   rateHistory(

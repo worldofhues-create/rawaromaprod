@@ -123,7 +123,8 @@
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
       ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
       ['ratehist', 'Rate history', 'list', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'activity', '/v1/vendor-performance'],
-      ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
+      ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['rejgrns', 'Rejected GRNs', 'alert', '/v1/qc-rejected-grns'],
+      ['vledger', 'Vendor ledger', 'clipboard', '/v1/vendor-ledger'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
       ['grnitems', 'Qty verification', 'activity', '/v1/grn-items'],
@@ -183,6 +184,8 @@
     '/v1/vendor-negotiations': ['quotationNumber', 'vendorName', 'materialName', 'originalRate', 'revisedRate', 'recommendation', 'status'],
     '/v1/vendor-rate-history': ['asOf', 'vendorName', 'materialName', 'rate', 'source'],
     '/v1/vendor-performance': ['vendorName', 'poCount', 'grnCount', 'qcPass', 'qcFail', 'qcPassPct'],
+    '/v1/qc-rejected-grns': ['grnNumber', 'vendorName', 'poNumber', 'qcResult'],
+    '/v1/vendor-ledger': ['vendorName', 'poTotal', 'creditNotes', 'creditTotal', 'netBalance'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
@@ -669,6 +672,9 @@
     '/v1/grn-containers': [
       { label: 'QR label', perm: 'inventory:grn_container:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Container ' + (r.containerCode || ''), (r.containerCode || String(r.grnContainerId).slice(0, 8)), 'RA-CONTAINER:' + (r.containerCode || '') + ':' + r.grnContainerId, 'GRN ' + (r.grnNumber || '') + (r.containerQty != null ? ' · ' + r.containerQty : '')); } }
     ],
+    '/v1/qc-rejected-grns': [
+      { label: 'Replacement PO', perm: 'procurement:purchase_order:write', tone: 'accent', when: function () { return true; }, run: function (r) { generateReplacementPo(r); } }
+    ],
     '/v1/qc-inspections': [
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
       { label: 'Record results', perm: 'quality:qc_inspections:write', tone: 'accent', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, run: function (r) { openRecordQc(r); } },
@@ -904,6 +910,15 @@
       toast('Marked delivered ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
+  // FAIL-branch tail: spawn a replacement PO from a rejected GRN, linked to the original PO.
+  function generateReplacementPo(row) {
+    if (!window.confirm('Generate a replacement PO for GRN ' + (row.grnNumber || '') + ', linked to the original PO?')) return;
+    tunnel('/v1/replacement-po', { method: 'POST', body: { grnId: row.grnId } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'), 'bad'); return; }
+      var d = res.json && res.json.data;
+      toast('Replacement PO ' + (d && d.poNumber ? d.poNumber : '') + ' created ✓ (linked to original)', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
 
   /* ---------------- printable records (PO / GRN / dispatch note / CoA / batch certificate) ---------------- */
   var PRINTABLE = {
@@ -1027,7 +1042,7 @@
     ] },
     '/v1/vendor-credit-notes': { title: 'New vendor settlement', perm: 'procurement:vendor_credit_note:write', fields: [
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
-      { n: 'grnId', l: 'Against GRN (rejected batch)', t: 'select', fk: '/v1/grns', fv: 'grnId', fl: 'grnNumber' },
+      { n: 'grnId', l: 'Against GRN (QC-rejected only)', t: 'select', fk: '/v1/qc-rejected-grns', fv: 'grnId', fl: 'label' },
       { n: 'vendorCreditReasonId', l: 'Reason', t: 'select', fk: '/v1/vendor-credit-reasons', fv: 'vendorCreditReasonId', fl: 'reasonName' },
       { n: 'creditNoteNumber', l: 'Credit note no.', t: 'text', req: true }, { n: 'amount', l: 'Amount', t: 'number' },
       { n: 'creditNoteDate', l: 'Date', t: 'date' }
