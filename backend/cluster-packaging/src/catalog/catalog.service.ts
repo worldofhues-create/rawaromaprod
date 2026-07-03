@@ -7,7 +7,7 @@
  * is cursor-paginated by descending PK.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
@@ -221,16 +221,21 @@ export class CatalogService {
     return row;
   }
 
-  async listPackagingBoms(
-    query: ListQuery,
-  ): Promise<Page<typeof packagingBomMaster.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(packagingBomMaster)
-      .where(query.cursor ? lt(packagingBomMaster.packagingBomId, query.cursor) : undefined)
-      .orderBy(desc(packagingBomMaster.packagingBomId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.packagingBomId);
+  async listPackagingBoms(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with SKU code + packaging-material name. Packaging materials (bottle/cap/label/
+    // carton) are not formula ingredients, and the readers (Owner/Packaging) hold material reveal,
+    // so showing the name here is not a masking concern.
+    const rows = (await this.db.execute(sql`
+      select b.packaging_bom_id as "packagingBomId", b.product_sku_id as "productSkuId", s.sku_code as "skuCode",
+             b.packaging_material_id as "packagingMaterialId", m.material_name as "packagingMaterialName",
+             b.required_qty as "requiredQty", b.uom_id as "uomId", b.status as "status"
+        from packaging.packaging_bom_master b
+        left join packaging.product_sku s on s.product_sku_id = b.product_sku_id
+        left join masterdata.material m on m.material_id = b.packaging_material_id
+       ${query.cursor ? sql`where b.packaging_bom_id < ${query.cursor}` : sql``}
+       order by b.packaging_bom_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.packagingBomId as string);
   }
 
   async getPackagingBom(id: string) {

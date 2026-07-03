@@ -72,6 +72,18 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'packaging', table: 'product_sku', pk: 'product_sku_id', perm: 'packaging:product_sku:write',
     cols: { skuCode: 'sku_code', packSize: 'pack_size', status: 'status' },
   },
+  products: {
+    schema: 'packaging', table: 'product_master', pk: 'product_id', perm: 'packaging:product_master:write',
+    cols: { productName: 'product_name', productCode: 'product_code', status: 'status' },
+  },
+  'packaging-boms': {
+    schema: 'packaging', table: 'packaging_bom_master', pk: 'packaging_bom_id', perm: 'packaging:packaging_bom_master:write',
+    cols: { requiredQty: 'required_qty', status: 'status' },
+  },
+  'quotation-items': {
+    schema: 'procurement', table: 'quotation_items', pk: 'quotation_item_id', perm: 'procurement:quotation_items:write',
+    cols: { quotedQty: 'quoted_qty', quotedRate: 'quoted_rate', status: 'status' },
+  },
   'stock-requirements': {
     schema: 'procurement', table: 'stock_requirement', pk: 'stock_requirement_id', perm: 'procurement:stock_requirement:write',
     cols: { requiredQty: 'required_qty', priority: 'priority', requiredByDate: 'required_by_date', status: 'status' },

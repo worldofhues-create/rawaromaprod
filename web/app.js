@@ -100,6 +100,7 @@
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
+      ['qitems', 'Quotation items', 'list', '/v1/quotation-items'],
       ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'],
       ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
       ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
@@ -128,7 +129,8 @@
       ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
       ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
-      ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['skus', 'Product SKUs', 'tag', '/v1/product-skus'] ] },
+      ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['products', 'Products', 'tag', '/v1/products'],
+      ['skus', 'Product SKUs', 'tag', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'layers', '/v1/packaging-boms'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
       ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
       ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
@@ -155,6 +157,9 @@
     '/v1/batch-container-mappings': ['batchNumber', 'containerCode', 'status'],
     '/v1/geo-region-types': ['key', 'name', 'displayOrder', 'typicalParent'],
     '/v1/geo-regions': ['name', 'typeName', 'code', 'parentName', 'isActive'],
+    '/v1/products': ['productCode', 'productName', 'status'],
+    '/v1/packaging-boms': ['skuCode', 'packagingMaterialName', 'requiredQty', 'status'],
+    '/v1/quotation-items': ['quotationNumber', 'vendorName', 'materialName', 'quotedQty', 'quotedRate', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
     '/v1/vendor-contacts': ['contactName', 'contactType', 'designation', 'email', 'mobileNumber', 'status'],
     '/v1/vendor-rm-mappings': ['vendorName', 'materialCode', 'materialName', 'isPreferred', 'leadTimeDays', 'minOrderQty', 'status'],
@@ -719,6 +724,12 @@
       fields: [{ n: 'containerCode', l: 'Container number' }, { n: 'containerQty', l: 'Container qty', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/geo-regions': { resource: 'geo-regions', idKey: 'id', perm: 'platform:geo_location_master:write', statusField: 'isActive', editPath: function (id) { return '/v1/geo-regions/' + id; }, title: 'Edit geo region',
       fields: [{ n: 'name', l: 'Region name' }, { n: 'code', l: 'Code' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] },
+    '/v1/products': { resource: 'products', idKey: 'productId', perm: 'packaging:product_master:write', statusField: 'status', title: 'Edit product',
+      fields: [{ n: 'productCode', l: 'Code' }, { n: 'productName', l: 'Name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/packaging-boms': { resource: 'packaging-boms', idKey: 'packagingBomId', perm: 'packaging:packaging_bom_master:write', statusField: 'status', title: 'Edit BOM line',
+      fields: [{ n: 'requiredQty', l: 'Qty per unit', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/quotation-items': { resource: 'quotation-items', idKey: 'quotationItemId', perm: 'procurement:quotation_items:write', statusField: 'status', title: 'Edit quotation line',
+      fields: [{ n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/warehouses': { resource: 'warehouses', idKey: 'warehouseId', perm: 'location:warehouse_master:write', statusField: 'status', title: 'Edit warehouse',
       fields: [{ n: 'warehouseName', l: 'Warehouse name' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/floors': { resource: 'floors', idKey: 'floorId', perm: 'location:floor_master:write', statusField: 'status', title: 'Edit floor',
@@ -1049,6 +1060,23 @@
       { n: 'typeKey', l: 'Level', t: 'select', fk: '/v1/geo-region-types', fv: 'key', fl: 'name', req: true },
       { n: 'parentId', l: 'Parent region', t: 'select', fk: '/v1/geo-regions', fv: 'id', fl: 'name' },
       { n: 'name', l: 'Region name', t: 'text', req: true }, { n: 'code', l: 'Code (e.g. KA, 560001)', t: 'text' }
+    ] },
+    '/v1/products': { title: 'New product', perm: 'packaging:product_master:write', fields: [
+      { n: 'productCode', l: 'Product code', t: 'text', req: true }, { n: 'productName', l: 'Product name', t: 'text', req: true },
+      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaCode' },
+      { n: 'brandId', l: 'Brand', t: 'select', fk: '/v1/brands', fv: 'brandId', fl: 'brandName' },
+      { n: 'productCategoryId', l: 'Category', t: 'select', fk: '/v1/product-categories', fv: 'productCategoryId', fl: 'categoryName' }
+    ] },
+    '/v1/packaging-boms': { title: 'New packaging BOM line', perm: 'packaging:packaging_bom_master:write', fields: [
+      { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
+      { n: 'packagingMaterialId', l: 'Packaging material (bottle/cap/label/carton)', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'requiredQty', l: 'Qty per unit', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
+    ] },
+    '/v1/quotation-items': { title: 'New quotation line', perm: 'procurement:quotation_items:write', fields: [
+      { n: 'quotationId', l: 'Quotation', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber', req: true },
+      { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
+      { n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
+      { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },

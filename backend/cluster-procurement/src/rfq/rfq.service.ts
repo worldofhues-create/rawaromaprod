@@ -5,7 +5,7 @@
  * numeric → String(n); dates stay ISO date strings (date columns). Soft refs are plain uuids.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import {
   PROCUREMENT_DB,
@@ -218,16 +218,23 @@ export class RfqService {
     );
   }
 
-  async listQuotationItems(
-    query: ListQuery,
-  ): Promise<Page<typeof quotationItems.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(quotationItems)
-      .where(query.cursor ? lt(quotationItems.quotationItemId, query.cursor) : undefined)
-      .orderBy(desc(quotationItems.quotationItemId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.quotationItemId);
+  async listQuotationItems(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with quotation number + vendor + material + rate so procurement can compare quotes.
+    // Readers (Owner/Procurement) hold material reveal, so the material name is not a masking concern;
+    // material_id is still surfaced so the interceptor would mask it for any non-reveal caller.
+    const rows = (await this.db.execute(sql`
+      select qi.quotation_item_id as "quotationItemId", qi.quotation_id as "quotationId",
+             q.quotation_number as "quotationNumber", v.vendor_name as "vendorName",
+             qi.material_id as "materialId", m.material_name as "materialName",
+             qi.quoted_qty as "quotedQty", qi.quoted_rate as "quotedRate", qi.uom_id as "uomId", qi.status as "status"
+        from procurement.quotation_items qi
+        left join procurement.quotations q on q.quotation_id = qi.quotation_id
+        left join procurement.vendor_details v on v.vendor_id = q.vendor_id
+        left join masterdata.material m on m.material_id = qi.material_id
+       ${query.cursor ? sql`where qi.quotation_item_id < ${query.cursor}` : sql``}
+       order by qi.quotation_item_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.quotationItemId as string);
   }
 
   async getQuotationItem(id: string) {
