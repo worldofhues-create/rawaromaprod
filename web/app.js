@@ -30,13 +30,29 @@
   }
   async function seal(s) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, AES, te(s))); var o = new Uint8Array(12 + ct.length); o.set(iv, 0); o.set(ct, 12); return b64(o); }
   async function open(bl) { var b = ub64(bl); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, AES, b.slice(12)); return new TextDecoder().decode(pt); }
-  async function tunnel(path, opts, _retried) {
+  async function tunnel(path, opts, _retried, _ch) {
     opts = opts || {}; await handshake();
     var p = { method: (opts.method || 'GET').toUpperCase(), path: path };
     if (opts.body !== undefined) p.body = opts.body;
     if (session) p.token = session.token;
-    var r = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': KID }, body: JSON.stringify({ enc: await seal(JSON.stringify(p)) }) });
-    var outer = await r.json(); if (!outer.data || !outer.data.enc) { AES = null; hsP = null; throw new Error('channel'); }
+    // Transient-failure resilience (SYS-01): a dropped fetch, a cold-start 502, or a reset
+    // handshake all surface as a missing encrypted envelope. Rather than bubble "could not reach
+    // the secure channel" to the user on the first blip, reset the crypto state and retry with a
+    // short backoff (up to 3 attempts) — re-running the ECDH handshake each time.
+    _ch = _ch || 0;
+    var outer;
+    try {
+      var r = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': KID }, body: JSON.stringify({ enc: await seal(JSON.stringify(p)) }) });
+      outer = await r.json();
+    } catch (netErr) {
+      if (_ch < 2) { AES = null; hsP = null; await new Promise(function (rs) { setTimeout(rs, 350 + _ch * 400); }); return tunnel(path, opts, _retried, _ch + 1); }
+      throw new Error('channel');
+    }
+    if (!outer || !outer.data || !outer.data.enc) {
+      AES = null; hsP = null;
+      if (_ch < 2) { await new Promise(function (rs) { setTimeout(rs, 350 + _ch * 400); }); return tunnel(path, opts, _retried, _ch + 1); }
+      throw new Error('channel');
+    }
     var inner = JSON.parse(await open(outer.data.enc));
     // Access token expired mid-session (15-min TTL) → silently refresh once and retry, so the user isn't bounced.
     if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login') {
@@ -1676,10 +1692,11 @@
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
     var newBtn = canNew ? '<button id="ra-new" style="padding:8px 14px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm);white-space:nowrap">+ New</button>' : '';
-    if (!rows.length) {
+    if (!rows.length && !srch) {
+      // Genuinely empty table (and not a search) — the only case that shows "empty in the database".
       table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
     } else {
-      var q = st.search.trim().toLowerCase();
+      var q = srch.toLowerCase();
       var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
       _acts = {}; _actSeq = 0;
       var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]];
@@ -1687,17 +1704,26 @@
         (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
       var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
         (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
+      // No-match state keeps the header + search box (so the user can clear) and NEVER claims the DB is empty.
+      var inner = shown.length
+        ? '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>'
+        : '<div style="padding:44px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No results for "' + escHtml(srch) + '"</div><div style="font-size:13px;color:var(--t3)">' + rows.length + ' record' + (rows.length === 1 ? '' : 's') + ' in this table — none match your search.</div><button id="ra-clear" style="margin-top:14px;padding:8px 16px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit">Clear search</button></div>';
       table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
         '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
         '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)">' + shown.length + ' of ' + rows.length + '</div>' +
         '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div>' + newBtn + '</div>' +
-        '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+        inner + '</div>';
     }
     V.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>' + table;
     wireActions();
     var nb = $('ra-new'); if (nb) nb.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
-    var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; loadView(); setTimeout(function () { var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }, 0); });
+    var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; loadView(); };
+    // Debounce the search so we don't fire a fetch + full re-render on every keystroke (PROC-09),
+    // and only steal focus back when THIS render was search-driven (so nav changes don't grab it).
+    var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; st._searching = true; clearTimeout(st._st); st._st = setTimeout(loadView, 260); });
+    if (st._searching) { st._searching = false; var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }
   }
+  function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; }); }
   function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
 
   // Theme changes only re-apply the CSS variables + restyle the toggles — NO data re-fetch.
