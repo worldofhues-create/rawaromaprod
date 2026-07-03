@@ -2,7 +2,7 @@
  * AuditService — owner-facing governance views over the tamper-evident audit trail. The formula
  * vault writes a hash-chained row to formula.audit_events on every decrypt/access; this surfaces it
  * as a first-class "who accessed which formula, when, from where" report (the finding: the audit
- * existed at the crypto layer but had no route). Login history reads iam.sessions. Raw SQL, owner-gated.
+ * existed at the crypto layer but had no route). Login history reads iam.login_history. Raw SQL, owner-gated.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
@@ -29,10 +29,10 @@ export class AuditService {
     const lim = Math.min(Math.max(1, limit), 500);
     const items = await this.sql`
       select s.id, u.email as "user", u.user_name as "userName", s.portal_audience as "portal",
-             s.created_at as "loginAt", s.expires_at as "expiresAt"
-      from iam.sessions s
+             s.login_at as "loginAt", s.expires_at as "expiresAt"
+      from iam.login_history s
       left join iam.user_master u on u.user_id = s.user_id
-      order by s.created_at desc
+      order by s.login_at desc
       limit ${lim}`;
     return { items, nextCursor: null };
   }

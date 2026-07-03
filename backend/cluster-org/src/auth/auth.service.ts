@@ -43,16 +43,17 @@ export class AuthService {
     @Inject(PG_CLIENT) private readonly sql: Sql,
   ) {}
 
-  /** Record a login in iam.sessions so the admin Login-history view has data (audit requirement).
-   * Stores the SHA-256 of the refresh token (never the raw token) to satisfy the NOT NULL
-   * refresh_token_hash column and give a real per-session handle. Best-effort: a failure here
-   * must not block login. */
+  /** Record a login in iam.login_history so the admin Login-history view has data (audit
+   * requirement). We use a dedicated table keyed to iam.user_master rather than the legacy
+   * iam.sessions (whose user_id FK points at the unused iam.users identity table, making it
+   * impossible to record real app users). Stores the SHA-256 of the refresh token — never the
+   * raw token. Best-effort: a failure here must not block login. */
   private async recordSession(userId: string, refreshToken: string): Promise<void> {
     try {
       const refreshHash = createHash("sha256").update(refreshToken).digest("hex");
       await this.sql`
-        insert into iam.sessions (id, user_id, portal_audience, refresh_token_hash, expires_at, created_by, updated_by)
-        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, ${refreshHash}, now() + interval '30 days', ${userId}, ${userId})`;
+        insert into iam.login_history (id, user_id, portal_audience, refresh_token_hash, expires_at)
+        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, ${refreshHash}, now() + interval '30 days')`;
     } catch (e) {
       this.logger.warn(`session record failed: ${(e as Error).message}`);
     }
