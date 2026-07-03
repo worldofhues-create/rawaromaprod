@@ -10,7 +10,7 @@
 import { Inject, Injectable, Logger } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import * as argon2 from "argon2";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
 import { DomainError, JwtService, PG_CLIENT, type AuthPrincipal } from "@core/backend-kernel";
 import type { Portal } from "@core/contracts";
@@ -43,12 +43,16 @@ export class AuthService {
     @Inject(PG_CLIENT) private readonly sql: Sql,
   ) {}
 
-  /** Record a login in iam.sessions so the admin Login-history view has data (audit requirement). */
-  private async recordSession(userId: string): Promise<void> {
+  /** Record a login in iam.sessions so the admin Login-history view has data (audit requirement).
+   * Stores the SHA-256 of the refresh token (never the raw token) to satisfy the NOT NULL
+   * refresh_token_hash column and give a real per-session handle. Best-effort: a failure here
+   * must not block login. */
+  private async recordSession(userId: string, refreshToken: string): Promise<void> {
     try {
+      const refreshHash = createHash("sha256").update(refreshToken).digest("hex");
       await this.sql`
-        insert into iam.sessions (id, user_id, portal_audience, expires_at, created_by, updated_by)
-        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, now() + interval '30 days', ${userId}, ${userId})`;
+        insert into iam.sessions (id, user_id, portal_audience, refresh_token_hash, expires_at, created_by, updated_by)
+        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, ${refreshHash}, now() + interval '30 days', ${userId}, ${userId})`;
     } catch (e) {
       this.logger.warn(`session record failed: ${(e as Error).message}`);
     }
@@ -92,7 +96,7 @@ export class AuthService {
       sid: row.userId,
     });
     const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
-    await this.recordSession(row.userId);
+    await this.recordSession(row.userId, refreshToken);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,
