@@ -1329,7 +1329,16 @@
     var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--t3);font-family:\'JetBrains Mono\',monospace;font-size:12px">LOADING · ENCRYPTED CHANNEL…</div>';
     var masked = item[4] === true;
     var res;
-    try { res = await tunnel(item[3] + '?limit=100'); } catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
+    var srch = st.search.trim();
+    try {
+      if (srch) {
+        // server-side search over the WHOLE table (not just the first page); fall back to page + client filter if this screen isn't searchable.
+        res = await tunnel('/v1/search?resource=' + encodeURIComponent(item[3]) + '&q=' + encodeURIComponent(srch) + '&limit=200');
+        if (res.status === 404 || res.status >= 500) res = await tunnel(item[3] + '?limit=100');
+      } else {
+        res = await tunnel(item[3] + '?limit=100');
+      }
+    } catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
     if (res.status === 403) { V.innerHTML = errBox('Your role does not have access to this data.'); return; }
     var rows = (res.json && res.json.data) || [];
     var cols = columns(rows, item[3]);

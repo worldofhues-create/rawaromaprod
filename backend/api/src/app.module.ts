@@ -44,6 +44,7 @@ import { EditModule } from './edit/edit.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { PlanningModule } from './planning/planning.module.js';
 import { AuditModule } from './audit/audit.module.js';
+import { SearchModule } from './search/search.module.js';
 
 @Module({
   imports: [
@@ -68,6 +69,7 @@ import { AuditModule } from './audit/audit.module.js';
     DocumentsModule,
     PlanningModule,
     AuditModule,
+    SearchModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then flag-gate.
