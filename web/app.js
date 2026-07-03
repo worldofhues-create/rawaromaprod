@@ -94,6 +94,7 @@
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
   var ROLES = {
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
+      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
       ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
       ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
@@ -191,6 +192,8 @@
     '/v1/vendor-dispatches': ['poNumber', 'vendorName', 'dispatchDate', 'transporter', 'docketNumber', 'status'],
     '/v1/qc-sample-retentions': ['sampleCode', 'sampleQty', 'retainedDt', 'status'],
     '/v1/approval-matrix': ['module', 'transaction', 'createdBy', 'approvedBy', 'finalAuthority', 'autoApproval', 'remarks'],
+    '/v1/production-plans': ['planDate', 'plannedStartDt', 'plannedEndDt', 'status'],
+    '/v1/production-plan-items': ['plannedQty', 'status'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
@@ -727,7 +730,9 @@
     '/v1/oil-batches': [
       { label: 'Start maturation', perm: 'production:oil_batch_master:write', when: function (r) { return ['IN_MATURATION', 'MATURING', 'RELEASED'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'IN_MATURATION', 'Maturation started'); } },
       { label: 'Release', perm: 'production:oil_batch_master:write', tone: 'good', when: function (r) { return ['IN_MATURATION', 'MATURING', 'HOLD'].indexOf(UP(r.status)) >= 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'RELEASED', 'Released'); } },
-      { label: 'Hold', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'HOLD'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'HOLD', 'Held'); } }
+      { label: 'Hold', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'HOLD'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'HOLD', 'Held'); } },
+      { label: 'Rework', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'FAILED', 'REWORK'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'REWORK', 'Sent for rework'); } },
+      { label: 'Fail', perm: 'production:oil_batch_master:write', tone: 'bad', when: function (r) { return ['RELEASED', 'FAILED'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'FAILED', 'Batch failed'); } }
     ]
   };
   /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */
@@ -775,6 +780,8 @@
       fields: [{ n: 'aliasName', l: 'Alias name' }, { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/grn-containers': { resource: 'grn-containers', idKey: 'grnContainerId', perm: 'inventory:grn_container:write', statusField: 'status', title: 'Edit container',
       fields: [{ n: 'containerCode', l: 'Container number' }, { n: 'containerQty', l: 'Container qty', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/production-plans': { resource: 'production-plans', idKey: 'productionPlanId', perm: 'production:production_plan:write', statusField: 'status', title: 'Edit production plan',
+      fields: [{ n: 'planDate', l: 'Plan date', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] }] },
     '/v1/geo-regions': { resource: 'geo-regions', idKey: 'id', perm: 'platform:geo_location_master:write', statusField: 'isActive', editPath: function (id) { return '/v1/geo-regions/' + id; }, title: 'Edit geo region',
       fields: [{ n: 'name', l: 'Region name' }, { n: 'code', l: 'Code' }, { n: 'isActive', l: 'Active', t: 'select', en: ['true', 'false'] }] },
     '/v1/products': { resource: 'products', idKey: 'productId', perm: 'packaging:product_master:write', statusField: 'status', title: 'Edit product',
@@ -1205,6 +1212,15 @@
       { n: 'notes', l: 'Notes', t: 'textarea' }
     ] },
     // ---- mid-flow production/packaging creates (make the 20-stage chain walkable from the UI) ----
+    '/v1/production-plans': { title: 'New production plan', perm: 'production:production_plan:write', fields: [
+      { n: 'planDate', l: 'Plan date', t: 'date', req: true },
+      { n: 'locationId', l: 'Location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' }
+    ] },
+    '/v1/production-plan-items': { title: 'New plan item', perm: 'production:production_plan:write', fields: [
+      { n: 'productionPlanId', l: 'Production plan', t: 'select', fk: '/v1/production-plans', fv: 'productionPlanId', fl: 'planDate', req: true },
+      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaCode' },
+      { n: 'plannedQty', l: 'Planned qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
+    ] },
     '/v1/production-orders': { title: 'New production order', perm: 'production:production_order:write', fields: [
       { n: 'formulaVersionId', l: 'Formula version', t: 'select', fk: '/v1/formula-versions', fv: 'formulaVersionId', fl: 'versionNumber', req: true },
       { n: 'orderQty', l: 'Batch size / order qty', t: 'number', req: true }
