@@ -3,7 +3,7 @@
  * GATE_ENTRY_DOCUMENTS. In-schema FK: gate_entry_documents → gate_entry_master. All other
  * refs (vendor/po/location/document_type/document) are cross-schema SOFT refs (plain uuid).
  */
-import { index, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { index, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { inventory } from "./_schema.js";
 
@@ -20,6 +20,8 @@ export const gateEntryMaster = inventory.table(
     entryDt: timestamp("entry_dt", { withTimezone: true }),
     exitDt: timestamp("exit_dt", { withTimezone: true }),
     driverName: varchar("driver_name", { length: 200 }),
+    invoiceNumber: text("invoice_number"),
+    challanNumber: text("challan_number"),
     ...metaColumns(),
   },
   (t) => [

@@ -44,6 +44,8 @@ export const createGateEntry = z.object({
   entryDt: z.string().nullish(),
   exitDt: z.string().nullish(),
   driverName: z.string().max(200).nullish(),
+  invoiceNumber: z.string().nullish(),
+  challanNumber: z.string().nullish(),
   documents: z.array(gateEntryDocumentInput).default([]),
 });
 export type CreateGateEntry = z.infer<typeof createGateEntry>;

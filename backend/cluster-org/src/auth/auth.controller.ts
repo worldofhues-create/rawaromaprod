@@ -41,7 +41,7 @@ export class AuthController {
     return this.auth.refresh(body.refreshToken);
   }
 
-  @Permissions("iam:user:write")
+  @Permissions("iam:user_master:write")
   @Post("auth/users/:id/password")
   setPassword(
     @Param("id") id: string,

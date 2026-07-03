@@ -147,8 +147,10 @@ export class DashboardService {
     const qc = { pass: 0, fail: 0, pending: 0 };
     for (const r of qcByResult) {
       const k = String(r.r).toUpperCase();
-      if (k === 'PASS') qc.pass = num(r.c);
-      else if (k === 'FAIL') qc.fail = num(r.c);
+      // inbound QC dispositions set overall_result to the disposition code (ACCEPT/REJECT/REWORK/HOLD),
+      // so treat ACCEPT/PASS as pass, REJECT/FAIL as fail, and REWORK/HOLD/PENDING as still-pending.
+      if (k === 'PASS' || k === 'ACCEPT') qc.pass += num(r.c);
+      else if (k === 'FAIL' || k === 'REJECT') qc.fail += num(r.c);
       else qc.pending += num(r.c);
     }
     const passRate = qc.pass + qc.fail ? Math.round((qc.pass / (qc.pass + qc.fail)) * 100) : 0;
@@ -389,7 +391,7 @@ export class DashboardService {
     const [prPend, poPend, qcFail, prodQcFail, pkgQcFail, lowStock, expiring] = await Promise.all([
       sql`select count(*)::int c from procurement.purchase_request where upper(status) = 'SUBMITTED'`,
       sql`select count(*)::int c from procurement.purchase_order where upper(status) in ('DRAFT','PENDING','PENDING_APPROVAL')`,
-      sql`select count(*)::int c from quality.qc_inspections where upper(overall_result) = 'FAIL'`,
+      sql`select count(*)::int c from quality.qc_inspections where upper(overall_result) in ('FAIL', 'REJECT')`,
       sql`select count(*)::int c from production.production_qc where upper(result) in ('FAIL','HOLD')`,
       sql`select count(*)::int c from packaging.packaging_qc where upper(overall_result) = 'FAIL'`,
       sql`select count(*)::int c from procurement.stock_requirement where status is null or upper(status) <> 'CLOSED'`,
