@@ -75,6 +75,8 @@ export const grnItemInput = z.object({
   uomId: z.string().uuid().nullish(),
   acceptedQty: num.nullish(),
   rejectedQty: num.nullish(),
+  damagedQty: num.nullish(),
+  varianceReason: z.string().nullish(),
   manufacturingDate: z.string().nullish(),
   expiryDate: z.string().nullish(),
   storageLocationId: z.string().uuid().nullish(),

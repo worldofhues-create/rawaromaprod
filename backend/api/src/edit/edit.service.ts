@@ -89,6 +89,7 @@ const REGISTRY: Record<string, ResourceCfg> = {
     cols: { requiredQty: 'required_qty', priority: 'priority', requiredByDate: 'required_by_date', status: 'status' },
   },
   grns: { schema: 'inventory', table: 'grn_master', pk: 'grn_id', perm: 'inventory:grn_master:write', cols: { status: 'status' } },
+  'grn-items': { schema: 'inventory', table: 'grn_items', pk: 'grn_item_id', perm: 'inventory:grn_master:write', cols: { receivedQty: 'received_qty', acceptedQty: 'accepted_qty', rejectedQty: 'rejected_qty', damagedQty: 'damaged_qty', varianceType: 'variance_type', varianceReason: 'variance_reason', status: 'status' } },
   'grn-containers': { schema: 'inventory', table: 'grn_container', pk: 'grn_container_id', perm: 'inventory:grn_container:write', cols: { containerCode: 'container_code', containerQty: 'container_qty', status: 'status' } },
   'batch-container-mappings': { schema: 'inventory', table: 'batch_container_mappings', pk: 'batch_container_mapping_id', perm: 'inventory:batch_container_mappings:write', cols: { status: 'status' } },
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },

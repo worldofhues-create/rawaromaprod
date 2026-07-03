@@ -126,6 +126,7 @@
       ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
+      ['grnitems', 'Qty verification', 'activity', '/v1/grn-items'],
       ['batches', 'Batches', 'layers', '/v1/rm-batches'], ['containers', 'Containers', 'box', '/v1/grn-containers'] ] },
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
@@ -192,6 +193,7 @@
     '/v1/purchase-requests': ['prNumber', 'requiredDate', 'status'],
     '/v1/gate-entries': ['gateEntryNumber', 'vehicleNumber', 'driverName', 'status'],
     '/v1/grns': ['grnNumber', 'batchId', 'status'],
+    '/v1/grn-items': ['grnNumber', 'orderedQty', 'receivedQty', 'acceptedQty', 'rejectedQty', 'damagedQty', 'varianceType', 'status'],
     '/v1/rm-batches': ['batchNumber', 'expiryDate', 'fefoFlag', 'status'],
     '/v1/qc-inspections': ['rmBatchId', 'overallResult', 'inspectionDt', 'status'],
     '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
@@ -1346,8 +1348,8 @@
       header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
-      header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date' } ],
-      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true } ] }
+      header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
+      item: [ { n: 'purchaseOrderItemId', l: 'PO line (ordered qty)', t: 'select', fk: '/v1/purchase-order-items', fv: 'purchaseOrderItemId', fl: 'label' }, { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true }, { n: 'damagedQty', l: 'Damaged qty', t: 'number' }, { n: 'varianceReason', l: 'Variance reason (if short/excess/damaged)', t: 'text' } ] }
   };
   async function openCreateDoc(endpoint) {
     var cfg = CREATE_DOC[endpoint]; if (!cfg) return;

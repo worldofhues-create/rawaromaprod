@@ -10,7 +10,7 @@
  * inventory/GRN can cold-read the PO. numeric → String(n); dates → ISO date strings.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -41,7 +41,14 @@ export class PoService {
   /* ── purchase_order — create from a quotation, total = Σ(amount) ─────── */
 
   async createPurchaseOrder(body: CreatePurchaseOrder, principal: AuthPrincipal) {
-    const total = body.items.reduce((sum, it) => sum + Number(it.amount), 0);
+    // Line amount = explicit amount, else qty × rate; never NaN (PROC-19: the total previously
+    // did raw Number(it.amount) which is NaN when the form only sends qty + rate, corrupting
+    // total_amount on every UI-created PO).
+    const lineAmount = (it: (typeof body.items)[number]): number => {
+      const amt = it.amount != null ? Number(it.amount) : Number(it.orderedQty ?? 0) * Number(it.rate ?? 0);
+      return Number.isFinite(amt) ? amt : 0;
+    };
+    const total = body.items.reduce((sum, it) => sum + lineAmount(it), 0);
 
     return this.db.transaction(async (tx) => {
       const poId = uuidv7();
@@ -80,7 +87,7 @@ export class PoService {
                 orderedQty: it.orderedQty != null ? String(it.orderedQty) : null,
                 uomId: it.uomId ?? null,
                 rate: it.rate != null ? String(it.rate) : null,
-                amount: String(it.amount != null ? it.amount : Number(it.orderedQty || 0) * Number(it.rate || 0)),
+                amount: String(lineAmount(it)),
                 status: 'ACTIVE',
                 createdBy: principal.userId,
                 updatedBy: principal.userId,
@@ -142,18 +149,22 @@ export class PoService {
     );
   }
 
-  async listPurchaseOrderItems(
-    query: ListQuery,
-  ): Promise<Page<typeof purchaseOrderItems.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(purchaseOrderItems)
-      .where(
-        query.cursor ? lt(purchaseOrderItems.purchaseOrderItemId, query.cursor) : undefined,
-      )
-      .orderBy(desc(purchaseOrderItems.purchaseOrderItemId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.purchaseOrderItemId);
+  async listPurchaseOrderItems(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with PO number + material + ordered qty, and a composite `label` so the GRN
+    // quantity-verification form can pick the exact PO line being received. Readers (Owner/
+    // Procurement/Receiving) hold material reveal.
+    const rows = (await this.db.execute(sql`
+      select poi.purchase_order_item_id as "purchaseOrderItemId", poi.purchase_order_id as "purchaseOrderId",
+             po.po_number as "poNumber", poi.material_id as "materialId", m.material_name as "materialName",
+             poi.ordered_qty as "orderedQty", poi.rate as "rate", poi.uom_id as "uomId", poi.status as "status",
+             coalesce(po.po_number, '') || ' · ' || coalesce(m.material_name, m.material_code, '?') || ' · ord ' || coalesce(poi.ordered_qty::text, '0') as "label"
+        from procurement.purchase_order_items poi
+        left join procurement.purchase_order po on po.purchase_order_id = poi.purchase_order_id
+        left join masterdata.material m on m.material_id = poi.material_id
+       ${query.cursor ? sql`where poi.purchase_order_item_id < ${query.cursor}` : sql``}
+       order by poi.purchase_order_item_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.purchaseOrderItemId as string);
   }
 
   async getPurchaseOrderItem(id: string) {

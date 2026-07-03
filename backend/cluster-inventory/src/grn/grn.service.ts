@@ -74,6 +74,30 @@ export class GrnService {
 
       for (const it of body.items) {
         const grnItemId = uuidv7();
+
+        // Step 18 — Quantity Verification. Pull the ordered qty from the linked PO line, then
+        // classify the receipt: MATCHED when received == ordered (and nothing damaged), else
+        // SHORT / EXCESS; DAMAGED overrides a match. accepted defaults to received − damaged −
+        // rejected. A mismatch (or damage) records a vendor notification below.
+        let orderedQty: number | null = null;
+        if (it.purchaseOrderItemId) {
+          const poi = (await tx.execute(
+            sql`select ordered_qty from procurement.purchase_order_items where purchase_order_item_id = ${it.purchaseOrderItemId} limit 1`,
+          )) as unknown as Array<{ ordered_qty: string | null }>;
+          orderedQty = poi[0]?.ordered_qty != null ? Number(poi[0].ordered_qty) : null;
+        }
+        const received = it.receivedQty != null ? Number(it.receivedQty) : 0;
+        const damaged = it.damagedQty != null ? Number(it.damagedQty) : 0;
+        const rejected = it.rejectedQty != null ? Number(it.rejectedQty) : damaged;
+        const accepted = it.acceptedQty != null ? Number(it.acceptedQty) : Math.max(0, received - damaged - (it.rejectedQty != null ? rejected : 0));
+        let varianceQty: number | null = null;
+        let varianceType = 'MATCHED';
+        if (orderedQty != null) {
+          varianceQty = Number((received - orderedQty).toFixed(3));
+          if (Math.abs(varianceQty) > 0.0001) varianceType = received < orderedQty ? 'SHORT' : 'EXCESS';
+        }
+        if (damaged > 0 && varianceType === 'MATCHED') varianceType = 'DAMAGED';
+
         const item = ensure(
           (
             await tx
@@ -85,8 +109,13 @@ export class GrnService {
                 materialId: it.materialId ?? null,
                 receivedQty: it.receivedQty != null ? String(it.receivedQty) : null,
                 uomId: it.uomId ?? null,
-                acceptedQty: it.acceptedQty != null ? String(it.acceptedQty) : null,
-                rejectedQty: it.rejectedQty != null ? String(it.rejectedQty) : null,
+                acceptedQty: String(accepted),
+                rejectedQty: String(rejected),
+                orderedQty: orderedQty != null ? String(orderedQty) : null,
+                damagedQty: String(damaged),
+                varianceQty: varianceQty != null ? String(varianceQty) : null,
+                varianceType,
+                varianceReason: it.varianceReason ?? null,
                 status: 'ACTIVE',
                 createdBy: principal.userId,
                 updatedBy: principal.userId,
@@ -95,6 +124,21 @@ export class GrnService {
           )[0],
         );
         items.push(item);
+
+        // Vendor notification on any short/excess/damaged receipt (scope-freeze step 18 branch).
+        if (varianceType !== 'MATCHED') {
+          try {
+            await tx.execute(sql`
+              insert into platform.notification_log (notification_log_id, event_id, event_type, channel, recipient, subject, body, status, created_dt)
+              values (gen_random_uuid(), ${grnItemId}, 'grn.variance', 'EMAIL',
+                      ${master.vendorId ? String(master.vendorId) : 'vendor'},
+                      ${'GRN ' + master.grnNumber + ' — ' + varianceType + ' variance'},
+                      ${'GRN ' + master.grnNumber + ': ordered ' + (orderedQty ?? '—') + ', received ' + received + (damaged ? ', damaged ' + damaged : '') + ' → ' + varianceType + (it.varianceReason ? ' (' + it.varianceReason + ')' : '') + '. Please review with purchase.'},
+                      'LOGGED', now())`);
+          } catch {
+            /* best-effort: a notification failure must not roll back the receipt */
+          }
+        }
 
         const lineContainers: (typeof grnContainer.$inferSelect)[] = [];
         for (const c of it.containers) {
@@ -225,14 +269,23 @@ export class GrnService {
     );
   }
 
-  async listGrnItems(query: ListQuery): Promise<Page<typeof grnItems.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(grnItems)
-      .where(query.cursor ? lt(grnItems.grnItemId, query.cursor) : undefined)
-      .orderBy(desc(grnItems.grnItemId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.grnItemId);
+  async listGrnItems(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with the GRN number + the Step-18 quantity-verification fields so ordered-vs-received
+    // and the variance classification are visible. material_id is kept (interceptor masks it for
+    // non-reveal callers); no real material name is added here.
+    const rows = (await this.db.execute(sql`
+      select gi.grn_item_id as "grnItemId", gi.grn_id as "grnId", g.grn_number as "grnNumber",
+             gi.material_id as "materialId",
+             gi.ordered_qty as "orderedQty", gi.received_qty as "receivedQty",
+             gi.accepted_qty as "acceptedQty", gi.rejected_qty as "rejectedQty", gi.damaged_qty as "damagedQty",
+             gi.variance_qty as "varianceQty", gi.variance_type as "varianceType", gi.variance_reason as "varianceReason",
+             gi.status as "status"
+        from inventory.grn_items gi
+        left join inventory.grn_master g on g.grn_id = gi.grn_id
+       ${query.cursor ? sql`where gi.grn_item_id < ${query.cursor}` : sql``}
+       order by gi.grn_item_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.grnItemId as string);
   }
 
   async getGrnItem(id: string) {

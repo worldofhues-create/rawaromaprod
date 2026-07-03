@@ -3,7 +3,7 @@
  * GRN_CONTAINER. In-schema FKs: grn_items → grn_master; grn_container → grn_master + grn_items.
  * gate_entry_id, po/vendor/location/material refs are SOFT (plain uuid).
  */
-import { date, index, numeric, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { date, index, numeric, text, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { inventory } from "./_schema.js";
 
@@ -41,6 +41,13 @@ export const grnItems = inventory.table(
     uomId: uuid("uom_id"),
     acceptedQty: numeric("accepted_qty", { precision: 18, scale: 4 }),
     rejectedQty: numeric("rejected_qty", { precision: 18, scale: 4 }),
+    // Step 18 — quantity verification: ordered snapshot (from the PO line) + damaged qty + the
+    // computed variance and its classification (MATCHED / SHORT / EXCESS / DAMAGED) + reason.
+    orderedQty: numeric("ordered_qty", { precision: 18, scale: 3 }),
+    damagedQty: numeric("damaged_qty", { precision: 18, scale: 3 }),
+    varianceQty: numeric("variance_qty", { precision: 18, scale: 3 }),
+    varianceType: text("variance_type"),
+    varianceReason: text("variance_reason"),
     ...metaColumns(),
   },
   (t) => [
