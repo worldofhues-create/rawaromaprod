@@ -628,7 +628,11 @@
       { label: 'Reject', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'ISSUED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-orders', 'purchaseOrderId', r); } }
     ],
     '/v1/rm-batches': [
+      { label: 'QR label', perm: 'inventory:rm_batch_master:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Batch ' + (r.batchNumber || ''), (r.batchNumber || String(r.rmBatchId).slice(0, 8)), 'RA-BATCH:' + (r.batchNumber || '') + ':' + r.rmBatchId, 'RM batch'); } },
       { label: 'Release to stock', perm: 'inventory:rm_batch_master:write', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/rm-batches/' + r.rmBatchId + '/release'; }, body: {} }
+    ],
+    '/v1/grn-containers': [
+      { label: 'QR label', perm: 'inventory:grn_container:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Container ' + (r.containerCode || ''), (r.containerCode || String(r.grnContainerId).slice(0, 8)), 'RA-CONTAINER:' + (r.containerCode || '') + ':' + r.grnContainerId, 'GRN ' + (r.grnNumber || '') + (r.containerQty != null ? ' · ' + r.containerQty : '')); } }
     ],
     '/v1/qc-inspections': [
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
@@ -1444,6 +1448,31 @@
         close(); toast('Ingredients sealed ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Seal into vault'; $('ra-gerr').textContent = 'Could not reach the secure channel.'; });
     };
+  }
+  // Build a scannable QR (byte mode, ECC-M) as an inline SVG using the vendored qrcode generator.
+  function qrSvg(text, cell) {
+    if (typeof qrcode === 'undefined') return '';
+    try { var q = qrcode(0, 'M'); q.addData(String(text)); q.make(); return q.createSvgTag({ cellSize: cell || 6, margin: (cell || 6) * 2, scalable: true }); }
+    catch (e) { return ''; }
+  }
+  // Open a print-ready label window: QR (encoding the traceable payload) + human-readable code.
+  function openQrLabel(title, code, payload, sub) {
+    var svg = qrSvg(payload, 6);
+    if (!svg) { toast('QR generator not loaded — hard-refresh the page.', 'bad'); return; }
+    var w = window.open('', '_blank', 'width=420,height=580');
+    if (!w) { toast('Allow pop-ups to print the QR label.', 'warn'); return; }
+    var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; }); };
+    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
+      '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#111}' +
+      '.qr{width:250px;height:250px;margin:0 auto 10px}.qr svg{width:100%;height:100%}' +
+      '.code{font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:800;letter-spacing:.04em;margin:6px 0 2px}' +
+      '.sub{color:#555;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#999}' +
+      '@media print{@page{margin:8mm}}</style></head><body>' +
+      '<div class="qr">' + svg + '</div><div class="code">' + esc(code) + '</div><div class="sub">' + esc(sub) + '</div>' +
+      '<div class="brand">RAW AROMACHEM</div>' +
+      '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},180);};</scr' + 'ipt>' +
+      '</body></html>');
+    w.document.close();
   }
   function openRecordQc(inspection) {
     var iid = inspection.qcInspectionId != null ? inspection.qcInspectionId : guessId(inspection);

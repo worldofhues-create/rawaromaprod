@@ -5,9 +5,9 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v44';
+const CACHE = 'ra-shell-v45';
 const SHELL = [
-  '/', '/index.html', '/app.js', '/manifest.webmanifest', '/icon.svg',
+  '/', '/index.html', '/app.js', '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
   '/fonts/adf5f325-e87d-4401-84a9-246e380c6864.woff2',
   '/fonts/9b9b854c-5b1b-4e4a-88a5-0d3eec462f94.woff2',
   '/fonts/ad1f26c5-34be-47f9-98b1-c73b902006f7.woff2',
