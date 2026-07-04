@@ -1119,7 +1119,7 @@
     '/v1/vendor-credit-notes': { title: 'New vendor settlement', perm: 'procurement:vendor_credit_note:write', fields: [
       { n: 'vendorId', l: 'Vendor', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true },
       { n: 'grnId', l: 'Against GRN (QC-rejected only)', t: 'select', fk: '/v1/qc-rejected-grns', fv: 'grnId', fl: 'label' },
-      { n: 'vendorCreditReasonId', l: 'Reason', t: 'select', fk: '/v1/vendor-credit-reasons', fv: 'vendorCreditReasonId', fl: 'reasonName' },
+      { n: 'vendorCreditReasonId', l: 'Reason', t: 'select', fk: '/v1/vendor-credit-reasons', fv: 'vendorCreditReasonId', fl: 'reasonDescription' },
       { n: 'creditNoteNumber', l: 'Credit note no.', t: 'text', req: true }, { n: 'amount', l: 'Amount', t: 'number' },
       { n: 'creditNoteDate', l: 'Date', t: 'date' }
     ] },
