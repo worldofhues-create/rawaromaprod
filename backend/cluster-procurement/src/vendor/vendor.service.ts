@@ -35,7 +35,10 @@ export class VendorService {
           .insert(vendorDetails)
           .values({
             organizationId: body.organizationId ?? null,
-            vendorCode: body.vendorCode ?? null,
+            // Vendor code auto-generates (VEN-YYYYMM-#####) when the form leaves it blank.
+            vendorCode:
+              (body.vendorCode && String(body.vendorCode).trim()) ||
+              'VEN-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5),
             vendorName: body.vendorName ?? null,
             addressId: body.addressId ?? null,
             baseCurrencyId: body.baseCurrencyId ?? null,

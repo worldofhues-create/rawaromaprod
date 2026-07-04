@@ -185,26 +185,38 @@ export class ProcAnalyticsService {
    * (FAIL-01) so a credit note is raised against the correct rejected batch, with QC context. */
   async qcRejectedGrns(limit = 200) {
     const lim = Math.min(Math.max(1, limit), 500);
+    // Enriched with the failed QC result + the batch numbers so the settlement is raised against
+    // the correct batch/GRN with visible context (FAIL-01). The picker label reads
+    // "GRN · vendor · QC REJECT · batch F24-…" — and degrades to "(no vendor)" rather than "?".
     const items = await this.sql`
-      select g.grn_id as "grnId", g.grn_number as "grnNumber", g.purchase_order_id as "purchaseOrderId",
-             po.po_number as "poNumber", g.vendor_id as "vendorId", v.vendor_name as "vendorName",
-             (select string_agg(distinct upper(qi.overall_result), ', ')
-                from quality.qc_inspections qi
-                join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
-                join inventory.grn_items gi2 on gi2.grn_item_id = b.grn_item_id
-               where gi2.grn_id = g.grn_id and upper(qi.overall_result) in ('REJECT','FAIL')) as "qcResult",
-             coalesce(g.grn_number,'') || ' · ' || coalesce(v.vendor_name,'?') as "label"
-        from inventory.grn_master g
-        left join procurement.purchase_order po on po.purchase_order_id = g.purchase_order_id
-        left join procurement.vendor_details v on v.vendor_id = g.vendor_id
-       where exists (select 1 from quality.qc_inspections qi
-                       join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
-                       join inventory.grn_items gi on gi.grn_item_id = b.grn_item_id
-                      where gi.grn_id = g.grn_id and upper(qi.overall_result) in ('REJECT','FAIL'))
-          or exists (select 1 from inventory.grn_items gi
-                      where gi.grn_id = g.grn_id and (coalesce(gi.rejected_qty,0) > 0 or coalesce(gi.damaged_qty,0) > 0 or gi.variance_type in ('SHORT','DAMAGED')))
-       order by g.grn_id desc
-       limit ${lim}`;
+      select t.*,
+             coalesce(t."grnNumber",'') || ' · ' || coalesce(t."vendorName",'(no vendor)') ||
+             case when t."qcResult" is not null then ' · QC ' || t."qcResult" else '' end ||
+             case when t."batchNumbers" is not null then ' · batch ' || t."batchNumbers" else '' end as "label"
+        from (
+          select g.grn_id as "grnId", g.grn_number as "grnNumber", g.purchase_order_id as "purchaseOrderId",
+                 po.po_number as "poNumber", g.vendor_id as "vendorId", v.vendor_name as "vendorName",
+                 (select string_agg(distinct upper(qi.overall_result), ', ')
+                    from quality.qc_inspections qi
+                    join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
+                    join inventory.grn_items gi2 on gi2.grn_item_id = b.grn_item_id
+                   where gi2.grn_id = g.grn_id and upper(qi.overall_result) in ('REJECT','FAIL')) as "qcResult",
+                 (select string_agg(distinct b.batch_number, ', ')
+                    from inventory.rm_batch_master b
+                    join inventory.grn_items gi3 on gi3.grn_item_id = b.grn_item_id
+                   where gi3.grn_id = g.grn_id) as "batchNumbers"
+            from inventory.grn_master g
+            left join procurement.purchase_order po on po.purchase_order_id = g.purchase_order_id
+            left join procurement.vendor_details v on v.vendor_id = g.vendor_id
+           where exists (select 1 from quality.qc_inspections qi
+                           join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
+                           join inventory.grn_items gi on gi.grn_item_id = b.grn_item_id
+                          where gi.grn_id = g.grn_id and upper(qi.overall_result) in ('REJECT','FAIL'))
+              or exists (select 1 from inventory.grn_items gi
+                          where gi.grn_id = g.grn_id and (coalesce(gi.rejected_qty,0) > 0 or coalesce(gi.damaged_qty,0) > 0 or gi.variance_type in ('SHORT','DAMAGED')))
+           order by g.grn_id desc
+           limit ${lim}
+        ) t`;
     return { items, nextCursor: null };
   }
 

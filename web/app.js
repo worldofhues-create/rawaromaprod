@@ -439,6 +439,8 @@
       '<div style="display:flex;gap:10px;margin-top:6px">' +
       [kset[1], kset[2]].map(function (m, i) { return '<div style="flex:1;background:var(--well);box-shadow:var(--ins-sm);border-radius:12px;padding:10px 12px"><div style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3)">' + ['TOP', 'MED'][i] + '</div><div style="font-size:13px;font-weight:800;margin-top:2px">' + m[1] + '</div><div style="font-size:10.5px;color:var(--t3)">' + m[2] + '</div></div>'; }).join('') +
       '</div>', '22px');
+    // Procurement asked to drop the (redundant) PIPELINE SIGNALS card → 2-card band there.
+    if (role === 'procurement') return '<div data-grid style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">' + insight + output + '</div>';
     return '<div data-grid style="display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:14px">' + insight + signals + output + '</div>';
   }
   // Side panel — donut / bars / feed / pipeline (mockup buildSide), real data.
@@ -739,6 +741,14 @@
     ]
   };
   /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */
+  // Row-click detail drill-downs: header fields + (optionally) the record's line items.
+  var DETAIL = {
+    '/v1/purchase-requests': { title: 'Purchase request', idKey: 'purchaseRequestId' },
+    '/v1/purchase-orders': { title: 'Purchase order', idKey: 'purchaseOrderId', items: { ep: '/v1/purchase-order-items', fk: 'purchaseOrderId', cols: ['materialName', 'orderedQty', 'rate', 'amount', 'status'] } },
+    '/v1/quotations': { title: 'Quotation', idKey: 'quotationId', items: { ep: '/v1/quotation-items', fk: 'quotationId', cols: ['materialName', 'quotedQty', 'quotedRate', 'status'] } },
+    '/v1/sales-orders': { title: 'Sales order', idKey: 'salesOrderId', items: { ep: '/v1/sales-order-items', fk: 'salesOrderId', cols: ['orderedQty', 'rate', 'amount', 'status'] } },
+    '/v1/grns': { title: 'Goods receipt', idKey: 'grnId', items: { ep: '/v1/grn-items', fk: 'grnId', cols: ['orderedQty', 'receivedQty', 'acceptedQty', 'rejectedQty', 'damagedQty', 'varianceType'] } },
+  };
   var EDIT = {
     '/v1/materials': { resource: 'materials', idKey: 'materialId', perm: 'masterdata:material:write', statusField: 'status', title: 'Edit material',
       fields: [{ n: 'materialName', l: 'Material name' }, { n: 'uomId', l: 'Unit', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
@@ -813,6 +823,10 @@
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['RECEIVED', 'PENDING', 'CANCELLED'] }] },
     '/v1/rfqs': { resource: 'rfqs', idKey: 'rfqId', perm: 'procurement:rfq_master:write', statusField: 'status', title: 'Edit RFQ',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED', 'CANCELLED'] }] },
+    '/v1/purchase-requests': { resource: 'purchase-requests', idKey: 'purchaseRequestId', perm: 'procurement:purchase_request:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, title: 'Edit purchase request (draft)',
+      fields: [{ n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'SUBMITTED'] }] },
+    '/v1/purchase-orders': { resource: 'purchase-orders', idKey: 'purchaseOrderId', perm: 'procurement:purchase_order:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, title: 'Edit purchase order (draft)',
+      fields: [{ n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT'] }] },
     '/v1/formula-versions': { resource: 'formula-versions', idKey: 'formulaVersionId', perm: 'formula:formula_version:write', statusField: 'status', title: 'Edit formula version',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'ARCHIVED', 'REJECTED'] }] },
     '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
@@ -828,6 +842,39 @@
     '/v1/document-registry': { resource: 'documents', idKey: 'documentRegistryId', perm: 'platform:document_master:write', statusField: 'status', title: 'Edit document',
       fields: [{ n: 'title', l: 'Title' }, { n: 'documentType', l: 'Type' }, { n: 'referenceNo', l: 'Reference no.' }, { n: 'sourceUrl', l: 'Document link' }, { n: 'issueDate', l: 'Issue date' }, { n: 'expiryDate', l: 'Expiry date' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'SUPERSEDED', 'INACTIVE'] }] }
   };
+  // Read-only drill-down: the record's readable fields + its line items (fetched on open).
+  function openDetail(endpoint, row) {
+    var cfg = DETAIL[endpoint]; if (!cfg) return;
+    var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
+    var skip = {}; skip[cfg.idKey] = 1;
+    var fieldsHtml = Object.keys(row).filter(function (k) {
+      var v = row[k]; if (skip[k]) return false; if (v == null || v === '') return false;
+      if (/Id$/.test(k) && isUuid(v)) return false;
+      return true;
+    }).map(function (k) {
+      return '<div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12px;color:var(--t3);font-weight:600">' + label(k) + '</span><span style="font-size:13px;color:var(--t1);font-weight:600;text-align:right;word-break:break-word">' + fmt(k, row[k]) + '</span></div>';
+    }).join('') || '<div style="color:var(--t3);font-size:12px;padding:8px 0">No details.</div>';
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<div style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + ' detail</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="margin:10px 0 4px">' + fieldsHtml + '</div>' +
+      (cfg.items ? '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:16px 0 6px">LINE ITEMS</div><div id="ra-ditems" style="color:var(--t3);font-size:12px;padding:8px 0">Loading…</div>' : '') + '</div>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-dclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    if (cfg.items) {
+      tunnel(cfg.items.ep + '?limit=100').then(function (res) {
+        var mine = ((res.json && res.json.data) || []).filter(function (x) { return x[cfg.items.fk] === id; });
+        var box = $('ra-ditems'); if (!box) return;
+        if (!mine.length) { box.textContent = 'No line items recorded.'; return; }
+        var cols = cfg.items.cols;
+        box.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>' +
+          cols.map(function (c) { return '<th style="text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--border)">' + label(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+          mine.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:8px 8px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--t1);white-space:nowrap">' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+      }).catch(function () { var box = $('ra-ditems'); if (box) box.textContent = 'Could not load line items.'; });
+    }
+  }
   function openEdit(endpoint, row) {
     var cfg = EDIT[endpoint]; if (!cfg) return;
     var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
@@ -1001,12 +1048,14 @@
       out.push(actBtn(k, a.label, bg));
     });
     var cfg = EDIT[endpoint];
-    if (cfg && can(cfg.perm)) {
+    if (cfg && can(cfg.perm) && (!cfg.editWhen || cfg.editWhen(r))) {
       var kE = 'ra' + (_actSeq++); _acts[kE] = { a: { label: 'Edit', run: function (row) { openEdit(endpoint, row); } }, r: r };
       out.push(actBtn(kE, 'Edit', 'var(--well)', 'var(--t1)'));
-      var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
-      var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
-      out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? '#C0492E' : '#2E7D55'));
+      if (!cfg.noDeactivate) {
+        var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
+        var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
+        out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? '#C0492E' : '#2E7D55'));
+      }
     }
     if (PRINTABLE[endpoint]) {
       var kP = 'ra' + (_actSeq++); _acts[kP] = { a: { label: 'Print', run: function (row) { printDoc(endpoint, row); } }, r: r };
@@ -1297,7 +1346,7 @@
       { n: 'qcRequired', l: 'QC required?', t: 'select', en: ['true', 'false'] }, { n: 'description', l: 'Description', t: 'textarea' }
     ] },
     '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
-      { n: 'vendorCode', l: 'Vendor code', t: 'text', req: true }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true }, { n: 'paymentTerms', l: 'Payment terms', t: 'text' },
+      { n: 'vendorCode', l: 'Vendor code (auto if blank)', t: 'text', maxlen: 50 }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true, maxlen: 200 }, { n: 'paymentTerms', l: 'Payment terms', t: 'text', maxlen: 60 },
       { n: 'gstin', l: 'GSTIN', t: 'text', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'panNumber', l: 'PAN', t: 'text', maxlen: 10, pat: '[A-Z]{5}[0-9]{4}[A-Z]', patMsg: 'PAN must be 10 characters, e.g. ABCDE1234F' },
       { n: 'bankName', l: 'Bank name', t: 'text' }, { n: 'bankAccountNumber', l: 'Bank account no.', t: 'text', maxlen: 20, pat: '[0-9]{6,20}', patMsg: 'Account number must be 6–20 digits' }, { n: 'bankIfsc', l: 'IFSC', t: 'text', maxlen: 11, pat: '[A-Z]{4}0[A-Z0-9]{6}', patMsg: 'IFSC must be 11 characters, e.g. HDFC0001234' },
       { n: 'contactEmail', l: 'Contact email', t: 'text', pat: '[^@ ]+@[^@ ]+[.][^@ ]+', patMsg: 'Enter a valid email' }, { n: 'contactPhone', l: 'Contact phone', t: 'text', pat: '[+]?[0-9][0-9 -]{6,18}', patMsg: 'Enter a valid phone number' }
@@ -1310,7 +1359,7 @@
     ] },
     '/v1/stock-requirements': { title: 'New stock requirement', perm: 'procurement:stock_requirement:write', fields: [
       { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true },
-      { n: 'requiredQty', l: 'Required qty', t: 'number', req: true }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
+      { n: 'requiredQty', l: 'Required qty', t: 'number', req: true, min: 0, max: 1000000000 }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
       { n: 'requiredByDate', l: 'Required by', t: 'date', req: true }, { n: 'requirementSource', l: 'Source', t: 'text' }
     ] },
     '/v1/purchase-requests': { title: 'New purchase request', perm: 'procurement:purchase_request:write', fields: [
@@ -1763,60 +1812,73 @@
     var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--t3);font-family:\'JetBrains Mono\',monospace;font-size:12px">LOADING · ENCRYPTED CHANNEL…</div>';
     var masked = item[4] === true;
     var res;
-    var srch = st.search.trim();
-    try {
-      if (srch) {
-        // server-side search over the WHOLE table (not just the first page); fall back to page + client filter if this screen isn't searchable.
-        res = await tunnel('/v1/search?resource=' + encodeURIComponent(item[3]) + '&q=' + encodeURIComponent(srch) + '&limit=200');
-        if (res.status === 404 || res.status >= 500) res = await tunnel(item[3] + '?limit=100');
-      } else {
-        res = await tunnel(item[3] + '?limit=100');
-      }
-    } catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
+    try { res = await tunnel(item[3] + '?limit=100'); }
+    catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
     if (res.status === 403) { V.innerHTML = errBox('Your role does not have access to this data.'); return; }
     var rows = (res.json && res.json.data) || [];
+    // Stash the loaded page so search can filter it WITHOUT re-rendering the panel (the search input
+    // is rendered once here and only #ra-results / #ra-count repaint — this kills the cursor-jump).
+    st._view = { item: item, rows: rows, masked: masked, serverQ: null, serverRows: null };
     var cols = columns(rows, item[3]);
-    // KPIs from the real data (counts + status breakdown)
     var byStatus = {}; rows.forEach(function (r) { var s = (r.status || r.overallResult || '').toString().toLowerCase(); if (s) byStatus[s] = (byStatus[s] || 0) + 1; });
     var sKeys = Object.keys(byStatus);
     var kpis = kpi(item[2], String(rows.length), 'Total ' + item[1].toLowerCase()) +
       (sKeys[0] ? kpi('activity', String(byStatus[sKeys[0]]), label(sKeys[0])) : kpi('grid', '—', 'Live')) +
       (sKeys[1] ? kpi('flask', String(byStatus[sKeys[1]]), label(sKeys[1])) : kpi('layers', cols.length ? String(cols.length) : '—', 'Fields')) +
       kpi('lock', masked ? 'Masked' : 'Live', masked ? 'Alias-protected' : 'DB source of truth');
-    var table;
+    var kpiBand = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
     var newBtn = canNew ? '<button id="ra-new" style="padding:8px 14px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm);white-space:nowrap">+ New</button>' : '';
-    if (!rows.length && !srch) {
-      // Genuinely empty table (and not a search) — the only case that shows "empty in the database".
-      table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
-    } else {
-      var q = srch.toLowerCase();
-      var shown = rows.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
-      _acts = {}; _actSeq = 0;
-      var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]];
-      var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
-        (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
-      var body = shown.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
-        (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
-      // No-match state keeps the header + search box (so the user can clear) and NEVER claims the DB is empty.
-      var inner = shown.length
-        ? '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>'
-        : '<div style="padding:44px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No results for "' + escHtml(srch) + '"</div><div style="font-size:13px;color:var(--t3)">' + rows.length + ' record' + (rows.length === 1 ? '' : 's') + ' in this table — none match your search.</div><button id="ra-clear" style="margin-top:14px;padding:8px 16px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit">Clear search</button></div>';
-      table = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
-        '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
-        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)">' + shown.length + ' of ' + rows.length + '</div>' +
-        '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div>' + newBtn + '</div>' +
-        inner + '</div>';
+    if (!rows.length && !st.search.trim()) {
+      V.innerHTML = kpiBand + '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
+      var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
+      return;
     }
-    V.innerHTML = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>' + table;
-    wireActions();
+    var shell = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
+      '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
+      '<div id="ra-count" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)"></div>' +
+      '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div>' + newBtn + '</div>' +
+      '<div id="ra-results"></div></div>';
+    V.innerHTML = kpiBand + shell;
+    paintResults();
     var nb = $('ra-new'); if (nb) nb.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
-    var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; loadView(); };
-    // Debounce the search so we don't fire a fetch + full re-render on every keystroke (PROC-09),
-    // and only steal focus back when THIS render was search-driven (so nav changes don't grab it).
-    var si = $('ra-search'); if (si) si.addEventListener('input', function (e) { st.search = e.target.value; st._searching = true; clearTimeout(st._st); st._st = setTimeout(loadView, 260); });
-    if (st._searching) { st._searching = false; var s2 = $('ra-search'); if (s2) { s2.focus(); s2.setSelectionRange(s2.value.length, s2.value.length); } }
+    var si = $('ra-search'); if (si) {
+      si.addEventListener('input', function (e) { st.search = e.target.value; paintResults(); clearTimeout(st._st); st._st = setTimeout(searchServer, 380); });
+      if (st.search) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
+    }
+  }
+  // Repaint ONLY the results table + count (never the search input) — client-filters the loaded page,
+  // or the whole-table server matches when we have them for the current query.
+  function paintResults() {
+    var v = st._view; if (!v) return; var item = v.item, masked = v.masked;
+    var q = st.search.trim().toLowerCase();
+    var base = (q && v.serverQ === st.search.trim() && v.serverRows) ? v.serverRows : v.rows;
+    var shown = base.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
+    var cols = columns(v.rows, item[3]);
+    _acts = {}; _actSeq = 0;
+    var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]] || !!DETAIL[item[3]];
+    var cnt = $('ra-count'); if (cnt) cnt.textContent = shown.length + ' of ' + v.rows.length;
+    var el = $('ra-results'); if (!el) return;
+    if (!shown.length) {
+      el.innerHTML = '<div style="padding:44px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No results for "' + escHtml(st.search.trim()) + '"</div><div style="font-size:13px;color:var(--t3)">' + v.rows.length + ' record' + (v.rows.length === 1 ? '' : 's') + ' loaded — none match your search.</div><button id="ra-clear" style="margin-top:14px;padding:8px 16px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit">Clear search</button></div>';
+      var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; var s = $('ra-search'); if (s) { s.value = ''; s.focus(); } paintResults(); };
+      return;
+    }
+    var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
+      (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
+    var clickable = !!DETAIL[item[3]];
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
+      (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
+    el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    wireActions();
+    if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) { tr.onclick = function (e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) openDetail(item[3], a.r); }; });
+  }
+  // Whole-table search (beyond the loaded page) — updates the cache then repaints; input untouched.
+  async function searchServer() {
+    var v = st._view; if (!v) return; var q = st.search.trim(); if (!q) return;
+    var res; try { res = await tunnel('/v1/search?resource=' + encodeURIComponent(v.item[3]) + '&q=' + encodeURIComponent(q) + '&limit=200'); } catch (e) { return; }
+    if (res && res.status < 400 && res.json && res.json.data && st.search.trim() === q) { v.serverQ = q; v.serverRows = res.json.data; paintResults(); }
   }
   function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; }); }
   // SYS-04 — shared field validation: required, max length, format (regex), numeric bounds.

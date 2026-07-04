@@ -24,6 +24,12 @@ export interface Page<T> {
 }
 
 const num = z.union([z.number(), z.string()]);
+// A real date (yyyy-mm-dd or full ISO) — rejects free text like "uhyg" server-side.
+const dateStr = z.string().regex(/^\d{4}-\d{2}-\d{2}([T ].*)?$/, 'Expected a date (yyyy-mm-dd)');
+// A sane quantity 0..1e9 — rejects the absurd 65,493,487,347,935 kind of junk server-side.
+const qty = z
+  .union([z.number(), z.string()])
+  .refine((v) => { const n = Number(v); return !isNaN(n) && n >= 0 && n <= 1_000_000_000; }, 'Quantity out of range (0–1,000,000,000)');
 
 /* ── vendor ───────────────────────────────────────────────────────────── */
 
@@ -68,10 +74,10 @@ export type CreateVendorRmMapping = z.infer<typeof createVendorRmMapping>;
 
 export const createStockRequirement = z.object({
   locationId: z.string().uuid().nullish(),
-  materialId: z.string().uuid().nullish(),
-  requiredQty: num.nullish(),
+  materialId: z.string().uuid(),
+  requiredQty: qty,
   uomId: z.string().uuid().nullish(),
-  requiredByDate: z.string().nullish(),
+  requiredByDate: dateStr, // required + must be a real date (server-side enforcement)
   requirementSource: z.string().max(255).nullish(),
   priority: z.string().max(255).nullish(),
 });
@@ -133,9 +139,9 @@ export type ApprovePurchaseRequest = z.infer<typeof approvePurchaseRequest>;
 
 export const createRfqMaster = z.object({
   rfqNumber: z.string().max(50).nullish(),
-  purchaseRequestId: z.string().uuid().nullish(),
-  rfqDate: z.string().nullish(),
-  submissionDeadline: z.string().max(255).nullish(),
+  purchaseRequestId: z.string().uuid(), // an RFQ must come from a PR (mapping enforced)
+  rfqDate: dateStr, // required + real date
+  submissionDeadline: dateStr.nullish(), // optional, but a real date if given (rejects "uhyg")
 });
 export type CreateRfqMaster = z.infer<typeof createRfqMaster>;
 
