@@ -231,7 +231,7 @@
     '/v1/customers': ['customerCode', 'customerName', 'status'],
     '/v1/transporters': ['transporterCode', 'transporterName', 'status'],
     '/v1/stock-requirements': ['materialCode', 'materialName', 'requiredQty', 'requiredByDate', 'priority', 'status'],
-    '/v1/rfqs': ['rfqNumber', 'rfqDate', 'submissionDeadline', 'status'],
+    '/v1/rfqs': ['rfqNumber', 'prNumber', 'rfqDate', 'submissionDeadline', 'status'],
     '/v1/quotations': ['quotationNumber', 'quotationDate', 'validUntilDate', 'status'],
     '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
     '/v1/material-issues': ['issuedDt', 'productionOrderId', 'status'],

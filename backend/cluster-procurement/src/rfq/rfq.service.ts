@@ -50,14 +50,17 @@ export class RfqService {
     );
   }
 
-  async listRfqMasters(query: ListQuery): Promise<Page<typeof rfqMaster.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(rfqMaster)
-      .where(query.cursor ? lt(rfqMaster.rfqId, query.cursor) : undefined)
-      .orderBy(desc(rfqMaster.rfqId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.rfqId);
+  async listRfqMasters(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with the source PR number so the list shows which RFQ maps to which PR.
+    const rows = (await this.db.execute(sql`
+      select r.rfq_id as "rfqId", r.rfq_number as "rfqNumber", r.purchase_request_id as "purchaseRequestId",
+             pr.pr_number as "prNumber", r.rfq_date as "rfqDate", r.submission_deadline as "submissionDeadline", r.status as "status"
+        from procurement.rfq_master r
+        left join procurement.purchase_request pr on pr.purchase_request_id = r.purchase_request_id
+       ${query.cursor ? sql`where r.rfq_id < ${query.cursor}` : sql``}
+       order by r.rfq_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.rfqId as string);
   }
 
   async getRfqMaster(id: string) {
