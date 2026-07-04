@@ -7,6 +7,15 @@
  */
 import { z } from 'zod';
 
+/** Accept a date-only string (yyyy-mm-dd, as the UI date pickers emit) OR a full ISO datetime,
+ * normalising a bare date to midnight UTC. Fixes the "Validation failed" on forms whose date
+ * field posts 2026-07-03 while the column is a timestamp. */
+const isoDateish = () =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v && !v.includes('T') ? `${v}T00:00:00.000Z` : v),
+    z.string().datetime().optional(),
+  );
+
 /** Generic cursor list query shared by every table. */
 export const listQuery = z.object({
   cursor: z.string().uuid().optional(),
@@ -29,7 +38,7 @@ export const createQcInspection = z.object({
   rmBatchId: z.string().uuid(),
   inspectionRoleId: z.string().uuid().optional(),
   inspectorUserId: z.string().uuid().optional(),
-  inspectionDt: z.string().datetime().optional(),
+  inspectionDt: isoDateish(),
 });
 export type CreateQcInspection = z.infer<typeof createQcInspection>;
 
@@ -69,7 +78,7 @@ export const disposeInspection = z.object({
   dispositionReason: z.string().optional(),
   conditions: z.string().optional(),
   disposedBy: z.string().uuid().optional(),
-  disposedDt: z.string().datetime().optional(),
+  disposedDt: isoDateish(),
 });
 export type DisposeInspection = z.infer<typeof disposeInspection>;
 
@@ -83,9 +92,9 @@ export const createQcSampleRetention = z.object({
   sampleQty: z.number().optional(),
   uomId: z.string().uuid().optional(),
   retentionLocationId: z.string().uuid().optional(),
-  retainedDt: z.string().datetime().optional(),
+  retainedDt: isoDateish(),
   retainedBy: z.string().uuid().optional(),
-  retentionExpiryDt: z.string().datetime().optional(),
+  retentionExpiryDt: isoDateish(),
 });
 export type CreateQcSampleRetention = z.infer<typeof createQcSampleRetention>;
 
@@ -99,10 +108,10 @@ export const createQcCapa = z.object({
   rootCause: z.string().optional(),
   actionPlan: z.string().optional(),
   assignedTo: z.string().uuid().optional(),
-  dueDt: z.string().datetime().optional(),
-  closedDt: z.string().datetime().optional(),
+  dueDt: isoDateish(),
+  closedDt: isoDateish(),
   closureEvidence: z.string().optional(),
   verifiedBy: z.string().uuid().optional(),
-  verifiedDt: z.string().datetime().optional(),
+  verifiedDt: isoDateish(),
 });
 export type CreateQcCapa = z.infer<typeof createQcCapa>;

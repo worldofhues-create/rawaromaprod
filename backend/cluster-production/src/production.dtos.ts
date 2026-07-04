@@ -7,6 +7,15 @@
  */
 import { z } from 'zod';
 
+/** Accept a date-only string (yyyy-mm-dd, as the UI date pickers emit) OR a full ISO datetime,
+ * normalising a bare date to midnight UTC. Fixes "Validation failed" when a form date field posts
+ * 2026-07-03 into a timestamp column. */
+const isoDateish = () =>
+  z.preprocess(
+    (v) => (typeof v === 'string' && v && !v.includes('T') ? `${v}T00:00:00.000Z` : v),
+    z.string().datetime().optional(),
+  );
+
 /** Generic cursor list query shared by every table. */
 export const listQuery = z.object({
   cursor: z.string().uuid().optional(),
@@ -19,8 +28,8 @@ export type ListQuery = z.infer<typeof listQuery>;
 export const createPlan = z.object({
   locationId: z.string().uuid().optional(),
   planDate: z.string().optional(), // ISO date (yyyy-mm-dd)
-  plannedStartDt: z.string().datetime().optional(),
-  plannedEndDt: z.string().datetime().optional(),
+  plannedStartDt: isoDateish(),
+  plannedEndDt: isoDateish(),
 });
 export type CreatePlan = z.infer<typeof createPlan>;
 
@@ -61,7 +70,7 @@ const issueItem = z.object({
 export const createIssue = z.object({
   productionOrderId: z.string().uuid(),
   materialPickListId: z.string().uuid().optional(),
-  issuedDt: z.string().datetime().optional(),
+  issuedDt: isoDateish(),
   items: z.array(issueItem).min(1),
 });
 export type CreateIssue = z.infer<typeof createIssue>;
@@ -71,7 +80,7 @@ export type CreateIssue = z.infer<typeof createIssue>;
 export const createMixingSession = z.object({
   productionOrderId: z.string().uuid(),
   operatorId: z.string().uuid().optional(),
-  sessionStartDt: z.string().datetime().optional(),
+  sessionStartDt: isoDateish(),
 });
 export type CreateMixingSession = z.infer<typeof createMixingSession>;
 
@@ -80,12 +89,12 @@ export const logStep = z.object({
   stepSequence: z.number().int().optional(),
   stepDescription: z.string().optional(),
   performedBy: z.string().uuid().optional(),
-  performedDt: z.string().datetime().optional(),
+  performedDt: isoDateish(),
 });
 export type LogStep = z.infer<typeof logStep>;
 
 export const endMixingSession = z.object({
-  sessionEndDt: z.string().datetime().optional(),
+  sessionEndDt: isoDateish(),
 });
 export type EndMixingSession = z.infer<typeof endMixingSession>;
 
@@ -95,7 +104,7 @@ const consumptionRow = z.object({
   consumedForDocumentId: z.string().uuid().optional(),
   consumedQty: z.number().nonnegative(),
   uomId: z.string().uuid().optional(),
-  consumedDt: z.string().datetime().optional(),
+  consumedDt: isoDateish(),
 });
 
 export const produceOilBatch = z.object({
@@ -104,7 +113,7 @@ export const produceOilBatch = z.object({
   batchNumber: z.string(),
   producedQty: z.number().positive(),
   uomId: z.string().uuid().optional(),
-  producedDt: z.string().datetime().optional(),
+  producedDt: isoDateish(),
   consumption: z.array(consumptionRow).optional(),
 });
 export type ProduceOilBatch = z.infer<typeof produceOilBatch>;
@@ -117,6 +126,6 @@ export const recordProductionQc = z.object({
   observedValue: z.number().optional(),
   result: z.string().optional(),
   inspectedBy: z.string().uuid().optional(),
-  inspectionDt: z.string().datetime().optional(),
+  inspectionDt: isoDateish(),
 });
 export type RecordProductionQc = z.infer<typeof recordProductionQc>;
