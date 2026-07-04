@@ -5,7 +5,7 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v62';
+const CACHE = 'ra-shell-v63';
 const SHELL = [
   '/', '/index.html', '/app.js', '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
   '/fonts/adf5f325-e87d-4401-84a9-246e380c6864.woff2',
@@ -38,10 +38,34 @@ self.addEventListener('fetch', (e) => {
     return; // default network handling
   }
 
-  // Navigations → cached shell first, then network.
+  // Navigations → NETWORK-FIRST so a fresh deploy is picked up on the next reload; fall back to
+  // the cached shell only when offline. (Was cache-first, which stranded users on an old shell
+  // until the SW quietly updated — the recurring "I don't see the new module" problem.)
   if (req.mode === 'navigate') {
     e.respondWith(
-      caches.match('/index.html').then((cached) => cached || fetch(req).catch(() => caches.match('/index.html'))),
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put('/index.html', copy));
+          return res;
+        })
+        .catch(() => caches.match('/index.html')),
+    );
+    return;
+  }
+
+  // app.js — NETWORK-FIRST (it IS the application; must be fresh), cache fallback for offline.
+  if (url.origin === self.location.origin && url.pathname === '/app.js') {
+    e.respondWith(
+      fetch(req)
+        .then((res) => {
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy));
+          }
+          return res;
+        })
+        .catch(() => caches.match(req)),
     );
     return;
   }
