@@ -1634,11 +1634,29 @@
     catch (e) { return ''; }
   }
   // Open a print-ready label window: QR (encoding the traceable payload) + human-readable code.
+  // In-page QR preview: renders the scannable code inline (on a white tile so it scans in any
+  // theme) with the human code + a Print button. Print still opens a clean print-ready window.
   function openQrLabel(title, code, payload, sub) {
     var svg = qrSvg(payload, 6);
     if (!svg) { toast('QR generator not loaded — hard-refresh the page.', 'bad'); return; }
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<div style="width:100%;max-width:330px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:22px 24px;text-align:center">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:800;font-size:15px;flex:1;text-align:left">' + escHtml(title) + '</div>' +
+      '<button type="button" id="ra-qrclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:30px;height:30px;border-radius:10px;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>' +
+      '<div style="width:220px;height:220px;margin:6px auto 4px;background:#fff;border-radius:12px;padding:12px;box-sizing:border-box;box-shadow:var(--ins-sm)"><div id="ra-qrbox" style="width:100%;height:100%">' + svg + '</div></div>' +
+      '<div style="font-family:\'JetBrains Mono\',monospace;font-size:18px;font-weight:800;letter-spacing:.03em;margin:10px 0 2px;color:var(--t1);word-break:break-all">' + escHtml(code) + '</div>' +
+      '<div style="font-size:12px;color:var(--t3);margin-bottom:15px">' + escHtml(sub) + '</div>' +
+      '<button type="button" id="ra-qrprint" style="width:100%;padding:11px;border:none;border-radius:13px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Print label</button></div>';
+    document.body.appendChild(ov); setTheme();
+    var svgEl = ov.querySelector('#ra-qrbox svg'); if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; svgEl.style.display = 'block'; }
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-qrclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    $('ra-qrprint').onclick = function () { printQrLabel(title, code, svg, sub); };
+  }
+  function printQrLabel(title, code, svg, sub) {
     var w = window.open('', '_blank', 'width=420,height=580');
-    if (!w) { toast('Allow pop-ups to print the QR label.', 'warn'); return; }
+    if (!w) { toast('Allow pop-ups to print the QR label (the preview above is still scannable).', 'warn'); return; }
     var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; }); };
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
       '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#111}' +
