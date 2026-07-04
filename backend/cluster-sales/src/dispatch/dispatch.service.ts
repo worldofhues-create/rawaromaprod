@@ -12,7 +12,7 @@
  * one real in-schema FK.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { SALES_DB, salesSchema, type SalesDb } from '../sales.tokens.js';
@@ -85,14 +85,21 @@ export class DispatchService {
 
   /* ── dispatch master (CRUD reads) ─────────────────────────────────── */
 
-  async listDispatches(query: ListQuery): Promise<Page<typeof dispatchMaster.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(dispatchMaster)
-      .where(query.cursor ? lt(dispatchMaster.dispatchId, query.cursor) : undefined)
-      .orderBy(desc(dispatchMaster.dispatchId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.dispatchId);
+  async listDispatches(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Enriched with SO number + customer + a composite label so the list is readable and the
+    // dispatch-document picker can identify the dispatch (customers aren't secret).
+    const rows = (await this.db.execute(sql`
+      select dm.dispatch_id as "dispatchId", dm.sales_order_id as "salesOrderId", so.so_number as "soNumber",
+             dm.customer_id as "customerId", c.customer_name as "customerName",
+             dm.dispatch_date as "dispatchDate", dm.vehicle_number as "vehicleNumber", dm.status as "status",
+             coalesce(so.so_number, '') || ' · ' || coalesce(c.customer_name, '?') || ' · ' || coalesce(dm.dispatch_date::text, '') as "label"
+        from sales.dispatch_master dm
+        left join sales.sales_order so on so.sales_order_id = dm.sales_order_id
+        left join sales.customer_master c on c.customer_id = dm.customer_id
+       ${query.cursor ? sql`where dm.dispatch_id < ${query.cursor}` : sql``}
+       order by dm.dispatch_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.dispatchId as string);
   }
 
   async getDispatch(id: string) {

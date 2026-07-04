@@ -104,6 +104,7 @@
       ['maliases', 'RM aliases', 'lock', '/v1/rm-aliases'],
       ['splitc', 'Split containers', 'layers', '/v1/batch-container-mappings'],
       ['geotypes', 'Geo levels', 'sliders', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'building', '/v1/geo-regions'],
+      ['sorders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'], ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
@@ -156,7 +157,8 @@
       ['skus', 'Product SKUs', 'tag', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'layers', '/v1/packaging-boms'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
       ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
-      ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'] ] }
+      ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'],
+      ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'] ] }
   };
   // Curated, readable columns per endpoint (DB field names). Fallback = a smart generic picker.
   var COLS = {
@@ -243,7 +245,8 @@
     '/v1/business-units': ['businessUnitCode', 'businessUnitName', 'status'],
     '/v1/packaging-qc': ['overallResult', 'leakageCheck', 'labelCheck', 'cartonCheck', 'inspectionDt'],
     '/v1/notifications': ['eventType', 'subject', 'status', 'recipient', 'createdDt'],
-    '/v1/dispatches': ['dispatchDate', 'vehicleNumber', 'status'],
+    '/v1/dispatches': ['soNumber', 'customerName', 'dispatchDate', 'vehicleNumber', 'status'],
+    '/v1/dispatch-documents': ['documentType', 'documentNumber', 'soNumber', 'customerName', 'documentDate', 'amount', 'status'],
     '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
   };
   // Every role opens on a rich, DB-aggregated dashboard (endpoint sentinel '__dash__' → /v1/dashboard).
@@ -780,6 +783,8 @@
       fields: [{ n: 'aliasName', l: 'Alias name' }, { n: 'aliasType', l: 'Alias type', t: 'select', en: ['FLOOR', 'PACKAGING', 'GENERIC'] }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/grn-containers': { resource: 'grn-containers', idKey: 'grnContainerId', perm: 'inventory:grn_container:write', statusField: 'status', title: 'Edit container',
       fields: [{ n: 'containerCode', l: 'Container number' }, { n: 'containerQty', l: 'Container qty', t: 'number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
+    '/v1/dispatch-documents': { resource: 'dispatch-documents', idKey: 'dispatchDocumentId', perm: 'sales:dispatch_master:write', statusField: 'status', title: 'Edit dispatch document',
+      fields: [{ n: 'documentNumber', l: 'Document number' }, { n: 'amount', l: 'Amount', t: 'number' }, { n: 'receivedBy', l: 'Received by (POD)' }, { n: 'status', l: 'Status', t: 'select', en: ['ISSUED', 'DELIVERED', 'CANCELLED'] }] },
     '/v1/production-plans': { resource: 'production-plans', idKey: 'productionPlanId', perm: 'production:production_plan:write', statusField: 'status', title: 'Edit production plan',
       fields: [{ n: 'planDate', l: 'Plan date', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED'] }] },
     '/v1/geo-regions': { resource: 'geo-regions', idKey: 'id', perm: 'platform:geo_location_master:write', statusField: 'isActive', editPath: function (id) { return '/v1/geo-regions/' + id; }, title: 'Edit geo region',
@@ -1164,6 +1169,13 @@
       { n: 'locationTypeId', l: 'Location type', t: 'select', fk: '/v1/location-types', fv: 'locationTypeId', fl: 'typeName' },
       { n: 'parentLocationId', l: 'Parent location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' },
       { n: 'locationCode', l: 'Location code', t: 'text', req: true }, { n: 'locationName', l: 'Location name', t: 'text', req: true }
+    ] },
+    '/v1/dispatch-documents': { title: 'New dispatch document', perm: 'sales:dispatch_master:write', fields: [
+      { n: 'dispatchId', l: 'Dispatch', t: 'select', fk: '/v1/dispatches', fv: 'dispatchId', fl: 'label', req: true },
+      { n: 'documentType', l: 'Document type', t: 'select', en: ['DELIVERY_CHALLAN', 'INVOICE', 'EWAY_BILL', 'PACKING_LIST', 'PROOF_OF_DELIVERY'], req: true },
+      { n: 'documentNumber', l: 'Document number', t: 'text' }, { n: 'documentDate', l: 'Document date', t: 'date' },
+      { n: 'amount', l: 'Amount (invoice)', t: 'number' }, { n: 'reference', l: 'Reference (e-way/transport)', t: 'text' },
+      { n: 'receivedBy', l: 'Received by (POD)', t: 'text' }, { n: 'notes', l: 'Notes', t: 'textarea' }
     ] },
     '/v1/vendor-dispatches': { title: 'Record vendor dispatch', perm: 'procurement:purchase_order:read', fields: [
       { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber', req: true },

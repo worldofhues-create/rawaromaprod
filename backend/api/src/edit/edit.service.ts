@@ -52,6 +52,10 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'sales', table: 'dispatch_master', pk: 'dispatch_id', perm: 'sales:dispatch_master:write',
     cols: { status: 'status', vehicleNumber: 'vehicle_number', transporterId: 'transporter_id', dispatchDate: 'dispatch_date' },
   },
+  'dispatch-documents': {
+    schema: 'sales', table: 'dispatch_document', pk: 'dispatch_document_id', perm: 'sales:dispatch_master:write',
+    cols: { documentNumber: 'document_number', amount: 'amount', receivedBy: 'received_by', reference: 'reference', status: 'status' },
+  },
   reservations: {
     schema: 'inventory', table: 'stock_reservation', pk: 'stock_reservation_id', perm: 'inventory:stock_reservation:write',
     cols: { status: 'status', reservedQty: 'reserved_qty' },
