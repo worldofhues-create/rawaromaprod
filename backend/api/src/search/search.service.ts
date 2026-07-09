@@ -6,8 +6,8 @@
  * are excluded. Snake_case columns are camelised so the result matches the list shape, and the
  * global MaterialMaskingInterceptor still masks materialId for non-reveal roles.
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { PG_CLIENT } from '@core/backend-kernel';
+import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 
 // endpoint → { schema, table }. created_dt (metaColumns) exists on all, used for ordering.
@@ -39,6 +39,14 @@ const REGISTRY: Record<string, { schema: string; table: string }> = {
   '/v1/bins': { schema: 'location', table: 'bin_master' },
 };
 
+// Per-resource read permission (audit H-S3): search must NOT bypass function-level auth. The perm
+// is the same one the resource's list route requires (schema:table:read), so a caller can only
+// search what they may already list. document-registry is a BFF whose perm differs from its table.
+const PERM_OVERRIDE: Record<string, string> = { '/v1/document-registry': 'platform:document_master:read' };
+function readPerm(endpoint: string, cfg: { schema: string; table: string }): string {
+  return PERM_OVERRIDE[endpoint] ?? `${cfg.schema}:${cfg.table}:read`;
+}
+
 const camel = (k: string): string => k.replace(/_([a-z])/g, (_m, c: string) => c.toUpperCase());
 const camelKeys = (row: Record<string, unknown>): Record<string, unknown> => {
   const out: Record<string, unknown> = {};
@@ -50,10 +58,15 @@ const camelKeys = (row: Record<string, unknown>): Record<string, unknown> => {
 export class SearchService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
 
-  async search(endpoint: string, q: string, limit = 100) {
+  async search(endpoint: string, q: string, limit: number, principal: AuthPrincipal) {
     const cfg = REGISTRY[endpoint];
     if (!cfg) throw new NotFoundException(`"${endpoint}" is not searchable`);
-    const lim = Math.min(Math.max(1, limit), 500);
+    // Function-level auth: only search a resource you hold the read permission for.
+    const perm = readPerm(endpoint, cfg);
+    if (!(principal?.permissions ?? []).includes(perm)) {
+      throw new ForbiddenException(`You do not have permission to search ${endpoint} (requires ${perm}).`);
+    }
+    const lim = Math.min(Math.max(1, limit || 100), 500);
     const term = `%${String(q || '').trim()}%`;
     const rows = (await this.sql.unsafe(
       `select * from ${cfg.schema}.${cfg.table} as t where t::text ilike $1 order by t.created_dt desc nulls last limit ${lim}`,

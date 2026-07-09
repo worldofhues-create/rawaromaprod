@@ -6,7 +6,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
-import type { AuthPrincipal } from '@core/backend-kernel';
+import { DomainError, type AuthPrincipal } from '@core/backend-kernel';
 import { ORG_DB, orgSchema, type OrgDb } from '../cluster-org.tokens.js';
 import type { ListQuery, Page } from '../cluster-org.dtos.js';
 import type {
@@ -216,6 +216,42 @@ export class SecurityService {
     body: CreateUserRoleBody,
     principal: AuthPrincipal,
   ): Promise<UserRoleRow> {
+    // Privilege-escalation guard (audit H-S1): you may only grant a role whose permission set is a
+    // SUBSET of your own, and never a top-level admin role unless you already hold it. Without this,
+    // any admin (who holds iam:user_role_mapping:write) could self-grant `owner` → formula:actual:read.
+    const role = (
+      await this.db
+        .select({ roleCode: roleMaster.roleCode })
+        .from(roleMaster)
+        .where(eq(roleMaster.roleId, body.roleId))
+        .limit(1)
+    )[0];
+    if (!role) throw DomainError.notFound('Role not found');
+    const targetCode = String(role.roleCode ?? '').toLowerCase();
+    const granterRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+    const PRIVILEGED = ['owner', 'super_admin', 'superadmin'];
+    if (PRIVILEGED.includes(targetCode) && !granterRoles.includes(targetCode)) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', `You cannot grant the "${role.roleCode}" role.`);
+    }
+    const rolePerms = (
+      await this.db
+        .select({ code: permissionMaster.permissionCode })
+        .from(rolePermissionMapping)
+        .innerJoin(
+          permissionMaster,
+          eq(permissionMaster.permissionId, rolePermissionMapping.permissionId),
+        )
+        .where(eq(rolePermissionMapping.roleId, body.roleId))
+    ).map((r) => r.code);
+    const held = new Set(principal.permissions ?? []);
+    const missing = rolePerms.filter((p): p is string => !!p && !held.has(p));
+    if (missing.length) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        `You cannot grant a role carrying permissions you do not hold (e.g. ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}).`,
+      );
+    }
+
     const actor = principal.userId;
     const rows = await this.db
       .insert(userRoleMapping)

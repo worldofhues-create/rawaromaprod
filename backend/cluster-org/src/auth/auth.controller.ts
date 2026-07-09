@@ -46,8 +46,9 @@ export class AuthController {
   setPassword(
     @Param("id") id: string,
     @Body(new ZodValidationPipe(setPasswordBody)) body: SetPasswordBody,
+    @CurrentUser() principal: AuthPrincipal,
   ): Promise<{ userId: string }> {
-    return this.auth.setPassword(id, body.password);
+    return this.auth.setPassword(id, body.password, principal);
   }
 
   @Get("me")

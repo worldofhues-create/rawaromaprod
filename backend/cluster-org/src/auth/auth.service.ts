@@ -149,9 +149,13 @@ export class AuthService {
     };
   }
 
-  /** Hash + store a user's password (admin-gated). */
-  async setPassword(userId: string, password: string): Promise<{ userId: string }> {
-    const { userMaster } = orgSchema;
+  /** Hash + store a user's password (admin-gated, with a rank guard). */
+  async setPassword(
+    userId: string,
+    password: string,
+    principal: AuthPrincipal,
+  ): Promise<{ userId: string }> {
+    const { userMaster, userRoleMapping, roleMaster } = orgSchema;
     const exists = (
       await this.db
         .select({ userId: userMaster.userId })
@@ -160,10 +164,28 @@ export class AuthService {
         .limit(1)
     )[0];
     if (!exists) throw DomainError.notFound("User not found");
+
+    // Rank guard (audit H-S2): only an owner may reset a privileged user's password — otherwise an
+    // admin (who holds iam:user_master:write) could overwrite the owner's hash and log in as owner.
+    const targetRoles = (
+      await this.db
+        .select({ code: roleMaster.roleCode })
+        .from(userRoleMapping)
+        .innerJoin(roleMaster, eq(roleMaster.roleId, userRoleMapping.roleId))
+        .where(eq(userRoleMapping.userId, userId))
+    ).map((r) => String(r.code ?? "").toLowerCase());
+    const principalRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+    const targetPrivileged = targetRoles.some((r) =>
+      ["owner", "super_admin", "superadmin", "admin"].includes(r),
+    );
+    if (targetPrivileged && !principalRoles.includes("owner") && userId !== principal.userId) {
+      throw DomainError.forbidden("AUTH_FORBIDDEN", "Only an owner may reset a privileged user's password.");
+    }
+
     const passwordHash = await argon2.hash(password, ARGON2_OPTIONS);
     await this.db
       .update(userMaster)
-      .set({ passwordHash, updatedBy: userId })
+      .set({ passwordHash, updatedBy: principal.userId })
       .where(eq(userMaster.userId, userId));
     return { userId };
   }
