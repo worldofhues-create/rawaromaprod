@@ -103,7 +103,7 @@ for it — **overselling is impossible by construction**; staleness only under-s
 | RBAC / two consoles | 85% | CONSOLE tag on roles + login check |
 | Air-gap hygiene | 90% | Resend → local SMTP (one class) |
 | Relay | 60% (foundation) | exporter/importer, relay_cursor/inbox, package signing, keygen |
-| Inventory ATP | 25% | **FG stock model + ATP**, dispatch decrement, allocation ledgers |
+| Inventory ATP | ✅ SHIPPED | FG ATP (`GET /v1/fg-stock` + `/by-sku`), `finished_good_reservation` table, over-dispatch guard (409), reservation CRUD — live-verified 2026-07-09 (commit e426f9f) |
 | Storefront | 5% | public website, cart, checkout, payments |
 | AI layer | 0% | everything (both flavors) |
 
@@ -111,7 +111,7 @@ for it — **overselling is impossible by construction**; staleness only under-s
 
 ## Build sequence
 
-1. **FG stock + ATP** — prerequisite for everything; pays off even without the split
+1. ~~**FG stock + ATP**~~ — ✅ **DONE** (live-verified 2026-07-09): derived ATP `available = produced − dispatched − consumed − reserved`, `finished_good_reservation` table, over-dispatch guard, reservation CRUD, real dispatch modal
 2. **Relay + boundary contracts** — exporter/importer, signed packages, grant/order/confirmation events
 3. **Offline console** — on-prem deploy, FileKmsAdapter key ceremony, CONSOLE split, SMTP swap
 4. **Storefront** — public shop selling against the granted allocation
