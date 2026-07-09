@@ -4,6 +4,11 @@
 
 _Source: 10 line-by-line area audits, each cross-checked against a live endpoint sweep (91/107 endpoints return real data, 0 server errors) plus targeted live probes with the owner token against `api.onrender.com`. Date: 2026-07-09._
 
+> **Hardening progress (post-audit, 2026-07-09):**
+> - ✅ **H-R reproducibility FIXED** — ad-hoc objects scripted + `pnpm db:provision` one-command fresh-deploy entrypoint (commit 3f6d66f).
+> - ✅ **H-S1 / H-S2 / H-S3 security FIXED & live-verified** — role-grant subset guard, password-reset rank guard, per-resource search auth. Negative-tested on prod: admin→owner grant, vendor-PAN search, owner-password reset all now **403** (commit 2d8ceb0).
+> - ⏳ **H-A1 relay-apply** — the last blocker before Step 3.
+
 ## 1. Headline
 
 - **Phase-1 (factory ERP, M01–M12): ~70% complete** — importance-weighted **69.7%**, simple mean **70.2%** across 9 areas (they converge, so the number is stable, not an artifact of weighting).
