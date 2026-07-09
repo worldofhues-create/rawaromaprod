@@ -4,15 +4,16 @@
  * concrete class. Keyed selects returning a package order ref + a finished-good batch ref.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { eq } from 'drizzle-orm';
+import { and, eq, isNull, sql } from 'drizzle-orm';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from './packaging.tokens.js';
 import type {
   FinishedGoodBatchRef,
+  FinishedGoodStockRef,
   PackageOrderRef,
   PackagingLookup,
 } from './public-api.js';
 
-const { packageOrder, finishedGoodBatchMaster } = packagingSchema;
+const { packageOrder, finishedGoodBatchMaster, finishedGoodReservation } = packagingSchema;
 
 @Injectable()
 export class PackagingLookupService implements PackagingLookup {
@@ -51,5 +52,42 @@ export class PackagingLookupService implements PackagingLookup {
         .limit(1)
     )[0];
     return row ?? null;
+  }
+
+  async getFinishedGoodStock(
+    finishedGoodBatchId: string,
+  ): Promise<FinishedGoodStockRef | null> {
+    const batch = (
+      await this.db
+        .select({
+          finishedGoodBatchId: finishedGoodBatchMaster.finishedGoodBatchId,
+          producedQty: finishedGoodBatchMaster.producedQty,
+        })
+        .from(finishedGoodBatchMaster)
+        .where(eq(finishedGoodBatchMaster.finishedGoodBatchId, finishedGoodBatchId))
+        .limit(1)
+    )[0];
+    if (!batch) return null;
+
+    // Sum ACTIVE reservations (released_dt IS NULL). coalesce → '0' when none.
+    const reserved = (
+      await this.db
+        .select({
+          total: sql<string>`coalesce(sum(${finishedGoodReservation.reservedQty}), 0)::text`,
+        })
+        .from(finishedGoodReservation)
+        .where(
+          and(
+            eq(finishedGoodReservation.finishedGoodBatchId, finishedGoodBatchId),
+            isNull(finishedGoodReservation.releasedDt),
+          ),
+        )
+    )[0];
+
+    return {
+      finishedGoodBatchId: batch.finishedGoodBatchId,
+      producedQty: batch.producedQty,
+      reservedQty: reserved?.total ?? '0',
+    };
   }
 }

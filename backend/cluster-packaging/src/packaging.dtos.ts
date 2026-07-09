@@ -143,3 +143,16 @@ export const createBatchConsumption = z.object({
   consumedDt: z.string().datetime().optional(),
 });
 export type CreateBatchConsumption = z.infer<typeof createBatchConsumption>;
+
+/* ── batch: finished-good reservation (soft allocation, ATP) ──────────── */
+
+/** Hold a quantity of an FG batch for a channel/document so it can't be dispatched or re-promised. */
+export const createFinishedGoodReservation = z.object({
+  finishedGoodBatchId: z.string().uuid(),
+  productSkuId: z.string().uuid().optional(),
+  reservedQty: z.number().positive(),
+  channel: z.string().max(30).optional(), // WEB | OFFLINE | GENERAL
+  reservedForDocumentId: z.string().uuid().optional(),
+  uomId: z.string().uuid().optional(),
+});
+export type CreateFinishedGoodReservation = z.infer<typeof createFinishedGoodReservation>;

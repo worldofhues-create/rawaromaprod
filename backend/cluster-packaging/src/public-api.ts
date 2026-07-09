@@ -20,10 +20,23 @@ export interface FinishedGoodBatchRef {
   status: string | null;
 }
 
-/** Cold read port into package orders + finished-good batches. */
+/**
+ * Packaging-owned stock facts for one FG batch: how much was produced and how much is currently
+ * held by active reservations. The DISPATCHED total lives in the sales cluster, so a caller that
+ * needs true available-to-promise (e.g. the dispatch guard) nets its own dispatched sum against
+ * these: available = producedQty − reservedQty − dispatched.
+ */
+export interface FinishedGoodStockRef {
+  finishedGoodBatchId: string;
+  producedQty: string | null;
+  reservedQty: string; // sum of ACTIVE (released_dt IS NULL) reservations, '0' if none
+}
+
+/** Cold read port into package orders + finished-good batches + FG stock facts. */
 export interface PackagingLookup {
   getPackageOrder(packageOrderId: string): Promise<PackageOrderRef | null>;
   getFinishedGoodBatch(finishedGoodBatchId: string): Promise<FinishedGoodBatchRef | null>;
+  getFinishedGoodStock(finishedGoodBatchId: string): Promise<FinishedGoodStockRef | null>;
 }
 
 /** DI token for `PackagingLookup`. */

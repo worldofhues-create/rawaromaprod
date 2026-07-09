@@ -40,6 +40,7 @@ import { CryptoModule } from './crypto/crypto.module.js';
 import { DashboardModule } from './dashboard/dashboard.module.js';
 import { PackagingQcModule } from './packaging-qc/packaging-qc.module.js';
 import { InventoryViewModule } from './inventory-view/inventory-view.module.js';
+import { FgStockModule } from './fg-stock/fg-stock.module.js';
 import { EditModule } from './edit/edit.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { PlanningModule } from './planning/planning.module.js';
@@ -69,6 +70,7 @@ import { DispatchDocsModule } from './dispatchdocs/dispatchdocs.module.js';
     DashboardModule,
     PackagingQcModule,
     InventoryViewModule,
+    FgStockModule,
     EditModule,
     DocumentsModule,
     PlanningModule,

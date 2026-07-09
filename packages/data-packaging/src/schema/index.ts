@@ -18,5 +18,6 @@ export {
 export {
   finishedGoodBatchMaster,
   finishedGoodsBatchConsumption,
+  finishedGoodReservation,
 } from "./batch.js";
 export { outbox, auditEvents } from "./crosscutting.js";

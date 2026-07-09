@@ -26,6 +26,7 @@
     "@core/backend-kernel": "workspace:*",
     "@core/contracts": "workspace:*",
     "@core/data-kernel": "workspace:*",
+    "@ra/cluster-packaging": "workspace:*",
     "@ra/data-sales": "workspace:*",
     "@nestjs/common": "^10.4.15",
     "@nestjs/core": "^10.4.15",

@@ -10,6 +10,7 @@ export { packagingEvents } from './packaging.events.js';
 export {
   type PackageOrderRef,
   type FinishedGoodBatchRef,
+  type FinishedGoodStockRef,
   type PackagingLookup,
   PACKAGING_LOOKUP,
 } from './public-api.js';

@@ -16,13 +16,15 @@ import { OrdersController } from './orders/orders.controller.js';
 import { OrdersService } from './orders/orders.service.js';
 import { BatchController } from './batch/batch.controller.js';
 import { BatchService } from './batch/batch.service.js';
+import { ReservationController } from './reservation/reservation.controller.js';
+import { ReservationService } from './reservation/reservation.service.js';
 import { PackagingLookupService } from './packaging-lookup.service.js';
 import { PACKAGING_LOOKUP } from './public-api.js';
 import { PACKAGING_DB, drizzle, packagingSchema } from './packaging.tokens.js';
 
 @Global()
 @Module({
-  controllers: [CatalogController, OrdersController, BatchController],
+  controllers: [CatalogController, OrdersController, BatchController, ReservationController],
   providers: [
     {
       provide: PACKAGING_DB,
@@ -32,6 +34,7 @@ import { PACKAGING_DB, drizzle, packagingSchema } from './packaging.tokens.js';
     CatalogService,
     OrdersService,
     BatchService,
+    ReservationService,
     PackagingLookupService,
     { provide: PACKAGING_LOOKUP, useExisting: PackagingLookupService },
   ],

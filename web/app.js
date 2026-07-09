@@ -105,6 +105,7 @@
       ['splitc', 'Split containers', 'layers', '/v1/batch-container-mappings'],
       ['geotypes', 'Geo levels', 'sliders', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'building', '/v1/geo-regions'],
       ['sorders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'], ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'],
+      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'],
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
@@ -153,10 +154,12 @@
       ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
       ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
+      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
       ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['products', 'Products', 'tag', '/v1/products'],
       ['skus', 'Product SKUs', 'tag', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'layers', '/v1/packaging-boms'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
       ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
+      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
       ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'],
       ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'] ] }
   };
@@ -226,6 +229,9 @@
     '/v1/filling-sessions': ['sessionStartDt', 'sessionEndDt', 'status'],
     '/v1/package-orders': ['orderQty', 'productSkuId', 'status'],
     '/v1/finished-good-batches': ['batchNumber', 'producedQty', 'manufacturingDate', 'status'],
+    '/v1/fg-stock': ['batchNumber', 'skuCode', 'producedQty', 'dispatchedQty', 'reservedQty', 'availableQty', 'expiryDate', 'daysToExpiry'],
+    '/v1/fg-stock/by-sku': ['skuCode', 'productName', 'batchCount', 'producedQty', 'availableQty'],
+    '/v1/fg-reservations': ['finishedGoodBatchId', 'reservedQty', 'channel', 'reservedForDocumentId', 'reservedDt', 'status'],
     '/v1/product-skus': ['skuCode', 'packSize', 'status'],
     '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'status'],
     '/v1/customers': ['customerCode', 'customerName', 'status'],
@@ -286,7 +292,7 @@
     if (v === null || v === undefined || v === '') return '<span style="color:var(--t3)">—</span>';
     if (typeof v === 'boolean') return v ? '<span style="color:#2E7D55;font-weight:700">Yes</span>' : '<span style="color:var(--t3)">No</span>';
     if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 0 ? '#C0492E' : (d <= 30 ? '#C0492E' : (d <= 90 ? '#9A6B1E' : 'var(--t2)')); return '<span style="font-weight:700;color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
-    if (k === 'available') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + v + '</span>'; }
+    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + v + '</span>'; }
     if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (sh > 0 ? '#C0492E' : 'var(--t3)') + '">' + (sh > 0 ? '▲ ' + v : v) + '</span>'; }
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var s = STATUS[String(v).toLowerCase()] || ['var(--well)', 'var(--t2)', '#9298A2']; return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:' + s[0] + ';color:' + s[1] + '"><i style="width:6px;height:6px;border-radius:50%;background:' + s[2] + '"></i>' + v + '</span>'; }
     if (isUuid(v)) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:var(--t2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
@@ -716,11 +722,10 @@
     ],
     '/v1/sales-orders': [
       { label: 'Confirm', perm: 'sales:sales_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/sales-orders/' + r.salesOrderId + '/confirm'; }, body: {} },
-      { label: 'Dispatch', perm: 'sales:dispatch_master:write', when: function (r) { return UP(r.status) === 'CONFIRMED'; }, path: function () { return '/v1/dispatches'; },
-        prepare: async function (r) {
-          var fg = await tunnel('/v1/finished-good-batches?limit=1'); var b = fg.json && fg.json.data && fg.json.data[0];
-          return { salesOrderId: r.salesOrderId, customerId: r.customerId, dispatchDate: new Date().toISOString().slice(0, 10), vehicleNumber: 'TN-22-0001', items: [{ finishedGoodBatchId: b && b.finishedGoodBatchId, dispatchedQty: 1 }] };
-        } }
+      { label: 'Dispatch', perm: 'sales:dispatch_master:write', when: function (r) { return UP(r.status) === 'CONFIRMED'; }, run: function (r) { openDispatch(r); } }
+    ],
+    '/v1/fg-reservations': [
+      { label: 'Release', perm: 'packaging:finished_good_batch_master:write', tone: 'warn', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/fg-reservations/' + (r.finishedGoodReservationId != null ? r.finishedGoodReservationId : guessId(r)) + '/release'; }, body: {} }
     ],
     '/v1/formula-versions': [
       { label: 'Seal ingredients', perm: 'formula:formula_ingredients:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, run: function (r) { openAddIngredients(r); } },
@@ -974,6 +979,52 @@
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
         close(); toast('Requirement raised ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = 'Could not reach the secure channel.'; });
+    };
+  }
+  // Dispatch a confirmed sales order: pick an FG batch that actually has stock (FEFO, avail > 0)
+  // and a real quantity. The server re-checks available (produced − reserved − already dispatched)
+  // and rejects over-dispatch (409). One line per dispatch here; add more via the Dispatches list.
+  async function openDispatch(row) {
+    var res0;
+    try { res0 = await tunnel('/v1/fg-stock?onlyAvailable=1&limit=100'); }
+    catch (e) { toast('Could not reach the secure channel', 'bad'); return; }
+    var batches = (res0.json && res0.json.data) || [];
+    var byId = {}; batches.forEach(function (b) { byId[b.finishedGoodBatchId] = b; });
+    var opts = batches.map(function (b) {
+      return '<option value="' + b.finishedGoodBatchId + '">' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + (b.skuCode ? ' · ' + b.skuCode : '') + ' · avail ' + b.availableQty + '</option>';
+    }).join('');
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
+    ov.innerHTML = '<form id="ra-dform" style="width:100%;max-width:420px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Dispatch order</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + (row.soNumber || 'Sales order') + ' → ship finished goods. Only batches with available stock are listed.</div>' +
+      (batches.length
+        ? '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Finished-good batch <span style="color:#C0492E">*</span></label><select id="ra-dfg" style="' + fStyle() + '">' + opts + '</select>' +
+          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch qty <span style="color:#C0492E">*</span></label><input id="ra-dq" type="number" min="1" value="1" style="' + fStyle() + '"><div id="ra-dhint" style="font-size:11px;color:var(--t3);margin-top:4px"></div>' +
+          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Vehicle number</label><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" style="' + fStyle() + '">' +
+          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch date</label><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" style="' + fStyle() + '">' +
+          '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
+          '<button type="submit" id="ra-dsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Dispatch</button>'
+        : '<div style="font-size:13px;color:#9A6B1E;background:var(--well);border-radius:12px;padding:14px;text-align:center">No finished-good stock is available to dispatch. Produce or release stock first.</div>') +
+      '</form>';
+    document.body.appendChild(ov); setTheme();
+    function close() { if (ov.parentNode) ov.remove(); }
+    $('ra-dclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    if (!batches.length) return;
+    function syncHint() { var b = byId[$('ra-dfg').value]; if (b) { $('ra-dhint').textContent = 'Available in this batch: ' + b.availableQty; $('ra-dq').setAttribute('max', b.availableQty); } }
+    $('ra-dfg').onchange = syncHint; syncHint();
+    $('ra-dform').onsubmit = function (e) {
+      e.preventDefault();
+      var b = byId[$('ra-dfg').value]; if (!b) { $('ra-derr').textContent = 'Pick a batch.'; return; }
+      var qty = Number($('ra-dq').value);
+      if (!(qty > 0)) { $('ra-derr').textContent = 'Enter a quantity.'; return; }
+      if (qty > Number(b.availableQty)) { $('ra-derr').textContent = 'Only ' + b.availableQty + ' available in this batch.'; return; }
+      var body = { salesOrderId: row.salesOrderId, customerId: row.customerId, dispatchDate: $('ra-dd').value || null, vehicleNumber: $('ra-dv').value || null, items: [{ finishedGoodBatchId: b.finishedGoodBatchId, dispatchedQty: qty, uomId: b.uomId || undefined }] };
+      var save = $('ra-dsave'); save.disabled = true; save.textContent = 'Dispatching…';
+      tunnel('/v1/dispatches', { method: 'POST', body: body }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        close(); toast('Dispatched ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = 'Could not reach the secure channel.'; });
     };
   }
   // delivery confirmation — the last flow stage (dispatch → delivered).
@@ -1329,6 +1380,11 @@
     '/v1/stock-reservations': { title: 'New stock reservation', perm: 'inventory:stock_reservation:write', fields: [
       { n: 'inventoryBatchId', l: 'Batch', t: 'select', fk: '/v1/inventory-availability', fv: 'inventoryBatchId', fl: 'batchNumber', req: true },
       { n: 'reservedQty', l: 'Reserve qty', t: 'number', req: true }
+    ] },
+    '/v1/fg-reservations': { title: 'Reserve finished-good stock', perm: 'packaging:finished_good_batch_master:write', fields: [
+      { n: 'finishedGoodBatchId', l: 'Finished-good batch', t: 'select', fk: '/v1/fg-stock', fv: 'finishedGoodBatchId', fl: 'batchNumber', req: true },
+      { n: 'reservedQty', l: 'Reserve qty', t: 'number', req: true },
+      { n: 'channel', l: 'Hold for', t: 'select', en: ['GENERAL', 'WEB', 'OFFLINE'] }
     ] },
     '/v1/stock-audits': { title: 'New stock count', perm: 'inventory:stock_audit:write', fields: [
       { n: 'auditCode', l: 'Count reference', t: 'text', req: true },

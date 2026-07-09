@@ -47,3 +47,35 @@ export const finishedGoodsBatchConsumption = packaging.table(
     index("finished_goods_batch_consumption_batch_idx").on(t.finishedGoodBatchId),
   ],
 );
+
+/**
+ * FINISHED_GOOD_RESERVATION — soft-allocates finished-good stock so it can't be dispatched or
+ * re-promised twice (the FG analogue of inventory.stock_reservation, which is RM-only). An FG
+ * batch's available-to-promise = produced_qty − sum(dispatch_items.dispatched_qty) −
+ * sum(finished_goods_batch_consumption.consumed_qty) − sum(active reserved_qty). A reservation is
+ * ACTIVE while released_dt IS NULL. `channel` tags who the stock is held for (WEB / OFFLINE /
+ * GENERAL) — the seam the two-console model uses to grant web-sellable stock. finished_good_batch
+ * is the one in-schema FK; sku / document / uom are dict-soft refs.
+ */
+export const finishedGoodReservation = packaging.table(
+  "finished_good_reservation",
+  {
+    finishedGoodReservationId: dictPk("finished_good_reservation_id"),
+    finishedGoodBatchId: uuid("finished_good_batch_id").references(
+      () => finishedGoodBatchMaster.finishedGoodBatchId,
+    ),
+    productSkuId: uuid("product_sku_id"), // soft ref → product_sku (denormalised for by-SKU ATP)
+    reservedQty: numeric("reserved_qty", { precision: 18, scale: 4 }),
+    channel: varchar("channel", { length: 30 }), // WEB | OFFLINE | GENERAL
+    reservedForDocumentId: uuid("reserved_for_document_id"), // soft ref → sales.sales_order (polymorphic)
+    reservedDt: timestamp("reserved_dt", { withTimezone: true }),
+    releasedDt: timestamp("released_dt", { withTimezone: true }),
+    uomId: uuid("uom_id"), // soft ref → platform.uom_master
+    ...metaColumns(),
+  },
+  (t) => [
+    index("finished_good_reservation_batch_idx").on(t.finishedGoodBatchId),
+    index("finished_good_reservation_sku_idx").on(t.productSkuId),
+    index("finished_good_reservation_document_idx").on(t.reservedForDocumentId),
+  ],
+);

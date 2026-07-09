@@ -11,10 +11,11 @@
  * uom are dict-soft refs (plain uuid, no FK at this layer); dispatch_items.dispatch_id is the
  * one real in-schema FK.
  */
-import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, lt, ne, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
+import { PACKAGING_LOOKUP, type PackagingLookup } from '@ra/cluster-packaging';
 import { SALES_DB, salesSchema, type SalesDb } from '../sales.tokens.js';
 import { salesEvents } from '../sales.events.js';
 import { num, paginate, type Page } from '../_helpers.js';
@@ -28,16 +29,61 @@ const { dispatchMaster, dispatchItems, outbox } = salesSchema;
 
 @Injectable()
 export class DispatchService {
-  constructor(@Inject(SALES_DB) private readonly db: SalesDb) {}
+  constructor(
+    @Inject(SALES_DB) private readonly db: SalesDb,
+    @Inject(PACKAGING_LOOKUP) private readonly packaging: PackagingLookup,
+  ) {}
+
+  /**
+   * Finished-goods available-to-promise for one FG batch, netted across the schema boundary.
+   * produced + reserved come from the packaging cluster's cold-read port; already-dispatched is
+   * this cluster's own sum (non-cancelled lines). available = produced − reserved − dispatched.
+   * Throws NotFound for an unknown batch. Best-effort (read outside the write tx) — acceptable at
+   * Phase-1 concurrency; the true single-writer guard lands with the offline factory console.
+   */
+  private async fgAvailable(finishedGoodBatchId: string): Promise<number> {
+    const stock = await this.packaging.getFinishedGoodStock(finishedGoodBatchId);
+    if (!stock) {
+      throw new NotFoundException(`finished-good batch not found: ${finishedGoodBatchId}`);
+    }
+    const produced = Number(stock.producedQty ?? 0);
+    const reserved = Number(stock.reservedQty ?? 0);
+    const dispatchedRow = (
+      await this.db
+        .select({ total: sql<string>`coalesce(sum(${dispatchItems.dispatchedQty}), 0)::text` })
+        .from(dispatchItems)
+        .where(
+          and(
+            eq(dispatchItems.finishedGoodBatchId, finishedGoodBatchId),
+            ne(dispatchItems.status, 'CANCELLED'),
+          ),
+        )
+    )[0];
+    const alreadyDispatched = Number(dispatchedRow?.total ?? 0);
+    return produced - reserved - alreadyDispatched;
+  }
 
   /* ── flow: create dispatch with items ─────────────────────────────── */
 
   /**
    * POST /v1/dispatches — insert the dispatch header + one line per item, then emit
    * `sales.dispatch.created`. All in one transaction so the event publishes iff the header +
-   * lines committed.
+   * lines committed. Before writing, every FG-batch line is checked against available-to-promise
+   * and over-dispatch is rejected (409) — you cannot ship more than produced − reserved − already
+   * dispatched.
    */
   async createDispatch(body: CreateDispatch, principal: AuthPrincipal) {
+    // Pre-flight availability guard (per FG-batch line).
+    for (const it of body.items) {
+      if (!it.finishedGoodBatchId || it.dispatchedQty == null) continue;
+      const available = await this.fgAvailable(it.finishedGoodBatchId);
+      if (it.dispatchedQty > available) {
+        throw new ConflictException(
+          `Cannot dispatch ${it.dispatchedQty} of finished-good batch ${it.finishedGoodBatchId}: only ${available} available (produced − reserved − already dispatched).`,
+        );
+      }
+    }
+
     return this.db.transaction(async (tx) => {
       const dispatchId = uuidv7();
       const header = (
