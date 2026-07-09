@@ -102,7 +102,7 @@ for it — **overselling is impossible by construction**; staleness only under-s
 | Vault / offline key | 90% | FileKmsAdapter (~60 lines) + audit-MAC key split |
 | RBAC / two consoles | 85% | CONSOLE tag on roles + login check |
 | Air-gap hygiene | 90% | Resend → local SMTP (one class) |
-| Relay | 60% (foundation) | exporter/importer, relay_cursor/inbox, package signing, keygen |
+| Relay | ✅ SHIPPED | export/import/status endpoints, relay_cursor/inbox/package tables, Ed25519 sign+SHA256+chain, boundary contract (formula.* never crosses), keygen + sneakernet CLI — verified 2026-07-09 (commit 3e079c7). Activate by setting RELAY_SIGNING_KEY/RELAY_VERIFY_KEY in env. |
 | Inventory ATP | ✅ SHIPPED | FG ATP (`GET /v1/fg-stock` + `/by-sku`), `finished_good_reservation` table, over-dispatch guard (409), reservation CRUD — live-verified 2026-07-09 (commit e426f9f) |
 | Storefront | 5% | public website, cart, checkout, payments |
 | AI layer | 0% | everything (both flavors) |
@@ -112,7 +112,7 @@ for it — **overselling is impossible by construction**; staleness only under-s
 ## Build sequence
 
 1. ~~**FG stock + ATP**~~ — ✅ **DONE** (live-verified 2026-07-09): derived ATP `available = produced − dispatched − consumed − reserved`, `finished_good_reservation` table, over-dispatch guard, reservation CRUD, real dispatch modal
-2. **Relay + boundary contracts** — exporter/importer, signed packages, grant/order/confirmation events
+2. ~~**Relay + boundary contracts**~~ — ✅ **DONE** (verified 2026-07-09): signed store-and-forward export/import/status over the outbox, Ed25519 + hash chain, boundary allow-list (`formula.*` never crosses), sneakernet CLI. Needs `RELAY_SIGNING_KEY`/`RELAY_VERIFY_KEY` in env to activate export/import.
 3. **Offline console** — on-prem deploy, FileKmsAdapter key ceremony, CONSOLE split, SMTP swap
 4. **Storefront** — public shop selling against the granted allocation
 5. **AI layer** — online forecasting first; factory local-inference second
