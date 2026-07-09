@@ -58,6 +58,17 @@ export const configSchema = z.object({
    * Optional so the app boots without it; vault encrypt/decrypt throws a clear error until set.
    */
   FORMULA_KEK: z.string().optional(),
+
+  /**
+   * Relay (offline air-gap) Ed25519 signing keys, base64 DER. RELAY_SIGNING_KEY (pkcs8 private)
+   * signs exported packages on the source console; RELAY_VERIFY_KEY (spki public) verifies imported
+   * packages on the destination console. Both optional so the app boots without them — the relay
+   * export/import endpoints throw a clear error until the relevant key is set. Generate a pair with
+   * `node scripts/relay-keygen.cjs`. Only signed, integrity-checked event envelopes cross the gap;
+   * the two databases never open a connection to each other.
+   */
+  RELAY_SIGNING_KEY: z.string().optional(),
+  RELAY_VERIFY_KEY: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;
