@@ -15,7 +15,8 @@
     "db:validate": "tsx scripts/db-validate.ts",
     "db:push": "tsx scripts/db-push.ts",
     "db:seed": "tsx scripts/db-seed.ts",
-    "db:seed:data": "tsx scripts/db-seed-data.ts"
+    "db:seed:data": "tsx scripts/db-seed-data.ts",
+    "db:provision": "node scripts/db-provision.mjs"
   },
   "devDependencies": {
     "@swc-node/register": "^1.11.1",
