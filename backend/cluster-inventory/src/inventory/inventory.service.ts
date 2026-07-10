@@ -5,7 +5,7 @@
  * ISSUE/TRANSFER/ADJUSTMENT (the event_type carried in the body) records the transaction +
  * an inventory_event_history row in one transaction. numeric → String(n); timestamps → Date.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -248,6 +248,13 @@ export class InventoryService {
         else if (/ISSUE|OUT|CONSUME|PICK|DISPATCH|REMOVE|SCRAP/.test(et)) delta = -Math.abs(qty);
         else delta = Math.abs(qty);
         if (delta !== 0) {
+          // Over-issue guard (audit #5): an OUT movement must not take on-hand negative.
+          const cur = (
+            await tx.select({ onHand: inventoryBatch.quantityOnHand }).from(inventoryBatch).where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId)).limit(1)
+          )[0];
+          if (Number(cur?.onHand ?? 0) + delta < 0) {
+            throw new ConflictException(`Movement would take on-hand negative for batch ${body.inventoryBatchId} (have ${Number(cur?.onHand ?? 0)}, delta ${delta}).`);
+          }
           await tx
             .update(inventoryBatch)
             .set({

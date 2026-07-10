@@ -6,7 +6,11 @@
  */
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
+import * as argon2 from 'argon2';
 import { DomainError, type AuthPrincipal } from '@core/backend-kernel';
+
+// Same Argon2id parameters the auth service uses to hash/verify passwords.
+const ARGON2_OPTIONS: argon2.Options = { type: argon2.argon2id, memoryCost: 64 * 1024, timeCost: 3, parallelism: 1 };
 import { ORG_DB, orgSchema, type OrgDb } from '../cluster-org.tokens.js';
 import type { ListQuery, Page } from '../cluster-org.dtos.js';
 import type {
@@ -57,6 +61,9 @@ export class SecurityService {
   // ── user_master ───────────────────────────────────────────────────────────
   async createUser(body: CreateUserBody, principal: AuthPrincipal): Promise<SafeUser> {
     const actor = principal.userId;
+    // Hash a plaintext password server-side (the browser can't produce Argon2id), else take the
+    // pre-computed hash. The DTO guarantees one of the two is present.
+    const passwordHash = body.password ? await argon2.hash(body.password, ARGON2_OPTIONS) : body.passwordHash;
     const rows = await this.db
       .insert(userMaster)
       .values({
@@ -65,7 +72,7 @@ export class SecurityService {
         userName: body.userName,
         email: body.email,
         mobileNumber: body.mobileNumber,
-        passwordHash: body.passwordHash,
+        passwordHash,
         isActive: body.isActive ?? true,
         status: 'ACTIVE',
         createdBy: actor,

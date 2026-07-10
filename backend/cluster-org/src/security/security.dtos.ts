@@ -6,15 +6,23 @@
  */
 import { z } from 'zod';
 
-export const createUserBody = z.object({
-  organizationId: z.string().uuid().optional(),
-  employeeCode: z.string().optional(),
-  userName: z.string(),
-  email: z.string(),
-  mobileNumber: z.string().optional(),
-  passwordHash: z.string(),
-  isActive: z.boolean().optional(),
-});
+export const createUserBody = z
+  .object({
+    organizationId: z.string().uuid().optional(),
+    employeeCode: z.string().optional(),
+    userName: z.string(),
+    email: z.string(),
+    mobileNumber: z.string().optional(),
+    // Provide EITHER a plaintext `password` (hashed server-side with Argon2id — the browser path)
+    // OR a pre-computed `passwordHash`. At least one is required so the user can authenticate.
+    password: z.string().min(8).max(200).optional(),
+    passwordHash: z.string().optional(),
+    isActive: z.boolean().optional(),
+  })
+  .refine((b) => !!(b.password || b.passwordHash), {
+    message: 'A password (or passwordHash) is required.',
+    path: ['password'],
+  });
 export type CreateUserBody = z.infer<typeof createUserBody>;
 
 export const createRoleBody = z.object({

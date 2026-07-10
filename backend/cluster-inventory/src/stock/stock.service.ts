@@ -4,8 +4,8 @@
  * createStockAudit writes the audit header + its detail lines in one transaction. numeric →
  * String(n); timestamps → Date; date columns kept as ISO strings.
  */
-import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -63,6 +63,13 @@ export class StockService {
         )[0],
       );
       if (body.inventoryBatchId && body.adjustmentQty != null) {
+        // Over-issue guard (audit #5): a correction must not take physical on-hand negative.
+        const cur = (
+          await tx.select({ onHand: inventoryBatch.quantityOnHand }).from(inventoryBatch).where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId)).limit(1)
+        )[0];
+        if (Number(cur?.onHand ?? 0) + Number(body.adjustmentQty) < 0) {
+          throw new ConflictException(`Adjustment would take on-hand negative (${Number(cur?.onHand ?? 0) + Number(body.adjustmentQty)}).`);
+        }
         await tx
           .update(inventoryBatch)
           .set({
@@ -239,6 +246,24 @@ export class StockService {
   /* ── stock_reservation ──────────────────────────────────────────────── */
 
   async createStockReservation(body: CreateStockReservation, principal: AuthPrincipal) {
+    // Over-reserve guard (audit #5): can't reserve more than available = on-hand − active reservations.
+    if (body.inventoryBatchId && body.reservedQty != null) {
+      if (!(Number(body.reservedQty) > 0)) throw new ConflictException('Reserved quantity must be positive.');
+      const batch = (
+        await this.db.select({ onHand: inventoryBatch.quantityOnHand }).from(inventoryBatch).where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId)).limit(1)
+      )[0];
+      if (!batch) throw new NotFoundException(`inventory_batch not found: ${body.inventoryBatchId}`);
+      const reserved = (
+        await this.db
+          .select({ total: sql<string>`coalesce(sum(${stockReservation.reservedQty}), 0)::text` })
+          .from(stockReservation)
+          .where(and(eq(stockReservation.inventoryBatchId, body.inventoryBatchId), isNull(stockReservation.releasedDt)))
+      )[0];
+      const available = Number(batch.onHand ?? 0) - Number(reserved?.total ?? 0);
+      if (Number(body.reservedQty) > available) {
+        throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations).`);
+      }
+    }
     return ensure(
       (
         await this.db

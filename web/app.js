@@ -1159,6 +1159,13 @@
 
   /* ---------------- "+ New" create forms (existing POST create routes) ---------------- */
   var CREATE = {
+    '/v1/users': { title: 'New user', perm: 'iam:user_master:write', fields: [
+      { n: 'userName', l: 'Full name', t: 'text', req: true },
+      { n: 'email', l: 'Email (used to sign in)', t: 'text', req: true },
+      { n: 'password', l: 'Temporary password (min 8 chars)', t: 'text', req: true },
+      { n: 'employeeCode', l: 'Employee code', t: 'text' },
+      { n: 'mobileNumber', l: 'Mobile number', t: 'text' }
+    ] },
     '/v1/roles': { title: 'New role', perm: 'iam:role_master:write', fields: [
       { n: 'roleCode', l: 'Role code', t: 'text', req: true }, { n: 'roleName', l: 'Role name', t: 'text', req: true }
     ] },
