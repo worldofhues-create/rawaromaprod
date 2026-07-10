@@ -1942,6 +1942,18 @@
     var q = st.search.trim().toLowerCase();
     var base = (q && v.serverQ === st.search.trim() && v.serverRows) ? v.serverRows : v.rows;
     var shown = base.filter(function (r) { return !q || JSON.stringify(r).toLowerCase().indexOf(q) >= 0; });
+    // WS3: type-aware sort by the clicked column (asc/desc toggle). Sorts all LOADED rows on the
+    // raw values (Load more loads the rest), and works for every column — including enriched ones
+    // (vendorName / skuCode / aliasName) the backend can't cheaply sort. Default (no sortKey) keeps
+    // the server's newest-first order.
+    if (v.sortKey) {
+      var sk = v.sortKey, dir = v.sortDir === 'asc' ? 1 : -1;
+      shown = shown.slice().sort(function (a, b) {
+        var av = a[sk], bv = b[sk], ae = (av == null || av === ''), be = (bv == null || bv === '');
+        if (ae || be) return ae && be ? 0 : (ae ? 1 : -1); // blanks always last, either direction
+        return cmpVals(av, bv) * dir;
+      });
+    }
     var cols = columns(v.rows, item[3]);
     _acts = {}; _actSeq = 0;
     var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]] || !!DETAIL[item[3]];
@@ -1952,7 +1964,10 @@
       var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; var s = $('ra-search'); if (s) { s.value = ''; s.focus(); } paintResults(); };
       return;
     }
-    var head = cols.map(function (c) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + label(c) + '</th>'; }).join('') +
+    var head = cols.map(function (c) {
+      var active = v.sortKey === c; var arrow = active ? (v.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+      return '<th data-sort="' + c + '" title="Sort by ' + label(c) + '" style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:' + (active ? 'var(--accent)' : 'var(--t3)') + ';border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none">' + label(c) + arrow + '</th>';
+    }).join('') +
       (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
     var clickable = !!DETAIL[item[3]];
     var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
@@ -1964,6 +1979,26 @@
     wireActions();
     if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) { tr.onclick = function (e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) openDetail(item[3], a.r); }; });
     var mb = $('ra-more'); if (mb) mb.onclick = loadMore;
+    // WS3: clicking a header sorts by that column; clicking the active column flips the direction.
+    [].forEach.call(el.querySelectorAll('th[data-sort]'), function (th) {
+      th.onclick = function () {
+        var c = th.getAttribute('data-sort');
+        if (v.sortKey === c) v.sortDir = v.sortDir === 'asc' ? 'desc' : 'asc';
+        else { v.sortKey = c; v.sortDir = 'asc'; }
+        paintResults();
+      };
+    });
+  }
+  // WS3: type-aware comparator — numbers numerically, dates chronologically, else natural-order
+  // string compare; blanks/nulls always sort last regardless of direction sign at the call site.
+  function cmpVals(a, b) {
+    var ae = (a == null || a === ''), be = (b == null || b === '');
+    if (ae || be) return ae && be ? 0 : (ae ? 1 : -1);
+    var sa = String(a).trim(), sb = String(b).trim();
+    if (/^-?[\d,]*\.?\d+$/.test(sa) && /^-?[\d,]*\.?\d+$/.test(sb)) return Number(sa.replace(/,/g, '')) - Number(sb.replace(/,/g, ''));
+    var da = Date.parse(sa), db = Date.parse(sb);
+    if (!isNaN(da) && !isNaN(db)) return da - db;
+    return sa.localeCompare(sb, undefined, { numeric: true });
   }
   // WS1: fetch the next cursor page, append to the loaded rows, and repaint. Errors leave the
   // button ready to retry. When the server returns no further cursor, the button disappears.
