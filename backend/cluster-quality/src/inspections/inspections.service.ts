@@ -198,7 +198,7 @@ export class InspectionsService {
             dispositionCode: body.dispositionCode,
             dispositionReason: body.dispositionReason ?? null,
             conditions: body.conditions ?? null,
-            disposedBy: body.disposedBy ?? principal.userId,
+            disposedBy: principal.userId, // audit LOW: actor is the authenticated user, never a spoofable body field
             disposedDt: body.disposedDt ? new Date(body.disposedDt) : new Date(),
             status: 'ACTIVE',
             createdBy: principal.userId,

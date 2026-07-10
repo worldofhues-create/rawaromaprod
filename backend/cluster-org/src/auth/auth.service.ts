@@ -7,7 +7,7 @@
  * MVP note: no server-side session store yet (the dictionary has no sessions table), so
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.
  */
-import { Inject, Injectable, Logger } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import { eq } from "drizzle-orm";
 import * as argon2 from "argon2";
 import { createHash, randomUUID } from "node:crypto";
@@ -45,9 +45,15 @@ export interface LoginResult {
   expiresIn: number;
 }
 
+// Login lockout thresholds (audit LOW): N failures per identifier → locked for the window.
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_LOCK_MS = 15 * 60 * 1000;
+
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  // In-memory brute-force throttle keyed by identifier (per-process; a shared store is the Stage-1 swap).
+  private readonly loginFails = new Map<string, { count: number; until: number }>();
 
   constructor(
     @Inject(ORG_DB) private readonly db: OrgDb,
@@ -71,9 +77,26 @@ export class AuthService {
     }
   }
 
+  /** Count a failed login; lock the identifier once it exceeds the threshold. */
+  private recordLoginFail(key: string): void {
+    const g = this.loginFails.get(key) ?? { count: 0, until: 0 };
+    g.count += 1;
+    if (g.count >= LOGIN_MAX_FAILS) {
+      g.until = Date.now() + LOGIN_LOCK_MS;
+      g.count = 0;
+    }
+    this.loginFails.set(key, g);
+  }
+
   /** Password login against user_master (identifier = email). */
   async login(identifier: string, password: string): Promise<LoginResult> {
     const { userMaster } = orgSchema;
+    const key = String(identifier ?? '').toLowerCase();
+    // Login lockout (audit LOW): refuse once an identifier has failed too many times recently.
+    const gate = this.loginFails.get(key);
+    if (gate && gate.until > Date.now()) {
+      throw new HttpException('Too many failed login attempts — try again in a few minutes.', HttpStatus.TOO_MANY_REQUESTS);
+    }
     const row = (
       await this.db
         .select({
@@ -88,12 +111,15 @@ export class AuthService {
         .limit(1)
     )[0];
     if (!row || !row.passwordHash) {
+      this.recordLoginFail(key);
       throw DomainError.unauthorized("AUTH_INVALID_CREDENTIALS", "Invalid credentials");
     }
     const ok = await argon2.verify(row.passwordHash, password);
     if (!ok) {
+      this.recordLoginFail(key);
       throw DomainError.unauthorized("AUTH_INVALID_CREDENTIALS", "Invalid credentials");
     }
+    this.loginFails.delete(key); // success clears the counter
     if (row.isActive === false) {
       throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
     }

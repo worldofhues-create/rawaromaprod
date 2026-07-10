@@ -51,7 +51,9 @@ export class OrdersService {
           .insert(salesOrder)
           .values({
             salesOrderId,
-            soNumber: (body.soNumber && String(body.soNumber).trim()) || ('SO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
+            // Audit LOW: base36 of the full epoch (no truncation) — the last-5-digit form collided
+            // every ~100s. Unique per millisecond; the so_number unique index backstops same-ms ties.
+            soNumber: (body.soNumber && String(body.soNumber).trim()) || ('SO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + Date.now().toString(36).toUpperCase()),
             customerId: body.customerId,
             orderDate: body.orderDate ?? null,
             deliveryLocationId: body.deliveryLocationId ?? null,
