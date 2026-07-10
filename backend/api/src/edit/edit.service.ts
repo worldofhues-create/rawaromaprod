@@ -60,6 +60,12 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'inventory', table: 'stock_reservation', pk: 'stock_reservation_id', perm: 'inventory:stock_reservation:write',
     cols: { status: 'status', reservedQty: 'reserved_qty' },
   },
+  capas: {
+    // CAPA lifecycle (audit #7): edit status (OPEN → IN_PROGRESS → CLOSED → VERIFIED) + fill the
+    // root cause / action plan / closure evidence — was create-only.
+    schema: 'quality', table: 'qc_capa', pk: 'qc_capa_id', perm: 'quality:qc_capa:write',
+    cols: { status: 'status', capaType: 'capa_type', rootCause: 'root_cause', actionPlan: 'action_plan', closureEvidence: 'closure_evidence' },
+  },
   'purchase-requests': {
     schema: 'procurement', table: 'purchase_request', pk: 'purchase_request_id', perm: 'procurement:purchase_request:write',
     cols: { status: 'status', priority: 'priority' },

@@ -14,7 +14,7 @@
  * stringified at insert; ISO timestamps → Date. rm_batch_id / inspector / role / document /
  * parameter are cross-schema or dict-soft refs (plain uuid, no FK at this layer).
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -181,6 +181,12 @@ export class InspectionsService {
   async dispose(inspectionId: string, body: DisposeInspection, principal: AuthPrincipal) {
     const inspection = await this.getInspection(inspectionId);
     if (!inspection) throw new NotFoundException(`qc_inspection not found: ${inspectionId}`);
+    // Idempotency guard (audit #7): an inspection already dispositioned cannot be re-disposed
+    // (double-dispose would emit a second event + a duplicate disposition row).
+    const already = String((inspection as { overallResult?: string | null }).overallResult ?? '').toUpperCase();
+    if (['ACCEPT', 'REJECT', 'HOLD', 'REWORK'].includes(already)) {
+      throw new ConflictException(`This inspection is already dispositioned (${already}).`);
+    }
 
     return this.db.transaction(async (tx) => {
       const disposition = (

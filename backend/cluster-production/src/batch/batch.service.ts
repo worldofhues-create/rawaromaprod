@@ -275,6 +275,14 @@ export class BatchService {
    * All in one transaction.
    */
   async recordProductionQc(body: RecordProductionQc, principal: AuthPrincipal) {
+    // Auto-grade against the supplied spec range (audit #8): observed value inside [min,max] = PASS.
+    const graded =
+      (body.specMin != null || body.specMax != null) && body.observedValue != null
+        ? (body.specMin == null || body.observedValue >= body.specMin) &&
+          (body.specMax == null || body.observedValue <= body.specMax)
+          ? 'PASS'
+          : 'FAIL'
+        : body.result ?? null;
     return this.db.transaction(async (tx) => {
       const qc = (
         await tx
@@ -284,7 +292,7 @@ export class BatchService {
             oilBatchId: body.oilBatchId,
             qcParameterId: body.qcParameterId ?? null,
             observedValue: num(body.observedValue),
-            result: body.result ?? null,
+            result: graded,
             inspectedBy: body.inspectedBy ?? principal.userId,
             inspectionDt: body.inspectionDt ? new Date(body.inspectionDt) : new Date(),
             status: 'ACTIVE',
@@ -322,7 +330,7 @@ export class BatchService {
         tx,
         outbox,
         productionEvents.qcRecorded,
-        { productionQcId, oilBatchId: body.oilBatchId, result: body.result ?? null },
+        { productionQcId, oilBatchId: body.oilBatchId, result: graded },
         productionQcId,
       );
 

@@ -125,6 +125,10 @@ export const recordProductionQc = z.object({
   qcParameterId: z.string().uuid().optional(),
   observedValue: z.number().optional(),
   result: z.string().optional(),
+  // Spec range (audit #8): when supplied, the observed value is auto-graded PASS/FAIL against
+  // [specMin, specMax] instead of relying on a free-text result.
+  specMin: z.number().optional(),
+  specMax: z.number().optional(),
   inspectedBy: z.string().uuid().optional(),
   inspectionDt: isoDateish(),
 });

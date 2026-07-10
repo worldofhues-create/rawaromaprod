@@ -118,9 +118,13 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
     catch (err) { result = { status: 'FAILED' as const, error: (err as Error).message }; }
     await this.sql`
       insert into platform.notification_log
-        (notification_log_id, event_id, event_type, channel, recipient, subject, body, status, error)
-      values (${randomUUID()}, ${eventId}, ${eventType}, 'email', ${intendedList.join(', ')}, ${subject}, ${body}, ${result.status}, ${(result as { error?: string }).error ?? null})
-      on conflict (event_id) do nothing`;
+        (notification_log_id, event_id, event_type, channel, recipient, subject, body, status, error, attempts, updated_dt)
+      values (${randomUUID()}, ${eventId}, ${eventType}, 'email', ${intendedList.join(', ')}, ${subject}, ${body}, ${result.status}, ${(result as { error?: string }).error ?? null}, 1, now())
+      on conflict (event_id) do update set
+        status = excluded.status,
+        error = excluded.error,
+        attempts = platform.notification_log.attempts + 1,
+        updated_dt = now()`;
   }
 
   /** Deterministic uuid from a string so condition alerts dedupe (daily bucket / per-row). */
@@ -136,10 +140,17 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
     try {
       const union = SCHEMAS.map((s) => `select id, type, payload::text as payload, occurred_at from ${s}.outbox`).join(' union all ');
       const inList = TYPES.map((t) => `'${t}'`).join(',');
+      // Delivery-assurance (audit #10): re-process an event that hasn't been SENT/LOGGED yet and
+      // still has retries left (FAILED with attempts < 3). A row that is SENT/LOGGED, or FAILED
+      // after 3 attempts (dead-lettered), is excluded.
       const rows = (await this.sql.unsafe(
         `select id, type, payload, occurred_at from (${union}) e
          where e.type in (${inList})
-           and not exists (select 1 from platform.notification_log nl where nl.event_id = e.id)
+           and not exists (
+             select 1 from platform.notification_log nl
+              where nl.event_id = e.id
+                and (nl.status in ('SENT','LOGGED') or coalesce(nl.attempts,0) >= 3)
+           )
          order by e.occurred_at desc limit 50`,
       )) as Array<{ id: string; type: string; payload: string | null }>;
       for (const r of rows) await this.notifyEvent(r);
@@ -197,6 +208,13 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
         await this.condition(`approvals:${day}`, 'workflow.approval.pending', 'Approvals waiting for sign-off',
           `${appr.c} purchase request(s)/order(s) are waiting for approval. Delays here stall procurement.`, { pending: appr.c }, ['procurement', 'owner'],
           'Review and approve/reject the pending items.', 'Purchase orders');
+      }
+      // Dead-letter alert (audit #10): notifications that failed after all retries.
+      const dead = ((await this.sql`select count(*)::int c from platform.notification_log where status = 'FAILED' and coalesce(attempts, 0) >= 3`) as Array<{ c: number }>)[0] ?? { c: 0 };
+      if (dead.c > 0) {
+        await this.condition(`notify-dead:${day}`, 'notify.dead_letter', 'Notification delivery is failing',
+          `${dead.c} notification(s) could not be delivered after 3 attempts — check the email provider (RESEND_API_KEY / sending domain).`, { failed: dead.c }, ['admin', 'owner'],
+          'Check the email provider configuration; the affected events can be re-triggered.', 'Notifications');
       }
       // -- per-row alerts (one email per offending record, ever) --
       // (inbound QC HOLD now notifies immediately via the quality.qc.hold outbox event, not here.)
