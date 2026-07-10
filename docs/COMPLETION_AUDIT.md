@@ -7,7 +7,9 @@ _Source: 10 line-by-line area audits, each cross-checked against a live endpoint
 > **Hardening progress (post-audit, 2026-07-09):**
 > - ✅ **H-R reproducibility FIXED** — ad-hoc objects scripted + `pnpm db:provision` one-command fresh-deploy entrypoint (commit 3f6d66f).
 > - ✅ **H-S1 / H-S2 / H-S3 security FIXED & live-verified** — role-grant subset guard, password-reset rank guard, per-resource search auth. Negative-tested on prod: admin→owner grant, vendor-PAN search, owner-password reset all now **403** (commit 2d8ceb0).
-> - ⏳ **H-A1 relay-apply** — the last blocker before Step 3.
+> - ✅ **H-A1 relay-apply FIXED & verified** — relay now hydrates each event with its domain rows (registry, PKs verified) and materializes them on import via idempotent transactional upsert. Proven on live data: order deleted → re-created by apply (commit 1041d42).
+>
+> **→ All three Step-3 blockers (reproducibility, security, relay-apply) are cleared. Step 3 (offline console + FileKmsAdapter) is unblocked.**
 
 ## 1. Headline
 
