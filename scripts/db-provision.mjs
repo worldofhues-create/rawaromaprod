@@ -22,6 +22,7 @@ const REQUIRED = [
   ['tables: relay_*', 'node scripts/create-relay-tables.cjs'],
   ['tables: ad-hoc (negotiation/advance/dispatch/approval-matrix/dispatch-document + PO column)', 'node scripts/create-adhoc-tables.cjs'],
   ['table: material_issue_applied (consumption ledger + backfill)', 'node scripts/create-material-issue-applied-table.cjs'],
+  ['guard: formula.audit_events append-only trigger', 'node scripts/create-vault-audit-guard.cjs'],
   ['seed: RBAC (roles + permissions)', 'pnpm db:seed'],
 ];
 const OPTIONAL = [

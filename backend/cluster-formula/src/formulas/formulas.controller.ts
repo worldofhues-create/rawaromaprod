@@ -55,6 +55,14 @@ export class FormulasController {
     return this.formulas.createFormula(body, principal);
   }
 
+  // Verify the tamper-evidence of the vault access-audit chain (owner-only). Recomputes the
+  // KEK-keyed hash chain and reports {ok, rows, firstBadSeq}.
+  @Permissions('formula:actual:read')
+  @Get('v1/formula-audit-verify')
+  verifyAuditChain() {
+    return this.formulas.verifyAuditChain();
+  }
+
   /* ── formula version ──────────────────────────────────────────────── */
 
   @Permissions('formula:formula_version:read')

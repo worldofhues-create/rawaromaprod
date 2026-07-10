@@ -57,6 +57,11 @@ export class FormulasService {
     private readonly vault: VaultService,
   ) {}
 
+  /** Verify the tamper-evidence of the vault access-audit chain (owner-only). */
+  verifyAuditChain() {
+    return this.vault.verifyAuditChain();
+  }
+
   /* ── formula master (+ vault) ─────────────────────────────────────── */
 
   /** Create the formula and its vault row (fresh DEK, wrapped under the KEK). */

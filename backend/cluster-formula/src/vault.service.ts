@@ -148,6 +148,58 @@ export class VaultService {
       rowHash,
     });
   }
+
+  /**
+   * Verify the tamper-evidence of the whole formula access-audit chain (audit #6). Walks chain_seq
+   * ascending and checks (1) strictly-monotonic, no-gap seq, (2) prev_hash links to the prior row,
+   * (3) row_hash recomputes = KEK-HMAC(prev_hash || canonical(row)). A tampered / deleted / reordered
+   * row breaks the recompute — a DB-write attacker without the KEK cannot forge a valid chain.
+   */
+  async verifyAuditChain(): Promise<{ ok: boolean; rows: number; firstBadSeq: number | null; reason: string | null }> {
+    const rows = await this.db
+      .select({
+        chainSeq: auditEvents.chainSeq,
+        actorId: auditEvents.actorId,
+        action: auditEvents.action,
+        entityType: auditEvents.entityType,
+        entityId: auditEvents.entityId,
+        occurredAt: auditEvents.occurredAt,
+        requestId: auditEvents.requestId,
+        ip: auditEvents.ip,
+        prevHash: auditEvents.prevHash,
+        rowHash: auditEvents.rowHash,
+      })
+      .from(auditEvents)
+      .orderBy(asc(auditEvents.chainSeq));
+
+    let prevHash: string | null = null;
+    let expectedSeq = 1n;
+    for (const r of rows) {
+      const seq = r.chainSeq ?? -1n;
+      if (seq !== expectedSeq) {
+        return { ok: false, rows: rows.length, firstBadSeq: Number(seq), reason: `chain_seq gap or regression (expected ${expectedSeq}, got ${seq})` };
+      }
+      if ((r.prevHash ?? null) !== prevHash) {
+        return { ok: false, rows: rows.length, firstBadSeq: Number(seq), reason: 'prev_hash does not link to the prior row' };
+      }
+      const canonical = canonicalAudit({
+        chainSeq: seq,
+        actorId: r.actorId,
+        action: r.action,
+        entityType: r.entityType,
+        entityId: r.entityId,
+        occurredAt: r.occurredAt.toISOString(),
+        requestId: r.requestId,
+        ip: r.ip,
+      });
+      if (this.kms.macAudit((r.prevHash ?? '') + canonical) !== r.rowHash) {
+        return { ok: false, rows: rows.length, firstBadSeq: Number(seq), reason: 'row_hash does not recompute — content tampered' };
+      }
+      prevHash = r.rowHash;
+      expectedSeq = seq + 1n;
+    }
+    return { ok: true, rows: rows.length, firstBadSeq: null, reason: null };
+  }
 }
 
 /**
