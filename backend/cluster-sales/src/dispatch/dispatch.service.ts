@@ -46,6 +46,8 @@ export class DispatchService {
     if (!stock) {
       throw new NotFoundException(`finished-good batch not found: ${finishedGoodBatchId}`);
     }
+    // A batch that failed packaging QC is not dispatchable (audit H-I2) — available is 0.
+    if (stock.qcFailed) return 0;
     const produced = Number(stock.producedQty ?? 0);
     const reserved = Number(stock.reservedQty ?? 0);
     const dispatchedRow = (

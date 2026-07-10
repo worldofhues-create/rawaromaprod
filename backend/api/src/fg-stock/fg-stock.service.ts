@@ -22,7 +22,7 @@ export class FgStockService {
     const limit = Math.min(Math.max(1, opts.limit ?? 100), 200);
     const skuWhere = opts.productSkuId ? this.sql`fg.product_sku_id = ${opts.productSkuId}` : this.sql`true`;
     const availWhere = opts.onlyAvailable
-      ? this.sql`and greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) > 0`
+      ? this.sql`and case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0 else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end > 0`
       : this.sql``;
     const rows = await this.sql`
       select fg.finished_good_batch_id as "finishedGoodBatchId",
@@ -35,7 +35,9 @@ export class FgStockService {
              coalesce(d.dispatched, 0)::float     as "dispatchedQty",
              coalesce(c.consumed, 0)::float       as "consumedQty",
              coalesce(r.reserved, 0)::float       as "reservedQty",
-             greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0))::float as "availableQty",
+             qc.overall_result                    as "qcResult",
+             (case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0
+                   else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end)::float as "availableQty",
              fg.manufacturing_date     as "manufacturingDate",
              fg.expiry_date            as "expiryDate",
              case when fg.expiry_date is not null then (fg.expiry_date - current_date) end as "daysToExpiry",
@@ -61,6 +63,11 @@ export class FgStockService {
         where released_dt is null and coalesce(status, 'ACTIVE') <> 'RELEASED'
         group by finished_good_batch_id
       ) r on r.finished_good_batch_id = fg.finished_good_batch_id
+      left join (
+        select distinct on (finished_good_batch_id) finished_good_batch_id, overall_result
+        from packaging.packaging_qc
+        order by finished_good_batch_id, created_dt desc
+      ) qc on qc.finished_good_batch_id = fg.finished_good_batch_id
       where ${skuWhere} ${availWhere}
       order by fg.expiry_date asc nulls last, fg.batch_number asc nulls last
       limit ${limit}`;
@@ -76,7 +83,8 @@ export class FgStockService {
              pm.product_name    as "productName",
              count(fg.finished_good_batch_id)::int as "batchCount",
              sum(coalesce(fg.produced_qty, 0))::float as "producedQty",
-             sum(greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)))::float as "availableQty"
+             sum(case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0
+                      else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end)::float as "availableQty"
       from packaging.finished_good_batch_master fg
       join packaging.product_sku sku on sku.product_sku_id = fg.product_sku_id
       left join packaging.product_master pm on pm.product_id = sku.product_id
@@ -98,6 +106,11 @@ export class FgStockService {
         where released_dt is null and coalesce(status, 'ACTIVE') <> 'RELEASED'
         group by finished_good_batch_id
       ) r on r.finished_good_batch_id = fg.finished_good_batch_id
+      left join (
+        select distinct on (finished_good_batch_id) finished_good_batch_id, overall_result
+        from packaging.packaging_qc
+        order by finished_good_batch_id, created_dt desc
+      ) qc on qc.finished_good_batch_id = fg.finished_good_batch_id
       group by sku.product_sku_id, sku.sku_code, pm.product_name
       order by "availableQty" desc
       limit ${limit}`;

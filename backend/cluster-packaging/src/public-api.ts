@@ -30,6 +30,7 @@ export interface FinishedGoodStockRef {
   finishedGoodBatchId: string;
   producedQty: string | null;
   reservedQty: string; // sum of ACTIVE (released_dt IS NULL) reservations, '0' if none
+  qcFailed: boolean; // latest packaging QC verdict is FAIL → not sellable/dispatchable
 }
 
 /** Cold read port into package orders + finished-good batches + FG stock facts. */

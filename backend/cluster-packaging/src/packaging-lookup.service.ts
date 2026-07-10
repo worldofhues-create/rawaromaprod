@@ -84,10 +84,18 @@ export class PackagingLookupService implements PackagingLookup {
         )
     )[0];
 
+    // Latest packaging QC verdict (audit H-I2): a FAIL means the batch is not sellable/dispatchable.
+    const qc = (await this.db.execute(sql`
+      select overall_result from packaging.packaging_qc
+       where finished_good_batch_id = ${finishedGoodBatchId}
+       order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
+    const qcFailed = String(qc[0]?.overall_result ?? '').toUpperCase() === 'FAIL';
+
     return {
       finishedGoodBatchId: batch.finishedGoodBatchId,
       producedQty: batch.producedQty,
       reservedQty: reserved?.total ?? '0',
+      qcFailed,
     };
   }
 }

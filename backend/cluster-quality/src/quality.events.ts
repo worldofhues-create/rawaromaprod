@@ -22,4 +22,8 @@ export const qualityEvents = {
     'quality.qc.hold',
     z.object({ qcInspectionId: uuid, rmBatchId: uuid }),
   ),
+  qcRework: defineEvent(
+    'quality.qc.rework',
+    z.object({ qcInspectionId: uuid, rmBatchId: uuid }),
+  ),
 } as const;

@@ -237,6 +237,15 @@ export class InspectionsService {
           { qcInspectionId: inspectionId, rmBatchId },
           inspectionId,
         );
+      } else if (body.dispositionCode === 'REWORK' && rmBatchId) {
+        // REWORK sends the batch back for reprocessing + re-inspection (audit H-I3: was a dead-end).
+        await recordOutbox(
+          tx,
+          outbox,
+          qualityEvents.qcRework,
+          { qcInspectionId: inspectionId, rmBatchId },
+          inspectionId,
+        );
       }
 
       return { inspection: updated, disposition };

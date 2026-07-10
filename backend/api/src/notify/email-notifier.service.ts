@@ -24,6 +24,7 @@ import { EmailTransport } from './email-transport.service.js';
 const RULES: Record<string, { subject: string; roles: string[]; cta: string; screen: string }> = {
   'quality.qc.failed':        { subject: 'QC FAILED — batch needs attention', roles: ['qc', 'owner'], cta: 'Review the failed inspection and disposition (reject / rework).', screen: 'Test queue' },
   'quality.qc.hold':          { subject: 'QC HOLD — batch quarantined', roles: ['qc', 'owner'], cta: 'Re-test or disposition the held batch (accept / reject / rework).', screen: 'Test queue' },
+  'quality.qc.rework':        { subject: 'QC REWORK — batch needs reprocessing', roles: ['qc', 'production', 'owner'], cta: 'Reprocess/rework the batch, then re-inspect it.', screen: 'Test queue' },
   'procurement.po.issued':    { subject: 'Purchase order issued', roles: ['procurement', 'owner'], cta: 'Track vendor acknowledgement and expected dispatch.', screen: 'Purchase orders' },
   'procurement.pr.submitted': { subject: 'Purchase request awaiting approval', roles: ['procurement', 'owner'], cta: 'Approve or reject the purchase request.', screen: 'Purchase requests' },
   'formula.version.approved': { subject: 'Formula version approved & sealed', roles: ['owner'], cta: 'The version is now locked for production use.', screen: 'Formula versions' },

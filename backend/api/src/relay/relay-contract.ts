@@ -45,6 +45,7 @@ export const RELAY_CONTRACT: Record<RelayDirection, string[]> = {
     'quality.qc.passed',
     'quality.qc.failed',
     'quality.qc.hold',
+    'quality.qc.rework',
     'production.order.created',
     'production.materials.issued',
     'production.oil_batch.created',

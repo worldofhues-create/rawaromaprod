@@ -41,6 +41,7 @@ export const RELAY_HYDRATION: Record<string, RelayHydrationSpec> = {
   'quality.qc.passed': { schema: 'quality', table: 'qc_inspections', pk: 'qc_inspection_id' },
   'quality.qc.failed': { schema: 'quality', table: 'qc_inspections', pk: 'qc_inspection_id' },
   'quality.qc.hold': { schema: 'quality', table: 'qc_inspections', pk: 'qc_inspection_id' },
+  'quality.qc.rework': { schema: 'quality', table: 'qc_inspections', pk: 'qc_inspection_id' },
   'production.order.created': { schema: 'production', table: 'production_order', pk: 'production_order_id' },
   'production.materials.issued': { schema: 'production', table: 'material_issue', pk: 'material_issue_id' },
   'production.oil_batch.created': { schema: 'production', table: 'oil_batch_master', pk: 'oil_batch_id' },
