@@ -12,13 +12,13 @@ export class AuditController {
 
   @Permissions('formula:actual:read')
   @Get('v1/formula-access-audit')
-  formulaAccess(@Query('limit') limit?: string) {
-    return this.svc.formulaAccessAudit(limit ? Number(limit) : 100);
+  formulaAccess(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
+    return this.svc.formulaAccessAudit(limit ? Number(limit) : 100, cursor);
   }
 
   @Permissions('iam:user_master:read')
   @Get('v1/login-history')
-  loginHistory(@Query('limit') limit?: string) {
-    return this.svc.loginHistory(limit ? Number(limit) : 100);
+  loginHistory(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
+    return this.svc.loginHistory(limit ? Number(limit) : 100, cursor);
   }
 }

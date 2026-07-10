@@ -1900,9 +1900,12 @@
     catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
     if (res.status === 403) { V.innerHTML = errBox('Your role does not have access to this data.'); return; }
     var rows = (res.json && res.json.data) || [];
+    // Portal-audit WS1: the envelope hoists a page's nextCursor into meta.cursor — keep it so the
+    // list can page past the first 100 rows via "Load more" (previously rows >100 were unreachable).
+    var cursor = (res.json && res.json.meta && res.json.meta.cursor) || null;
     // Stash the loaded page so search can filter it WITHOUT re-rendering the panel (the search input
     // is rendered once here and only #ra-results / #ra-count repaint — this kills the cursor-jump).
-    st._view = { item: item, rows: rows, masked: masked, serverQ: null, serverRows: null };
+    st._view = { item: item, rows: rows, masked: masked, serverQ: null, serverRows: null, cursor: cursor };
     var cols = columns(rows, item[3]);
     var byStatus = {}; rows.forEach(function (r) { var s = (r.status || r.overallResult || '').toString().toLowerCase(); if (s) byStatus[s] = (byStatus[s] || 0) + 1; });
     var sKeys = Object.keys(byStatus);
@@ -1954,9 +1957,25 @@
     var clickable = !!DETAIL[item[3]];
     var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
       (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
-    el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>';
+    // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
+    // search term is active — search runs its own whole-table server pass (searchServer).
+    var more = (v.cursor && !q) ? '<div style="padding:14px 22px;text-align:center;border-top:1px solid var(--border)"><button id="ra-more" style="padding:9px 20px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:12.5px">Load more · ' + v.rows.length + ' loaded</button></div>' : '';
+    el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     wireActions();
     if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) { tr.onclick = function (e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) openDetail(item[3], a.r); }; });
+    var mb = $('ra-more'); if (mb) mb.onclick = loadMore;
+  }
+  // WS1: fetch the next cursor page, append to the loaded rows, and repaint. Errors leave the
+  // button ready to retry. When the server returns no further cursor, the button disappears.
+  async function loadMore() {
+    var v = st._view; if (!v || !v.cursor) return;
+    var btn = $('ra-more'); if (btn) { btn.textContent = 'Loading…'; btn.disabled = true; }
+    var res; try { res = await tunnel(v.item[3] + '?limit=100&cursor=' + encodeURIComponent(v.cursor)); }
+    catch (e) { if (btn) { btn.textContent = 'Load more'; btn.disabled = false; } return; }
+    var more = (res.json && res.json.data) || [];
+    v.rows = v.rows.concat(more);
+    v.cursor = (res.json && res.json.meta && res.json.meta.cursor) || null;
+    paintResults();
   }
   // Whole-table search (beyond the loaded page) — updates the cache then repaints; input untouched.
   async function searchServer() {
