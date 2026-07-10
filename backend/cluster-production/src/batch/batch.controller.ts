@@ -17,9 +17,11 @@ import {
   listQuery,
   produceOilBatch,
   recordProductionQc,
+  transitionOilBatch,
   type ListQuery,
   type ProduceOilBatch,
   type RecordProductionQc,
+  type TransitionOilBatch,
 } from '../production.dtos.js';
 
 @Controller()
@@ -49,6 +51,16 @@ export class BatchController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.batch.produceOilBatch(body, principal);
+  }
+
+  @Permissions('production:oil_batch_master:write')
+  @Post('v1/oil-batches/:id/transition')
+  transitionOilBatch(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(transitionOilBatch)) body: TransitionOilBatch,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.batch.transitionOilBatch(id, body.status, principal);
   }
 
   /* ── oil batch consumption ───────────────────────────────────────── */

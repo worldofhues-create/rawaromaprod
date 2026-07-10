@@ -738,11 +738,12 @@
       { label: 'Trace', perm: 'formula:actual:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
     ],
     '/v1/oil-batches': [
-      { label: 'Start maturation', perm: 'production:oil_batch_master:write', when: function (r) { return ['IN_MATURATION', 'MATURING', 'RELEASED'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'IN_MATURATION', 'Maturation started'); } },
-      { label: 'Release', perm: 'production:oil_batch_master:write', tone: 'good', when: function (r) { return ['IN_MATURATION', 'MATURING', 'HOLD'].indexOf(UP(r.status)) >= 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'RELEASED', 'Released'); } },
-      { label: 'Hold', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'HOLD'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'HOLD', 'Held'); } },
-      { label: 'Rework', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'FAILED', 'REWORK'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'REWORK', 'Sent for rework'); } },
-      { label: 'Fail', perm: 'production:oil_batch_master:write', tone: 'bad', when: function (r) { return ['RELEASED', 'FAILED'].indexOf(UP(r.status)) < 0; }, run: function (r) { setStatus('oil-batches', 'oilBatchId', r, 'FAILED', 'Batch failed'); } }
+      // Guarded lifecycle (server enforces the state machine; these `when` guards are UX only).
+      { label: 'Start maturation', perm: 'production:oil_batch_master:write', when: function (r) { return ['IN_MATURATION', 'MATURING', 'RELEASED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/oil-batches/' + r.oilBatchId + '/transition'; }, body: { status: 'IN_MATURATION' } },
+      { label: 'Release', perm: 'production:oil_batch_master:write', tone: 'good', when: function (r) { return ['IN_MATURATION', 'MATURING', 'HOLD'].indexOf(UP(r.status)) >= 0; }, path: function (r) { return '/v1/oil-batches/' + r.oilBatchId + '/transition'; }, body: { status: 'RELEASED' } },
+      { label: 'Hold', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'HOLD'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/oil-batches/' + r.oilBatchId + '/transition'; }, body: { status: 'HOLD' } },
+      { label: 'Rework', perm: 'production:oil_batch_master:write', tone: 'warn', when: function (r) { return ['RELEASED', 'FAILED', 'REWORK'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/oil-batches/' + r.oilBatchId + '/transition'; }, body: { status: 'REWORK' } },
+      { label: 'Fail', perm: 'production:oil_batch_master:write', tone: 'bad', when: function (r) { return ['RELEASED', 'FAILED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/oil-batches/' + r.oilBatchId + '/transition'; }, body: { status: 'FAILED' } }
     ]
   };
   /* ---------------- edit / correct / deactivate (cross-cutting; PATCH /v1/masters/:resource/:id) ---------------- */

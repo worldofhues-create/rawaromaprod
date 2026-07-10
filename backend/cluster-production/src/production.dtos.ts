@@ -129,3 +129,9 @@ export const recordProductionQc = z.object({
   inspectionDt: isoDateish(),
 });
 export type RecordProductionQc = z.infer<typeof recordProductionQc>;
+
+/** POST /v1/oil-batches/:id/transition — a guarded oil-batch lifecycle move (audit H-C6). */
+export const transitionOilBatch = z.object({
+  status: z.enum(['IN_MATURATION', 'MATURING', 'RELEASED', 'HOLD', 'REWORK', 'FAILED']),
+});
+export type TransitionOilBatch = z.infer<typeof transitionOilBatch>;

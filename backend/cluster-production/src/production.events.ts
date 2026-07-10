@@ -26,4 +26,8 @@ export const productionEvents = {
     'production.qc.recorded',
     z.object({ productionQcId: uuid, oilBatchId: uuid, result: z.string().nullable() }),
   ),
+  oilBatchStatus: defineEvent(
+    'production.oil_batch.status',
+    z.object({ oilBatchId: uuid, status: z.string() }),
+  ),
 } as const;

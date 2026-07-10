@@ -13,7 +13,7 @@
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics via num();
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -21,6 +21,19 @@ import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../productio
 import { productionEvents } from '../production.events.js';
 import { paginate, num, type Page } from '../_helpers.js';
 import type { ListQuery, ProduceOilBatch, RecordProductionQc } from '../production.dtos.js';
+
+// Oil-batch lifecycle state machine (audit H-C6): the only legal moves. Was raw any→any status
+// PATCH via the generic editor (client-side guards only) — an API caller could go FAILED→RELEASED.
+const OIL_TRANSITIONS: Record<string, string[]> = {
+  ACTIVE: ['IN_MATURATION', 'HOLD', 'FAILED'],
+  PRODUCED: ['IN_MATURATION', 'HOLD', 'FAILED'],
+  IN_MATURATION: ['RELEASED', 'HOLD', 'REWORK', 'FAILED'],
+  MATURING: ['RELEASED', 'HOLD', 'REWORK', 'FAILED'],
+  HOLD: ['IN_MATURATION', 'RELEASED', 'REWORK', 'FAILED'],
+  REWORK: ['IN_MATURATION', 'RELEASED', 'FAILED'],
+  RELEASED: [],
+  FAILED: [],
+};
 
 const {
   oilBatchMaster,
@@ -101,6 +114,48 @@ export class BatchService {
         .where(eq(oilBatchEventHistory.oilBatchEventHistoryId, id))
         .limit(1)
     )[0] ?? null;
+  }
+
+  /* ── flow: oil-batch lifecycle transition (guarded) ──────────────── */
+
+  /**
+   * POST /v1/oil-batches/:id/transition — move an oil batch to a new lifecycle state, but only
+   * along a legal edge of OIL_TRANSITIONS. Writes an oil_batch_event_history row + emits
+   * production.oil_batch.status, all in one transaction. Same-state is an idempotent no-op.
+   */
+  async transitionOilBatch(id: string, target: string, principal: AuthPrincipal) {
+    const batch = await this.getOilBatch(id);
+    if (!batch) throw new NotFoundException(`oil_batch_master not found: ${id}`);
+    const current = String(batch.status ?? 'ACTIVE').toUpperCase();
+    const tgt = String(target ?? '').toUpperCase();
+    if (current === tgt) return batch; // idempotent
+    if (!(OIL_TRANSITIONS[current] ?? []).includes(tgt)) {
+      throw new ConflictException(`Oil batch cannot move from ${current} to ${tgt || '(none)'}.`);
+    }
+    return this.db.transaction(async (tx) => {
+      const updated = (
+        await tx
+          .update(oilBatchMaster)
+          .set({ status: tgt, updatedBy: principal.userId })
+          .where(eq(oilBatchMaster.oilBatchId, id))
+          .returning()
+      )[0];
+      if (!updated) throw new Error('update failed: oil_batch_master');
+
+      await tx.insert(oilBatchEventHistory).values({
+        oilBatchEventHistoryId: uuidv7(),
+        oilBatchId: id,
+        eventType: tgt,
+        eventDt: new Date(),
+        performedBy: principal.userId,
+        status: 'ACTIVE',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      });
+
+      await recordOutbox(tx, outbox, productionEvents.oilBatchStatus, { oilBatchId: id, status: tgt }, id);
+      return updated;
+    });
   }
 
   /* ── flow: produce oil batch ─────────────────────────────────────── */
