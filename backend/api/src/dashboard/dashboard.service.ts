@@ -61,7 +61,15 @@ export class DashboardService {
       (principal.roles || []).includes('owner') || (principal.roles || []).includes('super_admin');
     const seeProduct = isOwner || perms.has('formula:actual:read');
     const seeMaterial = isOwner || perms.has('masterdata:material:reveal');
+    // Portal-audit WS7: supplier names + spend share are commercial procurement data — only
+    // owner/procurement may see them (the spend-by-supplier panel renders for those roles only,
+    // but the DATA must not travel to a filling/qc/warehouse client either).
+    const seeSpend =
+      isOwner || perms.has('procurement:purchase_order:read') || perms.has('procurement:vendor_details:read');
 
+    // Each aggregate is one Q (a row array); the tuple cast keeps the 30 destructured names
+    // exactly typed even though the resilience .map() below erases Promise.all's tuple inference.
+    type Q = Array<Record<string, unknown>>;
     const [
       runs, poByStatus, spend, vendorCount, materialCount,
       qcByResult, grnCount, rmBatches, invAgg, zoneRacks,
@@ -69,7 +77,9 @@ export class DashboardService {
       custCount, soByStatus, userAgg, roleCount, poNumbers, oilNumbers, fgNumbers,
       events, qcRecent,
       stockReqRows, prodQcByResult, dispatchByStatus, soNumbers, formulaList, qcBatches,
-    ] = await Promise.all([
+      // Portal-audit WS7 resilience: each aggregate degrades to [] on failure (via .map(.catch)
+      // below) so ONE bad sub-query can no longer 500 the home page for every role at once.
+    ] = (await Promise.all(([
       // runs: production orders → formula (product identity) → output oil batch
       sql`select po.production_order_id id, po.order_qty qty, po.status, po.actual_start_dt sdt,
                  f.formula_name product, f.formula_code fcode, ob.batch_number batch
@@ -132,7 +142,10 @@ export class DashboardService {
       sql`select i.overall_result r, b.batch_number batch from quality.qc_inspections i
           left join inventory.rm_batch_master b on b.rm_batch_id = i.rm_batch_id
           order by i.inspection_dt desc limit 3`,
-    ]);
+    ] as Array<Promise<unknown>>).map((p) => p.catch(() => [] as unknown[])))) as [
+      Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
+      Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
+    ];
 
     // ── counts ────────────────────────────────────────────────────────────────
     const byStatus = (rows: readonly Record<string, unknown>[]) => {
@@ -260,14 +273,14 @@ export class DashboardService {
     const feed: Feed[] = [];
     for (const e of events) {
       const t = String(e.t || '').replace(/_/g, ' ').toLowerCase();
-      feed.push({ text: (e.r ? String(e.r) : t) + (t.includes('approved') ? '' : ''), dot: '#34A56F', ts: String(e.dt) });
+      feed.push({ text: (e.r ? String(e.r) : t) + (t.includes('approved') ? '' : ''), dot: '#34A56F', ts: e.dt ? String(e.dt) : '' });
     }
     for (const q of qcRecent.slice(0, 3)) {
       const r = String(q.r).toUpperCase();
       feed.push({
         text: 'QC ' + (r === 'PASS' ? 'pass' : r === 'FAIL' ? 'fail' : 'pending') + ' recorded against batch',
         dot: r === 'FAIL' ? '#D85A38' : r === 'PASS' ? '#34A56F' : '#D9A53B',
-        ts: String(q.dt),
+        ts: q.dt ? String(q.dt) : '',
       });
     }
     feed.sort((a, b) => (a.ts < b.ts ? 1 : -1));
@@ -308,7 +321,7 @@ export class DashboardService {
       qc,
       runs: runRows,
       flow,
-      spendByVendor,
+      spendByVendor: seeSpend ? spendByVendor : [],
       zones,
       feed: feed.slice(0, 6),
       pipeline,

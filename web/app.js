@@ -416,7 +416,8 @@
     filling: 'Filling output is steady — bulk lots are feeding the line with no shortfalls.',
     packaging: 'Packaging is keeping pace — finished-goods batches are sealing and labelling on schedule.',
     admin: 'Access is healthy — active users are stable and roles are fully defined.',
-    warehouse: 'Storage is balanced — themed zones are within capacity with flammables held apart.'
+    warehouse: 'Storage is balanced — themed zones are within capacity with flammables held apart.',
+    sales: 'Order fulfilment is on track — finished-goods stock is covering demand and dispatches are clearing to plan.'
   };
   function gaugeFor(p, role) {
     if (role === 'qc') return [p.counts.qcPassRate, 'Pass rate'];
@@ -487,7 +488,8 @@
       filling: ['Line activity', 'Filling line, latest first', sideFeed(p.feed)],
       packaging: ['Packaging activity', 'Finished goods, latest first', sideFeed(p.feed)],
       admin: ['Audit log', 'Recent governance events', sideFeed(p.feed)],
-      compounding: ['Mixing room', 'Recent activity', sideFeed(p.feed)]
+      compounding: ['Mixing room', 'Recent activity', sideFeed(p.feed)],
+      sales: ['Dispatch activity', 'Orders & dispatches, latest first', sideFeed(p.feed)]
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
     return card('<div style="font-weight:800;font-size:15px">' + spec[0] + '</div><div style="font-size:12px;color:var(--t3);margin:2px 0 12px">' + spec[1] + '</div>' + spec[2]);
   }
