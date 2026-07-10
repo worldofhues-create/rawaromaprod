@@ -60,6 +60,22 @@ export const configSchema = z.object({
   FORMULA_KEK: z.string().optional(),
 
   /**
+   * OFFLINE console: path to a file holding the 32-byte base64 KEK on removable / encrypted media.
+   * When set, the vault binds FileKmsAdapter instead of EnvKmsAdapter — the master key lives on
+   * mounted media (read per-op, mount only during unseal), never in an env secret. Optional; unset
+   * on the online console (keeps EnvKmsAdapter). Generate with `node scripts/formula-kek-keygen.cjs`.
+   */
+  FORMULA_KEK_FILE: z.string().optional(),
+
+  /**
+   * Which console this deployment is. `online` = cloud/public (orders, sales, sealed blobs, no
+   * unseal); `factory` = offline/air-gapped (production, QC, dispatch, the vault + unseal). Gates
+   * login by role and disables all outbound email on the factory side (true air gap). Default
+   * `online` so the current single deployment is unchanged.
+   */
+  CONSOLE: z.enum(['online', 'factory']).default('online'),
+
+  /**
    * Relay (offline air-gap) Ed25519 signing keys, base64 DER. RELAY_SIGNING_KEY (pkcs8 private)
    * signs exported packages on the source console; RELAY_VERIFY_KEY (spki public) verifies imported
    * packages on the destination console. Both optional so the app boots without them — the relay

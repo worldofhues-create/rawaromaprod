@@ -24,6 +24,7 @@ import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
 import { KMS_PORT } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
+import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
 import {
   FORMULA_DB,
   FORMULA_PG_CLIENT,
@@ -47,7 +48,14 @@ import {
       inject: [FORMULA_PG_CLIENT],
       useFactory: (client: Sql) => drizzle(client, { schema: formulaSchema }),
     },
-    { provide: KMS_PORT, useClass: EnvKmsAdapter },
+    // Env-driven KMS: the OFFLINE console (FORMULA_KEK_FILE set) keeps the master key on mounted
+    // media via FileKmsAdapter; everything else uses EnvKmsAdapter. One line, vault unchanged.
+    {
+      provide: KMS_PORT,
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) =>
+        config.get('FORMULA_KEK_FILE') ? new FileKmsAdapter(config) : new EnvKmsAdapter(config),
+    },
     VaultService,
     CatalogService,
     FormulasService,
