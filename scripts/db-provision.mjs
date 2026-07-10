@@ -32,6 +32,10 @@ const OPTIONAL = [
   ['data: flow gaps', 'node scripts/seed-flow-gaps.cjs'],
   ['data: trace links', 'node scripts/seed-trace-links.cjs'],
   ['data: approval matrix (35 rows)', 'node scripts/seed-approval-matrix.cjs'],
+  // Portal-audit WS6: runs LAST so the org/warehouse/user parents from the seeds above exist —
+  // fills the empty country/location-type/business-unit/floor/bin masters + wires null hierarchy
+  // FKs + backfills user employee_code/mobile_number.
+  ['data: master hierarchy (countries/BUs/location-types/floors/bins + wiring)', 'node scripts/seed-master-hierarchy.cjs'],
 ];
 
 function run(name, cmd, required) {
