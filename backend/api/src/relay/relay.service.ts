@@ -26,7 +26,13 @@ import {
   isRelayDirection,
   type RelayDirection,
 } from './relay-contract.js';
+import { RELAY_HYDRATION } from './relay-hydration.js';
 
+/** The domain row(s) an event carries so the destination can materialize the record. */
+export interface RelayEntity {
+  primary: Record<string, unknown> | null;
+  children: Record<string, Record<string, unknown>[]>;
+}
 export interface RelayEvent {
   id: string;
   type: string;
@@ -34,6 +40,7 @@ export interface RelayEvent {
   aggregateId: string | null;
   occurredAt: string;
   source: string;
+  entity?: RelayEntity | null;
 }
 export interface RelayManifest {
   packageId: string;
@@ -99,7 +106,9 @@ export class RelayService {
         sources[s] = { fromSeq: Number(from), toSeq: Number(rows[rows.length - 1]!.seq) };
         for (const r of rows) {
           if (isForbiddenAcrossGap(r.type)) continue; // belt-and-suspenders; formula.* never leaves
-          events.push({ id: r.id, type: r.type, payload: safeJson(r.payload), aggregateId: r.aggregate_id, occurredAt: r.occurred_at, source: s });
+          const ev: RelayEvent = { id: r.id, type: r.type, payload: safeJson(r.payload), aggregateId: r.aggregate_id, occurredAt: r.occurred_at, source: s };
+          ev.entity = await this.hydrateEvent(ev); // carry the domain row(s) so the far side can materialize
+          events.push(ev);
         }
       }
     }
@@ -145,7 +154,7 @@ export class RelayService {
   /* ── import ───────────────────────────────────────────────────────── */
 
   async importPackage(pkg: RelayPackage): Promise<{
-    packageId: string; direction: RelayDirection; eventCount: number; applied: number; skipped: number; status: string; chain: string;
+    packageId: string; direction: RelayDirection; eventCount: number; applied: number; skipped: number; materialized: number; status: string; chain: string;
   }> {
     const verifyKey = this.verifyKey();
     if (!pkg || typeof pkg !== 'object' || !pkg.manifest || !Array.isArray(pkg.events) || typeof pkg.signature !== 'string') {
@@ -171,7 +180,7 @@ export class RelayService {
       select 1 from platform.relay_package
        where package_id = ${manifest.packageId} and kind = 'IMPORT' limit 1`;
     if (already.length) {
-      return { packageId: manifest.packageId, direction: manifest.direction, eventCount: events.length, applied: 0, skipped: events.length, status: 'already-imported', chain: 'ok' };
+      return { packageId: manifest.packageId, direction: manifest.direction, eventCount: events.length, applied: 0, skipped: events.length, materialized: 0, status: 'already-imported', chain: 'ok' };
     }
 
     // 5) chain continuity vs our last import for this direction.
@@ -188,25 +197,88 @@ export class RelayService {
       chain = 'ok';
     }
 
-    // 6) apply — dedupe-insert each event into the inbox ledger.
+    // 6+7) apply — in ONE transaction: dedupe-insert each event into the inbox ledger AND
+    // materialize its carried entity (idempotent upsert by pk), then record the import in the
+    // chain. All-or-nothing, so a failed apply rolls back and the package can be re-imported safely.
+    const packageHash = sha256Hex(canonical);
     let applied = 0;
     let skipped = 0;
-    for (const e of events) {
-      const res = await this.sql`
-        insert into platform.relay_inbox (event_id, package_id, event_type, direction)
-        values (${e.id}, ${manifest.packageId}, ${e.type}, ${manifest.direction})
-        on conflict (event_id) do nothing returning event_id`;
-      if (res.length) applied++; else skipped++;
+    let materialized = 0;
+    await this.sql.begin(async (tx) => {
+      for (const e of events) {
+        const res = await tx`
+          insert into platform.relay_inbox (event_id, package_id, event_type, direction)
+          values (${e.id}, ${manifest.packageId}, ${e.type}, ${manifest.direction})
+          on conflict (event_id) do nothing returning event_id`;
+        if (res.length) {
+          applied++;
+          materialized += await this.applyEntity(tx as unknown as Sql, e);
+        } else {
+          skipped++;
+        }
+      }
+      await tx`
+        insert into platform.relay_package (package_id, direction, kind, package_hash, prev_hash, event_count)
+        values (${manifest.packageId}, ${manifest.direction}, 'IMPORT', ${packageHash}, ${lastImportHash}, ${events.length})
+        on conflict (package_id, kind) do nothing`;
+    });
+
+    return { packageId: manifest.packageId, direction: manifest.direction, eventCount: events.length, applied, skipped, materialized, status: 'imported', chain };
+  }
+
+  /* ── hydrate (export) / apply (import) ────────────────────────────── */
+
+  /** Fetch the domain row(s) an event carries so the destination can rebuild the record. */
+  private async hydrateEvent(ev: RelayEvent): Promise<RelayEntity | null> {
+    const spec = RELAY_HYDRATION[ev.type];
+    if (!spec || !ev.aggregateId) return null;
+    const primary = (
+      await this.sql.unsafe(
+        `select * from ${spec.schema}.${spec.table} where "${spec.pk}" = $1 limit 1`,
+        [ev.aggregateId],
+      )
+    )[0] as Record<string, unknown> | undefined;
+    const children: Record<string, Record<string, unknown>[]> = {};
+    if (spec.children) {
+      for (const c of spec.children) {
+        children[`${c.schema}.${c.table}`] = (await this.sql.unsafe(
+          `select * from ${c.schema}.${c.table} where "${c.fk}" = $1`,
+          [ev.aggregateId],
+        )) as unknown as Record<string, unknown>[];
+      }
     }
+    return { primary: primary ?? null, children };
+  }
 
-    // 7) record the import in the chain.
-    const packageHash = sha256Hex(canonical);
-    await this.sql`
-      insert into platform.relay_package (package_id, direction, kind, package_hash, prev_hash, event_count)
-      values (${manifest.packageId}, ${manifest.direction}, 'IMPORT', ${packageHash}, ${lastImportHash}, ${events.length})
-      on conflict (package_id, kind) do nothing`;
+  /** Materialize a carried entity on the destination: upsert primary then children. Returns rows written. */
+  private async applyEntity(tx: Sql, ev: RelayEvent): Promise<number> {
+    const spec = RELAY_HYDRATION[ev.type];
+    if (!spec || !ev.entity) return 0;
+    let n = 0;
+    if (ev.entity.primary) { await this.upsertRow(tx, spec.schema, spec.table, spec.pk, ev.entity.primary); n++; }
+    if (spec.children) {
+      for (const c of spec.children) {
+        for (const row of ev.entity.children?.[`${c.schema}.${c.table}`] ?? []) {
+          await this.upsertRow(tx, c.schema, c.table, c.pk, row);
+          n++;
+        }
+      }
+    }
+    return n;
+  }
 
-    return { packageId: manifest.packageId, direction: manifest.direction, eventCount: events.length, applied, skipped, status: 'imported', chain };
+  /** Generic idempotent upsert of a full row by primary key (identifiers come from the registry + DB columns, not user input). */
+  private async upsertRow(tx: Sql, schema: string, table: string, pk: string, row: Record<string, unknown>): Promise<void> {
+    const cols = Object.keys(row);
+    if (!cols.length) return;
+    const colList = cols.map((c) => `"${c}"`).join(', ');
+    const ph = cols.map((_, i) => `$${i + 1}`).join(', ');
+    const upd = cols.filter((c) => c !== pk).map((c) => `"${c}" = excluded."${c}"`).join(', ');
+    await tx.unsafe(
+      `insert into ${schema}.${table} (${colList}) values (${ph}) on conflict ("${pk}") ${upd ? `do update set ${upd}` : 'do nothing'}`,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cols.map((c) => row[c]) as any[],
+    );
   }
 
   /* ── status ───────────────────────────────────────────────────────── */
