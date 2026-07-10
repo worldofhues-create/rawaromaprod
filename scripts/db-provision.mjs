@@ -31,6 +31,7 @@ const OPTIONAL = [
   ['data: screens', 'node scripts/seed-screens.cjs'],
   ['data: flow gaps', 'node scripts/seed-flow-gaps.cjs'],
   ['data: trace links', 'node scripts/seed-trace-links.cjs'],
+  ['data: approval matrix (35 rows)', 'node scripts/seed-approval-matrix.cjs'],
 ];
 
 function run(name, cmd, required) {
