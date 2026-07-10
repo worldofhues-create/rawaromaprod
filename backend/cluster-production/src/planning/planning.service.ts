@@ -16,7 +16,7 @@
  * id-only soft refs (plain uuid, no FK at this layer).
  */
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { FORMULA_LOOKUP, type FormulaLookup } from '@ra/cluster-formula';
@@ -224,20 +224,27 @@ export class PlanningService {
 
   /* ── production order ingredients (CRUD reads) ───────────────────── */
 
-  async listOrderIngredients(
-    query: ListQuery,
-  ): Promise<Page<typeof productionOrderIngredients.$inferSelect>> {
-    const rows = await this.db
-      .select()
-      .from(productionOrderIngredients)
-      .where(
-        query.cursor
-          ? lt(productionOrderIngredients.productionOrderIngredientId, query.cursor)
-          : undefined,
-      )
-      .orderBy(desc(productionOrderIngredients.productionOrderIngredientId))
-      .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.productionOrderIngredientId);
+  async listOrderIngredients(query: ListQuery): Promise<Page<Record<string, unknown>>> {
+    // Portal-audit WS4: enrich the masked "Worksheets" list with the material's RM alias so its
+    // primary column shows the alias (NEVER the real material name — masking is preserved; the
+    // interceptor still masks material_id). A correlated subquery picks one alias deterministically.
+    // issued_qty stays a BOOLEAN flag (dictionary-locked) — it is an issued/not-issued indicator,
+    // not a quantity.
+    const rows = (await this.db.execute(sql`
+      select p.production_order_ingredient_id as "productionOrderIngredientId",
+             p.production_order_id as "productionOrderId",
+             p.material_id as "materialId",
+             (select a.alias_name from masterdata.rm_alias a
+                where a.material_id = p.material_id order by a.rm_alias_id limit 1) as "aliasName",
+             p.required_qty as "requiredQty",
+             p.issued_qty as "issuedQty",
+             p.uom_id as "uomId",
+             p.status as "status"
+        from production.production_order_ingredients p
+       ${query.cursor ? sql`where p.production_order_ingredient_id < ${query.cursor}` : sql``}
+       order by p.production_order_ingredient_id desc
+       limit ${query.limit + 1}`)) as unknown as Array<Record<string, unknown>>;
+    return paginate(Array.from(rows), query.limit, (r) => r.productionOrderIngredientId as string);
   }
 
   /** List the expanded bill-of-materials for one order (ids + requiredQty + issuedQty + uomId). */

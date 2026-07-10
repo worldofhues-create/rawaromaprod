@@ -18,7 +18,7 @@
  * cross-schema or dict-soft refs (plain uuid, no FK at this layer).
  */
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, inArray, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
@@ -37,6 +37,7 @@ const {
   packageOrder,
   packageOrderItem,
   packagingBomMaster,
+  productSku,
   fillingSession,
   fillingSessionDetails,
   outbox,
@@ -114,16 +115,28 @@ export class OrdersService {
     });
   }
 
-  async listPackageOrders(
-    query: ListQuery,
-  ): Promise<Page<typeof packageOrder.$inferSelect>> {
+  async listPackageOrders(query: ListQuery): Promise<Page<Record<string, unknown>>> {
     const rows = await this.db
       .select()
       .from(packageOrder)
       .where(query.cursor ? lt(packageOrder.packageOrderId, query.cursor) : undefined)
       .orderBy(desc(packageOrder.packageOrderId))
       .limit(query.limit + 1);
-    return paginate(rows, query.limit, (r) => r.packageOrderId);
+    // Portal-audit WS4: attach the human-readable SKU code (the list showed a raw product_sku_id
+    // uuid). Joined in JS to keep the fully-typed, camelCased base row intact for row actions.
+    const skuIds = [...new Set(rows.map((r) => r.productSkuId).filter((v): v is string => !!v))];
+    const skus = skuIds.length
+      ? await this.db
+          .select({ id: productSku.productSkuId, code: productSku.skuCode })
+          .from(productSku)
+          .where(inArray(productSku.productSkuId, skuIds))
+      : [];
+    const codeById = new Map(skus.map((s) => [s.id, s.code]));
+    const enriched = rows.map((r) => ({
+      ...r,
+      skuCode: r.productSkuId ? codeById.get(r.productSkuId) ?? null : null,
+    }));
+    return paginate(enriched, query.limit, (r) => r.packageOrderId);
   }
 
   async getPackageOrder(id: string) {

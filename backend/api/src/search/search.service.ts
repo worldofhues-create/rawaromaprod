@@ -37,6 +37,56 @@ const REGISTRY: Record<string, { schema: string; table: string }> = {
   '/v1/zones': { schema: 'location', table: 'zone_master' },
   '/v1/racks': { schema: 'location', table: 'rack_master' },
   '/v1/bins': { schema: 'location', table: 'bin_master' },
+  // Portal-audit WS2: extend server-side search to every non-secret single-table browse list, so
+  // the search box searches the WHOLE table (not just the loaded 100 rows) for the modules users
+  // actually browse. Each schema.table was verified to physically exist and to carry NO secret
+  // column (no password/hash/cipher/token/audit-chain) — a whole-row t::text ilike is safe.
+  // Deliberately EXCLUDED (kept client-only): secrets (formula.*, iam.user_master/credentials/
+  // login_history/otps/sessions, *.audit_events, relay_package), the MASKED worksheet
+  // (production_order_ingredients) + secure_mixing_session, and computed read-models whose list
+  // shape a single-table select can't reproduce (fg-stock, inventory-availability, packaging-qc,
+  // reorder-suggestions, qc-rejected-grns, po-advance-payments, vendor-rate-history/-negotiations/
+  // -performance/-ledger, notifications, dispatch-documents, approval-matrix, organizations, geo-*).
+  '/v1/roles': { schema: 'iam', table: 'role_master' },
+  '/v1/permissions': { schema: 'iam', table: 'permission_master' },
+  '/v1/business-units': { schema: 'iam', table: 'business_unit_master' },
+  '/v1/contacts': { schema: 'platform', table: 'contact_master' },
+  '/v1/countries': { schema: 'platform', table: 'country_master' },
+  '/v1/locations': { schema: 'location', table: 'location_master' },
+  '/v1/location-types': { schema: 'location', table: 'location_type_master' },
+  '/v1/shelves': { schema: 'location', table: 'shelf_master' },
+  '/v1/rm-aliases': { schema: 'masterdata', table: 'rm_alias' },
+  '/v1/material-types': { schema: 'masterdata', table: 'material_type_master' },
+  '/v1/material-categories': { schema: 'masterdata', table: 'material_category_master' },
+  '/v1/material-subcategories': { schema: 'masterdata', table: 'material_subcategory_master' },
+  '/v1/material-groups': { schema: 'masterdata', table: 'material_group' },
+  '/v1/material-qc-specifications': { schema: 'masterdata', table: 'material_qc_specifications' },
+  '/v1/material-storage-rules': { schema: 'masterdata', table: 'material_storage_rules' },
+  '/v1/qc-parameters': { schema: 'quality', table: 'qc_parameter_master' },
+  '/v1/qc-result-details': { schema: 'quality', table: 'qc_result_details' },
+  '/v1/qc-sample-retentions': { schema: 'quality', table: 'qc_sample_retention' },
+  '/v1/production-qc': { schema: 'production', table: 'production_qc' },
+  '/v1/production-plans': { schema: 'production', table: 'production_plan' },
+  '/v1/production-plan-items': { schema: 'production', table: 'production_plan_items' },
+  '/v1/material-pick-lists': { schema: 'production', table: 'material_pick_list' },
+  '/v1/material-issues': { schema: 'production', table: 'material_issue' },
+  '/v1/quotations': { schema: 'procurement', table: 'quotations' },
+  '/v1/quotation-items': { schema: 'procurement', table: 'quotation_items' },
+  '/v1/vendor-contacts': { schema: 'procurement', table: 'vendor_contact' },
+  '/v1/vendor-rm-mappings': { schema: 'procurement', table: 'vendor_rm_mapping' },
+  '/v1/vendor-credit-notes': { schema: 'procurement', table: 'vendor_credit_note' },
+  '/v1/products': { schema: 'packaging', table: 'product_master' },
+  '/v1/packaging-boms': { schema: 'packaging', table: 'packaging_bom_master' },
+  '/v1/filling-sessions': { schema: 'packaging', table: 'filling_session' },
+  '/v1/gate-entries': { schema: 'inventory', table: 'gate_entry_master' },
+  '/v1/grn-items': { schema: 'inventory', table: 'grn_items' },
+  '/v1/grn-containers': { schema: 'inventory', table: 'grn_container' },
+  '/v1/stock-adjustments': { schema: 'inventory', table: 'stock_adjustment' },
+  '/v1/stock-transfers': { schema: 'inventory', table: 'stock_transfer' },
+  '/v1/stock-reservations': { schema: 'inventory', table: 'stock_reservation' },
+  '/v1/stock-audits': { schema: 'inventory', table: 'stock_audit' },
+  '/v1/inventory-transactions': { schema: 'inventory', table: 'inventory_transaction' },
+  '/v1/batch-container-mappings': { schema: 'inventory', table: 'batch_container_mappings' },
 };
 
 // Per-resource read permission (audit H-S3): search must NOT bypass function-level auth. The perm
