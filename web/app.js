@@ -664,6 +664,24 @@
     '/v1/roles': [
       { label: 'Assign perms', perm: 'iam:role_permission_mapping:write', when: function () { return true; }, run: function (r) { openAssignPerm(r); } }
     ],
+    '/v1/user-roles': [
+      { label: 'Revoke', perm: 'iam:user_role_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
+        if (!window.confirm('Revoke this role assignment? (takes effect on the user\'s next sign-in / token refresh)')) return;
+        tunnel('/v1/user-roles/' + (r.userRoleMappingId != null ? r.userRoleMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
+          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+          toast('Revoked ✓', 'good'); loadView();
+        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      } }
+    ],
+    '/v1/role-permissions': [
+      { label: 'Revoke', perm: 'iam:role_permission_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
+        if (!window.confirm('Revoke this permission from the role?')) return;
+        tunnel('/v1/role-permissions/' + (r.rolePermissionMappingId != null ? r.rolePermissionMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
+          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+          toast('Revoked ✓', 'good'); loadView();
+        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      } }
+    ],
     '/v1/dispatches': [
       { label: 'Mark delivered', perm: 'sales:dispatch_master:write', tone: 'good', when: function (r) { return UP(r.status) !== 'DELIVERED'; }, run: function (r) { markDelivered(r); } }
     ],

@@ -3,7 +3,7 @@
  * (`iam:<table>:read` / `:write`). Login/auth lives in a separate cluster; user CREATE
  * here takes `passwordHash` directly for now.
  */
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Query } from '@nestjs/common';
 import {
   CurrentUser,
   Permissions,
@@ -120,6 +120,12 @@ export class SecurityController {
     return this.security.createRolePermission(body, principal);
   }
 
+  @Permissions('iam:role_permission_mapping:write')
+  @Delete('v1/role-permissions/:id')
+  revokeRolePermission(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.security.revokeRolePermission(id, principal);
+  }
+
   // ── user_role_mapping ─────────────────────────────────────────────────────
   @Permissions('iam:user_role_mapping:read')
   @Get('v1/user-roles')
@@ -140,6 +146,12 @@ export class SecurityController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.security.createUserRole(body, principal);
+  }
+
+  @Permissions('iam:user_role_mapping:write')
+  @Delete('v1/user-roles/:id')
+  revokeUserRole(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.security.revokeUserRole(id, principal);
   }
 
   // ── location_authority_master ─────────────────────────────────────────────

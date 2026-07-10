@@ -4,7 +4,7 @@
  * OrgService: create stamps created_by/updated_by + status "ACTIVE"; list is cursor
  * paginated (desc PK, limit+1). `passwordHash` is taken as-is for now (auth service later).
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
 import { DomainError, type AuthPrincipal } from '@core/backend-kernel';
 import { ORG_DB, orgSchema, type OrgDb } from '../cluster-org.tokens.js';
@@ -264,6 +264,61 @@ export class SecurityService {
       })
       .returning();
     return ensure(rows[0]);
+  }
+
+  /**
+   * Revoke a user↔role assignment (audit G/#1: RBAC was append-only). Deletes the mapping so the
+   * user loses the role on their next token refresh. Only an owner may revoke a top-level admin
+   * role, mirroring the grant-side subset guard.
+   */
+  async revokeUserRole(mappingId: string, principal: AuthPrincipal): Promise<{ userRoleMappingId: string }> {
+    const mapping = (
+      await this.db
+        .select({ id: userRoleMapping.userRoleMappingId, roleId: userRoleMapping.roleId })
+        .from(userRoleMapping)
+        .where(eq(userRoleMapping.userRoleMappingId, mappingId))
+        .limit(1)
+    )[0];
+    if (!mapping) throw new NotFoundException(`user_role_mapping not found: ${mappingId}`);
+    if (mapping.roleId) {
+      const role = (
+        await this.db.select({ code: roleMaster.roleCode }).from(roleMaster).where(eq(roleMaster.roleId, mapping.roleId)).limit(1)
+      )[0];
+      const rc = String(role?.code ?? '').toLowerCase();
+      const granterRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+      if (['owner', 'super_admin', 'superadmin'].includes(rc) && !granterRoles.includes('owner')) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', `Only an owner may revoke the "${role?.code}" role.`);
+      }
+    }
+    await this.db.delete(userRoleMapping).where(eq(userRoleMapping.userRoleMappingId, mappingId));
+    return { userRoleMappingId: mappingId };
+  }
+
+  /**
+   * Revoke a role↔permission grant (audit G/#1). Deletes the mapping so the role loses the
+   * permission. Only an owner may change a top-level admin role's permissions.
+   */
+  async revokeRolePermission(mappingId: string, principal: AuthPrincipal): Promise<{ rolePermissionMappingId: string }> {
+    const mapping = (
+      await this.db
+        .select({ id: rolePermissionMapping.rolePermissionMappingId, roleId: rolePermissionMapping.roleId })
+        .from(rolePermissionMapping)
+        .where(eq(rolePermissionMapping.rolePermissionMappingId, mappingId))
+        .limit(1)
+    )[0];
+    if (!mapping) throw new NotFoundException(`role_permission_mapping not found: ${mappingId}`);
+    if (mapping.roleId) {
+      const role = (
+        await this.db.select({ code: roleMaster.roleCode }).from(roleMaster).where(eq(roleMaster.roleId, mapping.roleId)).limit(1)
+      )[0];
+      const rc = String(role?.code ?? '').toLowerCase();
+      const granterRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+      if (['owner', 'super_admin', 'superadmin'].includes(rc) && !granterRoles.includes('owner')) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', `Only an owner may change the "${role?.code}" role's permissions.`);
+      }
+    }
+    await this.db.delete(rolePermissionMapping).where(eq(rolePermissionMapping.rolePermissionMappingId, mappingId));
+    return { rolePermissionMappingId: mappingId };
   }
 
   async listUserRoles(query: ListQuery): Promise<Page<UserRoleRow>> {
