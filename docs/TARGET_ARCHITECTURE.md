@@ -113,7 +113,7 @@ for it — **overselling is impossible by construction**; staleness only under-s
 
 1. ~~**FG stock + ATP**~~ — ✅ **DONE** (live-verified 2026-07-09): derived ATP `available = produced − dispatched − consumed − reserved`, `finished_good_reservation` table, over-dispatch guard, reservation CRUD, real dispatch modal
 2. ~~**Relay + boundary contracts**~~ — ✅ **DONE** (verified 2026-07-09): signed store-and-forward export/import/status over the outbox, Ed25519 + hash chain, boundary allow-list (`formula.*` never crosses), sneakernet CLI. Needs `RELAY_SIGNING_KEY`/`RELAY_VERIFY_KEY` in env to activate export/import.
-3. **Offline console** — on-prem deploy, FileKmsAdapter key ceremony, CONSOLE split, SMTP swap
+3. ~~**Offline console**~~ — ✅ **CODE DONE** (2026-07-10): FileKmsAdapter (offline KEK, verified 7/7) + env-driven KMS swap + key ceremony, CONSOLE=online|factory login gate (unset=unified, current deploy unchanged), air-gap notify (zero outbound on factory), `pnpm db:provision`, runbook `docs/OFFLINE_CONSOLE.md`. Remaining = the physical on-prem standup (ops: run db:provision on the in-house DB, mount the KEK media, CONSOLE=factory).
 4. **Storefront** — public shop selling against the granted allocation
 5. **AI layer** — online forecasting first; factory local-inference second
 
