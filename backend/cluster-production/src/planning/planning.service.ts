@@ -180,7 +180,9 @@ export class PlanningService {
             locationId: body.locationId ?? null,
             orderQty: num(body.orderQty),
             uomId: body.uomId ?? null,
-            status: 'PENDING',
+            // PLANNING (not PENDING): the pick-list step is gated on PLANNING/INPROGRESS, so a new
+            // order must start here or it's a dead-end (audit H-C5). generatePickList → INPROGRESS.
+            status: 'PLANNING',
             createdBy: principal.userId,
             updatedBy: principal.userId,
           })

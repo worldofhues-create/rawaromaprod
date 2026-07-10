@@ -23,6 +23,7 @@ import { paginate, type Page } from '../_helpers.js';
 import type { CreateIssue, GeneratePickList, ListQuery } from '../production.dtos.js';
 
 const {
+  productionOrder,
   productionOrderIngredients,
   materialPickList,
   materialPickListItems,
@@ -130,6 +131,13 @@ export class PickingService {
           updatedBy: principal.userId,
         });
       }
+
+      // Advance the order so it moves past PLANNING (audit H-C5): a pick list has been drawn, the
+      // order is now in progress. Only advances from PLANNING (not from a later state).
+      await tx
+        .update(productionOrder)
+        .set({ status: 'INPROGRESS', updatedBy: principal.userId })
+        .where(and(eq(productionOrder.productionOrderId, orderId), eq(productionOrder.status, 'PLANNING')));
 
       return { pickList, itemCount: ingredients.length };
     });
