@@ -19,6 +19,9 @@ export class EmailTransport {
   async send(to: string | string[], subject: string, body: string, html?: string): Promise<SendResult> {
     const recipients = (Array.isArray(to) ? to : [to]).filter(Boolean);
     if (!recipients.length) return { status: 'FAILED', error: 'no recipient' };
+    // Air gap (Step 3): the factory console makes ZERO outbound calls — record only, never dispatch,
+    // even if a provider key is present. (Swap for an internal SMTP relay if in-plant email is wanted.)
+    if (process.env.CONSOLE === 'factory') return { status: 'LOGGED' };
     if (!this.apiKey) return { status: 'LOGGED' }; // no provider → consume + record, don't dispatch
     try {
       const res = await fetch('https://api.resend.com/emails', {

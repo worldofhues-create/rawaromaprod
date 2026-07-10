@@ -26,6 +26,18 @@ const ARGON2_OPTIONS: argon2.Options = {
 // RA is a single manufacturing tenant; the access-token audience is fixed for now.
 const RA_PORTAL: Portal = "owner";
 
+// Console access policy (Step 3, two-console): which roles may log into which console. Owner + admin
+// are cross-console governance; floor roles are factory-only; sales/procurement are online-only. So a
+// factory-floor account can't authenticate on the public online console, and vice-versa.
+const FACTORY_ONLY_ROLES = ["receiving", "qc", "warehouse", "compounding", "filling", "packaging"];
+const ONLINE_ONLY_ROLES = ["sales", "procurement"];
+function consoleAllows(consoleEnv: "online" | "factory", roleCodes: string[]): boolean {
+  const roles = roleCodes.map((r) => r.toLowerCase());
+  if (roles.includes("owner") || roles.includes("admin")) return true; // governance: both consoles
+  const permitted = consoleEnv === "factory" ? FACTORY_ONLY_ROLES : ONLINE_ONLY_ROLES;
+  return roles.some((r) => permitted.includes(r));
+}
+
 export interface LoginResult {
   user: { userId: string; userName: string | null; email: string | null };
   accessToken: string;
@@ -88,6 +100,14 @@ export class AuthService {
 
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
+
+    // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
+    // roles don't belong to it. Unset = unified single console (the current deployment) → no gate.
+    const consoleEnv = process.env.CONSOLE;
+    if ((consoleEnv === "online" || consoleEnv === "factory") && !consoleAllows(consoleEnv, roles)) {
+      throw DomainError.forbidden("AUTH_FORBIDDEN", `This account is not permitted on the ${consoleEnv} console.`);
+    }
+
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,
@@ -132,6 +152,14 @@ export class AuthService {
     if (row.isActive === false) throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
+
+    // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
+    // roles don't belong to it. Unset = unified single console (the current deployment) → no gate.
+    const consoleEnv = process.env.CONSOLE;
+    if ((consoleEnv === "online" || consoleEnv === "factory") && !consoleAllows(consoleEnv, roles)) {
+      throw DomainError.forbidden("AUTH_FORBIDDEN", `This account is not permitted on the ${consoleEnv} console.`);
+    }
+
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,

@@ -70,10 +70,11 @@ export const configSchema = z.object({
   /**
    * Which console this deployment is. `online` = cloud/public (orders, sales, sealed blobs, no
    * unseal); `factory` = offline/air-gapped (production, QC, dispatch, the vault + unseal). Gates
-   * login by role and disables all outbound email on the factory side (true air gap). Default
-   * `online` so the current single deployment is unchanged.
+   * login by role and disables all outbound email on the factory side (true air gap). UNSET =
+   * unified single console (the current deployment) — no role gate, so nothing changes until a
+   * console is explicitly declared for the two-console split.
    */
-  CONSOLE: z.enum(['online', 'factory']).default('online'),
+  CONSOLE: z.enum(['online', 'factory']).optional(),
 
   /**
    * Relay (offline air-gap) Ed25519 signing keys, base64 DER. RELAY_SIGNING_KEY (pkcs8 private)
