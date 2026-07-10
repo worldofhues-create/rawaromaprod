@@ -5,7 +5,7 @@
  * an inventory_transaction (type RECEIVE) and an inventory_event_history row, all in one
  * transaction. numeric → String(n); date columns kept as ISO strings; timestamps → Date.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -208,7 +208,12 @@ export class BatchService {
           .where(eq(rmBatchMaster.rmBatchId, id))
           .limit(1)
       )[0];
-      if (!rmBatch) throw new Error(`rm_batch_master not found: ${id}`);
+      if (!rmBatch) throw new NotFoundException(`rm_batch_master not found: ${id}`);
+      // Idempotency (audit H-C4): a batch already released must not be projected into the ledger
+      // again — a second release would create a second inventory_batch and double-count on-hand.
+      if (String(rmBatch.status ?? '').toUpperCase() === 'RELEASED') {
+        throw new ConflictException(`RM batch ${rmBatch.batchNumber ?? id} is already released to stock.`);
+      }
 
       const quantity =
         body.quantity != null
@@ -282,6 +287,13 @@ export class BatchService {
             .returning()
         )[0],
       );
+
+      // Flip the RM batch to RELEASED so it can't be double-released (idempotency + the UI
+      // "Release to stock" guard, which keys off this status, now actually works).
+      await tx
+        .update(rmBatchMaster)
+        .set({ status: 'RELEASED', updatedBy: principal.userId })
+        .where(eq(rmBatchMaster.rmBatchId, id));
 
       return { inventoryBatch: invBatch, transaction: txn, history };
     });

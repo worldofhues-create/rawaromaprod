@@ -233,17 +233,29 @@ export class InventoryService {
         )[0],
       );
 
-      // Ledger→balance: apply the movement to the batch on-hand (IN adds, OUT subtracts).
+      // Ledger→balance (audit H-C2): the movement direction comes from the movement kind, not a
+      // loose "not-OUT ⇒ add" test that silently inflated on-hand for TRANSFER/ADJUSTMENT/blank.
+      //   TRANSFER  → net-zero (relocates stock; total on-hand unchanged — the move is applied elsewhere)
+      //   ADJUSTMENT→ signed as-is (a correction may be + or −)
+      //   ISSUE/CONSUME/PICK/DISPATCH/REMOVE/SCRAP/OUT → subtract |qty|
+      //   RECEIVE/RETURN/IN (default) → add |qty|
       if (body.inventoryBatchId && body.transactionQty != null) {
-        const isOut = /ISSUE|OUT|CONSUME|PICK|DISPATCH|REMOVE/i.test(body.eventType ?? '');
-        const delta = (isOut ? -1 : 1) * Number(body.transactionQty);
-        await tx
-          .update(inventoryBatch)
-          .set({
-            quantityOnHand: sql`coalesce(${inventoryBatch.quantityOnHand}, 0) + ${delta}`,
-            updatedBy: principal.userId,
-          })
-          .where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId));
+        const et = (body.eventType ?? '').toUpperCase();
+        const qty = Number(body.transactionQty);
+        let delta: number;
+        if (/TRANSFER/.test(et)) delta = 0;
+        else if (/ADJUST/.test(et)) delta = qty;
+        else if (/ISSUE|OUT|CONSUME|PICK|DISPATCH|REMOVE|SCRAP/.test(et)) delta = -Math.abs(qty);
+        else delta = Math.abs(qty);
+        if (delta !== 0) {
+          await tx
+            .update(inventoryBatch)
+            .set({
+              quantityOnHand: sql`coalesce(${inventoryBatch.quantityOnHand}, 0) + ${delta}`,
+              updatedBy: principal.userId,
+            })
+            .where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId));
+        }
       }
 
       return { transaction: txn, history };

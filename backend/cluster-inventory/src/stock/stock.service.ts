@@ -288,25 +288,38 @@ export class StockService {
   /* ── stock_transfer ─────────────────────────────────────────────────── */
 
   async createStockTransfer(body: CreateStockTransfer, principal: AuthPrincipal) {
-    return ensure(
-      (
-        await this.db
-          .insert(stockTransfer)
-          .values({
-            inventoryBatchId: body.inventoryBatchId ?? null,
-            fromLocationId: body.fromLocationId ?? null,
-            toLocationId: body.toLocationId ?? null,
-            transferQty: body.transferQty != null ? String(body.transferQty) : null,
-            uomId: body.uomId ?? null,
-            transferDt: body.transferDt ? new Date(body.transferDt) : new Date(),
-            requestedBy: body.requestedBy ?? principal.userId,
-            status: 'ACTIVE',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0],
-    );
+    // Apply the move (audit H-C1): a transfer used to only record a row; the batch never moved.
+    // Now the batch physically relocates to the destination in the same transaction. (Single-
+    // location batch model: the whole batch moves — a partial-quantity split into two batches is
+    // not modelled, so a partial transfer still relocates the batch record.)
+    return this.db.transaction(async (tx) => {
+      const row = ensure(
+        (
+          await tx
+            .insert(stockTransfer)
+            .values({
+              inventoryBatchId: body.inventoryBatchId ?? null,
+              fromLocationId: body.fromLocationId ?? null,
+              toLocationId: body.toLocationId ?? null,
+              transferQty: body.transferQty != null ? String(body.transferQty) : null,
+              uomId: body.uomId ?? null,
+              transferDt: body.transferDt ? new Date(body.transferDt) : new Date(),
+              requestedBy: body.requestedBy ?? principal.userId,
+              status: 'ACTIVE',
+              createdBy: principal.userId,
+              updatedBy: principal.userId,
+            })
+            .returning()
+        )[0],
+      );
+      if (body.inventoryBatchId && body.toLocationId) {
+        await tx
+          .update(inventoryBatch)
+          .set({ storageLocationId: body.toLocationId, updatedBy: principal.userId })
+          .where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId));
+      }
+      return row;
+    });
   }
 
   async listStockTransfers(
