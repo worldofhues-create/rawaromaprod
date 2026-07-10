@@ -136,16 +136,20 @@ export class RelayService {
 
     let committed = false;
     if (commit && events.length > 0) {
-      for (const [s, r] of Object.entries(sources)) {
-        await this.sql`
-          insert into platform.relay_cursor (direction, source_schema, last_seq, updated_dt)
-          values (${direction}, ${s}, ${r.toSeq}, now())
-          on conflict (direction, source_schema) do update set last_seq = ${r.toSeq}, updated_dt = now()`;
-      }
-      await this.sql`
-        insert into platform.relay_package (package_id, direction, kind, package_hash, prev_hash, event_count)
-        values (${manifest.packageId}, ${direction}, 'EXPORT', ${packageHash}, ${prevPackageHash}, ${events.length})
-        on conflict (package_id, kind) do nothing`;
+      // ONE transaction (audit G/#11): advance the cursors AND record the EXPORT package together,
+      // so a crash between them can't advance the watermark past events that were never packaged.
+      await this.sql.begin(async (tx) => {
+        for (const [s, r] of Object.entries(sources)) {
+          await tx`
+            insert into platform.relay_cursor (direction, source_schema, last_seq, updated_dt)
+            values (${direction}, ${s}, ${r.toSeq}, now())
+            on conflict (direction, source_schema) do update set last_seq = ${r.toSeq}, updated_dt = now()`;
+        }
+        await tx`
+          insert into platform.relay_package (package_id, direction, kind, package_hash, prev_hash, event_count)
+          values (${manifest.packageId}, ${direction}, 'EXPORT', ${packageHash}, ${prevPackageHash}, ${events.length})
+          on conflict (package_id, kind) do nothing`;
+      });
       committed = true;
     }
     return { manifest, events, signature, committed };
@@ -195,6 +199,10 @@ export class RelayService {
         throw new BadRequestException('chain break — prevPackageHash does not match the last imported package (gap or reorder).');
       }
       chain = 'ok';
+    } else if (manifest.prevPackageHash) {
+      // First import for this direction must be the genesis package (audit G/#11): starting
+      // mid-chain means continuity back to the origin can't be verified.
+      throw new BadRequestException('first import must be the genesis package (prevPackageHash null) — cannot bootstrap mid-chain.');
     }
 
     // 6+7) apply — in ONE transaction: dedupe-insert each event into the inbox ledger AND

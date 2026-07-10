@@ -50,6 +50,7 @@ export class DispatchService {
     if (stock.qcFailed) return 0;
     const produced = Number(stock.producedQty ?? 0);
     const reserved = Number(stock.reservedQty ?? 0);
+    const consumed = Number(stock.consumedQty ?? 0); // align with the ATP read-model (audit G/#9)
     const dispatchedRow = (
       await this.db
         .select({ total: sql<string>`coalesce(sum(${dispatchItems.dispatchedQty}), 0)::text` })
@@ -62,7 +63,7 @@ export class DispatchService {
         )
     )[0];
     const alreadyDispatched = Number(dispatchedRow?.total ?? 0);
-    return produced - reserved - alreadyDispatched;
+    return produced - reserved - consumed - alreadyDispatched;
   }
 
   /* ── flow: create dispatch with items ─────────────────────────────── */
@@ -75,13 +76,22 @@ export class DispatchService {
    * dispatched.
    */
   async createDispatch(body: CreateDispatch, principal: AuthPrincipal) {
-    // Pre-flight availability guard (per FG-batch line).
+    // Pre-flight availability guard: reject non-positive qty, AGGREGATE the requested qty per FG
+    // batch across lines (so two lines for one batch can't each pass the full-available check),
+    // then reject if a batch's total exceeds available (audit G/#9).
+    const perBatch = new Map<string, number>();
     for (const it of body.items) {
       if (!it.finishedGoodBatchId || it.dispatchedQty == null) continue;
-      const available = await this.fgAvailable(it.finishedGoodBatchId);
-      if (it.dispatchedQty > available) {
+      if (!(it.dispatchedQty > 0)) {
+        throw new ConflictException(`Dispatch quantity must be positive (got ${it.dispatchedQty}).`);
+      }
+      perBatch.set(it.finishedGoodBatchId, (perBatch.get(it.finishedGoodBatchId) ?? 0) + it.dispatchedQty);
+    }
+    for (const [batchId, requested] of perBatch) {
+      const available = await this.fgAvailable(batchId);
+      if (requested > available) {
         throw new ConflictException(
-          `Cannot dispatch ${it.dispatchedQty} of finished-good batch ${it.finishedGoodBatchId}: only ${available} available (produced − reserved − already dispatched).`,
+          `Cannot dispatch ${requested} of finished-good batch ${batchId}: only ${available} available (produced − reserved − consumed − already dispatched).`,
         );
       }
     }
@@ -159,6 +169,19 @@ export class DispatchService {
   /* ── dispatch items (CRUD) ────────────────────────────────────────── */
 
   async createDispatchItem(body: CreateDispatchItem, principal: AuthPrincipal) {
+    // Same availability guard as createDispatch (audit G/#9): this standalone line-add endpoint was
+    // a bypass around the over-dispatch check.
+    if (body.finishedGoodBatchId && body.dispatchedQty != null) {
+      if (!(body.dispatchedQty > 0)) {
+        throw new ConflictException(`Dispatch quantity must be positive (got ${body.dispatchedQty}).`);
+      }
+      const available = await this.fgAvailable(body.finishedGoodBatchId);
+      if (body.dispatchedQty > available) {
+        throw new ConflictException(
+          `Cannot dispatch ${body.dispatchedQty} of finished-good batch ${body.finishedGoodBatchId}: only ${available} available.`,
+        );
+      }
+    }
     const row = (
       await this.db
         .insert(dispatchItems)

@@ -8,7 +8,7 @@
  * in a db.transaction and write the purchase_request_approval row alongside the status
  * change. numeric → String(n); dates → new Date(iso). Soft refs are plain uuids.
  */
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -310,6 +310,14 @@ export class RequirementService {
       )[0];
       if (!pr) throw new Error(`purchase_request not found: ${id}`);
 
+      // State-machine guard (audit G/#3): only a DRAFT (or brand-new) PR can be submitted.
+      {
+        const st = String(pr.status ?? '').toUpperCase();
+        if (st && st !== 'DRAFT') {
+          throw new ConflictException(`Purchase request can only be submitted from DRAFT (current: ${st}).`);
+        }
+      }
+
       const updated = ensure(
         (
           await tx
@@ -359,6 +367,15 @@ export class RequirementService {
           .limit(1)
       )[0];
       if (!pr) throw new Error(`purchase_request not found: ${id}`);
+
+      // State-machine guard (audit G/#3): a PR must be SUBMITTED before it can be approved — a
+      // direct API call must not approve a never-submitted request.
+      {
+        const st = String(pr.status ?? '').toUpperCase();
+        if (st !== 'SUBMITTED') {
+          throw new ConflictException(`Purchase request must be SUBMITTED before it can be approved (current: ${st || '(none)'}).`);
+        }
+      }
 
       // Segregation of duties (owner's approval matrix): the creator of a PR cannot approve it,
       // even if they hold the approver role. It stays pending for the next eligible approver.

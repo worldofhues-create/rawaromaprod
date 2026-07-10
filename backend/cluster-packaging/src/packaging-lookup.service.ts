@@ -13,7 +13,7 @@ import type {
   PackagingLookup,
 } from './public-api.js';
 
-const { packageOrder, finishedGoodBatchMaster, finishedGoodReservation } = packagingSchema;
+const { packageOrder, finishedGoodBatchMaster, finishedGoodReservation, finishedGoodsBatchConsumption } = packagingSchema;
 
 @Injectable()
 export class PackagingLookupService implements PackagingLookup {
@@ -84,6 +84,14 @@ export class PackagingLookupService implements PackagingLookup {
         )
     )[0];
 
+    // Consumed qty (matches the fg-stock ATP read-model so the dispatch guard doesn't diverge).
+    const consumed = (
+      await this.db
+        .select({ total: sql<string>`coalesce(sum(${finishedGoodsBatchConsumption.consumedQty}), 0)::text` })
+        .from(finishedGoodsBatchConsumption)
+        .where(eq(finishedGoodsBatchConsumption.finishedGoodBatchId, finishedGoodBatchId))
+    )[0];
+
     // Latest packaging QC verdict (audit H-I2): a FAIL means the batch is not sellable/dispatchable.
     const qc = (await this.db.execute(sql`
       select overall_result from packaging.packaging_qc
@@ -95,6 +103,7 @@ export class PackagingLookupService implements PackagingLookup {
       finishedGoodBatchId: batch.finishedGoodBatchId,
       producedQty: batch.producedQty,
       reservedQty: reserved?.total ?? '0',
+      consumedQty: consumed?.total ?? '0',
       qcFailed,
     };
   }

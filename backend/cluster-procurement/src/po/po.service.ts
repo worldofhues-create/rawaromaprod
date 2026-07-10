@@ -9,7 +9,7 @@
  * approval/ack rows; issue also records a `procurement.po.issued` outbox event so downstream
  * inventory/GRN can cold-read the PO. numeric → String(n); dates → ISO date strings.
  */
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
@@ -297,6 +297,15 @@ export class PoService {
       )[0];
       if (!po) throw new Error(`purchase_order not found: ${id}`);
 
+      // State-machine guard (audit G/#3): only a DRAFT/PENDING PO can be approved — a direct API
+      // call must not re-approve or approve out of order.
+      {
+        const st = String(po.status ?? '').toUpperCase();
+        if (!['DRAFT', 'PENDING', 'PENDING_APPROVAL'].includes(st)) {
+          throw new ConflictException(`Purchase order cannot be approved from status ${st || '(none)'} (must be DRAFT/PENDING).`);
+        }
+      }
+
       // Segregation of duties (owner's approval matrix + system rule): the user who CREATED a PO
       // cannot approve it — even if they temporarily hold the approver role. The document stays
       // pending, rerouted to the next eligible approver (any other holder of the approve perm).
@@ -355,6 +364,15 @@ export class PoService {
       )[0];
       if (!po) throw new Error(`purchase_order not found: ${id}`);
 
+      // State-machine guard (audit G/#3): a PO must be APPROVED before it can be ISSUED — this is
+      // the exact gap where a direct API call could issue an unapproved order.
+      {
+        const st = String(po.status ?? '').toUpperCase();
+        if (st !== 'APPROVED') {
+          throw new ConflictException(`Purchase order must be APPROVED before it can be issued (current: ${st || '(none)'}).`);
+        }
+      }
+
       const updated = ensure(
         (
           await tx
@@ -393,6 +411,14 @@ export class PoService {
           .limit(1)
       )[0];
       if (!po) throw new Error(`purchase_order not found: ${id}`);
+
+      // State-machine guard (audit G/#3): only an ISSUED PO can be acknowledged by the vendor.
+      {
+        const st = String(po.status ?? '').toUpperCase();
+        if (st !== 'ISSUED') {
+          throw new ConflictException(`Purchase order must be ISSUED before it can be acknowledged (current: ${st || '(none)'}).`);
+        }
+      }
 
       const ack = ensure(
         (

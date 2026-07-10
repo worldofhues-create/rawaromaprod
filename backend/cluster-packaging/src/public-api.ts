@@ -30,6 +30,7 @@ export interface FinishedGoodStockRef {
   finishedGoodBatchId: string;
   producedQty: string | null;
   reservedQty: string; // sum of ACTIVE (released_dt IS NULL) reservations, '0' if none
+  consumedQty: string; // sum of finished_goods_batch_consumption, '0' if none (matches ATP read-model)
   qcFailed: boolean; // latest packaging QC verdict is FAIL → not sellable/dispatchable
 }
 
