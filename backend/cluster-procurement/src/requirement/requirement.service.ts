@@ -72,7 +72,7 @@ export class RequirementService {
     const rows = (await this.db.execute(sql`
       select sr.stock_requirement_id as "stockRequirementId", sr.material_id as "materialId",
              m.material_code as "materialCode", m.material_name as "materialName",
-             sr.required_qty as "requiredQty", sr.required_by_date as "requiredByDate",
+             sr.required_qty as "requiredQty", sr.uom_id as "uomId", sr.required_by_date as "requiredByDate",
              sr.priority as "priority", sr.requirement_source as "requirementSource", sr.status as "status"
         from procurement.stock_requirement sr
         left join masterdata.material m on m.material_id = sr.material_id

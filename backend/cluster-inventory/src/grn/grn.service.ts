@@ -277,7 +277,7 @@ export class GrnService {
     // non-reveal callers); no real material name is added here.
     const rows = (await this.db.execute(sql`
       select gi.grn_item_id as "grnItemId", gi.grn_id as "grnId", g.grn_number as "grnNumber",
-             gi.material_id as "materialId",
+             gi.material_id as "materialId", gi.uom_id as "uomId",
              gi.ordered_qty as "orderedQty", gi.received_qty as "receivedQty",
              gi.accepted_qty as "acceptedQty", gi.rejected_qty as "rejectedQty", gi.damaged_qty as "damagedQty",
              gi.variance_qty as "varianceQty", gi.variance_type as "varianceType", gi.variance_reason as "varianceReason",

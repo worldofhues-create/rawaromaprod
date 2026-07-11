@@ -288,12 +288,19 @@
   function sensitive(k) { return /hash|secret|token|password|salt|enc_?payload|enc_?iv|enc_?tag|encpayload|enciv|enctag|encryption|vaultlocation/i.test(k); }
   function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/.test(v); }
   function label(k) { return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
-  function fmt(k, v) {
+  // uomId → readable unit code (kg / L / units …), loaded once (loadView) and used to label
+  // quantity cells + create-form unit pickers so every quantity reads "10 kg", not a bare "10".
+  var UOM = {};
+  function trimNum(v) { var n = Number(v); return isFinite(n) && String(v).trim() !== '' ? String(n) : String(v); }
+  function isQtyKey(k) { return /qty$/i.test(k) || k === 'available' || k === 'onHand' || k === 'reserved'; }
+  function unitHtml(k, r) { var u = (isQtyKey(k) && r && r.uomId && UOM[r.uomId]) ? UOM[r.uomId] : ''; return u ? ' <span style="color:var(--t3);font-weight:600;font-size:11.5px">' + u + '</span>' : ''; }
+  function fmt(k, v, r) {
     if (v === null || v === undefined || v === '') return '<span style="color:var(--t3)">—</span>';
     if (typeof v === 'boolean') return v ? '<span style="color:#2E7D55;font-weight:700">Yes</span>' : '<span style="color:var(--t3)">No</span>';
     if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 0 ? '#C0492E' : (d <= 30 ? '#C0492E' : (d <= 90 ? '#9A6B1E' : 'var(--t2)')); return '<span style="font-weight:700;color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
-    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + v + '</span>'; }
+    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + trimNum(v) + '</span>' + unitHtml(k, r); }
     if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (sh > 0 ? '#C0492E' : 'var(--t3)') + '">' + (sh > 0 ? '▲ ' + v : v) + '</span>'; }
+    if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;font-weight:600">' + trimNum(v) + '</span>' + unitHtml(k, r);
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var s = STATUS[String(v).toLowerCase()] || ['var(--well)', 'var(--t2)', '#9298A2']; return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:' + s[0] + ';color:' + s[1] + '"><i style="width:6px;height:6px;border-radius:50%;background:' + s[2] + '"></i>' + v + '</span>'; }
     if (isUuid(v)) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:var(--t2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
     if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--t2)">' + v.slice(0, 10) + '</span>';
@@ -983,6 +990,7 @@
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Raise requirement</div><button type="button" id="ra-rclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + mat + ' · available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
       '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Order quantity <span style="color:#C0492E">*</span></label><input id="ra-rq" type="number" value="' + row.shortage + '" style="' + fStyle() + '">' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Unit</label><select id="ra-ru" style="' + fStyle() + '"><option value="">Unit…</option>' + Object.keys(UOM).map(function (id) { return '<option value="' + id + '">' + UOM[id] + '</option>'; }).join('') + '</select>' +
       '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Priority</label><select id="ra-rp" style="' + fStyle() + '"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>' +
       '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by <span style="color:#C0492E">*</span></label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
       '<div id="ra-rerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
@@ -994,7 +1002,7 @@
     $('ra-rform').onsubmit = function (e) {
       e.preventDefault(); var qty = Number($('ra-rq').value); if (!(qty > 0)) { $('ra-rerr').textContent = 'Enter a quantity.'; return; }
       var d = $('ra-rd').value; if (!d) { $('ra-rerr').textContent = 'A "Required by" date is required.'; return; }
-      var body = { materialId: row.materialId, requiredQty: qty, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION', requiredByDate: d };
+      var body = { materialId: row.materialId, requiredQty: qty, uomId: $('ra-ru').value || undefined, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION', requiredByDate: d };
       var save = $('ra-rsave'); save.disabled = true; save.textContent = 'Raising…';
       tunnel('/v1/stock-requirements', { method: 'POST', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
@@ -1313,7 +1321,8 @@
     '/v1/qc-sample-retentions': { title: 'Retain QC sample', perm: 'quality:qc_sample_retention:write', fields: [
       { n: 'sampleCode', l: 'Sample code', t: 'text', req: true },
       { n: 'rmBatchId', l: 'RM batch', t: 'select', fk: '/v1/rm-batches', fv: 'rmBatchId', fl: 'batchNumber' },
-      { n: 'sampleQty', l: 'Retained qty (ml)', t: 'number', def: 10 }
+      { n: 'sampleQty', l: 'Retained qty', t: 'number', def: 10 },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/po-advance-payments': { title: 'Record advance payment', perm: 'procurement:purchase_order:write', fields: [
       { n: 'purchaseOrderId', l: 'Purchase order', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber', req: true },
@@ -1363,14 +1372,16 @@
     ] },
     '/v1/production-orders': { title: 'New production order', perm: 'production:production_order:write', fields: [
       { n: 'formulaVersionId', l: 'Formula version', t: 'select', fk: '/v1/formula-versions', fv: 'formulaVersionId', fl: 'versionNumber', req: true },
-      { n: 'orderQty', l: 'Batch size / order qty', t: 'number', req: true }
+      { n: 'orderQty', l: 'Batch size / order qty', t: 'number', req: true },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/mixing-sessions': { title: 'New mixing session', perm: 'production:secure_mixing_session:write', fields: [
       { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true }
     ] },
     '/v1/oil-batches': { title: 'New oil batch', perm: 'production:oil_batch_master:write', fields: [
       { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true },
-      { n: 'batchNumber', l: 'Oil batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty', t: 'number', req: true }
+      { n: 'batchNumber', l: 'Oil batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty', t: 'number', req: true },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/production-qc': { title: 'Record production QC', perm: 'production:production_qc:write', fields: [
       { n: 'oilBatchId', l: 'Oil batch', t: 'select', fk: '/v1/oil-batches', fv: 'oilBatchId', fl: 'batchNumber', req: true },
@@ -1379,7 +1390,8 @@
     '/v1/package-orders': { title: 'New package order', perm: 'packaging:package_order:write', fields: [
       { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
       { n: 'oilBatchId', l: 'Oil batch', t: 'select', fk: '/v1/oil-batches', fv: 'oilBatchId', fl: 'batchNumber', req: true },
-      { n: 'orderQty', l: 'Order qty (units)', t: 'number', req: true }
+      { n: 'orderQty', l: 'Order qty', t: 'number', req: true },
+      { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/filling-sessions': { title: 'New filling session', perm: 'packaging:filling_session:write', fields: [
       { n: 'packageOrderId', l: 'Package order', t: 'select', fk: '/v1/package-orders', fv: 'packageOrderId', fl: 'packageOrderId', req: true }
@@ -1540,7 +1552,7 @@
       var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        close(); toast(cfg.title + ' created ✓', 'good'); loadView();
+        close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
     };
   }
@@ -1549,13 +1561,13 @@
   var CREATE_DOC = {
     '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
       header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date', req: true } ],
-      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Unit price', t: 'number', req: true } ] },
+      item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Unit price', t: 'number', req: true } ] },
     '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
       header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
-      item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'rate', l: 'Rate', t: 'number' } ] },
+      item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
       header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
-      item: [ { n: 'purchaseOrderItemId', l: 'PO line (ordered qty)', t: 'select', fk: '/v1/purchase-order-items', fv: 'purchaseOrderItemId', fl: 'label' }, { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true }, { n: 'damagedQty', l: 'Damaged qty', t: 'number' }, { n: 'varianceReason', l: 'Variance reason (if short/excess/damaged)', t: 'text' } ] }
+      item: [ { n: 'purchaseOrderItemId', l: 'PO line (ordered qty)', t: 'select', fk: '/v1/purchase-order-items', fv: 'purchaseOrderItemId', fl: 'label' }, { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'damagedQty', l: 'Damaged qty', t: 'number' }, { n: 'varianceReason', l: 'Variance reason (if short/excess/damaged)', t: 'text' } ] }
   };
   async function openCreateDoc(endpoint) {
     var cfg = CREATE_DOC[endpoint]; if (!cfg) return;
@@ -1606,7 +1618,7 @@
       var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        close(); toast(cfg.title + ' created ✓', 'good'); loadView();
+        close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
     };
   }
@@ -1893,6 +1905,8 @@
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
     if (item[3] === '__dash__') return loadDashboard();
+    // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
+    if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
     var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--t3);font-family:\'JetBrains Mono\',monospace;font-size:12px">LOADING · ENCRYPTED CHANNEL…</div>';
     var masked = item[4] === true;
     var res;
@@ -1970,7 +1984,7 @@
     }).join('') +
       (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
     var clickable = !!DETAIL[item[3]];
-    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c]) + '</td>'; }).join('') +
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c], r) + '</td>'; }).join('') +
       (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).

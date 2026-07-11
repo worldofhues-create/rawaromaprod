@@ -36,6 +36,8 @@ const OPTIONAL = [
   // fills the empty country/location-type/business-unit/floor/bin masters + wires null hierarchy
   // FKs + backfills user employee_code/mobile_number.
   ['data: master hierarchy (countries/BUs/location-types/floors/bins + wiring)', 'node scripts/seed-master-hierarchy.cjs'],
+  // WS8: fill uom_id on quantity rows so the UI shows units (kg/L/ml/pcs), not bare numbers.
+  ['data: unit-of-measure backfill (materials + quantity rows)', 'node scripts/backfill-uom.cjs'],
 ];
 
 function run(name, cmd, required) {
