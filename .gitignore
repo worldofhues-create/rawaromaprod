@@ -16,3 +16,23 @@ android/
 
 # CI workflow not pushed via gh OAuth (lacks workflow scope); re-add later with a PAT.
 .github/workflows/
+
+# macOS
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Dependencies / build
+node_modules/
+.next/
+dist/
+build/
+coverage/
+
+# Logs
+*.log
