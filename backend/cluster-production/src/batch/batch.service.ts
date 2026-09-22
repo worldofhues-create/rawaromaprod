@@ -15,7 +15,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -346,6 +346,22 @@ export class BatchService {
         { productionQcId, oilBatchId: body.oilBatchId, result: graded },
         productionQcId,
       );
+
+      // RP-EMIT (lane F6): resolve the order this oil batch was produced against, then emit
+      // QcStatusChanged toward ALEMBIC iff that order fulfills a bridge requirement — same
+      // transaction as the QC insert above.
+      const orderRow = (
+        await tx
+          .select({ productionOrderId: oilBatchMaster.productionOrderId })
+          .from(oilBatchMaster)
+          .where(eq(oilBatchMaster.oilBatchId, body.oilBatchId))
+          .limit(1)
+      )[0];
+      await emitBridgeOutbound(tx, 'QcStatusChanged', orderRow?.productionOrderId, {
+        production_qc_id: productionQcId,
+        oil_batch_id: body.oilBatchId,
+        result: graded,
+      });
 
       return { qc };
     });

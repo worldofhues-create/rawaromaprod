@@ -16,7 +16,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { QUALITY_DB, qualitySchema, type QualityDb } from '../quality.tokens.js';
 import { qualityEvents } from '../quality.events.js';
@@ -253,6 +253,18 @@ export class InspectionsService {
           inspectionId,
         );
       }
+
+      // RP-EMIT (lane F6): incoming RM-batch QC (this inspection) has no link back to a
+      // production order today — bridge.production_requirement.production_order_id only ever
+      // points at a production order, never an rm_batch — so this always resolves to "not
+      // bridge-originated" and emits nothing. Wired anyway so a future RM->requirement link
+      // (if one is ever added) only needs to pass a real production order id here, not a new
+      // call site.
+      await emitBridgeOutbound(tx, 'QcStatusChanged', null, {
+        qc_inspection_id: inspectionId,
+        rm_batch_id: rmBatchId ?? null,
+        disposition_code: body.dispositionCode,
+      });
 
       return { inspection: updated, disposition };
     });
