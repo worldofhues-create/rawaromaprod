@@ -86,7 +86,15 @@ export const inventoryTransaction = inventory.table(
   ],
 );
 
-/** INVENTORY_EVENT_HISTORY — all refs dict-soft → plain uuid. */
+/** INVENTORY_EVENT_HISTORY — all refs dict-soft → plain uuid.
+ *
+ * event_qty (RP-PROD-004, additive — not part of the original locked dictionary, nullable so
+ * existing rows are unaffected): the exact quantity this event moved. Added so the consumption
+ * subscriber (backend/api/src/consumption/consumption.service.ts) can record a real, queryable
+ * per-batch ledger of what it actually debited — previously the only record of "how much" was a
+ * free-text `remarks` string, which nothing could safely reverse against. MixingService.
+ * abortSession now sums this column (grouped by inventory_batch_id, filtered to this reference
+ * document) to credit back exactly what was taken, instead of the order's planned required_qty. */
 export const inventoryEventHistory = inventory.table(
   "inventory_event_history",
   {
@@ -97,6 +105,7 @@ export const inventoryEventHistory = inventory.table(
     inventoryTransactionId: uuid("inventory_transaction_id"),
     referenceDocumentId: uuid("reference_document_id"),
     referenceDocumentType: varchar("reference_document_type", { length: 50 }),
+    eventQty: numeric("event_qty", { precision: 18, scale: 4 }),
     performedBy: uuid("performed_by"),
     remarks: text("remarks"),
     ...metaColumns(),

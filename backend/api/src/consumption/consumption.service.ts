@@ -11,6 +11,17 @@
  * Quantity source: material_issue_item.issued_qty is a BOOLEAN (dictionary-locked), so the real
  * quantity comes from the linked material_pick_list_items.picked_qty; the batch to decrement is the
  * issue line's inventory_batch_id (what was actually taken).
+ *
+ * RP-PROD-004: the `inventory.material_issue_applied` row inserted below is a single-applier
+ * CLAIM, not just a dedupe marker — MixingService.abortSession (backend/cluster-production/src/
+ * mixing/mixing.service.ts) races this same INSERT ... ON CONFLICT DO NOTHING against the same
+ * primary key to cancel an issue before it's ever debited. Whichever side's transaction commits
+ * the claim row first wins: if abort wins, this method's own claim finds the row already there
+ * and returns without touching inventory (the issue is void, never debited — correct); if this
+ * method wins, abort's claim attempt finds the row already there and instead reads back the
+ * inventory_event_history rows this method writes (via event_qty) to credit the exact amount
+ * taken. Postgres serializes the two INSERTs on the shared PK, so there is no window where both
+ * sides believe they're first.
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
@@ -86,8 +97,8 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
            where inventory_batch_id = ${l.inv_batch}`;
         await tx`
           insert into inventory.inventory_event_history
-            (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, remarks, status)
-          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${`issued ${qty} to production`}, 'ACTIVE')`;
+            (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, remarks, status)
+          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} to production`}, 'ACTIVE')`;
         applied++;
       }
       await tx`update inventory.material_issue_applied set item_count = ${applied} where material_issue_id = ${issueId}`;
