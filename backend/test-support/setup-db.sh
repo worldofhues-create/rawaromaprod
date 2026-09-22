@@ -2,7 +2,7 @@
 # RP-FAC — creates (idempotently) the throwaway test database the harness runs against.
 # Uses TEST_DATABASE_URL if set, else the same default backend/test-support/db.ts falls back to.
 set -euo pipefail
-URL="${TEST_DATABASE_URL:-postgres://apple@localhost:5432/rawprod_mixabort_test}"
+URL="${TEST_DATABASE_URL:-postgres://apple@localhost:5432/rawprod_rp_proc_test}"
 DB="${URL##*/}"
 HOSTPORT="${URL#postgres://*@}"
 HOSTPORT="${HOSTPORT%%/*}"
