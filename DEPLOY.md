@@ -16,7 +16,7 @@ public**:
 | **Neon DB password** | Reset the role password in the Neon console; update `DATABASE_URL`. |
 | **JWT_SECRET** | New value: `openssl rand -base64 48` |
 | **FORMULA_KEK** | New value: `openssl rand -base64 32` — ⚠️ this is the formula-vault key-encryption key. If any formula ciphertext already exists with the old KEK, re-encrypt or re-seed; rotating it invalidates old sealed recipes. |
-| **All demo logins** | The 9 role users currently share one demo password (owner has its own). Reset via the seed with fresh per-role `BOOTSTRAP_*_PASSWORD` values, or disable demo logins. |
+| **All demo logins** | The 10 role users currently share one demo password (owner has its own). Reset via the seed with fresh per-role `BOOTSTRAP_*_PASSWORD` values, or disable demo logins. |
 
 Never commit any of these. `.env` is gitignored; `render.yaml` marks them `sync:false` (set in the
 Render dashboard).
@@ -78,6 +78,6 @@ so the app calls same-origin and the backend host stays hidden.
 ## Demo logins (rotate before public!)
 
 Owner: `owner@rawaroma.local` (password in your local `.env` as `BOOTSTRAP_OWNER_PASSWORD`). The other
-9 role users (`admin|procurement|receiving|qc|warehouse|compounding|filling|packaging|sales@rawaroma.local`)
+10 role users (`admin|procurement|receiving|qc|warehouse|compounding|filling|packaging|production|sales@rawaroma.local`)
 share one demo password set during seeding (re-seed `sales` with `BOOTSTRAP_SALES_PASSWORD`). Role is assigned by the DB, not self-selected. Reset all of
 these via `pnpm db:seed` with fresh `BOOTSTRAP_*_PASSWORD` values before any public exposure.

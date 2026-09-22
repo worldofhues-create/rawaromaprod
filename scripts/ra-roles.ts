@@ -186,6 +186,53 @@ export const ROLES: RoleDef[] = [
     passwordEnv: 'BOOTSTRAP_COMPOUNDING_PASSWORD',
   },
   {
+    // Production (Manufacturing/QC oversight — owner override 2026-09-21, ERP_BOUNDARY lifted:
+    // manufacturing/QC is in scope for RawProd). Plans and schedules production (the one write
+    // surface no floor role held before this role existed — production_plan/production_order/
+    // material_pick_list write sat with `owner` only) and holds read-only oversight across the
+    // floor + QC outcome, without performing the floor actions themselves: no
+    // secure_mixing_session:write / material_issue:write (compounding executes), no
+    // production_qc:write / quality:* write (qc executes/remediates). NO material:reveal → masked
+    // (same Formula Vault boundary as compounding/filling: plans runs by masked alias, never sees
+    // the actual recipe).
+    code: 'production',
+    name: 'Production Manager',
+    view: 'production',
+    select: anyOf(
+      oneOf(
+        'production:production_plan:read',
+        'production:production_plan:write',
+        'production:production_plan_items:read',
+        'production:production_plan_items:write',
+        'production:production_order:read',
+        'production:production_order:write',
+        'production:production_order_ingredients:read',
+        'production:material_pick_list:read',
+        'production:material_pick_list:write',
+        'production:material_pick_list_items:read',
+        'production:material_issue:read',
+        'production:material_issue_item:read',
+        'production:secure_mixing_session:read',
+        'production:mixing_step_log:read',
+        'production:oil_batch_master:read',
+        'production:oil_batch_consumption:read',
+        'production:oil_batch_event_history:read',
+        'production:oil_batch_qc_history:read',
+        'production:production_qc:read',
+      ),
+      oneOf(
+        'quality:qc_capa:read',
+        'quality:qc_inspections:read',
+        'quality:qc_result_details:read',
+        'quality:qc_disposition:read',
+      ),
+      oneOf('masterdata:rm_alias:read', 'inventory:inventory_batch:read'),
+      (p) => p.startsWith('location:') && isRead(p),
+    ),
+    sampleEmail: 'production@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_PRODUCTION_PASSWORD',
+  },
+  {
     // Filling — fill tickets from finished juice + a target volume. Sees a code + a quantity,
     // never a recipe → NO material:reveal (masked).
     code: 'filling',

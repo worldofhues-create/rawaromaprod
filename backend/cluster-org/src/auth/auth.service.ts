@@ -29,7 +29,7 @@ const RA_PORTAL: Portal = "owner";
 // Console access policy (Step 3, two-console): which roles may log into which console. Owner + admin
 // are cross-console governance; floor roles are factory-only; sales/procurement are online-only. So a
 // factory-floor account can't authenticate on the public online console, and vice-versa.
-const FACTORY_ONLY_ROLES = ["receiving", "qc", "warehouse", "compounding", "filling", "packaging"];
+const FACTORY_ONLY_ROLES = ["receiving", "qc", "warehouse", "compounding", "filling", "packaging", "production"];
 const ONLINE_ONLY_ROLES = ["sales", "procurement"];
 function consoleAllows(consoleEnv: "online" | "factory", roleCodes: string[]): boolean {
   const roles = roleCodes.map((r) => r.toLowerCase());
