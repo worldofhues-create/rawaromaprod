@@ -152,3 +152,32 @@ test('po approval: the generic EditService editor can no longer PATCH status dir
     /No editable fields supplied/,
   );
 });
+
+test('po issue: concurrent issuePurchaseOrder on an APPROVED PO — only one ISSUED transition, one outbox event (security review R1 #6)', async () => {
+  // Before the fix, issuePurchaseOrder read the PO, checked status === 'APPROVED', then
+  // unconditionally UPDATEd to ISSUED with no compare-and-swap on the WHERE clause (unlike
+  // approvePurchaseOrder, which already guards with `and(eq(id, id), eq(status, current))`).
+  // Two concurrent issue calls on the same APPROVED PO could both pass the read-time check
+  // before either committed, and both proceed to set status = 'ISSUED' and record a
+  // `procurement.po.issued` outbox event — a double transition and a duplicate event.
+  const id = await freshPo(1000, { createdBy: CREATOR });
+  await svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER_A }));
+
+  const results = await Promise.allSettled([
+    svc.issuePurchaseOrder(id, principal({ userId: APPROVER_A })),
+    svc.issuePurchaseOrder(id, principal({ userId: APPROVER_A })),
+  ]);
+  const succeeded = results.filter((r) => r.status === 'fulfilled');
+  assert.equal(succeeded.length, 1, 'exactly one concurrent issue should win');
+  for (const r of results) {
+    if (r.status === 'rejected') assert.ok(r.reason instanceof ConflictException);
+  }
+
+  const sql = testClient();
+  const rows = await sql`select status from procurement.purchase_order where purchase_order_id = ${id}`;
+  assert.equal(rows[0]!.status, 'ISSUED', 'the PO must end up ISSUED exactly once');
+
+  const events = await sql`select id from procurement.outbox
+                             where type = 'procurement.po.issued' and aggregate_id = ${id}`;
+  assert.equal(events.length, 1, 'exactly one procurement.po.issued outbox event must be recorded, never two');
+});

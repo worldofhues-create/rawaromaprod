@@ -528,15 +528,20 @@ export class PoService {
         }
       }
 
-      const updated = ensure(
-        (
-          await tx
-            .update(purchaseOrder)
-            .set({ status: 'ISSUED', updatedBy: principal.userId })
-            .where(eq(purchaseOrder.purchaseOrderId, id))
-            .returning()
-        )[0],
-      );
+      // Security review R1 #6: compare-and-swap on the update, mirroring approvePurchaseOrder —
+      // without this, two concurrent issue calls on the same APPROVED PO could both pass the
+      // read-time check above before either committed, and both flip to ISSUED and record a
+      // duplicate `procurement.po.issued` outbox event.
+      const updated = (
+        await tx
+          .update(purchaseOrder)
+          .set({ status: 'ISSUED', updatedBy: principal.userId })
+          .where(and(eq(purchaseOrder.purchaseOrderId, id), eq(purchaseOrder.status, 'APPROVED')))
+          .returning()
+      )[0];
+      if (!updated) {
+        throw new ConflictException(`Purchase order ${id} was moved off APPROVED by a concurrent request; refusing this stale issue.`);
+      }
 
       await recordOutbox(
         tx,
