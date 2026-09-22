@@ -4,8 +4,14 @@
  * vendor's response to an RFQ. Create stamps status "ACTIVE" + created_by/updated_by.
  * numeric → String(n); dates stay ISO date strings (date columns). Soft refs are plain uuids.
  */
-import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { and, desc, eq, lt, ne, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import {
   PROCUREMENT_DB,
@@ -19,6 +25,7 @@ import type {
   CreateRfqItem,
   CreateRfqMaster,
   CreateRfqVendorMapping,
+  SelectQuotation,
 } from '../cluster-procurement.dtos.js';
 import { ensure, paginate } from '../_helpers.js';
 
@@ -250,5 +257,101 @@ export class RfqService {
           .limit(1)
       )[0] ?? null
     );
+  }
+
+  /* ── FLOW: select winning quotation (RFQ → PO gap, RP-PROC-006) ───────── */
+
+  /**
+   * POST /v1/quotations/:id/select — the formal "select winning quotation" step that was
+   * missing from the RFQ → PO flow: createPurchaseOrder used to accept ANY quotationId with no
+   * check that it had actually won the RFQ, so a PO could be raised off a quote nobody chose.
+   * This marks exactly one quotation per RFQ as the awarded winner:
+   *   - the quotation must belong to a real RFQ (quotation.rfqId not null)
+   *   - its vendor must actually be a mapped/invited vendor for that RFQ (rfq_vendor_mappings) —
+   *     a quote from a vendor who was never on the RFQ cannot win it
+   *   - only ONE quotation per RFQ may ever hold status 'SELECTED' — awarding a second, different
+   *     quotation for an RFQ that already has a winner is rejected (409) as a double award;
+   *     re-selecting the SAME quotation that already won is a harmless no-op
+   * On success, quotations.status → 'SELECTED' and the matching rfq_vendor_mappings row gets
+   * is_selected_vendor = true (other vendor mappings for the same RFQ are cleared to false).
+   */
+  async selectQuotation(id: string, _body: SelectQuotation, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const quotation = (
+        await tx.select().from(quotations).where(eq(quotations.quotationId, id)).limit(1)
+      )[0];
+      if (!quotation) throw new NotFoundException(`quotation not found: ${id}`);
+      if (!quotation.rfqId) {
+        throw new ConflictException(
+          `Quotation ${id} is not linked to an RFQ and cannot be selected as a winner.`,
+        );
+      }
+
+      const vendorMapping = quotation.vendorId
+        ? (
+            await tx
+              .select()
+              .from(rfqVendorMappings)
+              .where(
+                and(
+                  eq(rfqVendorMappings.rfqId, quotation.rfqId),
+                  eq(rfqVendorMappings.vendorId, quotation.vendorId),
+                ),
+              )
+              .limit(1)
+          )[0]
+        : undefined;
+      if (!vendorMapping) {
+        throw new ForbiddenException(
+          `Vendor ${quotation.vendorId ?? '(none)'} was never invited/mapped to RFQ ${quotation.rfqId} — a quotation from an unmapped vendor cannot be selected.`,
+        );
+      }
+
+      // Double-award guard: some OTHER quotation for this RFQ already won.
+      const existingWinner = (
+        await tx
+          .select({ quotationId: quotations.quotationId })
+          .from(quotations)
+          .where(
+            and(
+              eq(quotations.rfqId, quotation.rfqId),
+              eq(quotations.status, 'SELECTED'),
+              ne(quotations.quotationId, id),
+            ),
+          )
+          .limit(1)
+      )[0];
+      if (existingWinner) {
+        throw new ConflictException(
+          `RFQ ${quotation.rfqId} already has an awarded quotation (${existingWinner.quotationId}); cannot award a second winner (double award).`,
+        );
+      }
+
+      const updated = ensure(
+        (
+          await tx
+            .update(quotations)
+            .set({ status: 'SELECTED', updatedBy: principal.userId })
+            .where(eq(quotations.quotationId, id))
+            .returning()
+        )[0],
+      );
+
+      await tx
+        .update(rfqVendorMappings)
+        .set({ isSelectedVendor: false, updatedBy: principal.userId })
+        .where(
+          and(
+            eq(rfqVendorMappings.rfqId, quotation.rfqId),
+            ne(rfqVendorMappings.vendorId, quotation.vendorId ?? ''),
+          ),
+        );
+      await tx
+        .update(rfqVendorMappings)
+        .set({ isSelectedVendor: true, updatedBy: principal.userId })
+        .where(eq(rfqVendorMappings.rfqVendorMappingId, vendorMapping.rfqVendorMappingId));
+
+      return updated;
+    });
   }
 }

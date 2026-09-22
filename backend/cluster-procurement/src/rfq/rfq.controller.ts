@@ -18,12 +18,14 @@ import {
   createRfqMaster,
   createRfqVendorMapping,
   listQuery,
+  selectQuotation,
   type CreateQuotation,
   type CreateQuotationItem,
   type CreateRfqItem,
   type CreateRfqMaster,
   type CreateRfqVendorMapping,
   type ListQuery,
+  type SelectQuotation,
 } from '../cluster-procurement.dtos.js';
 
 @Controller()
@@ -143,5 +145,17 @@ export class RfqController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.rfqs.createQuotationItem(body, principal);
+  }
+
+  /* ── select winning quotation (RFQ → PO gap, RP-PROC-006) ─────────────── */
+
+  @Permissions('procurement:quotations:write')
+  @Post('v1/quotations/:id/select')
+  selectQuotation(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(selectQuotation)) body: SelectQuotation,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.rfqs.selectQuotation(id, body, principal);
   }
 }

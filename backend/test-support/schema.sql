@@ -261,6 +261,114 @@ create table if not exists procurement.purchase_request_approval (
   updated_by varchar(255)
 );
 
+-- RP-PROC (lane F3): vendor_details + RFQ/quotation tables, needed to test the RFQ -> PO
+-- "select winning quotation" award step (PoService.createPurchaseOrder / RfqService.selectQuotation).
+create table if not exists procurement.vendor_details (
+  vendor_id uuid primary key default gen_random_uuid(),
+  organization_id uuid,
+  vendor_code varchar(50),
+  vendor_name varchar(200),
+  address_id uuid,
+  base_currency_id uuid,
+  payment_terms varchar(255),
+  gstin text,
+  pan_number text,
+  bank_name text,
+  bank_account_number text,
+  bank_ifsc text,
+  contact_email text,
+  contact_phone text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+-- Defensive: edit-service-bypass.test.ts also opportunistically creates a MINIMAL
+-- procurement.vendor_details (vendor_id/vendor_name/status only) with its own unguarded
+-- `create table if not exists`, outside this file's advisory-locked schema application — whoever
+-- runs first "wins" the table shape since IF NOT EXISTS won't widen an existing table. These
+-- ADD COLUMN IF NOT EXISTS calls make this file's fuller shape authoritative either way.
+alter table procurement.vendor_details add column if not exists organization_id uuid;
+alter table procurement.vendor_details add column if not exists vendor_code varchar(50);
+alter table procurement.vendor_details add column if not exists address_id uuid;
+alter table procurement.vendor_details add column if not exists base_currency_id uuid;
+alter table procurement.vendor_details add column if not exists payment_terms varchar(255);
+alter table procurement.vendor_details add column if not exists gstin text;
+alter table procurement.vendor_details add column if not exists pan_number text;
+alter table procurement.vendor_details add column if not exists bank_name text;
+alter table procurement.vendor_details add column if not exists bank_account_number text;
+alter table procurement.vendor_details add column if not exists bank_ifsc text;
+alter table procurement.vendor_details add column if not exists contact_email text;
+alter table procurement.vendor_details add column if not exists contact_phone text;
+
+create table if not exists procurement.rfq_master (
+  rfq_id uuid primary key default gen_random_uuid(),
+  rfq_number varchar(50),
+  purchase_request_id uuid,
+  rfq_date date,
+  submission_deadline varchar(255),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.rfq_items (
+  rfq_item_id uuid primary key default gen_random_uuid(),
+  rfq_id uuid references procurement.rfq_master(rfq_id),
+  material_id uuid,
+  required_qty numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.rfq_vendor_mappings (
+  rfq_vendor_mapping_id uuid primary key default gen_random_uuid(),
+  rfq_id uuid references procurement.rfq_master(rfq_id),
+  vendor_id uuid references procurement.vendor_details(vendor_id),
+  is_selected_vendor boolean,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.quotations (
+  quotation_id uuid primary key default gen_random_uuid(),
+  rfq_id uuid references procurement.rfq_master(rfq_id),
+  vendor_id uuid references procurement.vendor_details(vendor_id),
+  quotation_number varchar(50),
+  quotation_date date,
+  valid_until_date date,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.quotation_items (
+  quotation_item_id uuid primary key default gen_random_uuid(),
+  quotation_id uuid references procurement.quotations(quotation_id),
+  material_id uuid,
+  quoted_qty numeric(18,4),
+  uom_id uuid,
+  quoted_rate numeric(18,4),
+  currency_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists procurement.purchase_order (
   purchase_order_id uuid primary key default gen_random_uuid(),
   po_number varchar(50),

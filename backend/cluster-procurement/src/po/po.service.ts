@@ -9,7 +9,13 @@
  * approval/ack rows; issue also records a `procurement.po.issued` outbox event so downstream
  * inventory/GRN can cold-read the PO. numeric → String(n); dates → ISO date strings.
  */
-import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
@@ -28,11 +34,20 @@ import type {
   CreatePurchaseOrder,
   CreatePurchaseOrderItem,
   CreateVendorPoAck,
+  PurchaseOrderItemInput,
 } from '../cluster-procurement.dtos.js';
 import { ensure, paginate } from '../_helpers.js';
 
-const { purchaseOrder, purchaseOrderItems, poApprovalOrder, vendorPoAck, outbox } =
-  procurementSchema;
+const {
+  purchaseOrder,
+  purchaseOrderItems,
+  poApprovalOrder,
+  vendorPoAck,
+  outbox,
+  quotations,
+  quotationItems,
+  rfqVendorMappings,
+} = procurementSchema;
 
 // RP-FAC2 (§28 approval-threshold follow-up): a PO above this amount needs a SECOND, distinct
 // approval before it is truly APPROVED — a single approver's sign-off only moves it to
@@ -47,17 +62,97 @@ export class PoService {
 
   /* ── purchase_order — create from a quotation, total = Σ(amount) ─────── */
 
+  /**
+   * POST /v1/purchase-orders. When `quotationId` is supplied, this now enforces the formal
+   * "select winning quotation" step that used to be missing from the RFQ → PO flow (RP-PROC-006):
+   *   - the quotation must exist
+   *   - if `vendorId` is also supplied, it must match the quotation's own vendor (vendor
+   *     mismatch is refused — a PO cannot be raised in vendor A's name off vendor B's quote)
+   *   - the quotation's vendor must actually be a mapped/invited vendor on the quotation's RFQ
+   *     ("vendorId actually submitted quotationId for that RFQ")
+   *   - the quotation must hold status 'SELECTED' (awarded via POST /v1/quotations/:id/select) —
+   *     an unselected quotation, or a losing one from an RFQ that already awarded a DIFFERENT
+   *     quotation (double award), is refused
+   * On success the PO's vendorId, lines, quantities and prices are BOUND from the quotation's own
+   * quotation_items — client-supplied `items`/`vendorId` are ignored for a quotation-backed PO, so
+   * a caller cannot raise a PO at different prices/lines than what actually won the RFQ.
+   * With no `quotationId` (e.g. an emergency/direct purchase with no RFQ), behaviour is unchanged:
+   * items + vendorId come straight from the body.
+   */
   async createPurchaseOrder(body: CreatePurchaseOrder, principal: AuthPrincipal) {
-    // Line amount = explicit amount, else qty × rate; never NaN (PROC-19: the total previously
-    // did raw Number(it.amount) which is NaN when the form only sends qty + rate, corrupting
-    // total_amount on every UI-created PO).
-    const lineAmount = (it: (typeof body.items)[number]): number => {
-      const amt = it.amount != null ? Number(it.amount) : Number(it.orderedQty ?? 0) * Number(it.rate ?? 0);
-      return Number.isFinite(amt) ? amt : 0;
-    };
-    const total = body.items.reduce((sum, it) => sum + lineAmount(it), 0);
-
     return this.db.transaction(async (tx) => {
+      let items: PurchaseOrderItemInput[] = body.items;
+      let vendorId = body.vendorId ?? null;
+
+      if (body.quotationId) {
+        const quotationId = body.quotationId;
+        const quotation = (
+          await tx.select().from(quotations).where(eq(quotations.quotationId, quotationId)).limit(1)
+        )[0];
+        if (!quotation) throw new NotFoundException(`quotation not found: ${quotationId}`);
+
+        if (body.vendorId && quotation.vendorId && body.vendorId !== quotation.vendorId) {
+          throw new ForbiddenException(
+            `Vendor mismatch: quotation ${quotationId} was submitted by vendor ${quotation.vendorId}, not ${body.vendorId} — a purchase order cannot be raised against another vendor's quotation.`,
+          );
+        }
+        vendorId = quotation.vendorId ?? vendorId;
+
+        if (quotation.rfqId && quotation.vendorId) {
+          const mapped = (
+            await tx
+              .select()
+              .from(rfqVendorMappings)
+              .where(
+                and(
+                  eq(rfqVendorMappings.rfqId, quotation.rfqId),
+                  eq(rfqVendorMappings.vendorId, quotation.vendorId),
+                ),
+              )
+              .limit(1)
+          )[0];
+          if (!mapped) {
+            throw new ForbiddenException(
+              `Vendor ${quotation.vendorId} was never invited/mapped to RFQ ${quotation.rfqId} — its quotation cannot back a purchase order.`,
+            );
+          }
+        }
+
+        const status = String(quotation.status ?? '').toUpperCase();
+        if (status !== 'SELECTED') {
+          throw new ConflictException(
+            `Quotation ${quotationId} has not been selected as the RFQ's winning quotation (status: ${quotation.status ?? '(none)'}). Award it first via POST /v1/quotations/${quotationId}/select.`,
+          );
+        }
+
+        const qItems = await tx
+          .select()
+          .from(quotationItems)
+          .where(eq(quotationItems.quotationId, quotationId));
+        if (qItems.length === 0) {
+          throw new ConflictException(`Quotation ${quotationId} has no line items to bind to a purchase order.`);
+        }
+        items = qItems.map((qi) => ({
+          materialId: qi.materialId,
+          orderedQty: qi.quotedQty,
+          uomId: qi.uomId,
+          rate: qi.quotedRate,
+          amount:
+            qi.quotedQty != null && qi.quotedRate != null
+              ? Number(qi.quotedQty) * Number(qi.quotedRate)
+              : null,
+        }));
+      }
+
+      // Line amount = explicit amount, else qty × rate; never NaN (PROC-19: the total previously
+      // did raw Number(it.amount) which is NaN when the form only sends qty + rate, corrupting
+      // total_amount on every UI-created PO).
+      const lineAmount = (it: PurchaseOrderItemInput): number => {
+        const amt = it.amount != null ? Number(it.amount) : Number(it.orderedQty ?? 0) * Number(it.rate ?? 0);
+        return Number.isFinite(amt) ? amt : 0;
+      };
+      const total = items.reduce((sum, it) => sum + lineAmount(it), 0);
+
       const poId = uuidv7();
       const po = ensure(
         (
@@ -66,7 +161,7 @@ export class PoService {
             .values({
               purchaseOrderId: poId,
               poNumber: (body.poNumber && String(body.poNumber).trim()) || ('PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
-              vendorId: body.vendorId ?? null,
+              vendorId: vendorId ?? null,
               quotationId: body.quotationId ?? null,
               purchaseRequestId: body.purchaseRequestId ?? null,
               orderDate: body.orderDate ?? null,
@@ -81,8 +176,8 @@ export class PoService {
         )[0],
       );
 
-      const items: (typeof purchaseOrderItems.$inferSelect)[] = [];
-      for (const it of body.items) {
+      const insertedItems: (typeof purchaseOrderItems.$inferSelect)[] = [];
+      for (const it of items) {
         const row = ensure(
           (
             await tx
@@ -102,10 +197,10 @@ export class PoService {
               .returning()
           )[0],
         );
-        items.push(row);
+        insertedItems.push(row);
       }
 
-      return { purchaseOrder: po, items };
+      return { purchaseOrder: po, items: insertedItems };
     });
   }
 
