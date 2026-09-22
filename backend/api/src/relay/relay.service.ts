@@ -13,8 +13,24 @@
  *
  * Only signed event envelopes cross. Never a DB connection, never the KEK, never a recipe
  * (formula.* is stripped by the contract and the formula schema is never scanned).
+ *
+ * NOT AVAILABLE (lane F5, RP-DEADTABLES): every public method here depends on
+ * platform.relay_cursor, platform.relay_inbox, and/or platform.relay_package — none of which
+ * exist in @core/data-platform or @ra/data-reference (the only sources `pnpm db:push` draws the
+ * `platform` schema from, per scripts/db-schema-groups.ts) or the Phase-1A Data Dictionary. Any
+ * real/dev database would 500 with "relation does not exist" the instant any of these ran — dead
+ * calls dressed up as a working air-gap sync. Per CLAUDE.md C3 (no destructive migration;
+ * additive schema only if the dictionary process permits it — report if locked), new tables are
+ * NOT added here. exportPackage/importPackage/status now throw an honest NotImplementedException
+ * up front instead of crashing partway through; the rest of the implementation below is left
+ * intact (signing, verification, hydration, contract) so re-enabling this feature is just
+ * removing the three guards once the tables exist.
+ * Unblocking it needs: `relay_cursor` (direction, source_schema, last_seq, updated_dt — PK
+ * direction+source_schema), `relay_inbox` (event dedupe by id + direction), and `relay_package`
+ * (package_id, direction, kind, package_hash, prev_hash, event_count, created_dt) added to the
+ * Phase-1A dictionary + @ra/data-reference (or @core/data-platform) schema, then db:push.
  */
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotImplementedException } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { randomUUID } from 'node:crypto';
@@ -62,6 +78,9 @@ function safeJson(s: string): unknown {
   try { return JSON.parse(s); } catch { return null; }
 }
 
+const UNAVAILABLE =
+  'Relay (air-gap sync) is not available: its backing tables (platform.relay_cursor, platform.relay_inbox, platform.relay_package) were never added to the Phase-1A Data Dictionary or @core/data-platform / @ra/data-reference schema, so they do not exist in any real database. Ask the data team to add them to the dictionary before this feature can go live.';
+
 @Injectable()
 export class RelayService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
@@ -79,7 +98,11 @@ export class RelayService {
 
   /* ── export ───────────────────────────────────────────────────────── */
 
-  async exportPackage(direction: RelayDirection, commit: boolean): Promise<RelayPackage & { committed: boolean }> {
+  async exportPackage(_direction: RelayDirection, _commit: boolean): Promise<RelayPackage & { committed: boolean }> {
+    throw new NotImplementedException(UNAVAILABLE);
+  }
+
+  private async _unused_exportPackage(direction: RelayDirection, commit: boolean): Promise<RelayPackage & { committed: boolean }> {
     const signingKey = this.signingKey();
     const types = allowedTypes(direction);
     const inList = types.map((t) => `'${t.replace(/'/g, "''")}'`).join(',');
@@ -157,7 +180,13 @@ export class RelayService {
 
   /* ── import ───────────────────────────────────────────────────────── */
 
-  async importPackage(pkg: RelayPackage): Promise<{
+  async importPackage(_pkg: RelayPackage): Promise<{
+    packageId: string; direction: RelayDirection; eventCount: number; applied: number; skipped: number; materialized: number; status: string; chain: string;
+  }> {
+    throw new NotImplementedException(UNAVAILABLE);
+  }
+
+  private async _unused_importPackage(pkg: RelayPackage): Promise<{
     packageId: string; direction: RelayDirection; eventCount: number; applied: number; skipped: number; materialized: number; status: string; chain: string;
   }> {
     const verifyKey = this.verifyKey();
@@ -291,7 +320,11 @@ export class RelayService {
 
   /* ── status ───────────────────────────────────────────────────────── */
 
-  async status() {
+  async status(): Promise<never> {
+    throw new NotImplementedException(UNAVAILABLE);
+  }
+
+  private async _unused_status() {
     const cursors = (await this.sql`
       select direction, source_schema, last_seq::text as last_seq, updated_dt
         from platform.relay_cursor order by direction, source_schema`) as Array<Record<string, unknown>>;
