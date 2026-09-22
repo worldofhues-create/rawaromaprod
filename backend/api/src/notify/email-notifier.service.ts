@@ -195,11 +195,21 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
           `${exp.c} raw-material batch(es) expire within 30 days (soonest ${exp.soonest ?? '?'}). Use or quarantine them first (FEFO).`, { batchesExpiring: exp.c, soonest: exp.soonest }, ['warehouse', 'owner'],
           'Prioritise these batches for production or quarantine before expiry.', 'RM batches');
       }
-      const doc = ((await this.sql`select count(*)::int c, min(expiry_date)::text soonest from platform.document_registry where status = 'ACTIVE' and expiry_date is not null and expiry_date <= (now() + interval '45 days')`) as Array<{ c: number; soonest: string | null }>)[0] ?? { c: 0, soonest: null };
-      if (doc.c > 0) {
-        await this.condition(`docexpiry:${day}`, 'document.expiry', 'Document expiry — compliance docs lapsing soon',
-          `${doc.c} document(s) (vendor licences / COAs / contracts) expire within 45 days (soonest ${doc.soonest ?? '?'}). Renew them before they lapse.`, { documentsExpiring: doc.c, soonest: doc.soonest }, ['admin', 'owner'],
-          'Renew or replace the expiring documents.', 'Documents');
+      // Lane F5 (RP-DEADTABLES): platform.document_registry does NOT exist in @core/data-platform
+      // or @ra/data-reference (db:push's only sources for `platform`) or the Phase-1A Data
+      // Dictionary — see documents.service.ts. Isolated in its own try/catch (rather than left to
+      // bubble to the outer catch below) because it used to run BEFORE the approvals/dead-letter/
+      // stuck-PO/auto-approve/vendor-ack blocks further down: one missing table was silently
+      // killing every real, working condition that runs after it in this function, every scan.
+      try {
+        const doc = ((await this.sql`select count(*)::int c, min(expiry_date)::text soonest from platform.document_registry where status = 'ACTIVE' and expiry_date is not null and expiry_date <= (now() + interval '45 days')`) as Array<{ c: number; soonest: string | null }>)[0] ?? { c: 0, soonest: null };
+        if (doc.c > 0) {
+          await this.condition(`docexpiry:${day}`, 'document.expiry', 'Document expiry — compliance docs lapsing soon',
+            `${doc.c} document(s) (vendor licences / COAs / contracts) expire within 45 days (soonest ${doc.soonest ?? '?'}). Renew them before they lapse.`, { documentsExpiring: doc.c, soonest: doc.soonest }, ['admin', 'owner'],
+            'Renew or replace the expiring documents.', 'Documents');
+        }
+      } catch (e) {
+        this.logger.warn(`notifier scan: document-expiry digest skipped (platform.document_registry does not exist in any real database): ${(e as Error).message}`);
       }
       const appr = ((await this.sql`select
           (select count(*) from procurement.purchase_request where upper(status) = 'SUBMITTED')
@@ -210,11 +220,20 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
           'Review and approve/reject the pending items.', 'Purchase orders');
       }
       // Dead-letter alert (audit #10): notifications that failed after all retries.
-      const dead = ((await this.sql`select count(*)::int c from platform.notification_log where status = 'FAILED' and coalesce(attempts, 0) >= 3`) as Array<{ c: number }>)[0] ?? { c: 0 };
-      if (dead.c > 0) {
-        await this.condition(`notify-dead:${day}`, 'notify.dead_letter', 'Notification delivery is failing',
-          `${dead.c} notification(s) could not be delivered after 3 attempts — check the email provider (RESEND_API_KEY / sending domain).`, { failed: dead.c }, ['admin', 'owner'],
-          'Check the email provider configuration; the affected events can be re-triggered.', 'Notifications');
+      // Lane F5 (RP-DEADTABLES): platform.notification_log does NOT exist in @core/data-platform
+      // or @ra/data-reference or the Phase-1A Data Dictionary either (the drain() writer below is
+      // already best-effort/try-caught for the same reason). Isolated the same way as
+      // document-expiry above, so it can't silently kill the stuck-PO/auto-approve/vendor-ack
+      // blocks that follow it.
+      try {
+        const dead = ((await this.sql`select count(*)::int c from platform.notification_log where status = 'FAILED' and coalesce(attempts, 0) >= 3`) as Array<{ c: number }>)[0] ?? { c: 0 };
+        if (dead.c > 0) {
+          await this.condition(`notify-dead:${day}`, 'notify.dead_letter', 'Notification delivery is failing',
+            `${dead.c} notification(s) could not be delivered after 3 attempts — check the email provider (RESEND_API_KEY / sending domain).`, { failed: dead.c }, ['admin', 'owner'],
+            'Check the email provider configuration; the affected events can be re-triggered.', 'Notifications');
+        }
+      } catch (e) {
+        this.logger.warn(`notifier scan: dead-letter check skipped (platform.notification_log does not exist in any real database): ${(e as Error).message}`);
       }
       // -- per-row alerts (one email per offending record, ever) --
       // (inbound QC HOLD now notifies immediately via the quality.qc.hold outbox event, not here.)
