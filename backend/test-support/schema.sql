@@ -12,6 +12,7 @@ create schema if not exists inventory;
 create schema if not exists quality;
 create schema if not exists procurement;
 create schema if not exists masterdata;
+create schema if not exists bridge;
 
 -- RP-PROC (lane F3): minimal masterdata.material — ProcAnalyticsService.rateHistory left-joins it
 -- to attach material names to rate-history rows (RP-PROC-007).
@@ -162,6 +163,35 @@ create table if not exists quality.qc_inspections (
   updated_dt timestamptz not null default now(),
   created_by varchar(255),
   updated_by varchar(255)
+);
+
+-- RP-EMIT (lane F6): qc_disposition + quality.outbox, needed for InspectionsService.dispose
+-- (quality/inspections/inspections.service.ts) — the qualityEvents.qcPassed/qcFailed emission
+-- and the QcStatusChanged bridge hook wired beside it.
+create table if not exists quality.qc_disposition (
+  qc_disposition_id uuid primary key default gen_random_uuid(),
+  qc_inspection_id uuid references quality.qc_inspections(qc_inspection_id),
+  disposition_code varchar(50),
+  disposition_reason text,
+  conditions text,
+  disposed_by uuid,
+  disposed_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists quality.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
 );
 
 create table if not exists quality.qc_capa (
@@ -555,6 +585,35 @@ create table if not exists production.oil_batch_event_history (
   updated_by varchar(255)
 );
 
+-- RP-EMIT (lane F6): production_qc + oil_batch_qc_history, needed for BatchService.
+-- recordProductionQc (production/batch/batch.service.ts) — the QcStatusChanged emission hook.
+create table if not exists production.production_qc (
+  production_qc_id uuid primary key default gen_random_uuid(),
+  oil_batch_id uuid,
+  qc_parameter_id uuid,
+  observed_value numeric(18,4),
+  result varchar(255),
+  inspected_by uuid,
+  inspection_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.oil_batch_qc_history (
+  oil_batch_qc_history_id uuid primary key default gen_random_uuid(),
+  oil_batch_id uuid references production.oil_batch_master(oil_batch_id),
+  production_qc_id uuid,
+  recorded_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists production.outbox (
   id uuid primary key default gen_random_uuid(),
   type text not null,
@@ -755,6 +814,47 @@ create table if not exists sales.dispatch_items (
 );
 
 create table if not exists sales.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
+);
+
+-- bridge (RP-EMIT, lane F6) --------------------------------------------------
+-- RawProd's local projection of ALEMBIC production requirements + the outbound outbox toward
+-- ALEMBIC (backend/api/src/bridge/*, packages/data-bridge/src/schema/*). Only the two tables the
+-- lane F6 emission hooks need against this harness — connector_config/inbound_event (the inbound
+-- half) aren't exercised by these tests.
+create table if not exists bridge.production_requirement (
+  production_requirement_id uuid primary key default gen_random_uuid(),
+  alembic_requirement_id uuid not null,
+  org_id uuid not null,
+  correlation_id uuid not null,
+  order_ref varchar(100) not null,
+  mapped_sku text not null,
+  qty numeric(18,4) not null,
+  uom varchar(20) not null,
+  pack_size varchar(50),
+  needed_by timestamptz not null,
+  priority varchar(20) not null default 'normal',
+  lifecycle_status varchar(30) not null default 'CREATED',
+  status_reason text,
+  production_order_id uuid,
+  last_applied_version numeric not null default 0,
+  last_emitted_version numeric not null default 0,
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists bridge_production_requirement_alembic_id_uq
+  on bridge.production_requirement (alembic_requirement_id);
+
+create table if not exists bridge.outbox (
   id uuid primary key default gen_random_uuid(),
   type text not null,
   payload jsonb not null,
