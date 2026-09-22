@@ -38,8 +38,8 @@ export class DispatchService {
    * Finished-goods available-to-promise for one FG batch, netted across the schema boundary.
    * produced + reserved come from the packaging cluster's cold-read port; already-dispatched is
    * this cluster's own sum (non-cancelled lines). available = produced − reserved − dispatched.
-   * Throws NotFound for an unknown batch. Best-effort (read outside the write tx) — acceptable at
-   * Phase-1 concurrency; the true single-writer guard lands with the offline factory console.
+   * Throws NotFound for an unknown batch. Best-effort (read outside the write tx) — used only for
+   * the cheap pre-flight rejection; the authoritative check is `fgAvailableLocked`, below.
    */
   private async fgAvailable(finishedGoodBatchId: string): Promise<number> {
     const stock = await this.packaging.getFinishedGoodStock(finishedGoodBatchId);
@@ -66,19 +66,66 @@ export class DispatchService {
     return produced - reserved - consumed - alreadyDispatched;
   }
 
+  /**
+   * RP-FAC (RP-DISP-002 follow-up — single-writer guard was NOT_BUILT): the authoritative,
+   * concurrency-safe available-to-promise check. Runs INSIDE the write transaction and takes
+   * `SELECT ... FOR UPDATE` on the FG batch row first, so a second concurrent dispatch (or FG
+   * reservation — see ReservationService) against the same batch blocks on the lock instead of
+   * both racing on a stale read and both being allowed to over-dispatch. Everywhere this
+   * transaction dispatches more than one distinct batch, callers must lock in a stable (sorted)
+   * batch-id order to avoid lock-order deadlocks with a concurrent multi-batch dispatch.
+   */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  private async fgAvailableLocked(tx: any, finishedGoodBatchId: string): Promise<number> {
+    const locked = (await tx.execute(sql`
+      select produced_qty from packaging.finished_good_batch_master
+       where finished_good_batch_id = ${finishedGoodBatchId}
+       for update`)) as unknown as Array<{ produced_qty: string | null }>;
+    const batch = locked[0];
+    if (!batch) throw new NotFoundException(`finished-good batch not found: ${finishedGoodBatchId}`);
+
+    const qc = (await tx.execute(sql`
+      select overall_result from packaging.packaging_qc
+       where finished_good_batch_id = ${finishedGoodBatchId}
+       order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
+    if (String(qc[0]?.overall_result ?? '').toUpperCase() === 'FAIL') return 0;
+
+    const reserved = (await tx.execute(sql`
+      select coalesce(sum(reserved_qty), 0)::text as total from packaging.finished_good_reservation
+       where finished_good_batch_id = ${finishedGoodBatchId} and released_dt is null and coalesce(status, 'ACTIVE') <> 'RELEASED'`
+    )) as unknown as Array<{ total: string }>;
+    const consumed = (await tx.execute(sql`
+      select coalesce(sum(consumed_qty), 0)::text as total from packaging.finished_goods_batch_consumption
+       where finished_good_batch_id = ${finishedGoodBatchId} and coalesce(status, 'ACTIVE') <> 'CANCELLED'`
+    )) as unknown as Array<{ total: string }>;
+    const dispatched = (await tx.execute(sql`
+      select coalesce(sum(dispatched_qty), 0)::text as total from sales.dispatch_items
+       where finished_good_batch_id = ${finishedGoodBatchId} and coalesce(status, 'ACTIVE') <> 'CANCELLED'`
+    )) as unknown as Array<{ total: string }>;
+
+    return (
+      Number(batch.produced_qty ?? 0) -
+      Number(reserved[0]?.total ?? 0) -
+      Number(consumed[0]?.total ?? 0) -
+      Number(dispatched[0]?.total ?? 0)
+    );
+  }
+
   /* ── flow: create dispatch with items ─────────────────────────────── */
 
   /**
    * POST /v1/dispatches — insert the dispatch header + one line per item, then emit
    * `sales.dispatch.created`. All in one transaction so the event publishes iff the header +
-   * lines committed. Before writing, every FG-batch line is checked against available-to-promise
-   * and over-dispatch is rejected (409) — you cannot ship more than produced − reserved − already
-   * dispatched.
+   * lines committed. Every FG-batch line is checked against available-to-promise and
+   * over-dispatch is rejected (409) — you cannot ship more than produced − reserved − consumed −
+   * already dispatched. The authoritative check runs INSIDE the transaction with the batch
+   * row(s) locked (`fgAvailableLocked`) so two concurrent dispatches against the same batch can't
+   * both pass (RP-DISP-002: this used to be a documented best-effort, outside-the-tx read).
    */
   async createDispatch(body: CreateDispatch, principal: AuthPrincipal) {
-    // Pre-flight availability guard: reject non-positive qty, AGGREGATE the requested qty per FG
-    // batch across lines (so two lines for one batch can't each pass the full-available check),
-    // then reject if a batch's total exceeds available (audit G/#9).
+    // Cheap pre-flight (fails fast, no lock held): reject non-positive qty, AGGREGATE the
+    // requested qty per FG batch across lines (so two lines for one batch can't each pass the
+    // full-available check individually), then reject if a batch's total exceeds available.
     const perBatch = new Map<string, number>();
     for (const it of body.items) {
       if (!it.finishedGoodBatchId || it.dispatchedQty == null) continue;
@@ -97,6 +144,18 @@ export class DispatchService {
     }
 
     return this.db.transaction(async (tx) => {
+      // Authoritative, lock-held re-check — a stable (sorted) batch-id lock order avoids
+      // deadlocking against a concurrent multi-batch dispatch that locks the same two batches.
+      for (const batchId of Array.from(perBatch.keys()).sort()) {
+        const requested = perBatch.get(batchId)!;
+        const available = await this.fgAvailableLocked(tx, batchId);
+        if (requested > available) {
+          throw new ConflictException(
+            `Cannot dispatch ${requested} of finished-good batch ${batchId}: only ${available} available (produced − reserved − consumed − already dispatched).`,
+          );
+        }
+      }
+
       const dispatchId = uuidv7();
       const header = (
         await tx
@@ -170,34 +229,37 @@ export class DispatchService {
 
   async createDispatchItem(body: CreateDispatchItem, principal: AuthPrincipal) {
     // Same availability guard as createDispatch (audit G/#9): this standalone line-add endpoint was
-    // a bypass around the over-dispatch check.
-    if (body.finishedGoodBatchId && body.dispatchedQty != null) {
-      if (!(body.dispatchedQty > 0)) {
-        throw new ConflictException(`Dispatch quantity must be positive (got ${body.dispatchedQty}).`);
-      }
-      const available = await this.fgAvailable(body.finishedGoodBatchId);
-      if (body.dispatchedQty > available) {
-        throw new ConflictException(
-          `Cannot dispatch ${body.dispatchedQty} of finished-good batch ${body.finishedGoodBatchId}: only ${available} available.`,
-        );
-      }
+    // a bypass around the over-dispatch check. Runs the lock-held recheck inside a transaction
+    // (RP-DISP-002) so this route can't race a concurrent createDispatch/createDispatchItem call.
+    if (body.finishedGoodBatchId && body.dispatchedQty != null && !(body.dispatchedQty > 0)) {
+      throw new ConflictException(`Dispatch quantity must be positive (got ${body.dispatchedQty}).`);
     }
-    const row = (
-      await this.db
-        .insert(dispatchItems)
-        .values({
-          dispatchItemId: uuidv7(),
-          dispatchId: body.dispatchId,
-          salesOrderItemId: body.salesOrderItemId ?? null,
-          finishedGoodBatchId: body.finishedGoodBatchId ?? null,
-          dispatchedQty: num(body.dispatchedQty),
-          uomId: body.uomId ?? null,
-          status: 'ACTIVE',
-          createdBy: principal.userId,
-          updatedBy: principal.userId,
-        })
-        .returning()
-    )[0];
+    const row = await this.db.transaction(async (tx) => {
+      if (body.finishedGoodBatchId && body.dispatchedQty != null) {
+        const available = await this.fgAvailableLocked(tx, body.finishedGoodBatchId);
+        if (body.dispatchedQty > available) {
+          throw new ConflictException(
+            `Cannot dispatch ${body.dispatchedQty} of finished-good batch ${body.finishedGoodBatchId}: only ${available} available.`,
+          );
+        }
+      }
+      return (
+        await tx
+          .insert(dispatchItems)
+          .values({
+            dispatchItemId: uuidv7(),
+            dispatchId: body.dispatchId,
+            salesOrderItemId: body.salesOrderItemId ?? null,
+            finishedGoodBatchId: body.finishedGoodBatchId ?? null,
+            dispatchedQty: num(body.dispatchedQty),
+            uomId: body.uomId ?? null,
+            status: 'ACTIVE',
+            createdBy: principal.userId,
+            updatedBy: principal.userId,
+          })
+          .returning()
+      )[0];
+    });
     if (!row) throw new Error('insert failed: dispatch_items');
     return row;
   }
