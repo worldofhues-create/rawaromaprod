@@ -7,6 +7,12 @@
  * (shortage rejection + happy path), the single-writer filling-session guard (duplicate/
  * concurrent ACTIVE sessions), wrong-state recordFilling/endFillingSession, complete's yield
  * roll-up, and cancel's issued-flag reversal.
+ *
+ * Security review R1 #2 follow-up: issue-materials now locks every candidate inventory_batch row
+ * (FOR UPDATE) before computing availability and writes real inventory.stock_reservation rows per
+ * package_order_item — closing a cross-order TOCTOU (two orders sharing a material could both
+ * pass an unlocked availability check) and making cancel's reversal batch-accurate instead of a
+ * bare boolean flip.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -150,6 +156,74 @@ test('package order: cancel from MATERIALS_ISSUED reverses the issued flag', asy
   const items = await svc.listPackageOrderItems({ limit: 100 } as never);
   const forOrder = items.items.filter((i) => i.packageOrderId === orderId);
   assert.ok(forOrder.every((i) => i.issuedQty === false));
+});
+
+test('package order: issue-materials writes a real batch-level stock_reservation per item (not just a boolean)', async () => {
+  const orderId = await freshOrderWithItem(100, 40);
+  const { itemsIssued, batchesReserved } = await svc.issuePackagingMaterials(orderId, principal());
+  assert.equal(itemsIssued, 1);
+  assert.equal(batchesReserved, 1);
+
+  const sql = testClient();
+  const items = await sql`select package_order_item_id from packaging.package_order_item where package_order_id = ${orderId}`;
+  const itemId = items[0]!.package_order_item_id;
+  const reservations = await sql`
+    select reserved_qty, released_dt from inventory.stock_reservation
+     where reserved_for_document_id = ${itemId}`;
+  assert.equal(reservations.length, 1);
+  assert.equal(Number(reservations[0]!.reserved_qty), 40);
+  assert.equal(reservations[0]!.released_dt, null);
+});
+
+test('package order: cancel releases the exact stock_reservation rows issue wrote (batch-accurate reversal)', async () => {
+  const orderId = await freshOrderWithItem(100, 40);
+  await svc.issuePackagingMaterials(orderId, principal());
+  await svc.cancelPackageOrder(orderId, principal());
+
+  const sql = testClient();
+  const items = await sql`select package_order_item_id from packaging.package_order_item where package_order_id = ${orderId}`;
+  const itemId = items[0]!.package_order_item_id;
+  const reservations = await sql`
+    select released_dt from inventory.stock_reservation where reserved_for_document_id = ${itemId}`;
+  assert.equal(reservations.length, 1);
+  assert.notEqual(reservations[0]!.released_dt, null, 'the reservation must be released, not left dangling, on cancel');
+});
+
+test('package order: security review R1 #2 — concurrent issue-materials on TWO DIFFERENT orders sharing one packaging material cannot both over-issue (TOCTOU)', async () => {
+  // Two separate package orders both need 40 of the SAME packaging material, but only 50 total
+  // is on hand — enough for exactly one order, not both. Before the fix, the per-material
+  // availability check was an unlocked SELECT: both concurrent calls could read "50 available"
+  // before either wrote anything and both would pass. With the batch row locked FOR UPDATE and
+  // real stock_reservation rows written inside the same transaction, only one may win.
+  const sql = testClient();
+  const materialId = crypto.randomUUID();
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
+    values (${crypto.randomUUID()}, ${materialId}, 50, 'ACTIVE')`;
+
+  async function orderNeeding(qty: number) {
+    const oilBatchId = await releasedOilBatch();
+    const order = await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 100 }, principal());
+    await sql`insert into packaging.package_order_item
+      (package_order_item_id, package_order_id, packaging_material_id, required_qty, issued_qty, status)
+      values (${crypto.randomUUID()}, ${order.order.packageOrderId}, ${materialId}, ${qty}, false, 'ACTIVE')`;
+    return order.order.packageOrderId;
+  }
+
+  const orderA = await orderNeeding(40);
+  const orderB = await orderNeeding(40);
+
+  const results = await Promise.allSettled([
+    svc.issuePackagingMaterials(orderA, principal()),
+    svc.issuePackagingMaterials(orderB, principal()),
+  ]);
+  const succeeded = results.filter((r) => r.status === 'fulfilled');
+  assert.equal(succeeded.length, 1, 'only one of the two orders can be issued against a shared 50-unit material when each needs 40');
+
+  const reserved = await sql`
+    select coalesce(sum(reserved_qty), 0) as total from inventory.stock_reservation
+     where inventory_batch_id in (select inventory_batch_id from inventory.inventory_batch where material_id = ${materialId})
+       and released_dt is null`;
+  assert.ok(Number(reserved[0]!.total) <= 50, 'total reserved must never exceed on-hand quantity');
 });
 
 test('package order: cannot cancel a COMPLETED order (terminal state)', async () => {

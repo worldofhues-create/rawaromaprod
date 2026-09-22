@@ -179,6 +179,19 @@ export class OrdersService {
    * compared against the packaging material's available stock (on-hand across all its inventory
    * batches, net of active reservations) before anything is flagged issued. Any shortfall rejects
    * the WHOLE issue (no partial issuance) and lists exactly what's short.
+   *
+   * Security review R1 #2 (TOCTOU): the shortage check used to run each material's
+   * availability as a plain, UNLOCKED `select` — two concurrent issue-materials calls against
+   * package orders that share a packaging material could both read the same "available" figure
+   * before either wrote anything, both pass the check, and both flag issued, over-issuing the
+   * material beyond what physically exists. Fixed the same way StockService.createStockReservation
+   * closes the analogous race: every candidate inventory_batch row for every material this order
+   * needs is taken under `SELECT ... FOR UPDATE` (sorted by inventory_batch_id for a deterministic
+   * lock order across concurrent orders, so two issues never deadlock each other) BEFORE any
+   * availability is computed, and a REAL `inventory.stock_reservation` row is written per
+   * (package_order_item, batch) allocation inside the same transaction — this is also what makes
+   * cancelPackageOrder batch-accurate (it releases exactly these rows) without needing an
+   * additive inventory_batch_id column on package_order_item.
    */
   async issuePackagingMaterials(orderId: string, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
@@ -196,25 +209,79 @@ export class OrdersService {
         throw new ConflictException(`Package order ${orderId} has no BOM items to issue.`);
       }
 
+      const materialIds = [
+        ...new Set(items.map((i) => i.packagingMaterialId).filter((v): v is string => !!v)),
+      ];
+      if (materialIds.length === 0) {
+        throw new ConflictException(`Package order ${orderId} has no items with a packaging material to issue.`);
+      }
+
+      // Lock every candidate batch for every material this order needs, in ONE deterministically
+      // ordered pass, before computing any availability (closes the TOCTOU).
+      const lockedBatches = (await tx.execute(sql`
+        select inventory_batch_id, material_id, quantity_on_hand
+          from inventory.inventory_batch
+         where material_id in (${sql.join(materialIds.map((id) => sql`${id}`), sql`, `)})
+         order by inventory_batch_id
+         for update`
+      )) as unknown as Array<{
+        inventory_batch_id: string;
+        material_id: string | null;
+        quantity_on_hand: string | null;
+      }>;
+
+      const batchIds = lockedBatches.map((b) => b.inventory_batch_id);
+      const reservedByBatch = new Map<string, number>();
+      if (batchIds.length > 0) {
+        const reservedRows = (await tx.execute(sql`
+          select inventory_batch_id, coalesce(sum(reserved_qty), 0) as reserved
+            from inventory.stock_reservation
+           where inventory_batch_id in (${sql.join(batchIds.map((id) => sql`${id}`), sql`, `)}) and released_dt is null
+           group by inventory_batch_id`
+        )) as unknown as Array<{ inventory_batch_id: string; reserved: string }>;
+        for (const r of reservedRows) reservedByBatch.set(r.inventory_batch_id, Number(r.reserved));
+      }
+
+      // Post-lock available-qty pool per material (mutated as items are allocated below).
+      const poolByMaterial = new Map<string, Array<{ id: string; available: number }>>();
+      for (const b of lockedBatches) {
+        if (!b.material_id) continue;
+        const available = Number(b.quantity_on_hand ?? 0) - (reservedByBatch.get(b.inventory_batch_id) ?? 0);
+        const list = poolByMaterial.get(b.material_id) ?? [];
+        list.push({ id: b.inventory_batch_id, available });
+        poolByMaterial.set(b.material_id, list);
+      }
+
       const shortages: string[] = [];
+      const allocations: Array<{ packageOrderItemId: string; uomId: string | null; batchId: string; qty: number }> = [];
       for (const item of items) {
         if (!item.packagingMaterialId || item.requiredQty == null) continue;
-        const avail = (await tx.execute(sql`
-          select coalesce(sum(ib.quantity_on_hand), 0) - coalesce((
-            select sum(sr.reserved_qty) from inventory.stock_reservation sr
-            join inventory.inventory_batch ib2 on ib2.inventory_batch_id = sr.inventory_batch_id
-            where ib2.material_id = ${item.packagingMaterialId} and sr.released_dt is null
-          ), 0) as available
-          from inventory.inventory_batch ib
-          where ib.material_id = ${item.packagingMaterialId}`
-        )) as unknown as Array<{ available: string | null }>;
-        const available = Number(avail[0]?.available ?? 0);
-        if (Number(item.requiredQty) > available) {
-          shortages.push(`material ${item.packagingMaterialId}: required ${item.requiredQty}, available ${available}`);
+        let remaining = Number(item.requiredQty);
+        const pool = poolByMaterial.get(item.packagingMaterialId) ?? [];
+        for (const b of pool) {
+          if (remaining <= 1e-9) break;
+          if (b.available <= 0) continue;
+          const take = Math.min(remaining, b.available);
+          allocations.push({ packageOrderItemId: item.packageOrderItemId, uomId: item.uomId, batchId: b.id, qty: take });
+          b.available -= take;
+          remaining -= take;
+        }
+        if (remaining > 1e-9) {
+          const totalAvailable = (pool ?? []).reduce((sum, b) => sum + Math.max(b.available, 0), 0);
+          shortages.push(`material ${item.packagingMaterialId}: required ${item.requiredQty}, available ${totalAvailable}`);
         }
       }
       if (shortages.length > 0) {
         throw new ConflictException(`Cannot issue packaging materials — shortage(s): ${shortages.join('; ')}`);
+      }
+
+      for (const alloc of allocations) {
+        await tx.execute(sql`
+          insert into inventory.stock_reservation
+            (inventory_batch_id, reserved_qty, uom_id, reserved_for_document_id, reserved_dt, status, created_by, updated_by)
+          values
+            (${alloc.batchId}, ${String(alloc.qty)}, ${alloc.uomId}, ${alloc.packageOrderItemId}, now(), 'ACTIVE', ${principal.userId}, ${principal.userId})`
+        );
       }
 
       await tx
@@ -232,18 +299,22 @@ export class OrdersService {
       if (!updated) {
         throw new ConflictException(`Package order ${orderId} was moved off ${current} by a concurrent request; refusing this stale issue.`);
       }
-      return { order: updated, itemsIssued: items.length };
+      return { order: updated, itemsIssued: items.length, batchesReserved: allocations.length };
     });
   }
 
   /* ── flow: cancel (any non-terminal state) ────────────────────────── */
 
   /**
-   * POST /v1/package-orders/:id/cancel — guarded CAS to CANCELLED from any non-terminal state. If
-   * materials had already been flagged issued, the issued_qty flag is reversed (this dictionary
-   * table has no inventory_batch linkage on package_order_item — issued_qty is a locked BOOLEAN —
-   * so no batch-level quantity was ever decremented at issue time to reverse; the flag reversal is
-   * the full correction available at this layer).
+   * POST /v1/package-orders/:id/cancel — guarded CAS to CANCELLED from any non-terminal state.
+   * If materials had already been flagged issued, the reversal is now BATCH-ACCURATE: every
+   * `inventory.stock_reservation` row that issuePackagingMaterials wrote (keyed by
+   * reserved_for_document_id = package_order_item_id) is released (released_dt stamped), which
+   * hands the exact reserved quantity back to the exact batch it came from — not just a boolean
+   * flip. This closes the gap package_order_item.issued_qty being a dictionary-locked BOOLEAN
+   * left open (task 3): batch accuracy is achieved via the existing stock_reservation table
+   * instead of an additive inventory_batch_id column on package_order_item, so no dictionary
+   * schema change is needed. The issued_qty flag is still reversed too, for UI/back-compat.
    */
   async cancelPackageOrder(orderId: string, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
@@ -257,6 +328,19 @@ export class OrdersService {
       }
 
       if (current === 'MATERIALS_ISSUED' || current === 'IN_PROGRESS') {
+        const itemIds = (
+          await tx
+            .select({ id: packageOrderItem.packageOrderItemId })
+            .from(packageOrderItem)
+            .where(eq(packageOrderItem.packageOrderId, orderId))
+        ).map((r) => r.id);
+        if (itemIds.length > 0) {
+          await tx.execute(sql`
+            update inventory.stock_reservation
+               set released_dt = now(), updated_by = ${principal.userId}
+             where reserved_for_document_id in (${sql.join(itemIds.map((id) => sql`${id}`), sql`, `)}) and released_dt is null`
+          );
+        }
         await tx
           .update(packageOrderItem)
           .set({ issuedQty: false, updatedBy: principal.userId })
