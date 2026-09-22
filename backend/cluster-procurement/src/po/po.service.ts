@@ -86,8 +86,14 @@ export class PoService {
 
       if (body.quotationId) {
         const quotationId = body.quotationId;
+        // Security review R1 #2: lock the quotation row FIRST. Without this, two concurrent
+        // createPurchaseOrder calls off the SAME already-SELECTED quotation could both pass every
+        // check below before either had inserted its purchase_order row — two POs backed by one
+        // quotation. The lock serializes the second call behind the first; combined with the
+        // existing-PO check further down (run under this same lock), the second call always sees
+        // the first's already-committed purchase_order row and is refused.
         const quotation = (
-          await tx.select().from(quotations).where(eq(quotations.quotationId, quotationId)).limit(1)
+          await tx.select().from(quotations).where(eq(quotations.quotationId, quotationId)).for('update').limit(1)
         )[0];
         if (!quotation) throw new NotFoundException(`quotation not found: ${quotationId}`);
 
@@ -122,6 +128,21 @@ export class PoService {
         if (status !== 'SELECTED') {
           throw new ConflictException(
             `Quotation ${quotationId} has not been selected as the RFQ's winning quotation (status: ${quotation.status ?? '(none)'}). Award it first via POST /v1/quotations/${quotationId}/select.`,
+          );
+        }
+
+        // One PO per quotation. Run under the row lock taken above so a second concurrent call
+        // off the same quotation always sees the first's already-committed purchase_order row.
+        const existingPo = (
+          await tx
+            .select({ purchaseOrderId: purchaseOrder.purchaseOrderId })
+            .from(purchaseOrder)
+            .where(eq(purchaseOrder.quotationId, quotationId))
+            .limit(1)
+        )[0];
+        if (existingPo) {
+          throw new ConflictException(
+            `Quotation ${quotationId} already backs purchase order ${existingPo.purchaseOrderId}; a quotation can back only one purchase order.`,
           );
         }
 

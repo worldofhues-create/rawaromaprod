@@ -168,6 +168,33 @@ test('RFQ->PO award: concurrent selectQuotation on two DIFFERENT quotations of t
   }
 });
 
+/* ── security review R1 #2: createPurchaseOrder double-PO TOCTOU ────────── */
+
+test('PO award: concurrent createPurchaseOrder off the SAME selected quotation — only one PO may be created', async () => {
+  // Before the fix, createPurchaseOrder re-read the quotation with no lock, so two concurrent
+  // calls off the same already-SELECTED quotation could both pass every check and both insert a
+  // purchase_order row — two POs backed by one quotation. The fix locks the quotation row and
+  // checks for an existing PO under that lock, so the second concurrent call always sees the
+  // first's (already-committed) purchase_order row and is refused.
+  const { quotationA } = await freshRfqWithTwoQuotations();
+  await rfqs.selectQuotation(quotationA, {}, principal());
+
+  const results = await Promise.allSettled([
+    pos.createPurchaseOrder({ quotationId: quotationA, items: [] }, principal()),
+    pos.createPurchaseOrder({ quotationId: quotationA, items: [] }, principal()),
+  ]);
+  const succeeded = results.filter((r) => r.status === 'fulfilled');
+  assert.equal(succeeded.length, 1, 'exactly one of two concurrent POs off the same quotation may be created');
+  for (const r of results) {
+    if (r.status === 'rejected') assert.ok(r.reason instanceof ConflictException);
+  }
+
+  const sql = testClient();
+  const posForQuotation = await sql`select purchase_order_id from procurement.purchase_order
+                                       where quotation_id = ${quotationA}`;
+  assert.equal(posForQuotation.length, 1, 'a quotation may back exactly one purchase order, never two');
+});
+
 test('RFQ->PO award: selecting an unknown quotation 404s', async () => {
   await assert.rejects(() => rfqs.selectQuotation(crypto.randomUUID(), {}, principal()), NotFoundException);
 });
