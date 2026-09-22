@@ -274,6 +274,16 @@ export class RfqService {
    *     re-selecting the SAME quotation that already won is a harmless no-op
    * On success, quotations.status → 'SELECTED' and the matching rfq_vendor_mappings row gets
    * is_selected_vendor = true (other vendor mappings for the same RFQ are cleared to false).
+   *
+   * OPEN QUESTION FOR OWNER RATIFICATION (security review R1, informational finding #7 — no
+   * behaviour changed here): this endpoint has NO segregation-of-duties check. Any caller who
+   * holds the write permission on quotations/rfq_vendor_mappings — including the SAME user who
+   * created the RFQ (createRfqMaster) or invited the vendors — can also award the winning
+   * quotation via this method. Contrast with PoService.approvePurchaseOrder, which explicitly
+   * forbids the PO's own creator from approving it (and, above a threshold, requires a second,
+   * different approver). Whether RFQ award should get an analogous "the RFQ creator cannot
+   * award its own RFQ" rule (and/or a second-approver rule above some value) is a policy
+   * decision for the owner, not something this lane is changing unilaterally.
    */
   async selectQuotation(id: string, _body: SelectQuotation, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
