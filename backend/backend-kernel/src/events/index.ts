@@ -13,3 +13,4 @@ export {
   type EventDescriptor,
   type OutboxWriter,
 } from './outbox.recorder.js';
+export { emitBridgeOutbound, type BridgeEmitTx } from './bridge-emit.js';
