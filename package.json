@@ -10,6 +10,7 @@
   "type": "module",
   "scripts": {
     "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "build": "pnpm -r build",
     "boundaries": "depcruise packages backend web mobile --config .dependency-cruiser.cjs",
     "db:validate": "tsx scripts/db-validate.ts",
@@ -42,7 +43,8 @@
     "@ra/data-production": "workspace:*",
     "@ra/data-packaging": "workspace:*",
     "@ra/data-sales": "workspace:*",
-    "@ra/data-workflow-state": "workspace:*"
+    "@ra/data-workflow-state": "workspace:*",
+    "@ra/data-bridge": "workspace:*"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

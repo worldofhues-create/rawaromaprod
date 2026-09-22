@@ -17,6 +17,9 @@ importers:
       '@core/data-platform':
         specifier: workspace:*
         version: link:packages/data-platform
+      '@ra/data-bridge':
+        specifier: workspace:*
+        version: link:packages/data-bridge
       '@ra/data-formula':
         specifier: workspace:*
         version: link:packages/data-formula
@@ -143,6 +146,9 @@ importers:
       '@ra/cluster-sales':
         specifier: workspace:*
         version: link:../cluster-sales
+      '@ra/data-bridge':
+        specifier: workspace:*
+        version: link:../../packages/data-bridge
       '@ra/data-formula':
         specifier: workspace:*
         version: link:../../packages/data-formula
@@ -986,6 +992,34 @@ importers:
         version: 22.19.21
       typescript:
         specifier: ^5.6.3
+        version: 5.9.3
+
+  packages/data-bridge:
+    dependencies:
+      '@core/data-kernel':
+        specifier: workspace:*
+        version: link:../data-kernel
+      drizzle-orm:
+        specifier: ^0.38.4
+        version: 0.38.4(@types/react@19.2.17)(expo-sqlite@15.1.4(expo@53.0.27(@babel/core@7.29.7)(@expo/metro-runtime@4.0.1(react-native@0.79.7(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.7)))(react-native@0.79.7(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(react-native@0.79.7(@babel/core@7.29.7)(@types/react@19.2.17)(react@19.2.7))(react@19.2.7))(postgres@3.4.9)(react@19.2.7)
+      postgres:
+        specifier: ^3.4.5
+        version: 3.4.9
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.7
+        version: 22.19.21
+      drizzle-kit:
+        specifier: ^0.30.2
+        version: 0.30.6
+      rimraf:
+        specifier: ^6.0.1
+        version: 6.1.3
+      tsx:
+        specifier: ^4.19.2
+        version: 4.22.4
+      typescript:
+        specifier: ^5.7.3
         version: 5.9.3
 
   packages/data-formula:

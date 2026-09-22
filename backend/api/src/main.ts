@@ -22,6 +22,25 @@ async function bootstrap(): Promise<void> {
     new FastifyAdapter({ trustProxy: true }),
   );
 
+  // Additive JSON content-type parser: every route keeps its normal parsed body, but the
+  // exact bytes are also stashed on `req.rawBody`. Needed by BridgeController: an HMAC
+  // signature (docs/bridge/EVENT_CONTRACT.md) is computed over the exact bytes sent, and
+  // a re-serialization of the parsed body can produce different bytes than the sender
+  // signed. Falls back to Fastify's own default JSON error shape on a parse failure, so
+  // every other route's behaviour is unchanged.
+  app.getHttpAdapter().getInstance().addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (_req, body: string, done: (err: Error | null, body?: unknown) => void) => {
+      (_req as unknown as { rawBody?: string }).rawBody = body;
+      try {
+        done(null, body.length ? JSON.parse(body) : {});
+      } catch (err) {
+        done(err as Error, undefined);
+      }
+    },
+  );
+
   const config = app.get(ConfigService);
 
   // CORS — fail CLOSED in prod (BFF masking §7, LEAK-8): an unset CORS_ORIGINS under
