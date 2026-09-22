@@ -9,13 +9,43 @@
  *   abortSession → CAS IN_PROGRESS→ABORTED (RP-FAC2 / RP-PROD-003: this session had NO fail/abort
  *                  path at all — a botched mix could only ever be silently left IN_PROGRESS
  *                  forever, or force-completed). Reverses the inventory side effects of whatever
- *                  was already issued for this session's production order — credits back
- *                  inventory.inventory_batch.quantity_on_hand for every ingredient the picking
- *                  flow (PickingService.issueMaterials) had flagged issued, resets those
+ *                  was already issued for this session's production order, resets
  *                  production_order_ingredients.issued_qty back to false, marks the reversed
- *                  material_issue_item rows REVERSED, and releases any open RM stock_reservation
- *                  held against this production order — all inside ONE transaction with the
- *                  mixing_step_log ABORT row, so the reversal is never partially applied.
+ *                  material_issue/material_issue_item rows VOID or REVERSED, and releases any
+ *                  open RM stock_reservation held against this production order — all inside ONE
+ *                  transaction with the mixing_step_log ABORT row, so the reversal is never
+ *                  partially applied.
+ *
+ *                  RP-PROD-004 (HIGH, found by reviewer R1): the original reversal credited
+ *                  inventory.inventory_batch.quantity_on_hand by production_order_ingredients.
+ *                  required_qty for every ingredient PickingService.issueMaterials had flagged
+ *                  issued_qty=true — but issueMaterials never debits inventory at all; the debit
+ *                  is done asynchronously, later, by ConsumptionService (backend/api/src/
+ *                  consumption/consumption.service.ts, an outbox poller) from
+ *                  material_pick_list_items.picked_qty. So aborting before the poller ever ran
+ *                  credited stock that had never left, and an issue raised with no pick list
+ *                  (materialPickListId was optional) was NEVER debited by the poller at all — an
+ *                  abort on it still credited required_qty, minting unbounded phantom stock on
+ *                  repeat. Even once debited, required_qty (planned) and picked_qty (actual) can
+ *                  differ, and an abort could race the poller's own debit.
+ *
+ *                  Fixed by crediting from the real applied ledger instead of the plan:
+ *                  inventory.inventory_event_history rows ConsumptionService itself writes
+ *                  (event_type='PRODUCTION_ISSUE', reference_document_id=material_issue_id,
+ *                  event_qty=exact qty taken per batch — see RP-PROD-004 on that table). Abort
+ *                  and the consumer both race the SAME single-applier claim row insert into
+ *                  inventory.material_issue_applied (material_issue_id PK, ON CONFLICT DO
+ *                  NOTHING): whichever commits first wins — if abort wins, the issue is marked
+ *                  VOID with nothing credited (nothing was ever debited, and the consumer's own
+ *                  later claim attempt will now find the row and skip it forever); if the
+ *                  consumer wins, abort reads its committed inventory_event_history rows and
+ *                  credits back exactly that, per batch, then marks the issue REVERSED. Postgres
+ *                  serializes the two INSERTs on the shared PK, so there is no window where a
+ *                  debit lands after abort has already decided nothing was applied — and
+ *                  PickingService.issueMaterials now refuses an issue with no materialPickListId
+ *                  outright (production can't debit inventory itself — cluster boundary — so an
+ *                  issue the consumer can never price is refused at the source instead of relying
+ *                  on this reversal to paper over it).
  *
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; ISO timestamps →
  * Date. order/operator/stage/user refs are id-only soft refs (plain uuid, no FK at this layer).
@@ -155,11 +185,15 @@ export class MixingService {
 
   /**
    * POST /v1/mixing-sessions/:id/abort — CAS IN_PROGRESS→ABORTED. Records the abort reason as a
-   * mixing_step_log row, reverses any materials already issued against the session's production
-   * order (credits inventory.inventory_batch.quantity_on_hand back, resets
-   * production_order_ingredients.issued_qty, marks the material_issue_item rows REVERSED), and
+   * mixing_step_log row, reverses any material_issue rows still ACTIVE against the session's
+   * production order — crediting inventory.inventory_batch.quantity_on_hand back by exactly what
+   * the consumption ledger (inventory.inventory_event_history) shows was actually debited, per
+   * batch, never the order's planned required_qty — resets production_order_ingredients.
+   * issued_qty, marks the issue VOID (nothing was ever debited) or REVERSED (credited back), and
    * releases any still-open inventory.stock_reservation held for that production order. One
-   * transaction: the abort, the audit row, and every reversal commit or roll back together.
+   * transaction: the abort, the audit row, and every reversal commit or roll back together. See
+   * the class-level RP-PROD-004 note for why (the old version assumed issueMaterials always
+   * debited synchronously; it never does) and how the consumer race is interlocked.
    */
   async abortSession(sessionId: string, body: AbortMixingSession, principal: AuthPrincipal) {
     const session = await this.getSession(sessionId);
@@ -210,46 +244,98 @@ export class MixingService {
       const productionOrderId = updated.productionOrderId ?? null;
       let reversedIngredients = 0;
       if (productionOrderId) {
-        // Reverse whatever PickingService.issueMaterials already flagged issued for this order:
-        // credit the batch on-hand back, un-flag the ingredient, mark the issue item REVERSED.
-        const issuedIngredients = await tx
-          .select()
-          .from(productionOrderIngredients)
-          .where(
-            and(
-              eq(productionOrderIngredients.productionOrderId, productionOrderId),
-              eq(productionOrderIngredients.issuedQty, true),
-            ),
-          );
+        // Every material_issue for this order that hasn't already been settled by a previous
+        // abort (VOID) or previously credited (REVERSED). One issue at a time, so the
+        // single-applier claim race below is scoped to exactly the row the consumer also keys
+        // its own claim on.
+        const issues = (await tx.execute(sql`
+          select material_issue_id
+            from production.material_issue
+           where production_order_id = ${productionOrderId}
+             and coalesce(status, 'ACTIVE') not in ('REVERSED', 'VOID')`)) as unknown as Array<{
+          material_issue_id: string;
+        }>;
 
-        for (const ing of issuedIngredients) {
-          if (!ing.materialId) continue;
-          const materialId = ing.materialId;
+        const reversedMaterialIds = new Set<string>();
+
+        for (const { material_issue_id: issueId } of issues) {
           const items = (await tx.execute(sql`
-            select mii.material_issue_item_id, mii.inventory_batch_id
-              from production.material_issue_item mii
-              join production.material_issue mi on mi.material_issue_id = mii.material_issue_id
-             where mi.production_order_id = ${productionOrderId}
-               and mii.material_id = ${materialId}
-               and mii.issued_qty = true
-               and coalesce(mii.status, 'ACTIVE') <> 'REVERSED'`)) as unknown as Array<{
+            select material_issue_item_id, material_id
+              from production.material_issue_item
+             where material_issue_id = ${issueId}
+               and issued_qty = true
+               and coalesce(status, 'ACTIVE') <> 'REVERSED'`)) as unknown as Array<{
             material_issue_item_id: string;
-            inventory_batch_id: string | null;
+            material_id: string | null;
           }>;
+          if (items.length === 0) continue;
 
-          for (const item of items) {
-            if (item.inventory_batch_id && ing.requiredQty != null) {
+          // Single-applier claim: the SAME primary key ConsumptionService.applyIssue() claims
+          // before it debits (see that file's RP-PROD-004 note). Postgres serializes concurrent
+          // INSERTs on this PK, so exactly one side observes "claimed" for a given issue.
+          const claim = (await tx.execute(sql`
+            insert into inventory.material_issue_applied (material_issue_id, item_count, applied_dt)
+            values (${issueId}, 0, now())
+            on conflict (material_issue_id) do nothing
+            returning material_issue_id`)) as unknown as Array<{ material_issue_id: string }>;
+
+          if (claim.length > 0) {
+            // We claimed it first: nothing was ever debited, and — because the row now exists —
+            // the consumer's own later claim attempt will find it and skip the issue forever.
+            // Nothing to credit.
+            await tx.execute(sql`
+              update production.material_issue
+                 set status = 'VOID', updated_by = ${principal.userId}
+               where material_issue_id = ${issueId}`);
+          } else {
+            // The consumer claimed it first (already applied, or applying in a transaction we
+            // just waited on via the PK lock — either way its rows are now committed and
+            // visible). Credit back exactly what it debited, per batch, from the real ledger —
+            // never the plan.
+            const applied = (await tx.execute(sql`
+              select inventory_batch_id, coalesce(sum(event_qty), 0)::text as qty
+                from inventory.inventory_event_history
+               where reference_document_id = ${issueId}
+                 and reference_document_type = 'MATERIAL_ISSUE'
+                 and event_type = 'PRODUCTION_ISSUE'
+               group by inventory_batch_id`)) as unknown as Array<{
+              inventory_batch_id: string | null;
+              qty: string;
+            }>;
+
+            for (const row of applied) {
+              const qty = Number(row.qty);
+              if (!row.inventory_batch_id || !(qty > 0)) continue;
               await tx.execute(sql`
                 update inventory.inventory_batch
-                   set quantity_on_hand = coalesce(quantity_on_hand, 0) + ${Number(ing.requiredQty)}
-                 where inventory_batch_id = ${item.inventory_batch_id}`);
+                   set quantity_on_hand = coalesce(quantity_on_hand, 0) + ${qty}
+                 where inventory_batch_id = ${row.inventory_batch_id}`);
+              await tx.execute(sql`
+                insert into inventory.inventory_event_history
+                  (inventory_batch_id, event_type, event_dt, reference_document_id,
+                   reference_document_type, event_qty, performed_by, remarks, status)
+                values (${row.inventory_batch_id}, 'PRODUCTION_ISSUE_REVERSAL', now(), ${issueId},
+                        'MATERIAL_ISSUE', ${qty}, ${principal.userId},
+                        'mixing session abort credit', 'ACTIVE')`);
             }
+
             await tx.execute(sql`
-              update production.material_issue_item
+              update production.material_issue
                  set status = 'REVERSED', updated_by = ${principal.userId}
-               where material_issue_item_id = ${item.material_issue_item_id}`);
+               where material_issue_id = ${issueId}`);
           }
 
+          await tx.execute(sql`
+            update production.material_issue_item
+               set status = 'REVERSED', updated_by = ${principal.userId}
+             where material_issue_id = ${issueId} and issued_qty = true`);
+
+          for (const item of items) {
+            if (item.material_id) reversedMaterialIds.add(item.material_id);
+          }
+        }
+
+        for (const materialId of reversedMaterialIds) {
           await tx
             .update(productionOrderIngredients)
             .set({ issuedQty: false, updatedBy: principal.userId })
