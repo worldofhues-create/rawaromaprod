@@ -14,7 +14,7 @@
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
@@ -122,6 +122,15 @@ export class BatchService {
    * POST /v1/oil-batches/:id/transition — move an oil batch to a new lifecycle state, but only
    * along a legal edge of OIL_TRANSITIONS. Writes an oil_batch_event_history row + emits
    * production.oil_batch.status, all in one transaction. Same-state is an idempotent no-op.
+   *
+   * RP-FAC: the write is a compare-and-swap — `UPDATE ... WHERE oil_batch_id = :id AND status =
+   * :current` — not an unconditional update. Two concurrent transitions off the same source state
+   * (e.g. two operators both firing ACTIVE→IN_MATURATION, or a double-click resubmit) used to both
+   * pass the in-memory OIL_TRANSITIONS check (each read the same pre-transition `current`) and
+   * both write, producing two event_history rows and two outbox events for one logical move. Under
+   * Postgres read-committed, the second UPDATE now blocks on the first's row lock, re-evaluates
+   * its WHERE clause against the just-committed new status, matches zero rows, and this throws —
+   * exactly one of the two racing callers wins.
    */
   async transitionOilBatch(id: string, target: string, principal: AuthPrincipal) {
     const batch = await this.getOilBatch(id);
@@ -137,10 +146,14 @@ export class BatchService {
         await tx
           .update(oilBatchMaster)
           .set({ status: tgt, updatedBy: principal.userId })
-          .where(eq(oilBatchMaster.oilBatchId, id))
+          .where(and(eq(oilBatchMaster.oilBatchId, id), eq(oilBatchMaster.status, current)))
           .returning()
       )[0];
-      if (!updated) throw new Error('update failed: oil_batch_master');
+      if (!updated) {
+        throw new ConflictException(
+          `Oil batch ${id} was moved off ${current} by a concurrent request; refusing this stale ${current}→${tgt} transition.`,
+        );
+      }
 
       await tx.insert(oilBatchEventHistory).values({
         oilBatchEventHistoryId: uuidv7(),
