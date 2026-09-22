@@ -49,6 +49,12 @@ export const createOrder = z.object({
   locationId: z.string().uuid().optional(),
   orderQty: z.number().positive(),
   uomId: z.string().uuid().optional(),
+  // RP-EMIT (lane F6): when this order schedules production against an ALEMBIC-originated
+  // requirement RawProd already accepted (bridge.production_requirement), the caller passes
+  // that requirement's id so this order can be linked to it and a ProductionScheduled event
+  // emitted toward ALEMBIC. Omitted for RawProd's own internal orders — not every order is
+  // bridge-originated.
+  alembicRequirementId: z.string().uuid().optional(),
 });
 export type CreateOrder = z.infer<typeof createOrder>;
 

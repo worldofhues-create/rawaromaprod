@@ -17,7 +17,7 @@
  */
 import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { FORMULA_LOOKUP, type FormulaLookup } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
@@ -217,6 +217,25 @@ export class PlanningService {
         },
         productionOrderId,
       );
+
+      // RP-EMIT (lane F6): if this order schedules production against an ALEMBIC-originated
+      // requirement, link this order to it (guarded so a retry never re-links an
+      // already-linked requirement to a different order) and emit ProductionScheduled toward
+      // ALEMBIC, in this SAME transaction — a rollback of the order rolls back the link and
+      // the emission too. No alembicRequirementId → this is RawProd-internal production;
+      // emitBridgeOutbound's own lookup also no-ops if nothing is linked.
+      if (body.alembicRequirementId) {
+        await tx.execute(sql`
+          update bridge.production_requirement
+             set production_order_id = ${productionOrderId}
+           where alembic_requirement_id = ${body.alembicRequirementId}
+             and production_order_id is null
+        `);
+      }
+      await emitBridgeOutbound(tx, 'ProductionScheduled', productionOrderId, {
+        production_order_id: productionOrderId,
+        formula_version_id: body.formulaVersionId,
+      });
 
       return { order, ingredientCount: picks.length };
     });
