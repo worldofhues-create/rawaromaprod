@@ -8,6 +8,291 @@ create extension if not exists pgcrypto;
 create schema if not exists production;
 create schema if not exists packaging;
 create schema if not exists sales;
+create schema if not exists inventory;
+create schema if not exists quality;
+create schema if not exists procurement;
+
+-- inventory (RP-FAC2) ------------------------------------------------------
+create table if not exists inventory.inventory_batch (
+  inventory_batch_id uuid primary key default gen_random_uuid(),
+  rm_batch_id uuid,
+  material_id uuid,
+  storage_location_id uuid,
+  inventory_status_id uuid,
+  quantity_on_hand numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists inventory.stock_reservation (
+  stock_reservation_id uuid primary key default gen_random_uuid(),
+  inventory_batch_id uuid references inventory.inventory_batch(inventory_batch_id),
+  reserved_qty numeric(18,4),
+  uom_id uuid,
+  reserved_for_document_id uuid,
+  reserved_dt timestamptz,
+  released_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists inventory.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
+);
+
+-- quality (RP-FAC2) ---------------------------------------------------------
+create table if not exists quality.qc_inspections (
+  qc_inspection_id uuid primary key default gen_random_uuid(),
+  rm_batch_id uuid,
+  inspection_role_id uuid,
+  inspector_user_id uuid,
+  inspection_dt timestamptz,
+  overall_result varchar(255),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists quality.qc_capa (
+  qc_capa_id uuid primary key default gen_random_uuid(),
+  qc_inspection_id uuid,
+  capa_code varchar(50) unique,
+  capa_type varchar(30),
+  description text,
+  root_cause text,
+  action_plan text,
+  assigned_to uuid,
+  due_dt timestamptz,
+  closed_dt timestamptz,
+  closure_evidence text,
+  verified_by uuid,
+  verified_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- production additions (RP-FAC2 mixing + picking) --------------------------
+create table if not exists production.production_order (
+  production_order_id uuid primary key default gen_random_uuid(),
+  production_plan_item_id uuid,
+  formula_version_id uuid,
+  location_id uuid,
+  order_qty numeric(18,4),
+  uom_id uuid,
+  actual_start_dt timestamptz,
+  actual_end_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.production_order_ingredients (
+  production_order_ingredient_id uuid primary key default gen_random_uuid(),
+  production_order_id uuid references production.production_order(production_order_id),
+  material_id uuid,
+  required_qty numeric(18,4),
+  issued_qty boolean,
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.material_pick_list (
+  material_pick_list_id uuid primary key default gen_random_uuid(),
+  production_order_id uuid,
+  pick_list_date date,
+  generated_by uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.material_issue (
+  material_issue_id uuid primary key default gen_random_uuid(),
+  production_order_id uuid,
+  material_pick_list_id uuid,
+  issued_dt timestamptz,
+  issued_by uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.material_issue_item (
+  material_issue_item_id uuid primary key default gen_random_uuid(),
+  material_issue_id uuid references production.material_issue(material_issue_id),
+  material_id uuid,
+  inventory_batch_id uuid,
+  issued_qty boolean,
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.secure_mixing_session (
+  secure_mixing_session_id uuid primary key,
+  production_order_id uuid,
+  operator_id uuid,
+  session_start_dt timestamptz,
+  session_end_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.mixing_step_log (
+  mixing_step_log_id uuid primary key,
+  secure_mixing_session_id uuid references production.secure_mixing_session(secure_mixing_session_id),
+  formula_stage_id uuid,
+  step_sequence integer,
+  step_description text,
+  performed_dt timestamptz,
+  performed_by uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- procurement (RP-FAC2) -----------------------------------------------------
+create table if not exists procurement.purchase_request (
+  purchase_request_id uuid primary key default gen_random_uuid(),
+  pr_number varchar(50),
+  stock_requirement_id uuid,
+  request_location_id uuid,
+  delivery_location_id uuid,
+  priority varchar(30),
+  expected_delivery_date date,
+  approved_by uuid,
+  approved_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.purchase_request_approval (
+  purchase_request_approval_id uuid primary key default gen_random_uuid(),
+  purchase_request_id uuid references procurement.purchase_request(purchase_request_id),
+  approver_user_id uuid,
+  approval_level integer,
+  approval_status varchar(30),
+  approved_dt timestamptz,
+  remarks text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.purchase_order (
+  purchase_order_id uuid primary key default gen_random_uuid(),
+  po_number varchar(50),
+  vendor_id uuid,
+  quotation_id uuid,
+  purchase_request_id uuid,
+  order_date date,
+  delivery_location_id uuid,
+  currency_id uuid,
+  total_amount numeric(18,2),
+  replacement_of_po_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.purchase_order_items (
+  purchase_order_item_id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid references procurement.purchase_order(purchase_order_id),
+  material_id uuid,
+  ordered_qty numeric(18,4),
+  uom_id uuid,
+  rate numeric(18,4),
+  amount numeric(18,2),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.po_approval_order (
+  po_approval_order_id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid references procurement.purchase_order(purchase_order_id),
+  approver_user_id uuid,
+  approval_level integer,
+  approval_status varchar(30),
+  approved_dt timestamptz,
+  remarks text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.vendor_po_ack (
+  vendor_po_ack_id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid,
+  vendor_id uuid,
+  acknowledged_dt timestamptz,
+  accepted_delivery_date date,
+  remarks text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
+);
 
 -- production --------------------------------------------------------------
 create table if not exists production.oil_batch_master (
@@ -105,6 +390,89 @@ create table if not exists packaging.finished_good_reservation (
   reserved_dt timestamptz,
   released_dt timestamptz,
   uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.product_sku (
+  product_sku_id uuid primary key default gen_random_uuid(),
+  product_id uuid,
+  sku_code varchar(50),
+  pack_size varchar(255),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.packaging_bom_master (
+  packaging_bom_id uuid primary key default gen_random_uuid(),
+  product_sku_id uuid,
+  packaging_material_id uuid,
+  required_qty numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.package_order (
+  package_order_id uuid primary key default gen_random_uuid(),
+  product_sku_id uuid,
+  oil_batch_id uuid,
+  location_id uuid,
+  order_qty numeric(18,4),
+  uom_id uuid,
+  planned_start_dt timestamptz,
+  planned_end_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.package_order_item (
+  package_order_item_id uuid primary key default gen_random_uuid(),
+  package_order_id uuid references packaging.package_order(package_order_id),
+  packaging_material_id uuid,
+  required_qty numeric(18,4),
+  issued_qty boolean,
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.filling_session (
+  filling_session_id uuid primary key default gen_random_uuid(),
+  package_order_id uuid,
+  operator_id uuid,
+  session_start_dt timestamptz,
+  session_end_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists packaging.filling_session_details (
+  filling_session_detail_id uuid primary key default gen_random_uuid(),
+  filling_session_id uuid references packaging.filling_session(filling_session_id),
+  filled_qty numeric(18,4),
+  uom_id uuid,
+  rejected_qty numeric(18,4),
+  recorded_dt timestamptz,
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
