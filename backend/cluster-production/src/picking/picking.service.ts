@@ -13,7 +13,7 @@
  * created_by/updated_by = principal.userId; numerics via num(); ISO timestamps → Date.
  * material/inventory/uom/order/pick-list refs are id-only soft refs (plain uuid, no FK here).
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -194,6 +194,21 @@ export class PickingService {
    * production.materials.issued. All in one transaction.
    */
   async issueMaterials(body: CreateIssue, principal: AuthPrincipal) {
+    // RP-PROD-004: refuse an issue with no pick list. Production cannot debit
+    // inventory.inventory_batch itself (cluster boundary) — ConsumptionService (backend/api/src/
+    // consumption) is the only thing that ever decrements on-hand, and it can only do that from
+    // a material_pick_list_items.picked_qty line. No pick list means no quantity anywhere for it
+    // to apply, so the issue would be recorded but never actually debited — and MixingService.
+    // abortSession would still have something (issued_qty=true) to "reverse", crediting stock
+    // that was never removed. Requiring the pick list up front closes that gap at the source
+    // instead of leaving it to the async consumer / abort path to paper over.
+    if (!body.materialPickListId) {
+      throw new BadRequestException(
+        'material issue requires materialPickListId: production cannot debit inventory ' +
+          'synchronously, so the async consumer needs a pick-list line to know the quantity ' +
+          'to take. Generate a pick list for this order first.',
+      );
+    }
     return this.db.transaction(async (tx) => {
       const issue = (
         await tx

@@ -67,9 +67,15 @@ const issueItem = z.object({
   uomId: z.string().uuid().optional(),
 });
 
+/** RP-PROD-004: materialPickListId is REQUIRED, not optional. production cannot write the
+ * inventory schema (cluster boundary) — the async ConsumptionService (backend/api/src/
+ * consumption/consumption.service.ts) is what actually debits inventory_batch.quantity_on_hand,
+ * and it can only do that from a pick list line's picked_qty. An issue with no pick list has no
+ * quantity anywhere for the consumer to apply, so it is silently never debited — while
+ * MixingService.abortSession used to still credit it back on abort, minting phantom stock. */
 export const createIssue = z.object({
   productionOrderId: z.string().uuid(),
-  materialPickListId: z.string().uuid().optional(),
+  materialPickListId: z.string().uuid(),
   issuedDt: isoDateish(),
   items: z.array(issueItem).min(1),
 });
