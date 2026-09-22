@@ -37,6 +37,7 @@ export class ProcAnalyticsController {
     return this.svc.createReplacementPo(String(body.grnId), principal);
   }
 
+  @Permissions('iam:role_master:read')
   @Get('v1/approval-matrix')
   approvalMatrix(@Query('limit') limit?: string) {
     return this.svc.approvalMatrix(limit ? Number(limit) : 200);

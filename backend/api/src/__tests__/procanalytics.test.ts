@@ -98,3 +98,15 @@ test('vendor-dispatches (RP-PROC-007): honest "not available", not a crash or fa
     NotImplementedException,
   );
 });
+
+test('approval-matrix (lane F5): honest "not available" — iam.approval_matrix does not exist in @core/data-iam or @ra/data-org', async () => {
+  await assert.rejects(() => svc.approvalMatrix(200), NotImplementedException);
+});
+
+test('po-advance-payments (lane F5): honest "not available" — procurement.po_advance_payment does not exist in @ra/data-procurement', async () => {
+  await assert.rejects(() => svc.listAdvancePayments(200), NotImplementedException);
+  await assert.rejects(
+    () => svc.createAdvancePayment({ purchaseOrderId: crypto.randomUUID() }, principal({ permissions: ['procurement:purchase_order:write'] })),
+    NotImplementedException,
+  );
+});

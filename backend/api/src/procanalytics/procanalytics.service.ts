@@ -8,16 +8,19 @@
  *   - Vendor Performance: per-vendor PO count, GRN count, QC pass/fail + pass% (QC linked back
  *     through grn → rm_batch → inspection). REAL — dictionary tables only.
  *   - QC-rejected GRNs / vendor ledger / replacement PO: REAL — dictionary tables only.
- *   - Negotiation + vendor dispatch (RP-PROC-007): NOT AVAILABLE. Both used to query/insert
- *     procurement.vendor_negotiation / procurement.vendor_dispatch — tables that exist in
- *     NEITHER @ra/data-procurement (the only source `pnpm db:push` draws the `procurement`
- *     schema from, per scripts/db-schema-groups.ts) NOR the Phase-1A Data Dictionary
- *     (docs/PHASE1A_SCHEMA_PLAN.md's table list). Any real/dev database would 500 with
- *     "relation does not exist" the instant these ran — dead calls dressed up as working ones.
- *     Per CLAUDE.md C3 (no destructive migration; additive schema only if the dictionary
- *     process permits it), these now throw an honest NotImplementedException instead of
- *     crashing or fabricating rows — see listNegotiations/createNegotiation and
- *     listVendorDispatches/createVendorDispatch below for what unblocking them needs.
+ *   - Negotiation + vendor dispatch (RP-PROC-007) + approval matrix + advance payments
+ *     (lane F5, RP-DEADTABLES): NOT AVAILABLE. All four used to query/insert
+ *     procurement.vendor_negotiation / procurement.vendor_dispatch / iam.approval_matrix /
+ *     procurement.po_advance_payment — tables that exist in NEITHER their owning package (the
+ *     only source `pnpm db:push` draws each schema from, per scripts/db-schema-groups.ts) NOR
+ *     the Phase-1A Data Dictionary (docs/PHASE1A_SCHEMA_PLAN.md's table list). Any real/dev
+ *     database would 500 with "relation does not exist" the instant these ran — dead calls
+ *     dressed up as working ones. Per CLAUDE.md C3 (no destructive migration; additive schema
+ *     only if the dictionary process permits it), these now throw an honest
+ *     NotImplementedException instead of crashing or fabricating rows — see
+ *     listNegotiations/createNegotiation, listVendorDispatches/createVendorDispatch,
+ *     approvalMatrix, and listAdvancePayments/createAdvancePayment below for what unblocking
+ *     each needs.
  * Reads are permission-gated at the controller to reveal-capable procurement roles; every write
  * is now ALSO permission-gated at the controller (previously service-only checks on 4 POST
  * routes — the controller had no @Permissions decorator, so PermissionsGuard let any
@@ -100,18 +103,21 @@ export class ProcAnalyticsService {
     return { items, nextCursor: null };
   }
 
-  /** Approval matrix — the governance table (who creates / submits / approves / final authority /
-   * auto-approval) for every transaction, per the owner's spec. Reference data, auth-only. */
-  async approvalMatrix(limit = 200) {
-    const lim = Math.min(Math.max(1, limit), 500);
-    const items = await this.sql`
-      select approval_matrix_id as "approvalMatrixId", module, transaction as "transaction",
-             created_by as "createdBy", submitted_to as "submittedTo", approved_by as "approvedBy",
-             final_authority as "finalAuthority", auto_approval as "autoApproval", remarks
-        from iam.approval_matrix
-       order by ord asc
-       limit ${lim}`;
-    return { items, nextCursor: null };
+  /**
+   * Approval matrix — the governance table (who creates / submits / approves / final authority /
+   * auto-approval) for every transaction, per the owner's spec. NOT AVAILABLE: this used to query
+   * `iam.approval_matrix` — a table that does NOT exist in @core/data-iam or @ra/data-org (the
+   * only sources `pnpm db:push` draws the `iam` schema from, per scripts/db-schema-groups.ts) and
+   * is not in the Phase-1A Data Dictionary. Any real/dev database would 500 with "relation
+   * iam.approval_matrix does not exist" the instant this ran. Honest "not available" instead of a
+   * crash or fabricated data — see web/app.js's loadView, which surfaces this message verbatim.
+   * Unblocking it needs: `approval_matrix` added to the Phase-1A dictionary + @ra/data-org (or
+   * @core/data-iam) schema (columns as queried below), then db:push.
+   */
+  async approvalMatrix(_limit = 200): Promise<never> {
+    throw new NotImplementedException(
+      'Approval matrix is not available: its backing table (iam.approval_matrix) was never added to the Phase-1A Data Dictionary or @core/data-iam / @ra/data-org schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
   /* ── vendor dispatch (scope-freeze step 15) ────────────────────────── */
@@ -147,34 +153,27 @@ export class ProcAnalyticsService {
 
   /* ── advance payment (scope-freeze step 13) ────────────────────────── */
 
-  async listAdvancePayments(limit = 200) {
-    const lim = Math.min(Math.max(1, limit), 500);
-    const items = await this.sql`
-      select ap.po_advance_payment_id as "poAdvancePaymentId", ap.purchase_order_id as "purchaseOrderId",
-             po.po_number as "poNumber", v.vendor_name as "vendorName",
-             ap.amount as "amount", ap.payment_date as "paymentDate", ap.reference as "reference", ap.status as "status"
-        from procurement.po_advance_payment ap
-        left join procurement.purchase_order po on po.purchase_order_id = ap.purchase_order_id
-        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
-       order by ap.created_dt desc
-       limit ${lim}`;
-    return { items, nextCursor: null };
+  /**
+   * NOT AVAILABLE: this used to query/insert `procurement.po_advance_payment` — a table that does
+   * NOT exist in @ra/data-procurement (db:push's only source for the `procurement` schema) or the
+   * Phase-1A Data Dictionary. Any real/dev database would 500 with "relation
+   * procurement.po_advance_payment does not exist". Honest "not available" instead of a crash or
+   * fabricated data. Unblocking it needs: `po_advance_payment` added to the Phase-1A dictionary +
+   * @ra/data-procurement schema (columns as queried below), then db:push.
+   */
+  async listAdvancePayments(_limit = 200): Promise<never> {
+    throw new NotImplementedException(
+      'Advance payments are not available: their backing table (procurement.po_advance_payment) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
-  async createAdvancePayment(body: Record<string, unknown>, principal: AuthPrincipal) {
+  async createAdvancePayment(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
     if (!(principal.permissions || []).includes('procurement:purchase_order:write')) {
       throw new ForbiddenException('Missing permission procurement:purchase_order:write');
     }
-    const g = (k: string): string | null => {
-      const v = body[k];
-      return v == null || v === '' ? null : String(v);
-    };
-    if (!g('purchaseOrderId')) throw new BadRequestException('purchaseOrderId is required');
-    const rows = (await this.sql`
-      insert into procurement.po_advance_payment (po_advance_payment_id, purchase_order_id, amount, payment_date, reference, status, created_by, updated_by)
-      values (${randomUUID()}, ${g('purchaseOrderId')}, ${g('amount')}, ${g('paymentDate')}, ${g('reference')}, 'PAID', ${principal.userId}, ${principal.userId})
-      returning po_advance_payment_id as "poAdvancePaymentId", amount as "amount", status as "status"`) as Array<Record<string, unknown>>;
-    return rows[0];
+    throw new NotImplementedException(
+      'Advance payments are not available: their backing table (procurement.po_advance_payment) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
   /* ── negotiation ────────────────────────────────────────────────────── */
