@@ -7,10 +7,14 @@
  * deliberately NOT a mock; the whole point of the concurrency tests is that a fake db can't lie
  * about lock contention the way a real one can't.
  *
- *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_factory_sm2_test (default)
+ *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_mixabort_test (default)
  *
  * RP-FAC2: this is lane F2's OWN database (factory_sm2, not lane F's factory_sm) — two lanes
  * working the same tree never share a throwaway test DB.
+ *
+ * Lane F4 (RP-PROD-004, mixing/picking/consumption abort-inflation fix): same rule, own DB
+ * again — mixabort, not factory_sm2 — so this lane's test run never contends with another
+ * lane's throwaway database.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +32,7 @@ import type { AuthPrincipal } from '../backend-kernel/src/edge/principal.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_factory_sm2_test';
+  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_mixabort_test';
 
 let client: Sql | undefined;
 let ready: Promise<void> | undefined;

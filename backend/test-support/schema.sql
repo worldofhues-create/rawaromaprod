@@ -54,6 +54,32 @@ create table if not exists inventory.outbox (
   seq bigint generated always as identity
 );
 
+-- inventory (RP-PROD-004 — the real consumption ledger + its single-applier claim table, used
+-- by ConsumptionService (backend/api/src/consumption) and MixingService.abortSession) ---------
+create table if not exists inventory.inventory_event_history (
+  inventory_event_history_id uuid primary key default gen_random_uuid(),
+  inventory_batch_id uuid,
+  event_type varchar(50),
+  event_dt timestamptz,
+  inventory_transaction_id uuid,
+  reference_document_id uuid,
+  reference_document_type varchar(50),
+  event_qty numeric(18,4),
+  performed_by uuid,
+  remarks text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists inventory.material_issue_applied (
+  material_issue_id uuid primary key,
+  item_count integer,
+  applied_dt timestamptz not null default now()
+);
+
 -- quality (RP-FAC2) ---------------------------------------------------------
 create table if not exists quality.qc_inspections (
   qc_inspection_id uuid primary key default gen_random_uuid(),
@@ -126,6 +152,20 @@ create table if not exists production.material_pick_list (
   production_order_id uuid,
   pick_list_date date,
   generated_by uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists production.material_pick_list_items (
+  material_pick_list_item_id uuid primary key default gen_random_uuid(),
+  material_pick_list_id uuid references production.material_pick_list(material_pick_list_id),
+  material_id uuid,
+  inventory_batch_id uuid,
+  picked_qty numeric(18,4),
+  uom_id uuid,
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
