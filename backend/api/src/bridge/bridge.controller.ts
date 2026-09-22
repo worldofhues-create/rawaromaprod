@@ -8,6 +8,10 @@
  *   PUT  /v1/bridge/config           — admin-only, self-service: set the outbound webhook
  *     URL and rotate the shared HMAC secret. No `.env`, no redeploy, per the lane brief —
  *     the same requirement ALEMBIC's own connector console satisfies on its side.
+ *     Security review R1 #4/#5: the body is now zod-validated (@core/contracts'
+ *     `bridge.configureBridgeRequest` — https required, loopback/private/link-local/metadata/
+ *     localhost hosts refused, an SSRF guard on webhookUrl), and `configuredBy` is the real
+ *     authenticated principal, not the hardcoded string 'admin'.
  *
  * `@Body() rawBody` is a plain string, not a parsed object: the whole point of §26's
  * transport rule is that the signature covers the exact bytes sent, and re-serializing
@@ -16,9 +20,13 @@
  */
 import { Body, Controller, Headers, Post, Put, Req, Res } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
-import { Permissions, Public } from '@core/backend-kernel';
+import { CurrentUser, Permissions, Public, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { bridge as bridgeContracts } from '@core/contracts';
+import { z } from 'zod';
 import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
+
+type ConfigureBridgeBody = z.infer<typeof bridgeContracts.configureBridgeRequest>;
 
 @Controller()
 export class BridgeController {
@@ -51,10 +59,11 @@ export class BridgeController {
 
   @Permissions('platform:flag:write')
   @Put('v1/bridge/config')
-  async configure(@Body() body: { enabled?: boolean; webhookUrl?: string; hmacSecret?: string }) {
-    // The permission guard has already authenticated the caller; a named actor for the
-    // audit trail is a config-admin-service concern once RawProd's principal shape is
-    // threaded through here (see the lane report's remaining-work note).
-    return this.configAdmin.configure(body, 'admin');
+  async configure(
+    @Body(new ZodValidationPipe(bridgeContracts.configureBridgeRequest)) body: ConfigureBridgeBody,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    // Security review R1 #5: the real authenticated principal, never the hardcoded 'admin'.
+    return this.configAdmin.configure(body, principal.userId);
   }
 }

@@ -869,3 +869,14 @@ create table if not exists bridge.outbox (
   attempts integer not null default 0,
   seq bigint generated always as identity
 );
+
+-- bridge.connector_config — self-service outbound webhook URL + sealed HMAC secret (security
+-- review R1 #4/#5 tests exercise ConfigAdminService/BridgeController against this table).
+create table if not exists bridge.connector_config (
+  id varchar(50) primary key default 'default',
+  enabled boolean not null default false,
+  webhook_url text,
+  hmac_secret_sealed text,
+  configured_at timestamptz,
+  configured_by varchar(255)
+);

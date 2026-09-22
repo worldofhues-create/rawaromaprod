@@ -7,6 +7,7 @@ export * from './registries/index.js';
 // Clusters — namespaced contracts
 export * as identity from './clusters/identity/index.js';
 export * as platform from './clusters/platform/index.js';
+export * as bridge from './clusters/bridge/index.js';
 
 /** All domain events in one place (for the worker's typed subscriber map). */
 export { identityEvents } from './clusters/identity/events.js';
