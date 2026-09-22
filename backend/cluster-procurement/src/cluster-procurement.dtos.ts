@@ -179,6 +179,13 @@ export const createQuotationItem = z.object({
 });
 export type CreateQuotationItem = z.infer<typeof createQuotationItem>;
 
+/** POST /v1/quotations/:id/select — the formal "select winning quotation" step (RP-PROC-006
+ * follow-up): marks one quotation the RFQ's awarded winner. See rfq.service.ts selectQuotation. */
+export const selectQuotation = z.object({
+  remarks: z.string().nullish(),
+});
+export type SelectQuotation = z.infer<typeof selectQuotation>;
+
 /* ── purchase order ───────────────────────────────────────────────────── */
 
 /** A PO line supplied at PO creation; amount drives the computed total_amount. */
@@ -231,10 +238,15 @@ export const createVendorPoAck = z.object({
 });
 export type CreateVendorPoAck = z.infer<typeof createVendorPoAck>;
 
-/** POST /v1/purchase-orders/:id/approve — record the PO approval. */
+/**
+ * POST /v1/purchase-orders/:id/approve — record the PO approval. Deliberately carries NO
+ * approverUserId: the approver's identity is ALWAYS the authenticated principal (security
+ * review R1 #1) — a client-supplied approverUserId let one user register the first approval
+ * under a spoofed id then approve again as themselves, satisfying the two-distinct-approver
+ * segregation-of-duties rule alone. approvalLevel is likewise server-computed, never client
+ * input.
+ */
 export const approvePurchaseOrder = z.object({
-  approverUserId: z.string().uuid().nullish(),
-  approvalLevel: z.number().int().nullish(),
   remarks: z.string().nullish(),
 });
 export type ApprovePurchaseOrder = z.infer<typeof approvePurchaseOrder>;

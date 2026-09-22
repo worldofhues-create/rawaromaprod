@@ -119,6 +119,31 @@ test('po approval: duplicate/concurrent approval on a single-approval (below-thr
   assert.equal(succeeded.length, 1, 'exactly one concurrent approval should win');
 });
 
+test('po approval: a client-supplied approverUserId cannot spoof a second distinct approver (security review R1 #1)', async () => {
+  // Repro: APPROVER_A first-approves with a body claiming a DIFFERENT approverUserId (an id
+  // that isn't even principal.userId). If the service ever trusted that field, the recorded
+  // first approval would belong to the spoofed id, letting APPROVER_A approve again as
+  // themselves and single-handedly satisfy the two-distinct-approver rule. The identity must
+  // ALWAYS come from principal.userId regardless of what the body claims.
+  const id = await freshPo(600000, { createdBy: CREATOR });
+  const spoofedId = '00000000-0000-7000-8000-00000000dead';
+  await svc.approvePurchaseOrder(
+    id,
+    { approverUserId: spoofedId } as never,
+    principal({ userId: APPROVER_A }),
+  );
+  // APPROVER_A tries to give the "second" approval themselves — must be refused: the real
+  // first approver of record is APPROVER_A (principal-derived), not the spoofed id.
+  await assert.rejects(
+    () => svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER_A })),
+    ForbiddenException,
+  );
+  // A genuinely different approver still can, and the PO ends up correctly APPROVED (not
+  // stuck, and not approved solely by APPROVER_A).
+  const { purchaseOrder } = await svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER_B }));
+  assert.equal(purchaseOrder.status, 'APPROVED');
+});
+
 test('po approval: the generic EditService editor can no longer PATCH status directly (bypass closed)', async () => {
   const id = await freshPo(1000, { createdBy: CREATOR });
   const p = principal({ userId: CREATOR, permissions: ['procurement:purchase_order:write'] });

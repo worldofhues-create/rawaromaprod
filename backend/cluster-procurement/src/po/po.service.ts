@@ -358,7 +358,9 @@ export class PoService {
             .values({
               poApprovalOrderId: uuidv7(),
               purchaseOrderId: id,
-              approverUserId: body.approverUserId ?? principal.userId,
+              // Security review R1 #1: approver identity is ALWAYS the authenticated principal,
+              // never client-suppliable — approvePurchaseOrder no longer accepts approverUserId.
+              approverUserId: principal.userId,
               approvalLevel: needsSecondLevel ? 1 : current === 'PENDING_L2_APPROVAL' ? 2 : 1,
               approvalStatus: 'APPROVED',
               approvedDt: now,
