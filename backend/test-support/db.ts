@@ -7,11 +7,11 @@
  * deliberately NOT a mock; the whole point of the concurrency tests is that a fake db can't lie
  * about lock contention the way a real one can't.
  *
- *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_rp_deadtables_test (default)
+ *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_rp_emit_test (default)
  *
- * RP-DEADTABLES (lane F5): this is lane F5's OWN database (rp_deadtables), never shared with
- * lane F's factory_sm, lane F2's factory_sm2, lane F3's rp_proc, lane F4's mixabort, or any
- * other lane's throwaway test DB.
+ * RP-EMIT (lane F6): this is lane F6's OWN database (rp_emit), never shared with lane F's
+ * factory_sm, lane F2's factory_sm2, lane F3's rp_proc, lane F4's mixabort, lane F5's
+ * rp_deadtables, or any other lane's throwaway test DB.
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -29,7 +29,7 @@ import type { AuthPrincipal } from '../backend-kernel/src/edge/principal.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_rp_deadtables_test';
+  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_rp_emit_test';
 
 let client: Sql | undefined;
 let ready: Promise<void> | undefined;
@@ -55,13 +55,13 @@ export async function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const sql = testClient();
-      // Arbitrary fixed lock key for "the rp-deadtables (lane F5) test schema" — distinct from other lanes' keys.
-      await sql`select pg_advisory_lock(582917463)`;
+      // Arbitrary fixed lock key for "the rp-emit (lane F6) test schema" — distinct from other lanes' keys.
+      await sql`select pg_advisory_lock(275819463)`;
       try {
         const ddl = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
         await sql.unsafe(ddl);
       } finally {
-        await sql`select pg_advisory_unlock(582917463)`;
+        await sql`select pg_advisory_unlock(275819463)`;
       }
     })();
   }
