@@ -75,19 +75,10 @@ const repoRoot = join(__dirname, '..', '..');
  *                                   real database, not just the digest — this needs the table in
  *                                   the dictionary + @ra/data-reference (or a redesigned dedup
  *                                   strategy) before it can be fixed for real.
- *   platform.relay_cursor        \
- *   platform.relay_inbox          } — RelayService's three public entry points (exportPackage/
- *   platform.relay_package       /   importPackage/status) all throw NotImplementedException up
- *                                   front (lane F5); the original implementation is kept as
- *                                   unreferenced private methods (_unused_exportPackage etc.) for
- *                                   whoever restores the feature, so the raw SQL text is still
- *                                   physically present in relay.service.ts even though it can
- *                                   never execute. Needs all three tables in the dictionary +
- *                                   @ra/data-reference (or @core/data-platform).
  *
  * To make a feature real: add the table to docs/PHASE1A_SCHEMA_PLAN.md (owner-approved) + the
  * matching packages/data-<cluster>/src/schema file, run `pnpm db:push`, delete the raw-SQL call sites'
- * NotImplementedException guard (restoring the kept-but-unused implementation where one exists),
+ * NotImplementedException guard (for the relay, restore relay.service.ts from integration/fullsystem@db4815f),
  * and delete that table's line below — the guard test will then tell you if any reference to it
  * remains unaccounted for.
  */
@@ -97,9 +88,6 @@ const KNOWN_DEBT: ReadonlySet<string> = new Set([
   'packaging.packaging_qc',
   'platform.document_registry',
   'platform.notification_log',
-  'platform.relay_cursor',
-  'platform.relay_inbox',
-  'platform.relay_package',
 ]);
 
 /** Recursively list files under `dir` whose path matches `pred`, skipping node_modules/dist. */

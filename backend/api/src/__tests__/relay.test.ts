@@ -10,9 +10,8 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { NotImplementedException } from '@nestjs/common';
 import { RelayService } from '../relay/relay.service.js';
-import { testClient, closeTestClient } from '../../../test-support/db.js';
 
-const svc = new RelayService(testClient());
+const svc = new RelayService();
 
 test('relay export (lane F5): honest "not available" — platform.relay_cursor/relay_package do not exist', async () => {
   await assert.rejects(() => svc.exportPackage('online-to-offline', false), NotImplementedException);
@@ -41,5 +40,4 @@ test('relay import (lane F5): honest "not available" — platform.relay_inbox/re
 
 test('relay status (lane F5): honest "not available" — platform.relay_cursor/relay_inbox/relay_package do not exist', async () => {
   await assert.rejects(() => svc.status(), NotImplementedException);
-  await closeTestClient();
 });
