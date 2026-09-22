@@ -5,6 +5,7 @@
  * quotations->rfq_master + ->vendor_details, quotation_items->quotations.
  * material/uom/currency/purchase_request refs are id-only SOFT refs.
  */
+import { sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -78,6 +79,11 @@ export const quotations = procurement.table(
     uniqueIndex("quotations_quotation_number_uq").on(t.quotationNumber),
     index("quotations_rfq_idx").on(t.rfqId),
     index("quotations_vendor_idx").on(t.vendorId),
+    // Security review R1 #1: belt-and-suspenders for the double-award TOCTOU fix in
+    // RfqService.selectQuotation (the SELECT ... FOR UPDATE on rfq_master is the primary guard).
+    // Additive partial unique index — never a new table (Phase-1A dictionary stays locked) —
+    // makes a double award impossible at the DB level even if the row lock were ever bypassed.
+    uniqueIndex("quotations_rfq_selected_uq").on(t.rfqId).where(sql`status = 'SELECTED'`),
   ],
 );
 

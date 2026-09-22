@@ -287,6 +287,17 @@ export class RfqService {
         );
       }
 
+      // Security review R1 #1: lock the RFQ row FIRST, before the existing-winner check below.
+      // Without this, two concurrent selectQuotation calls for DIFFERENT quotations of the SAME
+      // RFQ could both read "no winner yet" before either committed, and both go on to mark
+      // themselves SELECTED — a double award (TOCTOU). With the lock, the second call blocks
+      // here until the first transaction commits or rolls back, so its existing-winner check
+      // below always sees the up-to-date, post-commit result. This also happens to prevent a
+      // Postgres deadlock the two transactions could otherwise hit on the rfq_vendor_mappings
+      // updates further down (each transaction touches both vendors' mapping rows in opposite
+      // order once both existing-winner checks pass unlocked).
+      await tx.select().from(rfqMaster).where(eq(rfqMaster.rfqId, quotation.rfqId)).for('update');
+
       const vendorMapping = quotation.vendorId
         ? (
             await tx
@@ -327,15 +338,28 @@ export class RfqService {
         );
       }
 
-      const updated = ensure(
-        (
-          await tx
-            .update(quotations)
-            .set({ status: 'SELECTED', updatedBy: principal.userId })
-            .where(eq(quotations.quotationId, id))
-            .returning()
-        )[0],
-      );
+      let updated;
+      try {
+        updated = ensure(
+          (
+            await tx
+              .update(quotations)
+              .set({ status: 'SELECTED', updatedBy: principal.userId })
+              .where(eq(quotations.quotationId, id))
+              .returning()
+          )[0],
+        );
+      } catch (err) {
+        // Belt-and-suspenders: the partial unique index quotations_rfq_selected_uq (rfq_id
+        // WHERE status='SELECTED') turns a double award into a clean 409 even if the row lock
+        // above were ever bypassed, instead of a raw constraint-violation 500.
+        if ((err as { code?: string }).code === '23505') {
+          throw new ConflictException(
+            `RFQ ${quotation.rfqId} already has an awarded quotation; cannot award a second winner (double award).`,
+          );
+        }
+        throw err;
+      }
 
       await tx
         .update(rfqVendorMappings)

@@ -453,6 +453,11 @@ create table if not exists procurement.quotations (
   updated_by varchar(255)
 );
 
+-- Security review R1 #1: belt-and-suspenders for the double-award TOCTOU fix (the row lock in
+-- RfqService.selectQuotation is the primary guard) — at most one SELECTED quotation per RFQ.
+create unique index if not exists quotations_rfq_selected_uq
+  on procurement.quotations (rfq_id) where status = 'SELECTED';
+
 create table if not exists procurement.quotation_items (
   quotation_item_id uuid primary key default gen_random_uuid(),
   quotation_id uuid references procurement.quotations(quotation_id),

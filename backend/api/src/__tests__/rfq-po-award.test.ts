@@ -127,6 +127,47 @@ test('RFQ->PO award: a quotation from a vendor never mapped to the RFQ cannot be
   await assert.rejects(() => rfqs.selectQuotation(q.quotationId, {}, principal()), ForbiddenException);
 });
 
+/* ── security review R1 #1: selectQuotation double-award TOCTOU ─────────── */
+
+test('RFQ->PO award: concurrent selectQuotation on two DIFFERENT quotations of the same RFQ — only one may win', async () => {
+  // Before the fix, selectQuotation read the "does this RFQ already have a winner" check with
+  // no lock on the RFQ, so two concurrent awards for the same RFQ (different quotations) could
+  // both pass the check before either had committed its UPDATE, and both would end up
+  // status='SELECTED' — a double award. Repro (see the lane's throwaway race harness): out of
+  // 20 trials of this exact race against the unfixed code, one trial produced two SELECTED
+  // quotations for the same RFQ, and most of the rest hit a raw Postgres deadlock error instead
+  // of a clean ConflictException (the two transactions' rfq_vendor_mappings updates lock-order
+  // against each other once both existing-winner checks pass).
+  //
+  // The fix locks the rfq_master row FIRST (SELECT ... FOR UPDATE) so the second request blocks
+  // until the first commits, then its existing-winner check always sees the first's committed
+  // result — this also happens to eliminate the deadlock, since the lock forces one consistent
+  // order instead of two transactions racing to lock each other's rows. Run the race many times
+  // (a single trial only reproduces the bug ~1-in-20) and require it to be clean every time.
+  for (let i = 0; i < 15; i++) {
+    const { quotationA, quotationB } = await freshRfqWithTwoQuotations();
+    const results = await Promise.allSettled([
+      rfqs.selectQuotation(quotationA, {}, principal()),
+      rfqs.selectQuotation(quotationB, {}, principal()),
+    ]);
+    const succeeded = results.filter((r) => r.status === 'fulfilled');
+    assert.equal(succeeded.length, 1, `trial ${i}: exactly one of two concurrent awards for the same RFQ may win`);
+    for (const r of results) {
+      if (r.status === 'rejected') {
+        assert.ok(
+          r.reason instanceof ConflictException,
+          `trial ${i}: a losing concurrent award must fail cleanly with ConflictException, not ${(r.reason as Error)?.constructor?.name} (${(r.reason as Error)?.message})`,
+        );
+      }
+    }
+
+    const sql = testClient();
+    const winners = await sql`select quotation_id from procurement.quotations
+                                where quotation_id in (${quotationA}, ${quotationB}) and status = 'SELECTED'`;
+    assert.equal(winners.length, 1, `trial ${i}: the RFQ must end up with exactly one SELECTED quotation, never two`);
+  }
+});
+
 test('RFQ->PO award: selecting an unknown quotation 404s', async () => {
   await assert.rejects(() => rfqs.selectQuotation(crypto.randomUUID(), {}, principal()), NotFoundException);
 });
