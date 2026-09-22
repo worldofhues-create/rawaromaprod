@@ -16,7 +16,9 @@
     "db:push": "tsx scripts/db-push.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:seed:data": "tsx scripts/db-seed-data.ts",
-    "db:provision": "node scripts/db-provision.mjs"
+    "db:provision": "node scripts/db-provision.mjs",
+    "test": "node backend/test-support/run-tests.mjs",
+    "test:db:setup": "bash backend/test-support/setup-db.sh"
   },
   "devDependencies": {
     "@swc-node/register": "^1.11.1",
