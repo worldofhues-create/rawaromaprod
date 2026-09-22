@@ -1924,6 +1924,10 @@
     try { res = await tunnel(item[3] + '?limit=100'); }
     catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
     if (res.status === 403) { V.innerHTML = errBox('Your role does not have access to this data.'); return; }
+    // RP-PROC-007: a route can exist but be honestly unavailable (e.g. a feature whose backing
+    // table isn't provisioned yet) — surface that message instead of silently falling through to
+    // "No records yet", which would wrongly imply the table is just empty.
+    if (res.status >= 400) { V.innerHTML = errBox((res.json && res.json.error && res.json.error.message) || ('This is not available right now (status ' + res.status + ').')); return; }
     var rows = (res.json && res.json.data) || [];
     // Portal-audit WS1: the envelope hoists a page's nextCursor into meta.cursor — keep it so the
     // list can page past the first 100 rows via "Load more" (previously rows >100 were unreachable).

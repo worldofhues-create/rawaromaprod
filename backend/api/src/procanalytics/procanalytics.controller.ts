@@ -1,7 +1,15 @@
 /**
  * ProcAnalyticsController — vendor rate history + performance + negotiation (M03/M04). Reads are
- * gated to reveal-capable procurement roles (they surface material names + rates); negotiation
- * writes are re-checked in the service against the caller's token.
+ * gated to reveal-capable procurement roles (they surface material names + rates).
+ *
+ * Security review R1 follow-up (RP-PROC-007): every write route now ALSO carries an explicit
+ * @Permissions decorator, matching the permission each service method already enforces
+ * internally. Without it, PermissionsGuard's `if (!required) return true` let ANY authenticated
+ * user reach the handler (any role, zero procurement permissions) and rely solely on the
+ * in-service check — functionally still safe (the service check did reject them), but
+ * inconsistent with how every other write route in this codebase is guarded, and one missed
+ * in-service check away from a real hole. Guards here are defense-in-depth, not a behavior
+ * change: the service-level checks are unchanged and still fire.
  */
 import { Body, Controller, Get, Post, Query } from '@nestjs/common';
 import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
@@ -23,6 +31,7 @@ export class ProcAnalyticsController {
     return this.svc.vendorLedger(limit ? Number(limit) : 200);
   }
 
+  @Permissions('procurement:purchase_order:write')
   @Post('v1/replacement-po')
   createReplacementPo(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.createReplacementPo(String(body.grnId), principal);
@@ -39,6 +48,7 @@ export class ProcAnalyticsController {
     return this.svc.listVendorDispatches(limit ? Number(limit) : 200);
   }
 
+  @Permissions('procurement:purchase_order:read')
   @Post('v1/vendor-dispatches')
   createVendorDispatch(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.createVendorDispatch(body, principal);
@@ -50,6 +60,7 @@ export class ProcAnalyticsController {
     return this.svc.listAdvancePayments(limit ? Number(limit) : 200);
   }
 
+  @Permissions('procurement:purchase_order:write')
   @Post('v1/po-advance-payments')
   createAdvancePayment(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.createAdvancePayment(body, principal);
@@ -77,6 +88,7 @@ export class ProcAnalyticsController {
     return this.svc.listNegotiations(limit ? Number(limit) : 200);
   }
 
+  @Permissions('procurement:quotation_items:write')
   @Post('v1/vendor-negotiations')
   createNegotiation(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.createNegotiation(body, principal);

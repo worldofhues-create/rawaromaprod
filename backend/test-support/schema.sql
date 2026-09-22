@@ -11,6 +11,20 @@ create schema if not exists sales;
 create schema if not exists inventory;
 create schema if not exists quality;
 create schema if not exists procurement;
+create schema if not exists masterdata;
+
+-- RP-PROC (lane F3): minimal masterdata.material — ProcAnalyticsService.rateHistory left-joins it
+-- to attach material names to rate-history rows (RP-PROC-007).
+create table if not exists masterdata.material (
+  material_id uuid primary key default gen_random_uuid(),
+  material_code varchar(50),
+  material_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
 
 -- inventory (RP-FAC2) ------------------------------------------------------
 create table if not exists inventory.inventory_batch (
@@ -21,6 +35,61 @@ create table if not exists inventory.inventory_batch (
   inventory_status_id uuid,
   quantity_on_hand numeric(18,4),
   uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- RP-PROC (lane F3): GRN + RM batch, needed for ProcAnalyticsService.qcRejectedGrns/vendorPerformance
+-- (RP-PROC-007) to test against real GRN -> rm_batch -> qc_inspections joins.
+create table if not exists inventory.grn_master (
+  grn_id uuid primary key default gen_random_uuid(),
+  grn_number varchar(50),
+  gate_entry_id uuid,
+  purchase_order_id uuid,
+  vendor_id uuid,
+  location_id uuid,
+  grn_date date,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists inventory.grn_items (
+  grn_item_id uuid primary key default gen_random_uuid(),
+  grn_id uuid references inventory.grn_master(grn_id),
+  purchase_order_item_id uuid,
+  material_id uuid,
+  received_qty numeric(18,4),
+  uom_id uuid,
+  accepted_qty numeric(18,4),
+  rejected_qty numeric(18,4),
+  ordered_qty numeric(18,3),
+  damaged_qty numeric(18,3),
+  variance_qty numeric(18,3),
+  variance_type text,
+  variance_reason text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists inventory.rm_batch_master (
+  rm_batch_id uuid primary key default gen_random_uuid(),
+  grn_item_id uuid,
+  material_id uuid,
+  batch_number varchar(50),
+  manufacturing_date date,
+  expiry_date date,
+  received_qty numeric(18,4),
+  uom_id uuid,
+  storage_location_id uuid,
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),

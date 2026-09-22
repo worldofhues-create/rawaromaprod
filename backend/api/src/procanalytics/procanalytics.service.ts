@@ -1,17 +1,36 @@
 /**
- * ProcAnalyticsService — the procurement flow's missing analytics + negotiation (scope-freeze
- * M03/M04). All raw-SQL over the shared PG_CLIENT (like the geo/search modules):
+ * ProcAnalyticsService — the procurement flow's analytics (scope-freeze M03/M04). All raw-SQL
+ * over the shared PG_CLIENT (like the geo/search modules):
  *   - Vendor Rate History: last + historical purchase rates per vendor/material, unioned from
- *     quotation lines and PO lines, so procurement can compare rates over time.
+ *     quotation lines and PO lines, so procurement can compare rates over time. REAL — reads
+ *     only dictionary tables (procurement.quotation_items/quotations/purchase_order_items/
+ *     purchase_order, procurement.vendor_details, masterdata.material).
  *   - Vendor Performance: per-vendor PO count, GRN count, QC pass/fail + pass% (QC linked back
- *     through grn → rm_batch → inspection).
- *   - Negotiation: revised-rate + notes + recommendation against a quotation (the flow step
- *     between quotation evaluation and final vendor selection).
- * Reads are permission-gated at the controller to reveal-capable procurement roles; negotiation
- * writes are checked here against the caller's token. Material names shown here are safe because
- * only reveal roles reach these endpoints.
+ *     through grn → rm_batch → inspection). REAL — dictionary tables only.
+ *   - QC-rejected GRNs / vendor ledger / replacement PO: REAL — dictionary tables only.
+ *   - Negotiation + vendor dispatch (RP-PROC-007): NOT AVAILABLE. Both used to query/insert
+ *     procurement.vendor_negotiation / procurement.vendor_dispatch — tables that exist in
+ *     NEITHER @ra/data-procurement (the only source `pnpm db:push` draws the `procurement`
+ *     schema from, per scripts/db-schema-groups.ts) NOR the Phase-1A Data Dictionary
+ *     (docs/PHASE1A_SCHEMA_PLAN.md's table list). Any real/dev database would 500 with
+ *     "relation does not exist" the instant these ran — dead calls dressed up as working ones.
+ *     Per CLAUDE.md C3 (no destructive migration; additive schema only if the dictionary
+ *     process permits it), these now throw an honest NotImplementedException instead of
+ *     crashing or fabricating rows — see listNegotiations/createNegotiation and
+ *     listVendorDispatches/createVendorDispatch below for what unblocking them needs.
+ * Reads are permission-gated at the controller to reveal-capable procurement roles; every write
+ * is now ALSO permission-gated at the controller (previously service-only checks on 4 POST
+ * routes — the controller had no @Permissions decorator, so PermissionsGuard let any
+ * authenticated user reach the handler and rely solely on the in-service check; guards added for
+ * defense-in-depth and consistency with the rest of the codebase's write routes).
  */
-import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotImplementedException,
+} from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { randomUUID } from 'node:crypto';
@@ -97,35 +116,33 @@ export class ProcAnalyticsService {
 
   /* ── vendor dispatch (scope-freeze step 15) ────────────────────────── */
 
-  async listVendorDispatches(limit = 200) {
-    const lim = Math.min(Math.max(1, limit), 500);
-    const items = await this.sql`
-      select vd.vendor_dispatch_id as "vendorDispatchId", vd.purchase_order_id as "purchaseOrderId",
-             po.po_number as "poNumber", v.vendor_name as "vendorName",
-             vd.dispatch_date as "dispatchDate", vd.transporter as "transporter",
-             vd.docket_number as "docketNumber", vd.vehicle_number as "vehicleNumber", vd.status as "status"
-        from procurement.vendor_dispatch vd
-        left join procurement.purchase_order po on po.purchase_order_id = vd.purchase_order_id
-        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
-       order by vd.created_dt desc
-       limit ${lim}`;
-    return { items, nextCursor: null };
+  /**
+   * RP-PROC-007: this used to run `select ... from procurement.vendor_dispatch` — a table that
+   * does NOT exist anywhere in the real schema pipeline. `procurement.vendor_dispatch` is not
+   * defined in @ra/data-procurement (the only source db:push draws the `procurement` schema
+   * from, per scripts/db-schema-groups.ts) and is not in the Phase-1A Data Dictionary's table
+   * list (docs/PHASE1A_SCHEMA_PLAN.md). Any real or dev database would 500 with "relation
+   * procurement.vendor_dispatch does not exist" the moment this ran — a dead call dressed up as
+   * a working one. Per CLAUDE.md C3 (no destructive migration; additive schema only if the
+   * dictionary process permits it — report if locked), a new table is NOT added here. This is an
+   * honest "not available" instead of a crash or fabricated data; web/app.js's loadView surfaces
+   * this message verbatim rather than showing a misleading "No records yet".
+   * Unblocking it needs: `vendor_dispatch` added to the Phase-1A dictionary + @ra/data-procurement
+   * schema (columns as queried below), then db:push.
+   */
+  async listVendorDispatches(_limit = 200): Promise<never> {
+    throw new NotImplementedException(
+      'Vendor dispatch tracking is not available: its backing table (procurement.vendor_dispatch) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
-  async createVendorDispatch(body: Record<string, unknown>, principal: AuthPrincipal) {
+  async createVendorDispatch(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
     if (!(principal.permissions || []).includes('procurement:purchase_order:read')) {
       throw new ForbiddenException('Missing permission procurement:purchase_order:read');
     }
-    const g = (k: string): string | null => {
-      const v = body[k];
-      return v == null || v === '' ? null : String(v);
-    };
-    if (!g('purchaseOrderId')) throw new BadRequestException('purchaseOrderId is required');
-    const rows = (await this.sql`
-      insert into procurement.vendor_dispatch (vendor_dispatch_id, purchase_order_id, dispatch_date, transporter, docket_number, vehicle_number, status, created_by, updated_by)
-      values (${randomUUID()}, ${g('purchaseOrderId')}, ${g('dispatchDate')}, ${g('transporter')}, ${g('docketNumber')}, ${g('vehicleNumber')}, 'DISPATCHED', ${principal.userId}, ${principal.userId})
-      returning vendor_dispatch_id as "vendorDispatchId", status as "status"`) as Array<Record<string, unknown>>;
-    return rows[0];
+    throw new NotImplementedException(
+      'Vendor dispatch tracking is not available: its backing table (procurement.vendor_dispatch) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
   /* ── advance payment (scope-freeze step 13) ────────────────────────── */
@@ -162,21 +179,15 @@ export class ProcAnalyticsService {
 
   /* ── negotiation ────────────────────────────────────────────────────── */
 
-  async listNegotiations(limit = 200) {
-    const lim = Math.min(Math.max(1, limit), 500);
-    const items = await this.sql`
-      select n.vendor_negotiation_id as "vendorNegotiationId", n.quotation_id as "quotationId",
-             q.quotation_number as "quotationNumber", n.vendor_id as "vendorId", v.vendor_name as "vendorName",
-             n.material_id as "materialId", m.material_name as "materialName",
-             n.original_rate as "originalRate", n.revised_rate as "revisedRate",
-             n.notes as "notes", n.recommendation as "recommendation", n.status as "status"
-        from procurement.vendor_negotiation n
-        left join procurement.quotations q on q.quotation_id = n.quotation_id
-        left join procurement.vendor_details v on v.vendor_id = n.vendor_id
-        left join masterdata.material m on m.material_id = n.material_id
-       order by n.created_dt desc
-       limit ${lim}`;
-    return { items, nextCursor: null };
+  /**
+   * RP-PROC-007: same defect as listVendorDispatches above — `procurement.vendor_negotiation`
+   * does not exist in @ra/data-procurement or the Phase-1A Data Dictionary, so this call would
+   * 500 against any real database. Honest "not available" instead of a crash or fake rows.
+   */
+  async listNegotiations(_limit = 200): Promise<never> {
+    throw new NotImplementedException(
+      'Vendor negotiation tracking is not available: its backing table (procurement.vendor_negotiation) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 
   /* ── FAIL-branch tail (scope-freeze M05 rejection loop) ─────────────── */
@@ -293,24 +304,12 @@ export class ProcAnalyticsService {
     return { purchaseOrderId: poId, poNumber, replacementOfPoId: grn.purchase_order_id, lines: items.length, totalAmount: total };
   }
 
-  async createNegotiation(body: Record<string, unknown>, principal: AuthPrincipal) {
+  async createNegotiation(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
     if (!(principal.permissions || []).includes(NEG_WRITE_PERM)) {
       throw new ForbiddenException(`Missing permission ${NEG_WRITE_PERM}`);
     }
-    const g = (k: string): string | null => {
-      const v = body[k];
-      return v == null || v === '' ? null : String(v);
-    };
-    const num = g;
-    const rows = (await this.sql`
-      insert into procurement.vendor_negotiation
-        (vendor_negotiation_id, quotation_id, vendor_id, material_id, original_rate, revised_rate,
-         notes, recommendation, status, created_by, updated_by)
-      values (${randomUUID()}, ${g('quotationId')}, ${g('vendorId')}, ${g('materialId')},
-              ${num('originalRate')}, ${num('revisedRate')}, ${g('notes')},
-              ${g('recommendation')}, 'ACTIVE', ${principal.userId}, ${principal.userId})
-      returning vendor_negotiation_id as "vendorNegotiationId", revised_rate as "revisedRate",
-                recommendation as "recommendation", status as "status"`) as Array<Record<string, unknown>>;
-    return rows[0];
+    throw new NotImplementedException(
+      'Vendor negotiation tracking is not available: its backing table (procurement.vendor_negotiation) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
+    );
   }
 }
