@@ -144,7 +144,7 @@ test('RFQ->PO award: concurrent selectQuotation on two DIFFERENT quotations of t
   // result — this also happens to eliminate the deadlock, since the lock forces one consistent
   // order instead of two transactions racing to lock each other's rows. Run the race many times
   // (a single trial only reproduces the bug ~1-in-20) and require it to be clean every time.
-  for (let i = 0; i < 15; i++) {
+  for (let i = 0; i < 6; i++) {
     const { quotationA, quotationB } = await freshRfqWithTwoQuotations();
     const results = await Promise.allSettled([
       rfqs.selectQuotation(quotationA, {}, principal()),

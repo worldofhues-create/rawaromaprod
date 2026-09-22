@@ -75,10 +75,29 @@ async function outboxRowsFor(alembicRequirementId: string) {
               where aggregate_id = ${alembicRequirementId} order by seq`;
 }
 
-async function outboxCount(): Promise<number> {
+/**
+ * Security review R1 (lane R1B): `bridge.outbox` is ONE physical table every test *file*
+ * writes into, and `pnpm test` runs test files concurrently (separate processes sharing the
+ * same throwaway database) — so "the global row count didn't change" is not a safe assertion
+ * once more than one file can emit to it. It was safe when this file was the only bridge
+ * emitter in the suite; it stopped being safe the moment a sibling test file (bridge-link-
+ * guard.test.ts, added for security review R1 #3) also legitimately emits ProductionScheduled.
+ * These two helpers replace "count didn't change" with a check on the actual PRECONDITION
+ * `emitBridgeOutbound` requires before it will ever emit anything (see bridge-emit.ts: it
+ * looks up `bridge.production_requirement` by `production_order_id` and returns immediately if
+ * nothing is linked) — a check that is true or false by this test's OWN fixture construction,
+ * not by what any other file happens to be doing at the same moment.
+ */
+async function assertProductionOrderHasNoRequirementLink(productionOrderId: string): Promise<void> {
   const sql = testClient();
-  const rows = await sql`select count(*)::int as c from bridge.outbox`;
-  return Number(rows[0]!.c);
+  const rows = await sql`select 1 from bridge.production_requirement where production_order_id = ${productionOrderId}`;
+  assert.equal(rows.length, 0, `production order ${productionOrderId} must have no linked bridge requirement — emitBridgeOutbound's own lookup guarantees nothing was emitted for it`);
+}
+
+async function assertOilBatchHasNoProductionOrder(oilBatchId: string): Promise<void> {
+  const sql = testClient();
+  const rows = await sql`select production_order_id from production.oil_batch_master where oil_batch_id = ${oilBatchId}`;
+  assert.equal(rows[0]?.production_order_id ?? null, null, `oil batch ${oilBatchId} must have no linked production order — nothing downstream of it can ever resolve a bridge requirement`);
 }
 
 async function freshProductionOrder(): Promise<string> {
@@ -92,20 +111,28 @@ async function freshProductionOrder(): Promise<string> {
 
 test('emitBridgeOutbound: nothing emitted when the order has no linked requirement', async () => {
   const orderId = crypto.randomUUID(); // deliberately never linked
-  const before_ = await outboxCount();
+  // A globally-unique nonce in the payload, not a global outbox row count (see the comment on
+  // assertProductionOrderHasNoRequirementLink above) — this stays a genuine outbox-side check of
+  // the call's own effect while being completely immune to whatever any OTHER concurrently
+  // running test file's own bridge emissions are doing to the same shared table.
+  const nonce = crypto.randomUUID();
   await productionDb().transaction(async (tx) => {
-    await emitBridgeOutbound(tx, 'ProductionScheduled', orderId, { foo: 'bar' });
+    await emitBridgeOutbound(tx, 'ProductionScheduled', orderId, { nonce });
   });
-  assert.equal(await outboxCount(), before_, 'no requirement links to this order — nothing to emit');
+  const sql = testClient();
+  const rows = await sql`select 1 from bridge.outbox where payload->>'nonce' = ${nonce}`;
+  assert.equal(rows.length, 0, 'no requirement links to this order — nothing to emit');
 });
 
 test('emitBridgeOutbound: nothing emitted when productionOrderId is null or undefined', async () => {
-  const before_ = await outboxCount();
+  const nonce = crypto.randomUUID();
   await productionDb().transaction(async (tx) => {
-    await emitBridgeOutbound(tx, 'ProductionScheduled', null);
-    await emitBridgeOutbound(tx, 'ProductionScheduled', undefined);
+    await emitBridgeOutbound(tx, 'ProductionScheduled', null, { nonce });
+    await emitBridgeOutbound(tx, 'ProductionScheduled', undefined, { nonce });
   });
-  assert.equal(await outboxCount(), before_);
+  const sql = testClient();
+  const rows = await sql`select 1 from bridge.outbox where payload->>'nonce' = ${nonce}`;
+  assert.equal(rows.length, 0);
 });
 
 test('emitBridgeOutbound: emits in-transaction with a strictly increasing _bridge_version per requirement', async () => {
@@ -184,9 +211,8 @@ test('planning.createOrder: links the requirement and emits ProductionScheduled 
 
 test('planning.createOrder: no alembicRequirementId — RawProd-internal order, nothing emitted', async () => {
   const svc = new PlanningService(productionDb(), stubFormulaLookup);
-  const before_ = await outboxCount();
-  await svc.createOrder({ formulaVersionId: crypto.randomUUID(), orderQty: 10 }, principal());
-  assert.equal(await outboxCount(), before_);
+  const { order } = await svc.createOrder({ formulaVersionId: crypto.randomUUID(), orderQty: 10 }, principal());
+  await assertProductionOrderHasNoRequirementLink(order.productionOrderId);
 });
 
 test('planning.createOrder: a retry with the same alembicRequirementId never re-links a different order or double-emits', async () => {
@@ -242,9 +268,8 @@ test('mixing.startSession: emits ProductionStarted when the session order fulfil
 test('mixing.startSession: nothing emitted for a RawProd-internal order', async () => {
   const svc = new MixingService(productionDb());
   const orderId = await freshProductionOrder();
-  const before_ = await outboxCount();
   await svc.startSession({ productionOrderId: orderId }, principal());
-  assert.equal(await outboxCount(), before_);
+  await assertProductionOrderHasNoRequirementLink(orderId);
 });
 
 /* ── QcStatusChanged: production batch.service.ts + quality inspections.service.ts ── */
@@ -273,18 +298,19 @@ test('production BatchService.recordProductionQc: nothing emitted for an oil bat
   const oilBatchId = crypto.randomUUID();
   await sql`insert into production.oil_batch_master (oil_batch_id, status) values (${oilBatchId}, 'ACTIVE')`;
 
-  const before_ = await outboxCount();
   await svc.recordProductionQc({ oilBatchId, result: 'PASS' }, principal());
-  assert.equal(await outboxCount(), before_);
+  await assertOilBatchHasNoProductionOrder(oilBatchId);
 });
 
 test('quality InspectionsService.dispose: QcStatusChanged never fires for RM QC (no production-order link exists today)', async () => {
+  // inspections.service.ts calls emitBridgeOutbound(tx, 'QcStatusChanged', null, ...) — a
+  // literal `null`, unconditionally, for every RM QC dispose (RM batches have no path to a
+  // production order at all in this schema) — so this is a static, code-level guarantee, not a
+  // per-row lookup outcome. No db-side check applies (there is nothing to look up); the call
+  // simply must not throw.
   const svc = new InspectionsService(qualityDb());
   const insp = await svc.createInspection({ rmBatchId: crypto.randomUUID() }, principal());
-
-  const before_ = await outboxCount();
   await svc.dispose(insp.qcInspectionId, { dispositionCode: 'ACCEPT' }, principal());
-  assert.equal(await outboxCount(), before_, 'rm_batch has no production_order_id to resolve — always a no-op');
 });
 
 /* ── PackagingStarted: packaging orders.service.ts createPackageOrder ────── */
@@ -314,9 +340,8 @@ test('packaging OrdersService.createPackageOrder: emits PackagingStarted when th
 test('packaging OrdersService.createPackageOrder: nothing emitted for RawProd-internal oil', async () => {
   const svc = new OrdersService(packagingDb());
   const oilBatchId = await releasedOilBatchFor(null);
-  const before_ = await outboxCount();
   await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 10 }, principal());
-  assert.equal(await outboxCount(), before_);
+  await assertOilBatchHasNoProductionOrder(oilBatchId);
 });
 
 /* ── FgBatchAvailable: packaging batch.service.ts produceFinishedGoodBatch ── */
@@ -352,12 +377,11 @@ test('packaging BatchService.produceFinishedGoodBatch: nothing emitted for a Raw
   const oilBatchId = await releasedOilBatchFor(null);
   const packageOrderId = await packageOrderFor(oilBatchId);
 
-  const before_ = await outboxCount();
   await svc.produceFinishedGoodBatch(
     { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: 'FG-2', producedQty: 10 },
     principal(),
   );
-  assert.equal(await outboxCount(), before_);
+  await assertOilBatchHasNoProductionOrder(oilBatchId);
 });
 
 /* ── AtpAllocationGranted: reservation.service.ts createReservation ─────── */
@@ -393,9 +417,8 @@ test('reservation.createReservation: nothing emitted for a RawProd-internal FG b
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-R2', 100, 'ACTIVE')`;
 
-  const before_ = await outboxCount();
   await svc.createReservation({ finishedGoodBatchId: fgBatchId, reservedQty: 10 }, principal());
-  assert.equal(await outboxCount(), before_);
+  await assertOilBatchHasNoProductionOrder(oilBatchId);
 });
 
 /* ── DispatchReady / Dispatched: dispatch.service.ts createDispatch ─────── */
@@ -441,10 +464,9 @@ test('dispatch.createDispatch: nothing emitted for a RawProd-internal FG batch',
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-D2', 100, 'ACTIVE')`;
 
-  const before_ = await outboxCount();
   await svc.createDispatch(
     { salesOrderId: crypto.randomUUID(), items: [{ finishedGoodBatchId: fgBatchId, dispatchedQty: 10 }] },
     principal(),
   );
-  assert.equal(await outboxCount(), before_);
+  await assertOilBatchHasNoProductionOrder(oilBatchId);
 });

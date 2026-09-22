@@ -59,8 +59,24 @@ export async function ensureSchema(): Promise<void> {
       // Arbitrary fixed lock key for "the r1b (lane F7) test schema" — distinct from other lanes' keys.
       await sql`select pg_advisory_lock(392847561)`;
       try {
-        const ddl = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
-        await sql.unsafe(ddl);
+        // R1B: skip re-applying schema.sql once some OTHER process has already fully applied
+        // it. Before this check, EVERY test-file process re-ran the whole script — harmless in
+        // principle (every statement is `IF NOT EXISTS`/idempotent), but each `ALTER TABLE ...
+        // ADD COLUMN IF NOT EXISTS` still takes an ACCESS EXCLUSIVE lock on that table to check,
+        // even when the column is already there. With dozens of test files starting up and
+        // racing this (only one applies at a time thanks to the advisory lock, but each of the
+        // REST still pays that lock cost serially, once each), a later process's ALTER could
+        // queue behind an already-running process's open transaction on the same table (e.g. a
+        // concurrency test's row lock) and hit a genuine Postgres deadlock — reproduced in this
+        // lane's own test suite once enough files/tests were added. `bridge.connector_config` is
+        // the LAST table schema.sql creates, and `sql.unsafe(ddl)`'s multi-statement string runs
+        // as one implicit transaction (Postgres's simple-query protocol), so its existence means
+        // the entire script already committed — safe to treat as a completion sentinel.
+        const [sentinel] = await sql<{ done: string | null }[]>`select to_regclass('bridge.connector_config') as done`;
+        if (!sentinel?.done) {
+          const ddl = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
+          await sql.unsafe(ddl);
+        }
       } finally {
         await sql`select pg_advisory_unlock(392847561)`;
       }
