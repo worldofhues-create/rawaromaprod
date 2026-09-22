@@ -10,7 +10,16 @@ import {
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { CapaService } from './capa.service.js';
-import { createQcCapa, listQuery, type CreateQcCapa, type ListQuery } from '../quality.dtos.js';
+import {
+  closeCapa,
+  createQcCapa,
+  listQuery,
+  verifyCapa,
+  type CloseCapa,
+  type CreateQcCapa,
+  type ListQuery,
+  type VerifyCapa,
+} from '../quality.dtos.js';
 
 @Controller()
 export class CapaController {
@@ -35,5 +44,33 @@ export class CapaController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.capa.createCapa(body, principal);
+  }
+
+  /* ── flow: closure + verification workflow ────────────────────────── */
+
+  @Permissions('quality:qc_capa:write')
+  @Post('v1/qc-capas/:id/start')
+  startCapa(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.capa.startCapa(id, principal);
+  }
+
+  @Permissions('quality:qc_capa:write')
+  @Post('v1/qc-capas/:id/close')
+  closeCapa(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(closeCapa)) body: CloseCapa,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.capa.closeCapa(id, body, principal);
+  }
+
+  @Permissions('quality:qc_capa:write')
+  @Post('v1/qc-capas/:id/verify')
+  verifyCapa(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(verifyCapa)) body: VerifyCapa,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.capa.verifyCapa(id, body, principal);
   }
 }

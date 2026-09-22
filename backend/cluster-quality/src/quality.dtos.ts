@@ -100,6 +100,9 @@ export type CreateQcSampleRetention = z.infer<typeof createQcSampleRetention>;
 
 /* ── qc capa (table-only CRUD) ────────────────────────────────────────── */
 
+// RP-FAC2 (RP-QC-002): closedDt/closureEvidence/verifiedBy/verifiedDt were removed from create —
+// a CAPA used to be insertable pre-closed/pre-verified in one shot, with no workflow at all. Those
+// fields now move ONLY through startCapa/closeCapa/verifyCapa below.
 export const createQcCapa = z.object({
   qcInspectionId: z.string().uuid().optional(),
   capaCode: z.string(),
@@ -109,9 +112,15 @@ export const createQcCapa = z.object({
   actionPlan: z.string().optional(),
   assignedTo: z.string().uuid().optional(),
   dueDt: isoDateish(),
-  closedDt: isoDateish(),
-  closureEvidence: z.string().optional(),
-  verifiedBy: z.string().uuid().optional(),
-  verifiedDt: isoDateish(),
 });
 export type CreateQcCapa = z.infer<typeof createQcCapa>;
+
+export const closeCapa = z.object({
+  closureEvidence: z.string().min(1),
+});
+export type CloseCapa = z.infer<typeof closeCapa>;
+
+export const verifyCapa = z.object({
+  remarks: z.string().optional(),
+});
+export type VerifyCapa = z.infer<typeof verifyCapa>;
