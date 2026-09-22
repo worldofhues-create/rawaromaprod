@@ -52,7 +52,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -73,24 +73,34 @@ export class MixingService {
 
   /* ── secure mixing session ───────────────────────────────────────── */
 
-  /** POST /v1/mixing-sessions — open a session. */
+  /** POST /v1/mixing-sessions — open a session. Wrapped in a transaction (RP-EMIT, lane
+   *  F6) so the session insert and the ProductionStarted emission toward ALEMBIC (when
+   *  this order fulfills a bridge requirement) commit or roll back together. */
   async startSession(body: CreateMixingSession, principal: AuthPrincipal) {
-    const row = (
-      await this.db
-        .insert(secureMixingSession)
-        .values({
-          secureMixingSessionId: uuidv7(),
-          productionOrderId: body.productionOrderId,
-          operatorId: body.operatorId ?? null,
-          sessionStartDt: body.sessionStartDt ? new Date(body.sessionStartDt) : new Date(),
-          status: 'IN_PROGRESS',
-          createdBy: principal.userId,
-          updatedBy: principal.userId,
-        })
-        .returning()
-    )[0];
-    if (!row) throw new Error('insert failed: secure_mixing_session');
-    return row;
+    return this.db.transaction(async (tx) => {
+      const row = (
+        await tx
+          .insert(secureMixingSession)
+          .values({
+            secureMixingSessionId: uuidv7(),
+            productionOrderId: body.productionOrderId,
+            operatorId: body.operatorId ?? null,
+            sessionStartDt: body.sessionStartDt ? new Date(body.sessionStartDt) : new Date(),
+            status: 'IN_PROGRESS',
+            createdBy: principal.userId,
+            updatedBy: principal.userId,
+          })
+          .returning()
+      )[0];
+      if (!row) throw new Error('insert failed: secure_mixing_session');
+
+      await emitBridgeOutbound(tx, 'ProductionStarted', body.productionOrderId, {
+        production_order_id: body.productionOrderId,
+        secure_mixing_session_id: row.secureMixingSessionId,
+      });
+
+      return row;
+    });
   }
 
   async listSessions(query: ListQuery): Promise<Page<typeof secureMixingSession.$inferSelect>> {
