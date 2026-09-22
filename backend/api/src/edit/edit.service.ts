@@ -74,9 +74,14 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'procurement', table: 'purchase_order', pk: 'purchase_order_id', perm: 'procurement:purchase_order:write',
     cols: { status: 'status', orderDate: 'order_date' },
   },
+  // RP-FAC: 'status' was removed from cols (audit H-C6 / registry RP-PROD-004 follow-up). The
+  // generic editor was a live server-side bypass of OIL_TRANSITIONS (BatchService.transitionOilBatch)
+  // — an API caller could PATCH status directly and jump straight to RELEASED from FAILED, skipping
+  // the guard, the event_history row, and the outbox event. Oil-batch status now moves ONLY through
+  // POST /v1/oil-batches/:id/transition. No other column on this table is editable here either.
   'oil-batches': {
     schema: 'production', table: 'oil_batch_master', pk: 'oil_batch_id', perm: 'production:oil_batch_master:write',
-    cols: { status: 'status' },
+    cols: {},
   },
   'production-plans': {
     schema: 'production', table: 'production_plan', pk: 'production_plan_id', perm: 'production:production_plan:write',
