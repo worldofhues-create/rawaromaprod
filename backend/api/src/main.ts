@@ -22,13 +22,22 @@ async function bootstrap(): Promise<void> {
     new FastifyAdapter({ trustProxy: true }),
   );
 
-  // Additive JSON content-type parser: every route keeps its normal parsed body, but the
+  /* Nest's FastifyAdapter registers its own default `application/json` parser lazily,
+   * inside `app.init()` (which `app.listen()` calls internally) — not here, at
+   * `NestFactory.create()`. So replacing it has to happen AFTER `init()`, once Nest's own
+   * parser actually exists to remove; adding one before that point collides with Nest's
+   * own registration a moment later (`FST_ERR_CTP_ALREADY_PRESENT`). */
+  await app.init();
+
+  // REPLACES Nest's default JSON parser: every route keeps its normal parsed body, but the
   // exact bytes are also stashed on `req.rawBody`. Needed by BridgeController: an HMAC
   // signature (docs/bridge/EVENT_CONTRACT.md) is computed over the exact bytes sent, and
   // a re-serialization of the parsed body can produce different bytes than the sender
   // signed. Falls back to Fastify's own default JSON error shape on a parse failure, so
   // every other route's behaviour is unchanged.
-  app.getHttpAdapter().getInstance().addContentTypeParser(
+  const fastifyInstance = app.getHttpAdapter().getInstance();
+  fastifyInstance.removeContentTypeParser('application/json');
+  fastifyInstance.addContentTypeParser(
     'application/json',
     { parseAs: 'string' },
     (_req, body: string, done: (err: Error | null, body?: unknown) => void) => {
