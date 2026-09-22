@@ -164,7 +164,7 @@ test('two-console gate: `production` is listed in FACTORY_ONLY_ROLES (auth.servi
   const src = readFileSync(join(repoRoot, 'backend/cluster-org/src/auth/auth.service.ts'), 'utf8');
   const m = src.match(/const FACTORY_ONLY_ROLES = \[([^\]]+)\];/);
   assert.ok(m, 'FACTORY_ONLY_ROLES array must be present');
-  const roles = m![1].split(',').map((s) => s.trim().replace(/["']/g, '')).filter(Boolean);
+  const roles = (m?.[1] ?? '').split(',').map((s) => s.trim().replace(/["']/g, '')).filter(Boolean);
   assert.ok(roles.includes('production'), 'production must be a factory-only console role');
   assert.ok(!roles.includes('owner') && !roles.includes('admin'), 'governance roles stay cross-console, not floor-only');
 });
