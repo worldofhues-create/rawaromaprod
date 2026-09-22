@@ -15,7 +15,7 @@
  * stringified via num(); ISO timestamps → Date. formula/location/uom/material refs are
  * id-only soft refs (plain uuid, no FK at this layer).
  */
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -225,12 +225,25 @@ export class PlanningService {
       // the emission too. No alembicRequirementId → this is RawProd-internal production;
       // emitBridgeOutbound's own lookup also no-ops if nothing is linked.
       if (body.alembicRequirementId) {
-        await tx.execute(sql`
+        // Security review R1 #3: the link used to match only "not yet linked", with no check
+        // on lifecycle_status and no check on how many rows it actually touched — so scheduling
+        // against a requirement that was already REJECTED_MAPPING'd or CANCELLED (or a bad/
+        // unknown id) silently no-opped instead of failing loudly. Now the UPDATE also requires
+        // lifecycle_status = 'ACCEPTED', and a zero-row result (not found / wrong status /
+        // already linked) throws instead of continuing as if the link had succeeded.
+        const linked = (await tx.execute(sql`
           update bridge.production_requirement
              set production_order_id = ${productionOrderId}
            where alembic_requirement_id = ${body.alembicRequirementId}
              and production_order_id is null
-        `);
+             and lifecycle_status = 'ACCEPTED'
+           returning alembic_requirement_id
+        `)) as unknown as Array<{ alembic_requirement_id: string }>;
+        if (linked.length === 0) {
+          throw new ConflictException(
+            `Bridge requirement ${body.alembicRequirementId} could not be linked to a new production order: it does not exist, is not in ACCEPTED lifecycle status, or is already linked to another order.`,
+          );
+        }
       }
       await emitBridgeOutbound(tx, 'ProductionScheduled', productionOrderId, {
         production_order_id: productionOrderId,

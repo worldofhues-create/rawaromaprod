@@ -15,6 +15,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { ConflictException } from '@nestjs/common';
 import { emitBridgeOutbound } from '../../../backend-kernel/src/events/bridge-emit.js';
 import { MixingService } from '../../../cluster-production/src/mixing/mixing.service.js';
 import { BatchService as ProductionBatchService } from '../../../cluster-production/src/batch/batch.service.js';
@@ -189,6 +190,13 @@ test('planning.createOrder: no alembicRequirementId — RawProd-internal order, 
 });
 
 test('planning.createOrder: a retry with the same alembicRequirementId never re-links a different order or double-emits', async () => {
+  // Security review R1 #3 updated this contract: a retry against an already-linked requirement
+  // used to silently no-op the link (0 rows updated, nobody told) and just proceed to create a
+  // second, unlinked production order with no emission — a silent inconsistency. It now throws
+  // ConflictException instead, loudly refusing the retry rather than quietly doing something
+  // different from what the caller asked for. Either way, the important invariant is unchanged:
+  // the requirement must stay linked to the FIRST order only, and never emit a second
+  // ProductionScheduled for a requirement that's already linked elsewhere.
   const svc = new PlanningService(productionDb(), stubFormulaLookup);
   const { alembicRequirementId } = await freshRequirement();
 
@@ -197,17 +205,20 @@ test('planning.createOrder: a retry with the same alembicRequirementId never re-
     principal(),
   );
   // A second order accidentally sent with the same requirement id (e.g. a client retry) must
-  // not steal the link from the first order, and must not emit a second ProductionScheduled
-  // for a requirement that's already linked elsewhere.
-  await svc.createOrder(
-    { formulaVersionId: crypto.randomUUID(), orderQty: 10, alembicRequirementId },
-    principal(),
+  // be refused outright, not silently create a second, unlinked order.
+  await assert.rejects(
+    () =>
+      svc.createOrder(
+        { formulaVersionId: crypto.randomUUID(), orderQty: 10, alembicRequirementId },
+        principal(),
+      ),
+    ConflictException,
   );
 
   const sql = testClient();
   const req = await sql`select production_order_id from bridge.production_requirement
                           where alembic_requirement_id = ${alembicRequirementId}`;
-  assert.equal(req[0]!.production_order_id, first.order.productionOrderId);
+  assert.equal(req[0]!.production_order_id, first.order.productionOrderId, 'the link must stay with the first order');
 
   const rows = await outboxRowsFor(alembicRequirementId);
   assert.equal(rows.length, 1, 'the already-linked requirement must not emit a second ProductionScheduled');
