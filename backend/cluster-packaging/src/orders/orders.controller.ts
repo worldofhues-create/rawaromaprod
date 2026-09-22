@@ -55,6 +55,26 @@ export class OrdersController {
     return this.orders.createPackageOrder(body, principal);
   }
 
+  /* ── flow: guarded status transitions ─────────────────────────────── */
+
+  @Permissions('packaging:package_order:write')
+  @Post('v1/package-orders/:id/issue-materials')
+  issuePackagingMaterials(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.orders.issuePackagingMaterials(id, principal);
+  }
+
+  @Permissions('packaging:package_order:write')
+  @Post('v1/package-orders/:id/complete')
+  completePackageOrder(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.orders.completePackageOrder(id, principal);
+  }
+
+  @Permissions('packaging:package_order:write')
+  @Post('v1/package-orders/:id/cancel')
+  cancelPackageOrder(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.orders.cancelPackageOrder(id, principal);
+  }
+
   /* ── package order item ───────────────────────────────────────────── */
 
   @Permissions('packaging:package_order_item:read')

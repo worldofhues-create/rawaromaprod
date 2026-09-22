@@ -17,8 +17,8 @@
  * BOOLEAN (dictionary-locked). sku / oil_batch / location / material / operator / uom are
  * cross-schema or dict-soft refs (plain uuid, no FK at this layer).
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, inArray, lt } from 'drizzle-orm';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
@@ -43,6 +43,18 @@ const {
   outbox,
 } = packagingSchema;
 
+// Package-order lifecycle (RP-FAC2 / RP-PKG-001, §33): the order used to sit permanently in
+// DRAFT — no status ever advanced past creation, so "packaging materials issued", "filling in
+// progress" and "completed" were never server-enforced facts, only whatever the UI happened to
+// display. The only legal moves now:
+const PACKAGE_ORDER_TRANSITIONS: Record<string, string[]> = {
+  DRAFT: ['MATERIALS_ISSUED', 'CANCELLED'],
+  MATERIALS_ISSUED: ['IN_PROGRESS', 'CANCELLED'],
+  IN_PROGRESS: ['COMPLETED', 'CANCELLED'],
+  COMPLETED: [],
+  CANCELLED: [],
+};
+
 @Injectable()
 export class OrdersService {
   constructor(@Inject(PACKAGING_DB) private readonly db: PackagingDb) {}
@@ -56,6 +68,19 @@ export class OrdersService {
    */
   async createPackageOrder(body: CreatePackageOrder, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
+      // Gate (§33 step 1, RP-FAC2): a package order can only be opened against oil that has
+      // actually been RELEASED by the oil-batch state machine — not maturing, on hold, in
+      // rework, or failed. Previously any oil_batch_id was accepted unchecked.
+      const oil = (await tx.execute(sql`
+        select status from production.oil_batch_master where oil_batch_id = ${body.oilBatchId}`
+      )) as unknown as Array<{ status: string | null }>;
+      if (!oil[0]) throw new NotFoundException(`oil_batch not found: ${body.oilBatchId}`);
+      if (String(oil[0].status ?? '').toUpperCase() !== 'RELEASED') {
+        throw new ConflictException(
+          `Cannot open a package order against oil batch ${body.oilBatchId}: status is ${oil[0].status ?? '(none)'} (must be RELEASED).`,
+        );
+      }
+
       const orderId = uuidv7();
       const order = (
         await tx
@@ -145,6 +170,160 @@ export class OrdersService {
     )[0] ?? null;
   }
 
+  /* ── flow: issue packaging materials (DRAFT → MATERIALS_ISSUED) ──────── */
+
+  /**
+   * POST /v1/package-orders/:id/issue-materials — §33 step: BOM/material check + issue. Guarded
+   * CAS DRAFT→MATERIALS_ISSUED under a row lock (so two concurrent issue calls on the same order
+   * can't both win), and a real shortage check first: every package_order_item's required_qty is
+   * compared against the packaging material's available stock (on-hand across all its inventory
+   * batches, net of active reservations) before anything is flagged issued. Any shortfall rejects
+   * the WHOLE issue (no partial issuance) and lists exactly what's short.
+   */
+  async issuePackagingMaterials(orderId: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        select status from packaging.package_order where package_order_id = ${orderId} for update`
+      )) as unknown as Array<{ status: string | null }>;
+      if (!locked[0]) throw new NotFoundException(`package_order not found: ${orderId}`);
+      const current = String(locked[0].status ?? 'DRAFT').toUpperCase();
+      if (!(PACKAGE_ORDER_TRANSITIONS[current] ?? []).includes('MATERIALS_ISSUED')) {
+        throw new ConflictException(`Package order cannot issue materials from status ${current} (must be DRAFT).`);
+      }
+
+      const items = await tx.select().from(packageOrderItem).where(eq(packageOrderItem.packageOrderId, orderId));
+      if (items.length === 0) {
+        throw new ConflictException(`Package order ${orderId} has no BOM items to issue.`);
+      }
+
+      const shortages: string[] = [];
+      for (const item of items) {
+        if (!item.packagingMaterialId || item.requiredQty == null) continue;
+        const avail = (await tx.execute(sql`
+          select coalesce(sum(ib.quantity_on_hand), 0) - coalesce((
+            select sum(sr.reserved_qty) from inventory.stock_reservation sr
+            join inventory.inventory_batch ib2 on ib2.inventory_batch_id = sr.inventory_batch_id
+            where ib2.material_id = ${item.packagingMaterialId} and sr.released_dt is null
+          ), 0) as available
+          from inventory.inventory_batch ib
+          where ib.material_id = ${item.packagingMaterialId}`
+        )) as unknown as Array<{ available: string | null }>;
+        const available = Number(avail[0]?.available ?? 0);
+        if (Number(item.requiredQty) > available) {
+          shortages.push(`material ${item.packagingMaterialId}: required ${item.requiredQty}, available ${available}`);
+        }
+      }
+      if (shortages.length > 0) {
+        throw new ConflictException(`Cannot issue packaging materials — shortage(s): ${shortages.join('; ')}`);
+      }
+
+      await tx
+        .update(packageOrderItem)
+        .set({ issuedQty: true, updatedBy: principal.userId })
+        .where(eq(packageOrderItem.packageOrderId, orderId));
+
+      const updated = (
+        await tx
+          .update(packageOrder)
+          .set({ status: 'MATERIALS_ISSUED', updatedBy: principal.userId })
+          .where(and(eq(packageOrder.packageOrderId, orderId), eq(packageOrder.status, current)))
+          .returning()
+      )[0];
+      if (!updated) {
+        throw new ConflictException(`Package order ${orderId} was moved off ${current} by a concurrent request; refusing this stale issue.`);
+      }
+      return { order: updated, itemsIssued: items.length };
+    });
+  }
+
+  /* ── flow: cancel (any non-terminal state) ────────────────────────── */
+
+  /**
+   * POST /v1/package-orders/:id/cancel — guarded CAS to CANCELLED from any non-terminal state. If
+   * materials had already been flagged issued, the issued_qty flag is reversed (this dictionary
+   * table has no inventory_batch linkage on package_order_item — issued_qty is a locked BOOLEAN —
+   * so no batch-level quantity was ever decremented at issue time to reverse; the flag reversal is
+   * the full correction available at this layer).
+   */
+  async cancelPackageOrder(orderId: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        select status from packaging.package_order where package_order_id = ${orderId} for update`
+      )) as unknown as Array<{ status: string | null }>;
+      if (!locked[0]) throw new NotFoundException(`package_order not found: ${orderId}`);
+      const current = String(locked[0].status ?? 'DRAFT').toUpperCase();
+      if (!(PACKAGE_ORDER_TRANSITIONS[current] ?? []).includes('CANCELLED')) {
+        throw new ConflictException(`Package order cannot be cancelled from status ${current}.`);
+      }
+
+      if (current === 'MATERIALS_ISSUED' || current === 'IN_PROGRESS') {
+        await tx
+          .update(packageOrderItem)
+          .set({ issuedQty: false, updatedBy: principal.userId })
+          .where(eq(packageOrderItem.packageOrderId, orderId));
+      }
+
+      const updated = (
+        await tx
+          .update(packageOrder)
+          .set({ status: 'CANCELLED', updatedBy: principal.userId })
+          .where(and(eq(packageOrder.packageOrderId, orderId), eq(packageOrder.status, current)))
+          .returning()
+      )[0];
+      if (!updated) {
+        throw new ConflictException(`Package order ${orderId} was moved off ${current} by a concurrent request; refusing this stale cancel.`);
+      }
+      return updated;
+    });
+  }
+
+  /* ── flow: complete (IN_PROGRESS → COMPLETED, yield/reject roll-up) ──── */
+
+  /**
+   * POST /v1/package-orders/:id/complete — guarded CAS IN_PROGRESS→COMPLETED. Refuses while any
+   * filling_session on this order is still ACTIVE (no completing an order mid-fill). Rolls up
+   * yield/reject qty across every filling_session_details row on the order's sessions.
+   */
+  async completePackageOrder(orderId: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        select status from packaging.package_order where package_order_id = ${orderId} for update`
+      )) as unknown as Array<{ status: string | null }>;
+      if (!locked[0]) throw new NotFoundException(`package_order not found: ${orderId}`);
+      const current = String(locked[0].status ?? 'DRAFT').toUpperCase();
+      if (!(PACKAGE_ORDER_TRANSITIONS[current] ?? []).includes('COMPLETED')) {
+        throw new ConflictException(`Package order cannot be completed from status ${current} (must be IN_PROGRESS).`);
+      }
+
+      const openSessions = (await tx.execute(sql`
+        select count(*)::int as n from packaging.filling_session
+         where package_order_id = ${orderId} and coalesce(status, 'ACTIVE') = 'ACTIVE'`
+      )) as unknown as Array<{ n: number }>;
+      if ((openSessions[0]?.n ?? 0) > 0) {
+        throw new ConflictException(`Package order ${orderId} still has an ACTIVE filling session — end it before completing the order.`);
+      }
+
+      const totals = (await tx.execute(sql`
+        select coalesce(sum(fsd.filled_qty), 0)::float as filled, coalesce(sum(fsd.rejected_qty), 0)::float as rejected
+          from packaging.filling_session_details fsd
+          join packaging.filling_session fs on fs.filling_session_id = fsd.filling_session_id
+         where fs.package_order_id = ${orderId}`
+      )) as unknown as Array<{ filled: number; rejected: number }>;
+
+      const updated = (
+        await tx
+          .update(packageOrder)
+          .set({ status: 'COMPLETED', updatedBy: principal.userId })
+          .where(and(eq(packageOrder.packageOrderId, orderId), eq(packageOrder.status, current)))
+          .returning()
+      )[0];
+      if (!updated) {
+        throw new ConflictException(`Package order ${orderId} was moved off ${current} by a concurrent request; refusing this stale completion.`);
+      }
+      return { order: updated, filledQty: totals[0]?.filled ?? 0, rejectedQty: totals[0]?.rejected ?? 0 };
+    });
+  }
+
   /* ── package order item (CRUD) ────────────────────────────────────── */
 
   async createPackageOrderItem(body: CreatePackageOrderItem, principal: AuthPrincipal) {
@@ -192,27 +371,64 @@ export class OrdersService {
 
   /* ── flow: filling session start / end ────────────────────────────── */
 
-  /** POST /v1/filling-sessions — open an ACTIVE filling session against a package order. */
+  /**
+   * POST /v1/filling-sessions — open an ACTIVE filling session against a package order. RP-FAC2:
+   * guarded — the order must have had its packaging materials issued (MATERIALS_ISSUED or already
+   * IN_PROGRESS), and only ONE filling session may be ACTIVE per order at a time (single-writer
+   * guard, same shape as RP-DISP-002's dispatch guard) — two operators can't fill the same order
+   * concurrently. The first session opened auto-advances the order MATERIALS_ISSUED→IN_PROGRESS
+   * under the same row lock.
+   */
   async startFillingSession(body: CreateFillingSession, principal: AuthPrincipal) {
-    const row = (
-      await this.db
-        .insert(fillingSession)
-        .values({
-          fillingSessionId: uuidv7(),
-          packageOrderId: body.packageOrderId ?? null,
-          operatorId: body.operatorId ?? null,
-          sessionStartDt: body.sessionStartDt ? new Date(body.sessionStartDt) : new Date(),
-          status: 'ACTIVE',
-          createdBy: principal.userId,
-          updatedBy: principal.userId,
-        })
-        .returning()
-    )[0];
-    if (!row) throw new Error('insert failed: filling_session');
-    return row;
+    if (!body.packageOrderId) throw new ConflictException('packageOrderId is required to start a filling session.');
+    const packageOrderId = body.packageOrderId;
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        select status from packaging.package_order where package_order_id = ${packageOrderId} for update`
+      )) as unknown as Array<{ status: string | null }>;
+      if (!locked[0]) throw new NotFoundException(`package_order not found: ${packageOrderId}`);
+      const current = String(locked[0].status ?? 'DRAFT').toUpperCase();
+      if (current !== 'MATERIALS_ISSUED' && current !== 'IN_PROGRESS') {
+        throw new ConflictException(
+          `Cannot start a filling session on package order ${packageOrderId}: status is ${current} (must be MATERIALS_ISSUED or IN_PROGRESS).`,
+        );
+      }
+
+      const openSessions = (await tx.execute(sql`
+        select count(*)::int as n from packaging.filling_session
+         where package_order_id = ${packageOrderId} and coalesce(status, 'ACTIVE') = 'ACTIVE'`
+      )) as unknown as Array<{ n: number }>;
+      if ((openSessions[0]?.n ?? 0) > 0) {
+        throw new ConflictException(`Package order ${packageOrderId} already has an ACTIVE filling session.`);
+      }
+
+      if (current === 'MATERIALS_ISSUED') {
+        await tx
+          .update(packageOrder)
+          .set({ status: 'IN_PROGRESS', updatedBy: principal.userId })
+          .where(and(eq(packageOrder.packageOrderId, packageOrderId), eq(packageOrder.status, 'MATERIALS_ISSUED')));
+      }
+
+      const row = (
+        await tx
+          .insert(fillingSession)
+          .values({
+            fillingSessionId: uuidv7(),
+            packageOrderId,
+            operatorId: body.operatorId ?? null,
+            sessionStartDt: body.sessionStartDt ? new Date(body.sessionStartDt) : new Date(),
+            status: 'ACTIVE',
+            createdBy: principal.userId,
+            updatedBy: principal.userId,
+          })
+          .returning()
+      )[0];
+      if (!row) throw new Error('insert failed: filling_session');
+      return row;
+    });
   }
 
-  /** POST /v1/filling-sessions/:id/end — stamp the end ts and flip status to DONE. */
+  /** POST /v1/filling-sessions/:id/end — CAS ACTIVE→DONE, stamp the end ts. */
   async endFillingSession(
     sessionId: string,
     body: EndFillingSession,
@@ -220,6 +436,10 @@ export class OrdersService {
   ) {
     const session = await this.getFillingSession(sessionId);
     if (!session) throw new NotFoundException(`filling_session not found: ${sessionId}`);
+    const current = String(session.status ?? 'ACTIVE').toUpperCase();
+    if (current !== 'ACTIVE') {
+      throw new ConflictException(`Filling session cannot be ended from status ${current} (must be ACTIVE).`);
+    }
 
     const updated = (
       await this.db
@@ -229,10 +449,12 @@ export class OrdersService {
           status: 'DONE',
           updatedBy: principal.userId,
         })
-        .where(eq(fillingSession.fillingSessionId, sessionId))
+        .where(and(eq(fillingSession.fillingSessionId, sessionId), eq(fillingSession.status, 'ACTIVE')))
         .returning()
     )[0];
-    if (!updated) throw new Error('update failed: filling_session');
+    if (!updated) {
+      throw new ConflictException(`Filling session ${sessionId} was moved off ACTIVE by a concurrent request; refusing this stale end.`);
+    }
     return updated;
   }
 
@@ -263,11 +485,15 @@ export class OrdersService {
   /**
    * POST /v1/filling-sessions/:id/details — append a filling_session_details row and emit the
    * optional `packaging.filling.done` signal. One transaction so the event is published iff the
-   * detail committed.
+   * detail committed. RP-FAC2: guarded — a session that already ended (DONE) can no longer record
+   * fill/reject quantities.
    */
   async recordFilling(sessionId: string, body: RecordFilling, principal: AuthPrincipal) {
     const session = await this.getFillingSession(sessionId);
     if (!session) throw new NotFoundException(`filling_session not found: ${sessionId}`);
+    if (String(session.status ?? 'ACTIVE').toUpperCase() !== 'ACTIVE') {
+      throw new ConflictException(`Filling session ${sessionId} is not ACTIVE — cannot record filling.`);
+    }
 
     return this.db.transaction(async (tx) => {
       const detailId = uuidv7();
