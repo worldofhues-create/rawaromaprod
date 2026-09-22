@@ -30,7 +30,6 @@ const REGISTRY: Record<string, { schema: string; table: string }> = {
   '/v1/product-skus': { schema: 'packaging', table: 'product_sku' },
   '/v1/sales-orders': { schema: 'sales', table: 'sales_order' },
   '/v1/dispatches': { schema: 'sales', table: 'dispatch_master' },
-  '/v1/document-registry': { schema: 'platform', table: 'document_registry' },
   '/v1/uoms': { schema: 'platform', table: 'uom_master' },
   '/v1/warehouses': { schema: 'location', table: 'warehouse_master' },
   '/v1/floors': { schema: 'location', table: 'floor_master' },
@@ -47,6 +46,10 @@ const REGISTRY: Record<string, { schema: string; table: string }> = {
   // shape a single-table select can't reproduce (fg-stock, inventory-availability, packaging-qc,
   // reorder-suggestions, qc-rejected-grns, po-advance-payments, vendor-rate-history/-negotiations/
   // -performance/-ledger, notifications, dispatch-documents, approval-matrix, organizations, geo-*).
+  // Lane F5 (RP-DEADTABLES): document-registry is ALSO excluded now, for the same reason as the
+  // rest of that list — platform.document_registry does not exist in @core/data-platform /
+  // @ra/data-reference (db:push's only sources for the `platform` schema) or the Phase-1A Data
+  // Dictionary; it was mistakenly left registered as searchable. See documents.service.ts.
   '/v1/roles': { schema: 'iam', table: 'role_master' },
   '/v1/permissions': { schema: 'iam', table: 'permission_master' },
   '/v1/business-units': { schema: 'iam', table: 'business_unit_master' },
@@ -91,8 +94,10 @@ const REGISTRY: Record<string, { schema: string; table: string }> = {
 
 // Per-resource read permission (audit H-S3): search must NOT bypass function-level auth. The perm
 // is the same one the resource's list route requires (schema:table:read), so a caller can only
-// search what they may already list. document-registry is a BFF whose perm differs from its table.
-const PERM_OVERRIDE: Record<string, string> = { '/v1/document-registry': 'platform:document_master:read' };
+// search what they may already list. Override here when a resource's BFF permission differs from
+// its table (none currently — document-registry, the previous example, was removed from REGISTRY
+// above by lane F5 since its table doesn't exist).
+const PERM_OVERRIDE: Record<string, string> = {};
 function readPerm(endpoint: string, cfg: { schema: string; table: string }): string {
   return PERM_OVERRIDE[endpoint] ?? `${cfg.schema}:${cfg.table}:read`;
 }
