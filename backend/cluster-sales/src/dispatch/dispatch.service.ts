@@ -13,7 +13,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt, ne, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_LOOKUP, type PackagingLookup } from '@ra/cluster-packaging';
 import { SALES_DB, salesSchema, type SalesDb } from '../sales.tokens.js';
@@ -195,6 +195,37 @@ export class DispatchService {
         { dispatchId, salesOrderId: body.salesOrderId },
         dispatchId,
       );
+
+      // RP-EMIT (lane F6): this single create-dispatch call both readies and ships each FG
+      // batch line (no separate "ready" staging state exists in this flow), so it emits
+      // DispatchReady then Dispatched toward ALEMBIC for every distinct production order
+      // behind this dispatch's batches — resolved two hops back (batch's package order's
+      // oil batch's production order) — iff that order fulfills a bridge requirement.
+      // `nextEmittedVersion` is allocated per call, so DispatchReady always gets a lower
+      // version than the Dispatched that follows it for the same requirement.
+      const distinctBatchIds = Array.from(perBatch.keys());
+      const productionOrderIds = new Set<string>();
+      for (const batchId of distinctBatchIds) {
+        const order = (await tx.execute(sql`
+          select ob.production_order_id
+            from packaging.finished_good_batch_master fg
+            join packaging.package_order po on po.package_order_id = fg.package_order_id
+            join production.oil_batch_master ob on ob.oil_batch_id = po.oil_batch_id
+           where fg.finished_good_batch_id = ${batchId}`
+        )) as unknown as Array<{ production_order_id: string | null }>;
+        const productionOrderId = order[0]?.production_order_id;
+        if (productionOrderId) productionOrderIds.add(productionOrderId);
+      }
+      for (const productionOrderId of productionOrderIds) {
+        await emitBridgeOutbound(tx, 'DispatchReady', productionOrderId, {
+          dispatch_id: dispatchId,
+          sales_order_id: body.salesOrderId,
+        });
+        await emitBridgeOutbound(tx, 'Dispatched', productionOrderId, {
+          dispatch_id: dispatchId,
+          sales_order_id: body.salesOrderId,
+        });
+      }
 
       return { dispatch: header, items };
     });
