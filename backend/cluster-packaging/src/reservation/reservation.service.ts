@@ -15,7 +15,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
-import { type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { num, paginate, type Page } from '../_helpers.js';
@@ -100,6 +100,23 @@ export class ReservationService {
           .returning()
       )[0];
       if (!row) throw new Error('insert failed: finished_good_reservation');
+
+      // RP-EMIT (lane F6): resolve the production order two hops back (this FG batch's
+      // package order's oil batch's production order), then emit AtpAllocationGranted
+      // toward ALEMBIC iff that order fulfills a bridge requirement.
+      const order = (await tx.execute(sql`
+        select ob.production_order_id
+          from packaging.finished_good_batch_master fg
+          join packaging.package_order po on po.package_order_id = fg.package_order_id
+          join production.oil_batch_master ob on ob.oil_batch_id = po.oil_batch_id
+         where fg.finished_good_batch_id = ${body.finishedGoodBatchId}`
+      )) as unknown as Array<{ production_order_id: string | null }>;
+      await emitBridgeOutbound(tx, 'AtpAllocationGranted', order[0]?.production_order_id, {
+        finished_good_reservation_id: row.finishedGoodReservationId,
+        finished_good_batch_id: body.finishedGoodBatchId,
+        reserved_qty: row.reservedQty,
+      });
+
       return row;
     });
   }

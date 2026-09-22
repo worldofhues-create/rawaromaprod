@@ -19,7 +19,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
@@ -72,8 +72,8 @@ export class OrdersService {
       // actually been RELEASED by the oil-batch state machine — not maturing, on hold, in
       // rework, or failed. Previously any oil_batch_id was accepted unchecked.
       const oil = (await tx.execute(sql`
-        select status from production.oil_batch_master where oil_batch_id = ${body.oilBatchId}`
-      )) as unknown as Array<{ status: string | null }>;
+        select status, production_order_id from production.oil_batch_master where oil_batch_id = ${body.oilBatchId}`
+      )) as unknown as Array<{ status: string | null; production_order_id: string | null }>;
       if (!oil[0]) throw new NotFoundException(`oil_batch not found: ${body.oilBatchId}`);
       if (String(oil[0].status ?? '').toUpperCase() !== 'RELEASED') {
         throw new ConflictException(
@@ -135,6 +135,14 @@ export class OrdersService {
         { packageOrderId: orderId, oilBatchId: body.oilBatchId },
         orderId,
       );
+
+      // RP-EMIT (lane F6): this package order starting packaging against a RELEASED oil
+      // batch is PackagingStarted toward ALEMBIC, iff the oil batch's production order
+      // fulfills a bridge requirement.
+      await emitBridgeOutbound(tx, 'PackagingStarted', oil[0]!.production_order_id, {
+        package_order_id: orderId,
+        oil_batch_id: body.oilBatchId,
+      });
 
       return { order, items };
     });
