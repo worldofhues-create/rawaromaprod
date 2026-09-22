@@ -8,7 +8,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotImplementedException } from '@nestjs/common';
 import { EditService } from '../edit/edit.service.js';
 import { BatchService } from '../../../cluster-production/src/batch/batch.service.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
@@ -58,3 +58,33 @@ test('edit-service: an editable resource (e.g. vendors) still works — the regi
   }))) as { vendor_name: string };
   assert.equal(updated.vendor_name, 'Acme Renamed');
 });
+
+/**
+ * Lane F5 (RP-DEADTABLES): these five REGISTRY entries target tables that do not exist in any
+ * real database (see the guard test in backend/test-support/schema-guard.test.ts for the full
+ * list + reasons). Before this fix, update() would issue a raw `update <schema>.<table> ...`
+ * against a nonexistent relation and the caller got an unhandled 500 PostgresError. Now `cfg.
+ * unavailable` short-circuits to an honest NotImplementedException, checked BEFORE the permission
+ * check (never let a caller conclude they lack permission when the feature doesn't exist at all).
+ */
+for (const [resource, perm] of [
+  ['documents', 'platform:document_master:write'],
+  ['dispatch-documents', 'sales:dispatch_master:write'],
+  ['po-advance-payments', 'procurement:purchase_order:write'],
+  ['vendor-dispatches', 'procurement:purchase_order:read'],
+  ['vendor-negotiations', 'procurement:quotation_items:write'],
+] as const) {
+  test(`edit-service: ${resource} is honestly unavailable (its backing table does not exist), not a 500`, async () => {
+    await assert.rejects(
+      () => editSvc.update(resource, crypto.randomUUID(), { status: 'ACTIVE' }, principal({ permissions: [perm] })),
+      NotImplementedException,
+    );
+  });
+
+  test(`edit-service: ${resource} refuses before checking permission (no perm at all still gets the honest message, not Forbidden)`, async () => {
+    await assert.rejects(
+      () => editSvc.update(resource, crypto.randomUUID(), { status: 'ACTIVE' }, principal({ permissions: [] })),
+      NotImplementedException,
+    );
+  });
+}
