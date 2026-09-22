@@ -125,6 +125,12 @@ export class StockController {
     return this.stock.createStockReservation(body, principal);
   }
 
+  @Permissions('inventory:stock_reservation:write')
+  @Post('v1/stock-reservations/:id/release')
+  releaseStockReservation(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.stock.releaseStockReservation(id, principal);
+  }
+
   /* ── stock_transfer ─────────────────────────────────────────────────── */
 
   @Permissions('inventory:stock_transfer:read')

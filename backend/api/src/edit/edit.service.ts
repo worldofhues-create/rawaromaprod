@@ -56,23 +56,39 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'sales', table: 'dispatch_document', pk: 'dispatch_document_id', perm: 'sales:dispatch_master:write',
     cols: { documentNumber: 'document_number', amount: 'amount', receivedBy: 'received_by', reference: 'reference', status: 'status' },
   },
+  // RP-FAC2 (RP-INV-004 follow-up): 'status'/'reservedQty' were removed (audit registry
+  // follow-up mirroring the oil-batch fix below). The generic editor let a caller PATCH a
+  // reservation's status straight to RELEASED (or edit reserved_qty in place) with no guard —
+  // bypassing StockService.releaseStockReservation's CAS + the over-reserve check entirely.
+  // Release now moves ONLY through POST /v1/stock-reservations/:id/release.
   reservations: {
     schema: 'inventory', table: 'stock_reservation', pk: 'stock_reservation_id', perm: 'inventory:stock_reservation:write',
-    cols: { status: 'status', reservedQty: 'reserved_qty' },
+    cols: {},
   },
+  // RP-FAC2 (RP-QC-002 follow-up): 'status' removed. CapaService now has a real guarded
+  // OPEN→IN_PROGRESS→CLOSED→VERIFIED workflow (startCapa/closeCapa/verifyCapa) with a
+  // closure-evidence requirement and closer/verifier segregation of duties — the generic editor
+  // used to let a caller PATCH status straight to VERIFIED, skipping all of it. rootCause/
+  // actionPlan/capaType stay editable here (investigation notes, not flow state).
   capas: {
-    // CAPA lifecycle (audit #7): edit status (OPEN → IN_PROGRESS → CLOSED → VERIFIED) + fill the
-    // root cause / action plan / closure evidence — was create-only.
     schema: 'quality', table: 'qc_capa', pk: 'qc_capa_id', perm: 'quality:qc_capa:write',
-    cols: { status: 'status', capaType: 'capa_type', rootCause: 'root_cause', actionPlan: 'action_plan', closureEvidence: 'closure_evidence' },
+    cols: { capaType: 'capa_type', rootCause: 'root_cause', actionPlan: 'action_plan' },
   },
+  // RP-FAC2 (§28 follow-up): 'status' removed. RequirementService already has a real guarded
+  // DRAFT→SUBMITTED→APPROVED workflow (submitPurchaseRequest/approvePurchaseRequest) with
+  // segregation of duties (creator can't approve their own PR) — the generic editor let a caller
+  // PATCH status straight to APPROVED, skipping the approval row and the segregation check.
   'purchase-requests': {
     schema: 'procurement', table: 'purchase_request', pk: 'purchase_request_id', perm: 'procurement:purchase_request:write',
-    cols: { status: 'status', priority: 'priority' },
+    cols: { priority: 'priority' },
   },
+  // RP-FAC2 (§28 follow-up): 'status' removed. PoService already has a real guarded
+  // DRAFT→APPROVED→ISSUED→ACKNOWLEDGED workflow with segregation of duties — the generic editor
+  // let a caller PATCH status straight to ISSUED/ACKNOWLEDGED, skipping approval, the outbox
+  // event, and the vendor-ack row entirely.
   'purchase-orders': {
     schema: 'procurement', table: 'purchase_order', pk: 'purchase_order_id', perm: 'procurement:purchase_order:write',
-    cols: { status: 'status', orderDate: 'order_date' },
+    cols: { orderDate: 'order_date' },
   },
   // RP-FAC: 'status' was removed from cols (audit H-C6 / registry RP-PROD-004 follow-up). The
   // generic editor was a live server-side bypass of OIL_TRANSITIONS (BatchService.transitionOilBatch)

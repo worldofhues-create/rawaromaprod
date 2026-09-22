@@ -27,8 +27,8 @@ export class InventoryViewService {
              coalesce(ib.quantity_on_hand, 0)::float as "onHand",
              coalesce(r.reserved, 0)::float          as "reserved",
              qc.overall_result           as "qcStatus",
-             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD') then coalesce(ib.quantity_on_hand, 0) else 0 end)::float as "blocked",
-             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD') then 0
+             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD','REWORK') then coalesce(ib.quantity_on_hand, 0) else 0 end)::float as "blocked",
+             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD','REWORK') then 0
                    else (coalesce(ib.quantity_on_hand, 0) - coalesce(r.reserved, 0)) end)::float as "available",
              rb.expiry_date              as "expiryDate",
              case when rb.expiry_date is not null then (rb.expiry_date - current_date) end as "daysToExpiry",

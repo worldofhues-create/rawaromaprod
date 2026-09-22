@@ -246,23 +246,66 @@ export class StockService {
   /* ── stock_reservation ──────────────────────────────────────────────── */
 
   async createStockReservation(body: CreateStockReservation, principal: AuthPrincipal) {
-    // Over-reserve guard (audit #5): can't reserve more than available = on-hand − active reservations.
+    // Over-reserve guard (audit #5, RP-FAC2: made concurrency-safe — same check-then-insert race
+    // that RP-FG-001's FG reservation had: the old code SELECTed on-hand + active reservations on
+    // the base connection with no lock, then INSERTed; two concurrent requests against the same
+    // batch could both read the same "available" figure and both pass, over-reserving the batch.
+    // Now the whole check-then-insert runs inside one transaction that takes SELECT ... FOR UPDATE
+    // on the inventory_batch row first, so a second concurrent reservation blocks until the first
+    // commits/rolls back and always re-reads the post-commit reserved total.
     if (body.inventoryBatchId && body.reservedQty != null) {
+      const inventoryBatchId = body.inventoryBatchId;
       if (!(Number(body.reservedQty) > 0)) throw new ConflictException('Reserved quantity must be positive.');
-      const batch = (
-        await this.db.select({ onHand: inventoryBatch.quantityOnHand }).from(inventoryBatch).where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId)).limit(1)
-      )[0];
-      if (!batch) throw new NotFoundException(`inventory_batch not found: ${body.inventoryBatchId}`);
-      const reserved = (
-        await this.db
-          .select({ total: sql<string>`coalesce(sum(${stockReservation.reservedQty}), 0)::text` })
-          .from(stockReservation)
-          .where(and(eq(stockReservation.inventoryBatchId, body.inventoryBatchId), isNull(stockReservation.releasedDt)))
-      )[0];
-      const available = Number(batch.onHand ?? 0) - Number(reserved?.total ?? 0);
-      if (Number(body.reservedQty) > available) {
-        throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations).`);
-      }
+      return this.db.transaction(async (tx) => {
+        const locked = (await tx.execute(sql`
+          select quantity_on_hand, rm_batch_id from inventory.inventory_batch
+           where inventory_batch_id = ${inventoryBatchId}
+           for update`)) as unknown as Array<{ quantity_on_hand: string | null; rm_batch_id: string | null }>;
+        const batch = locked[0];
+        if (!batch) throw new NotFoundException(`inventory_batch not found: ${inventoryBatchId}`);
+
+        // RP-FAC2 (RP-QC-002 follow-up): a batch QC dispositioned REJECT/HOLD/REWORK has zero
+        // eligible stock — the disposition drives reservation eligibility automatically, matching
+        // the same block the inventory-availability read-model already applies.
+        let qcBlocked = false;
+        if (batch.rm_batch_id) {
+          const qc = (await tx.execute(sql`
+            select overall_result from quality.qc_inspections
+             where rm_batch_id = ${batch.rm_batch_id}
+             order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
+          qcBlocked = ['REJECT', 'HOLD', 'REWORK'].includes(String(qc[0]?.overall_result ?? '').toUpperCase());
+        }
+
+        const reserved = (
+          await tx
+            .select({ total: sql<string>`coalesce(sum(${stockReservation.reservedQty}), 0)::text` })
+            .from(stockReservation)
+            .where(and(eq(stockReservation.inventoryBatchId, inventoryBatchId), isNull(stockReservation.releasedDt)))
+        )[0];
+        const available = qcBlocked ? 0 : Number(batch.quantity_on_hand ?? 0) - Number(reserved?.total ?? 0);
+        if (Number(body.reservedQty) > available) {
+          throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations${qcBlocked ? '; batch is QC REJECT/HOLD/REWORK' : ''}).`);
+        }
+
+        return ensure(
+          (
+            await tx
+              .insert(stockReservation)
+              .values({
+                inventoryBatchId: body.inventoryBatchId ?? null,
+                reservedQty: body.reservedQty != null ? String(body.reservedQty) : null,
+                uomId: body.uomId ?? null,
+                reservedForDocumentId: body.reservedForDocumentId ?? null,
+                reservedDt: body.reservedDt ? new Date(body.reservedDt) : new Date(),
+                releasedDt: body.releasedDt ? new Date(body.releasedDt) : null,
+                status: 'ACTIVE',
+                createdBy: principal.userId,
+                updatedBy: principal.userId,
+              })
+              .returning()
+          )[0],
+        );
+      });
     }
     return ensure(
       (
@@ -282,6 +325,36 @@ export class StockService {
           .returning()
       )[0],
     );
+  }
+
+  /**
+   * POST /v1/stock-reservations/:id/release — RP-FAC2: the only way to release an RM reservation
+   * used to be the generic EditService bypass, PATCHing `status`/`reserved_qty` directly with no
+   * guard at all (could "release" an already-released row, or silently change the reserved qty in
+   * place instead of freeing it). Now a real guarded transition: CAS ACTIVE→RELEASED under a row
+   * lock, mirroring the FG reservation release.
+   */
+  async releaseStockReservation(id: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const locked = (await tx.execute(sql`
+        select stock_reservation_id, status, released_dt from inventory.stock_reservation
+         where stock_reservation_id = ${id}
+         for update`)) as unknown as Array<{ stock_reservation_id: string; status: string | null; released_dt: Date | null }>;
+      const row = locked[0];
+      if (!row) throw new NotFoundException(`stock_reservation not found: ${id}`);
+      if (row.released_dt || String(row.status ?? '').toUpperCase() === 'RELEASED') {
+        throw new ConflictException(`Stock reservation ${id} is already released.`);
+      }
+      return ensure(
+        (
+          await tx
+            .update(stockReservation)
+            .set({ releasedDt: new Date(), status: 'RELEASED', updatedBy: principal.userId })
+            .where(and(eq(stockReservation.stockReservationId, id), isNull(stockReservation.releasedDt)))
+            .returning()
+        )[0],
+      );
+    });
   }
 
   async listStockReservations(
