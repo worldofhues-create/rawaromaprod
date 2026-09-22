@@ -26,6 +26,7 @@ export const SCHEMA_GROUPS: SchemaGroup[] = [
   { schema: 'packaging', packages: ['@ra/data-packaging'] },
   { schema: 'sales', packages: ['@ra/data-sales'] },
   { schema: 'workflow', packages: ['@ra/data-workflow-state'] },
+  { schema: 'bridge', packages: ['@ra/data-bridge'] },
   { schema: 'formula', packages: ['@ra/data-formula'], vault: true },
 ];
 
