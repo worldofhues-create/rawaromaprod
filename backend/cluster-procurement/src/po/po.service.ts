@@ -10,7 +10,7 @@
  * inventory/GRN can cold-read the PO. numeric → String(n); dates → ISO date strings.
  */
 import { ConflictException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { recordOutbox } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -33,6 +33,13 @@ import { ensure, paginate } from '../_helpers.js';
 
 const { purchaseOrder, purchaseOrderItems, poApprovalOrder, vendorPoAck, outbox } =
   procurementSchema;
+
+// RP-FAC2 (§28 approval-threshold follow-up): a PO above this amount needs a SECOND, distinct
+// approval before it is truly APPROVED — a single approver's sign-off only moves it to
+// PENDING_L2_APPROVAL. Below the threshold, one approval is enough (unchanged behaviour). The
+// figure itself is a system default pending an owner-configured per-tenant threshold table (not
+// yet modelled) — kept as one named constant so it's a single edit away from being data-driven.
+const PO_APPROVAL_THRESHOLD_AMOUNT = 500000;
 
 @Injectable()
 export class PoService {
@@ -280,8 +287,16 @@ export class PoService {
     );
   }
 
-  /* ── FLOW: PO approve → APPROVED + approval row APPROVED ─────────────── */
+  /* ── FLOW: PO approve → APPROVED (+ approval-threshold second level) ─── */
 
+  /**
+   * POST /v1/purchase-orders/:id/approve. Below PO_APPROVAL_THRESHOLD_AMOUNT, one approval is
+   * enough: DRAFT/PENDING → APPROVED. At or above it, the FIRST approval only reaches
+   * PENDING_L2_APPROVAL; a SECOND approval — by someone other than the creator AND other than the
+   * first approver — is required to actually reach APPROVED. Both the PO row update and the
+   * status pre-check run as a compare-and-swap (`WHERE status = :current`) so two concurrent
+   * approve calls can't both register.
+   */
   async approvePurchaseOrder(
     id: string,
     body: ApprovePurchaseOrder,
@@ -297,13 +312,11 @@ export class PoService {
       )[0];
       if (!po) throw new Error(`purchase_order not found: ${id}`);
 
-      // State-machine guard (audit G/#3): only a DRAFT/PENDING PO can be approved — a direct API
-      // call must not re-approve or approve out of order.
-      {
-        const st = String(po.status ?? '').toUpperCase();
-        if (!['DRAFT', 'PENDING', 'PENDING_APPROVAL'].includes(st)) {
-          throw new ConflictException(`Purchase order cannot be approved from status ${st || '(none)'} (must be DRAFT/PENDING).`);
-        }
+      const current = String(po.status ?? '').toUpperCase();
+      // State-machine guard (audit G/#3): only a DRAFT/PENDING/PENDING_L2_APPROVAL PO can be
+      // approved — a direct API call must not re-approve or approve out of order.
+      if (!['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'PENDING_L2_APPROVAL'].includes(current)) {
+        throw new ConflictException(`Purchase order cannot be approved from status ${current || '(none)'} (must be DRAFT/PENDING/PENDING_L2_APPROVAL).`);
       }
 
       // Segregation of duties (owner's approval matrix + system rule): the user who CREATED a PO
@@ -315,7 +328,28 @@ export class PoService {
         );
       }
 
+      const overThreshold = Number(po.totalAmount ?? 0) >= PO_APPROVAL_THRESHOLD_AMOUNT;
+      const needsSecondLevel = overThreshold && current !== 'PENDING_L2_APPROVAL';
+
+      if (current === 'PENDING_L2_APPROVAL') {
+        // Second-level approver must differ from whoever registered the first approval.
+        const firstApprover = (
+          await tx
+            .select({ approverUserId: poApprovalOrder.approverUserId })
+            .from(poApprovalOrder)
+            .where(eq(poApprovalOrder.purchaseOrderId, id))
+            .orderBy(desc(poApprovalOrder.poApprovalOrderId))
+            .limit(1)
+        )[0];
+        if (firstApprover?.approverUserId && firstApprover.approverUserId === principal.userId) {
+          throw new ForbiddenException(
+            'Segregation of duties: a purchase order over the approval threshold needs a SECOND, different approver — you already gave the first approval.',
+          );
+        }
+      }
+
       const now = new Date();
+      const targetStatus = needsSecondLevel ? 'PENDING_L2_APPROVAL' : 'APPROVED';
 
       const approval = ensure(
         (
@@ -325,7 +359,7 @@ export class PoService {
               poApprovalOrderId: uuidv7(),
               purchaseOrderId: id,
               approverUserId: body.approverUserId ?? principal.userId,
-              approvalLevel: body.approvalLevel ?? 1,
+              approvalLevel: needsSecondLevel ? 1 : current === 'PENDING_L2_APPROVAL' ? 2 : 1,
               approvalStatus: 'APPROVED',
               approvedDt: now,
               remarks: body.remarks ?? null,
@@ -341,13 +375,16 @@ export class PoService {
         (
           await tx
             .update(purchaseOrder)
-            .set({ status: 'APPROVED', updatedBy: principal.userId })
-            .where(eq(purchaseOrder.purchaseOrderId, id))
+            .set({ status: targetStatus, updatedBy: principal.userId })
+            .where(and(eq(purchaseOrder.purchaseOrderId, id), eq(purchaseOrder.status, current)))
             .returning()
         )[0],
       );
+      if (!updated) {
+        throw new ConflictException(`Purchase order ${id} was moved off ${current} by a concurrent request; refusing this stale approval.`);
+      }
 
-      return { purchaseOrder: updated, approval };
+      return { purchaseOrder: updated, approval, requiresSecondLevelApproval: needsSecondLevel };
     });
   }
 
