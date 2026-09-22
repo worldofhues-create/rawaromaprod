@@ -98,6 +98,14 @@ export const endMixingSession = z.object({
 });
 export type EndMixingSession = z.infer<typeof endMixingSession>;
 
+/** RP-FAC2 (RP-PROD-003): abort an IN_PROGRESS mixing session — reason is required so the audit
+ * trail (a mixing_step_log row) always explains why the session was killed. */
+export const abortMixingSession = z.object({
+  reason: z.string().min(1),
+  sessionEndDt: isoDateish(),
+});
+export type AbortMixingSession = z.infer<typeof abortMixingSession>;
+
 /* ── oil batch (master + consumption genealogy) ───────────────────────── */
 
 const consumptionRow = z.object({

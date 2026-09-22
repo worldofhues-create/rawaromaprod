@@ -13,10 +13,12 @@ import {
 } from '@core/backend-kernel';
 import { MixingService } from './mixing.service.js';
 import {
+  abortMixingSession,
   createMixingSession,
   endMixingSession,
   listQuery,
   logStep,
+  type AbortMixingSession,
   type CreateMixingSession,
   type EndMixingSession,
   type ListQuery,
@@ -72,6 +74,18 @@ export class MixingController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.mixing.endSession(id, body, principal);
+  }
+
+  /* ── flow: abort session (fail path) ───────────────────────────────── */
+
+  @Permissions('production:secure_mixing_session:write')
+  @Post('v1/mixing-sessions/:id/abort')
+  abortSession(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(abortMixingSession)) body: AbortMixingSession,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.mixing.abortSession(id, body, principal);
   }
 
   /* ── mixing step log (reads) ─────────────────────────────────────── */

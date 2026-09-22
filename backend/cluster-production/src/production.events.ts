@@ -30,4 +30,8 @@ export const productionEvents = {
     'production.oil_batch.status',
     z.object({ oilBatchId: uuid, status: z.string() }),
   ),
+  mixingSessionAborted: defineEvent(
+    'production.mixing_session.aborted',
+    z.object({ secureMixingSessionId: uuid, productionOrderId: uuid.nullable(), reason: z.string() }),
+  ),
 } as const;
