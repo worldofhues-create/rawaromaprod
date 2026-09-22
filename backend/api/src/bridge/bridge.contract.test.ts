@@ -121,11 +121,20 @@ test('ALEMBIC and RawProd compute an identical signature for identical bytes', (
   assert.equal(sig.length, 'sha256='.length + 64);
 });
 
-/* ── secret sealing (only runs when a KEK is present) ──────────────────── */
+/* ── secret sealing ──────────────────── */
 
-test('sealSecret/openSecret round-trip under a configured KEK', { skip: !process.env.BRIDGE_HMAC_KEK }, () => {
-  const sealed = sealSecret('super-secret-value');
-  assert.equal(openSecret(sealed), 'super-secret-value');
+test('sealSecret/openSecret round-trip under a configured KEK', () => {
+  /* A throwaway key for this test only, so the round-trip always runs; the
+     deployment's real key never enters the test process. */
+  const prior = process.env.BRIDGE_HMAC_KEK;
+  process.env.BRIDGE_HMAC_KEK = Buffer.alloc(32, 7).toString('base64');
+  try {
+    const sealed = sealSecret('super-secret-value');
+    assert.notEqual(sealed, 'super-secret-value');
+    assert.equal(openSecret(sealed), 'super-secret-value');
+  } finally {
+    if (prior === undefined) delete process.env.BRIDGE_HMAC_KEK; else process.env.BRIDGE_HMAC_KEK = prior;
+  }
 });
 
 test('openSecret returns null (never throws) for garbage input', () => {
