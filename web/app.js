@@ -137,6 +137,13 @@
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
       ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'] ] },
+    production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
+      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
+      ['runs', 'Production orders', 'layers', '/v1/production-orders', true], ['orderitems', 'Order ingredients', 'list', '/v1/production-order-ingredients', true],
+      ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['pickitems', 'Pick list items', 'list', '/v1/material-pick-list-items'],
+      ['issues', 'Material issues', 'box', '/v1/material-issues'],
+      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'],
+      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['capas', 'CAPA', 'shield', '/v1/qc-capas'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
       ['movements', 'Movements', 'activity', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
@@ -419,6 +426,7 @@
     procurement: 'Purchasing is tracking to plan — supplier lead times are holding and reorders are clearing on time.',
     receiving: 'Inbound is flowing — most deliveries matched their POs on the first pass with no holds raised.',
     qc: 'Quality is on target — the pass rate holds near threshold with a short retest queue.',
+    production: 'Manufacturing is tracking to plan — orders are moving through pick, mix and QC with no CAPA overdue.',
     compounding: 'Compounding is tracking to schedule — mixing sessions are progressing against masked worksheets.',
     filling: 'Filling output is steady — bulk lots are feeding the line with no shortfalls.',
     packaging: 'Packaging is keeping pace — finished-goods batches are sealing and labelling on schedule.',
@@ -427,6 +435,7 @@
     sales: 'Order fulfilment is on track — finished-goods stock is covering demand and dispatches are clearing to plan.'
   };
   function gaugeFor(p, role) {
+    if (role === 'production') return [p.planActual.pct, 'Plan attainment'];
     if (role === 'qc') return [p.counts.qcPassRate, 'Pass rate'];
     if (role === 'warehouse') return [p.counts.zoneCapAvg, 'Capacity'];
     if (role === 'admin') return [p.counts.usersTotal ? Math.round(p.counts.usersActive / p.counts.usersTotal * 100) : 0, 'Active users'];
@@ -495,6 +504,7 @@
       filling: ['Line activity', 'Filling line, latest first', sideFeed(p.feed)],
       packaging: ['Packaging activity', 'Finished goods, latest first', sideFeed(p.feed)],
       admin: ['Audit log', 'Recent governance events', sideFeed(p.feed)],
+      production: ['Production pipeline', 'Units in flight across the floor', sidePipe(p.pipeline)],
       compounding: ['Mixing room', 'Recent activity', sideFeed(p.feed)],
       sales: ['Dispatch activity', 'Orders & dispatches, latest first', sideFeed(p.feed)]
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
@@ -593,6 +603,7 @@
       receiving: [['truck', c.grns, 'Goods receipts'], ['layers', c.rmBatches, 'RM batches'], ['box', c.invOnHand, 'Units on hand'], ['flask', c.qcQueue, 'Awaiting QC']],
       qc: [['flask', c.qcQueue, 'In queue'], ['activity', c.qcPass, 'Passed'], ['alert', c.qcFail, 'Failed'], ['shield', c.qcPassRate + '%', 'Pass rate']],
       warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg + '%', 'Avg capacity']],
+      production: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       compounding: [['beaker', c.mixing, 'Mixing sessions'], ['layers', c.runsActive, 'Active runs'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString(), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],
       packaging: [['box', c.packageOrders, 'Pack orders'], ['pkg', c.fgBatches, 'Finished batches'], ['activity', c.unitsPacked.toLocaleString(), 'Units packed'], ['truck', c.salesOrders, 'Sales orders']],
