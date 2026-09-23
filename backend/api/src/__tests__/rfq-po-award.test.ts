@@ -28,6 +28,12 @@ import { ensureSchema, procurementDb, testClient, principal, closeTestClient } f
 let rfqs: RfqService;
 let pos: PoService;
 
+// §87: award (selectQuotation) is always exercised by a DIFFERENT principal than the default
+// one every helper here uses to CREATE the RFQ/quotations, so these pre-existing award-flow
+// tests keep exercising the award mechanics themselves rather than tripping the new RFQ-award
+// separation-of-duties rule (see rfq-award-separation.test.ts for that rule's own coverage).
+const AWARDER = '00000000-0000-7000-8000-0000000000aa';
+
 before(async () => {
   await ensureSchema();
   rfqs = new RfqService(procurementDb());
@@ -69,7 +75,7 @@ async function freshRfqWithTwoQuotations(rate = 100) {
 
 test('RFQ->PO award: happy path — select the winning quotation, then create a PO bound to its vendor/lines/prices', async () => {
   const { vendorA, quotationA, materialId } = await freshRfqWithTwoQuotations(150);
-  const awarded = await rfqs.selectQuotation(quotationA, {}, principal());
+  const awarded = await rfqs.selectQuotation(quotationA, {}, principal({ userId: AWARDER }));
   assert.equal(awarded.status, 'SELECTED');
 
   const { purchaseOrder, items } = await pos.createPurchaseOrder(
@@ -87,7 +93,7 @@ test('RFQ->PO award: happy path — select the winning quotation, then create a 
 
 test('RFQ->PO award: vendor mismatch is refused', async () => {
   const { vendorB, quotationA } = await freshRfqWithTwoQuotations();
-  await rfqs.selectQuotation(quotationA, {}, principal());
+  await rfqs.selectQuotation(quotationA, {}, principal({ userId: AWARDER }));
   await assert.rejects(
     () => pos.createPurchaseOrder({ quotationId: quotationA, vendorId: vendorB, items: [] }, principal()),
     ForbiddenException,
@@ -105,8 +111,8 @@ test('RFQ->PO award: an unselected quotation cannot back a purchase order', asyn
 
 test('RFQ->PO award: a double award (two winners for one RFQ) is refused at the select step', async () => {
   const { quotationA, quotationB } = await freshRfqWithTwoQuotations();
-  await rfqs.selectQuotation(quotationA, {}, principal());
-  await assert.rejects(() => rfqs.selectQuotation(quotationB, {}, principal()), ConflictException);
+  await rfqs.selectQuotation(quotationA, {}, principal({ userId: AWARDER }));
+  await assert.rejects(() => rfqs.selectQuotation(quotationB, {}, principal({ userId: AWARDER })), ConflictException);
 
   // The RFQ still has exactly one true winner — createPurchaseOrder off the never-awarded
   // quotation is refused too (defense in depth, same as "unselected quotation").
@@ -124,7 +130,7 @@ test('RFQ->PO award: a quotation from a vendor never mapped to the RFQ cannot be
     values (${strangerVendor}, ${'V-S-' + strangerVendor.slice(0, 8)}, 'Stranger', 'ACTIVE')`;
   // No rfq_vendor_mappings row for strangerVendor on this RFQ.
   const q = await rfqs.createQuotation({ rfqId: rfq.rfqId, vendorId: strangerVendor, quotationNumber: 'Q-S-' + Date.now() }, principal());
-  await assert.rejects(() => rfqs.selectQuotation(q.quotationId, {}, principal()), ForbiddenException);
+  await assert.rejects(() => rfqs.selectQuotation(q.quotationId, {}, principal({ userId: AWARDER })), ForbiddenException);
 });
 
 /* ── security review R1 #1: selectQuotation double-award TOCTOU ─────────── */
@@ -147,8 +153,8 @@ test('RFQ->PO award: concurrent selectQuotation on two DIFFERENT quotations of t
   for (let i = 0; i < 6; i++) {
     const { quotationA, quotationB } = await freshRfqWithTwoQuotations();
     const results = await Promise.allSettled([
-      rfqs.selectQuotation(quotationA, {}, principal()),
-      rfqs.selectQuotation(quotationB, {}, principal()),
+      rfqs.selectQuotation(quotationA, {}, principal({ userId: AWARDER })),
+      rfqs.selectQuotation(quotationB, {}, principal({ userId: AWARDER })),
     ]);
     const succeeded = results.filter((r) => r.status === 'fulfilled');
     assert.equal(succeeded.length, 1, `trial ${i}: exactly one of two concurrent awards for the same RFQ may win`);
@@ -177,7 +183,7 @@ test('PO award: concurrent createPurchaseOrder off the SAME selected quotation �
   // checks for an existing PO under that lock, so the second concurrent call always sees the
   // first's (already-committed) purchase_order row and is refused.
   const { quotationA } = await freshRfqWithTwoQuotations();
-  await rfqs.selectQuotation(quotationA, {}, principal());
+  await rfqs.selectQuotation(quotationA, {}, principal({ userId: AWARDER }));
 
   const results = await Promise.allSettled([
     pos.createPurchaseOrder({ quotationId: quotationA, items: [] }, principal()),
@@ -196,7 +202,7 @@ test('PO award: concurrent createPurchaseOrder off the SAME selected quotation �
 });
 
 test('RFQ->PO award: selecting an unknown quotation 404s', async () => {
-  await assert.rejects(() => rfqs.selectQuotation(crypto.randomUUID(), {}, principal()), NotFoundException);
+  await assert.rejects(() => rfqs.selectQuotation(crypto.randomUUID(), {}, principal({ userId: AWARDER })), NotFoundException);
 });
 
 test('RFQ->PO award: creating a PO off an unknown quotation 404s', async () => {

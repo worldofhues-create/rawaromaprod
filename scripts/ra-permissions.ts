@@ -193,6 +193,9 @@ export const RA_PERMISSIONS: string[] = [
   'procurement:quotation_items:write',
   'procurement:quotations:read',
   'procurement:quotations:write',
+  // §87 (lane F8/rp-policy): RFQ-award separation-of-duties explicit override — see
+  // rfq.service.ts selectQuotation / docs/PHASE1B_SCHEMA_PROPOSAL.md.
+  'procurement:quotations:award_override',
   'procurement:rfq_items:read',
   'procurement:rfq_items:write',
   'procurement:rfq_master:read',

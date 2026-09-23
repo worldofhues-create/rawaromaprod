@@ -29,8 +29,24 @@ import type {
 } from '../cluster-procurement.dtos.js';
 import { ensure, paginate } from '../_helpers.js';
 
-const { rfqMaster, rfqItems, rfqVendorMappings, quotations, quotationItems } =
+const { rfqMaster, rfqItems, rfqVendorMappings, quotations, quotationItems, auditEvents } =
   procurementSchema;
+
+/** The drizzle transaction handle for this cluster's schema (used by the in-tx helpers). */
+type Tx = Parameters<Parameters<ProcurementDb['transaction']>[0]>[0];
+
+// §87 (AUTONOMOUS DECISION DEFAULTS — lane F8/rp-policy): the policy_type this service reads
+// from iam.approval_matrix for "must the RFQ award approver differ from the RFQ creator". See
+// PoService's PO_APPROVAL_POLICY_TYPE for the sibling PO-threshold policy in the same table.
+const RFQ_AWARD_POLICY_TYPE = 'RFQ_AWARD_SEPARATION';
+
+// The permission that lets a caller use the explicit award-override path (§87 "RFQ creator
+// awarding their own RFQ" — "if organization has only one authorized approver, route to explicit
+// override with reason/audit rather than deadlock silently"). Distinct from the base
+// procurement:quotations:write permission the controller already requires for this route, so an
+// ordinary quotation-writer cannot silently self-award — only someone ALSO holding this
+// override permission (e.g. Procurement Head / Owner) can, and only with a reason.
+const RFQ_AWARD_OVERRIDE_PERMISSION = 'procurement:quotations:award_override';
 
 @Injectable()
 export class RfqService {
@@ -262,6 +278,41 @@ export class RfqService {
   /* ── FLOW: select winning quotation (RFQ → PO gap, RP-PROC-006) ───────── */
 
   /**
+   * Resolve whether the RFQ-award separation-of-duties rule is ENFORCED for the organisation
+   * that owns the RFQ (via the RFQ creator's iam.user_master.organization_id →
+   * iam.approval_matrix, policy_type = RFQ_AWARD_SEPARATION). Mirrors PoService's
+   * poApprovalThreshold, but the conservative DEFAULT is the opposite: unconfigured means
+   * separation IS required (§87: "Default conservative policy: separate creator from final award
+   * approver where roles permit"), whereas an unconfigured PO threshold means NO second-approver
+   * requirement (there's no safe non-zero/non-infinite numeric default to assume). A boolean
+   * carries no such ambiguity, so the safe default is simply "on".
+   */
+  private async rfqAwardSeparationRequired(tx: Tx, createdBy: string | null): Promise<boolean> {
+    if (!createdBy) return true;
+    let organizationId: string | null = null;
+    try {
+      const orgRows = (await tx.execute(sql`
+        select u.organization_id as "organizationId"
+          from iam.user_master u
+         where u.user_id = ${createdBy}::uuid
+         limit 1`)) as unknown as Array<{ organizationId: string | null }>;
+      organizationId = orgRows[0]?.organizationId ?? null;
+    } catch {
+      return true; // unresolvable organisation → conservative default (enforced)
+    }
+    if (!organizationId) return true;
+
+    const policyRows = (await tx.execute(sql`
+      select is_enabled as "isEnabled"
+        from iam.approval_matrix
+       where organization_id = ${organizationId}
+         and policy_type = ${RFQ_AWARD_POLICY_TYPE}
+       limit 1`)) as unknown as Array<{ isEnabled: boolean | null }>;
+    const configured = policyRows[0]?.isEnabled;
+    return configured == null ? true : configured;
+  }
+
+  /**
    * POST /v1/quotations/:id/select — the formal "select winning quotation" step that was
    * missing from the RFQ → PO flow: createPurchaseOrder used to accept ANY quotationId with no
    * check that it had actually won the RFQ, so a PO could be raised off a quote nobody chose.
@@ -275,17 +326,26 @@ export class RfqService {
    * On success, quotations.status → 'SELECTED' and the matching rfq_vendor_mappings row gets
    * is_selected_vendor = true (other vendor mappings for the same RFQ are cleared to false).
    *
-   * OPEN QUESTION FOR OWNER RATIFICATION (security review R1, informational finding #7 — no
-   * behaviour changed here): this endpoint has NO segregation-of-duties check. Any caller who
-   * holds the write permission on quotations/rfq_vendor_mappings — including the SAME user who
-   * created the RFQ (createRfqMaster) or invited the vendors — can also award the winning
-   * quotation via this method. Contrast with PoService.approvePurchaseOrder, which explicitly
-   * forbids the PO's own creator from approving it (and, above a threshold, requires a second,
-   * different approver). Whether RFQ award should get an analogous "the RFQ creator cannot
-   * award its own RFQ" rule (and/or a second-approver rule above some value) is a policy
-   * decision for the owner, not something this lane is changing unilaterally.
+   * §87 (AUTONOMOUS DECISION DEFAULTS — lane F8/rp-policy, resolving security review R1's
+   * informational finding #7 above): separation of duties between the RFQ's creator and its
+   * award approver, CONFIGURABLE per organisation via iam.approval_matrix (policy_type =
+   * RFQ_AWARD_SEPARATION, the same table/mechanism PoService reads for the PO threshold):
+   *   - organisation NOT configured, or configured with is_enabled = true → separation is
+   *     ENFORCED (the conservative default per §87: "separate creator from final award approver
+   *     where roles permit") — the RFQ's own creator cannot award its own RFQ.
+   *   - organisation explicitly configured with is_enabled = false → separation is NOT enforced;
+   *     the creator may award their own RFQ (an organisation's own opt-out, not this lane's
+   *     unilateral call).
+   *   - when separation is enforced and the caller IS the RFQ's creator, this is refused UNLESS
+   *     the caller also supplies `overrideReason` (non-empty) AND holds the dedicated
+   *     `procurement:quotations:award_override` permission (a caller who lacks this permission,
+   *     e.g. an ordinary Procurement user, gets a hard refusal — never a silent auto-approve or
+   *     deadlock). The override permission is meant for a Procurement Head/Owner role to use when
+   *     the organisation genuinely has only one authorized approver, so the flow doesn't
+   *     deadlock; every override is recorded to procurement.audit_events (actor, RFQ, quotation,
+   *     reason) for later review.
    */
-  async selectQuotation(id: string, _body: SelectQuotation, principal: AuthPrincipal) {
+  async selectQuotation(id: string, body: SelectQuotation, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
       const quotation = (
         await tx.select().from(quotations).where(eq(quotations.quotationId, id)).limit(1)
@@ -306,7 +366,42 @@ export class RfqService {
       // Postgres deadlock the two transactions could otherwise hit on the rfq_vendor_mappings
       // updates further down (each transaction touches both vendors' mapping rows in opposite
       // order once both existing-winner checks pass unlocked).
-      await tx.select().from(rfqMaster).where(eq(rfqMaster.rfqId, quotation.rfqId)).for('update');
+      const rfq = (
+        await tx.select().from(rfqMaster).where(eq(rfqMaster.rfqId, quotation.rfqId)).for('update')
+      )[0];
+
+      // §87 RFQ award separation of duties — see the method doc above.
+      if (rfq?.createdBy && rfq.createdBy === principal.userId) {
+        const separationRequired = await this.rfqAwardSeparationRequired(tx, rfq.createdBy);
+        if (separationRequired) {
+          const overrideReason = body.overrideReason?.trim();
+          const canOverride = (principal.permissions || []).includes(
+            RFQ_AWARD_OVERRIDE_PERMISSION,
+          );
+          if (!overrideReason || !canOverride) {
+            throw new ForbiddenException(
+              'Segregation of duties: you created this RFQ, so you cannot award its winning quotation. ' +
+                'Ask another authorized approver to award it, or — if this organisation genuinely has ' +
+                'only one authorized approver — resubmit with a non-empty overrideReason while holding ' +
+                `the ${RFQ_AWARD_OVERRIDE_PERMISSION} permission (Procurement Head/Owner).`,
+            );
+          }
+          // Explicit, permission-gated, reasoned override — audited rather than silently allowed.
+          await tx.insert(auditEvents).values({
+            actorId: principal.userId,
+            action: 'rfq.award.override',
+            entityType: 'rfq_master',
+            entityId: quotation.rfqId,
+            after: {
+              quotationId: id,
+              rfqCreatedBy: rfq.createdBy,
+              overriddenBy: principal.userId,
+              reason: overrideReason,
+            },
+            occurredAt: new Date(),
+          });
+        }
+      }
 
       const vendorMapping = quotation.vendorId
         ? (

@@ -180,9 +180,13 @@ export const createQuotationItem = z.object({
 export type CreateQuotationItem = z.infer<typeof createQuotationItem>;
 
 /** POST /v1/quotations/:id/select — the formal "select winning quotation" step (RP-PROC-006
- * follow-up): marks one quotation the RFQ's awarded winner. See rfq.service.ts selectQuotation. */
+ * follow-up): marks one quotation the RFQ's awarded winner. See rfq.service.ts selectQuotation.
+ * `overrideReason` (§87 RFQ-award separation-of-duties): required ONLY when the caller is the
+ * RFQ's own creator, separation is enforced for the organisation, and the caller also holds the
+ * award-override permission — see rfq.service.ts selectQuotation for the full rule. */
 export const selectQuotation = z.object({
   remarks: z.string().nullish(),
+  overrideReason: z.string().min(1).nullish(),
 });
 export type SelectQuotation = z.infer<typeof selectQuotation>;
 
