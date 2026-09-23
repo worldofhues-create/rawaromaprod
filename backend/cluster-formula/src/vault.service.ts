@@ -66,7 +66,10 @@ export class VaultService {
       await tx.select().from(formulaVault).where(eq(formulaVault.formulaId, formulaId)).limit(1)
     )[0];
     if (!vault?.vaultLocation) throw new NotFoundException('formula vault entry missing');
-    return this.kms.unwrapDek(parseWrappedKey(vault.vaultLocation));
+    return this.kms.unwrapDek(parseWrappedKey(vault.vaultLocation), {
+      formulaId,
+      vaultId: vault.formulaVaultId,
+    });
   }
 
   /**
@@ -146,7 +149,7 @@ export class VaultService {
       requestId,
       ip,
     });
-    const rowHash = this.kms.macAudit((prevHash ?? '') + canonical);
+    const rowHash = await this.kms.macAudit((prevHash ?? '') + canonical);
 
     // Non-hashed metadata (see the AuditInput doc comment for why reason/result stay outside
     // the MAC). Omitted entirely (column stays null) when the caller supplies neither, so an
@@ -224,7 +227,7 @@ export class VaultService {
         requestId: r.requestId,
         ip: r.ip,
       });
-      if (this.kms.macAudit((r.prevHash ?? '') + canonical) !== r.rowHash) {
+      if ((await this.kms.macAudit((r.prevHash ?? '') + canonical)) !== r.rowHash) {
         return { ok: false, rows: rows.length, firstBadSeq: Number(seq), reason: 'row_hash does not recompute — content tampered' };
       }
       prevHash = r.rowHash;
@@ -237,8 +240,11 @@ export class VaultService {
 /**
  * Parse + validate the wrapped-key blob from FORMULA_VAULT.vault_location. The column is a
  * plain varchar an attacker with DB write could corrupt; we never feed an unchecked shape to
- * the cipher. Validates the three base64 fields exist and the iv/tag decode to GCM sizes
- * (12 / 16 bytes) before use.
+ * the cipher. Validates the three base64 fields exist, and — for the local-AEAD adapters
+ * (env/file KEK) — that iv/tag decode to GCM sizes (12 / 16 bytes). AWS KMS ciphertext is
+ * opaque and self-describing server-side, so AwsKmsAdapter stores iv/tag as `""`; that empty
+ * pair is the one exception to the GCM-size check below (still requires ciphertext to be
+ * non-empty — an all-empty blob is still rejected as malformed).
  */
 function parseWrappedKey(raw: string): WrappedKey {
   let parsed: unknown;
@@ -248,11 +254,14 @@ function parseWrappedKey(raw: string): WrappedKey {
     throw new NotFoundException('formula vault key material is corrupt');
   }
   const w = parsed as Partial<WrappedKey>;
-  if (typeof w?.ciphertext !== 'string' || typeof w?.iv !== 'string' || typeof w?.tag !== 'string') {
+  if (typeof w?.ciphertext !== 'string' || typeof w?.iv !== 'string' || typeof w?.tag !== 'string' || w.ciphertext.length === 0) {
     throw new NotFoundException('formula vault key material is malformed');
   }
-  if (Buffer.from(w.iv, 'base64').length !== 12 || Buffer.from(w.tag, 'base64').length !== 16) {
-    throw new NotFoundException('formula vault key material is malformed');
+  const isOpaqueKmsCiphertext = w.iv === '' && w.tag === '';
+  if (!isOpaqueKmsCiphertext) {
+    if (Buffer.from(w.iv, 'base64').length !== 12 || Buffer.from(w.tag, 'base64').length !== 16) {
+      throw new NotFoundException('formula vault key material is malformed');
+    }
   }
   return { ciphertext: w.ciphertext, iv: w.iv, tag: w.tag };
 }
