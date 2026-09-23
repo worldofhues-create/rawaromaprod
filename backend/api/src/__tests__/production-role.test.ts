@@ -181,10 +181,10 @@ test('two-console gate: `production` is listed in FACTORY_ONLY_ROLES (auth.servi
    with this role sees an empty shell (server enforcement is necessary but not sufficient — the
    UI must actually show what the role may do). ─────────────────────────────────────────────── */
 
-test('UI: web/app.js ROLES catalog defines a `production` entry with a non-empty nav', () => {
-  const src = readFileSync(join(repoRoot, 'web/app.js'), 'utf8');
+test('UI: web/shell.js ROLES catalog defines a `production` entry with a non-empty nav', () => {
+  const src = readFileSync(join(repoRoot, 'web/shell.js'), 'utf8');
   const idx = src.indexOf('production: { label:');
-  assert.ok(idx >= 0, 'web/app.js ROLES must define a `production:` portal entry');
+  assert.ok(idx >= 0, 'web/shell.js ROLES must define a `production:` portal entry');
   const closeIdx = src.indexOf('\n    warehouse: {', idx);
   const block = src.slice(idx, closeIdx > 0 ? closeIdx : idx + 2000);
   assert.match(block, /'\/v1\/production-plans'/);
