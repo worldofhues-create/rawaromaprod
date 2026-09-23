@@ -238,6 +238,14 @@ export class AuthService {
       );
     }
     const now = new Date();
+    /* In production the target/tenant binding is mandatory: an unset value would silently
+       accept an assertion minted for another console or tenant (security review item 3). */
+    if (this.config.get('APP_ENV') === 'prod' &&
+        (!this.config.get('RAWPROD_ASSERTION_EXPECTED_TARGETS') || !this.config.get('ALEMBIC_ASSERTION_TENANT_ID'))) {
+      throw DomainError.featureDisabled(
+        'RAWPROD_ASSERTION_EXPECTED_TARGETS and ALEMBIC_ASSERTION_TENANT_ID must be set in production; sign-in via ALEMBIC is refused.',
+      );
+    }
     const expectedTargetsRaw = this.config.get('RAWPROD_ASSERTION_EXPECTED_TARGETS');
     const expectedTargets = expectedTargetsRaw
       ? expectedTargetsRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0)

@@ -434,3 +434,11 @@ test('REPLAY IS BLOCKED ACROSS SEPARATE AuthService INSTANCES sharing one Postgr
     },
   );
 });
+
+test('production refuses ALEMBIC sign-in while target/tenant binding is unconfigured', async () => {
+  const email = `admin-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}`, permissionCode: `perm-${sid()}` });
+  const svc = makeService({ APP_ENV: 'prod' });
+  await assert.rejects(() => svc.loginWithAssertion(signAssertion(claimsFor(email))),
+    /must be set in production/);
+});
