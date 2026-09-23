@@ -42,6 +42,9 @@ const child = spawn(
     '--import',
     '@swc-node/register/esm-register',
     '--test',
+    // Files share ONE Postgres and some singleton rows (bridge.connector_config 'default',
+    // formula_vault for rewrap): parallel files raced on them twice. Serialize.
+    '--test-concurrency=1',
     ...process.argv.slice(2),
     ...files,
   ],
