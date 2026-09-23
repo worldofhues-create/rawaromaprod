@@ -5,28 +5,37 @@
  *
  *   DATABASE_URL=... [FORMULA_DATABASE_URL=...] pnpm db:provision
  *
- * Order: db:push (all schema-as-code tables) → standalone CREATE scripts for tables that live
- * outside db:push (db:push skips already-populated schemas, so late-added tables ship as scripts)
- * → RBAC seed → demo data. Schema steps are REQUIRED (abort on failure); data seeds are best-effort
- * (a fresh console must BOOT even if demo data is skipped). Re-running is safe (all steps idempotent
- * or CREATE/INSERT-IF-NOT-EXISTS).
+ * PB-16: schema provisioning is now `pnpm db:migrate` ALONE — scripts/migrations/0000..0013 are
+ * generated from the same Drizzle definitions db:push reads (scripts/gen-schema-migrations.mjs)
+ * and 0014+ are every one of this directory's create-*.cjs scripts' schema DDL, hand-ported into
+ * ordered, idempotent .sql files (see scripts/db-migrate.ts's header). db:migrate is verified to
+ * be a strict superset of `db:push` on an empty database, AND — unlike db:push, which is
+ * create-once and skips a whole schema the moment it already has any table — to bring an
+ * ALREADY-POPULATED database (created by an older Drizzle snapshot, i.e. exactly what the
+ * create-*.cjs scripts existed to patch) up to the same full current schema, because every
+ * statement is idempotent at the STATEMENT level (CREATE TABLE / ADD COLUMN / ADD CONSTRAINT
+ * IF NOT EXISTS), not the schema-population level db:push checks. Calling `pnpm db:push` here
+ * too would not be wrong (it is now fully redundant with db:migrate's first 14 files) but would
+ * double every round trip for no additional effect, so it is dropped.
+ *
+ * The create-*.cjs scripts themselves are UNCHANGED and still safe to run by hand (all idempotent
+ * CREATE/ADD IF NOT EXISTS) — db:provision just no longer needs to, except
+ * create-packaging-qc-table.cjs, kept under OPTIONAL below for the 3 demo rows it seeds (its
+ * schema half is now a no-op, superseded by scripts/migrations/0009_packaging.sql).
+ *
+ * Schema + RBAC steps are REQUIRED (abort on failure); data seeds are best-effort (a fresh
+ * console must BOOT even if demo data is skipped). Re-running is safe (all steps idempotent or
+ * CREATE/INSERT-IF-NOT-EXISTS).
  */
 import { execSync } from 'node:child_process';
 
 const REQUIRED = [
-  ['schema: db:push (all clusters)', 'pnpm db:push'],
-  ['table: notification_log', 'node scripts/create-notification-log-table.cjs'],
-  ['table: document_registry', 'node scripts/create-document-registry-table.cjs'],
-  ['table: packaging_qc', 'node scripts/create-packaging-qc-table.cjs'],
-  ['table: finished_good_reservation', 'node scripts/create-finished-good-reservation-table.cjs'],
-  ['tables: relay_*', 'node scripts/create-relay-tables.cjs'],
-  ['tables: ad-hoc (negotiation/advance/dispatch/approval-matrix/dispatch-document + PO column)', 'node scripts/create-adhoc-tables.cjs'],
-  ['table: material_issue_applied (consumption ledger + backfill)', 'node scripts/create-material-issue-applied-table.cjs'],
-  ['guard: formula.audit_events append-only trigger', 'node scripts/create-vault-audit-guard.cjs'],
+  ['schema: db:migrate (canonical — PB-16)', 'pnpm db:migrate'],
   ['seed: RBAC (roles + permissions)', 'pnpm db:seed'],
 ];
 const OPTIONAL = [
   ['data: domain demo data', 'pnpm db:seed:data'],
+  ['data: packaging QC demo rows', 'node scripts/create-packaging-qc-table.cjs'],
   ['data: org units', 'node scripts/seed-org.cjs'],
   ['data: screens', 'node scripts/seed-screens.cjs'],
   ['data: flow gaps', 'node scripts/seed-flow-gaps.cjs'],

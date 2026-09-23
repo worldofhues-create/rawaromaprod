@@ -1,0 +1,38 @@
+# RawProd schema migrations, as a one-shot rawprod-api.service requires. Mirrors
+# /Users/apple/Downloads/alembic/ops/systemd/alembic-migrate.service: the schema must be current
+# BEFORE the API talks to it, and this runs as the owner role, never the app role — that
+# connection string lives in migrate.env only, a separate file from api.env, so a compromised
+# api.env leak cannot also leak DDL rights.
+#
+# PB-16: ExecStart runs `pnpm db:migrate` (scripts/db-migrate.ts against scripts/migrations/*.sql),
+# NOT `pnpm db:push` — db:migrate is the canonical provisioner (an ordered, idempotent SQL set
+# with a schema_migrations ledger, verified to bring both an empty database and an
+# already-populated older-schema database to the same full current schema; see
+# scripts/db-migrate.ts's own header for the proof).
+#
+# SKIP_TARGETS=formula in migrate.env, always, on THIS host: the main EC2 has no network path to
+# vault-pg (MIGRATION_AWS_PLAN.md §2 — vault-db's security group accepts 5432 from the vault-app
+# SG only), so this run must never even attempt the formula-targeted blocks, let alone fall back
+# to writing them into the shared `rawprod` database. See infra/aws/systemd/vault-migrate.service
+# for the other half.
+
+[Unit]
+Description=RawProd database migrations
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rawprod
+Group=rawprod
+WorkingDirectory=/srv/rawprod/app
+EnvironmentFile=/etc/rawprod/migrate.env
+ExecStart=/usr/bin/pnpm db:migrate
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

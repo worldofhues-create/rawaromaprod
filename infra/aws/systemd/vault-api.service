@@ -1,0 +1,69 @@
+# The Vault EC2's API process — SAME codebase and SAME unit shape as
+# infra/aws/systemd/rawprod-api.service (identical hardening block, identical ExecStart), running
+# on its own instance with its own security group, its own IAM role, and its own env file. Every
+# hardening comment in rawprod-api.service applies here unchanged and is not repeated.
+#
+# ── WHAT "vault-only module set" MEANS TODAY, AND WHY THIS UNIT DOES NOT DO IT ─────────────────
+#
+# The lane brief asked for "the separate codebase, vault-only module set if the app supports it —
+# otherwise document." It does not, and this is that documentation, not a workaround:
+#
+#   backend/api/src/app.module.ts imports EVERY cluster unconditionally (ClusterOrgModule,
+#   ClusterProcurementModule, FormulaModule, ProductionModule, ... all 15+ of them) — there is no
+#   env-gated subset, no separate vault-only entrypoint, no build target that drops the
+#   non-formula clusters. `main.ts` boots the whole AppModule or it boots nothing.
+#
+#   backend/backend-kernel/src/config/config.schema.ts's DATABASE_URL is NOT optional
+#   (`z.string().url()`, no `.optional()`) — the process refuses to start without a "main" schema
+#   connection at all, because JwtAuthGuard / PermissionsGuard / the iam.user_master-backed auth
+#   path every request goes through (app.module.ts's global APP_GUARD providers) need the iam and
+#   platform schemas to exist on THAT connection, not just formula.
+#
+# So vault-api.service, as configured, is the FULL application — every route the main EC2 serves
+# is also technically reachable here — with FORMULA_DATABASE_URL pointed at the real, isolated
+# vault-pg (ra_vault role) and DATABASE_URL pointed, FOR NOW, at the SAME shared `rawprod`
+# database the main EC2 uses (read the identity/RBAC tables it needs to boot and authenticate
+# requests at all). THIS IS AN INTERIM COMPROMISE, NOT THE PLAN'S TARGET SHAPE:
+# MIGRATION_AWS_PLAN.md §2 draws vault-db's security group accepting 5432 from vault-app ONLY,
+# with no path back to alembic-pg — true to that diagram, THIS unit's vault-app-SG-scoped
+# instance role must currently ALSO reach alembic-pg for DATABASE_URL, which is exactly the
+# shared-credential path §109.1 exists to close. What DOES hold today, and is real isolation
+# rather than documentation of a gap: the vault-app SG has no public listener (allow-list only,
+# infra/aws/nginx/vault-allowlist.conf), FORMULA_DATABASE_URL is a distinct role on a distinct
+# RDS instance with its own CMK, and rawprod_app (the main EC2's DML role) has no grant on
+# vault-pg at all — the DATA is isolated even though the PROCESS is not yet.
+#
+# Closing this gap needs one of: (a) a real vault-only NestJS entrypoint (a second main.ts
+# importing only FormulaModule + the minimal auth surface it needs — app code, not ops, tracked
+# under PB-03), or (b) a read-scoped iam/platform replica reachable from vault-app's SG instead of
+# a live connection to alembic-pg. Neither is built here; this unit and this comment are the
+# honest current state, not a claim that §109's separate-trust-domain requirement is met.
+
+[Unit]
+Description=Vault API (RawProd codebase, restricted network exposure — see comment above)
+After=network-online.target vault-migrate.service
+Requires=vault-migrate.service
+
+[Service]
+Type=exec
+User=rawprod
+Group=rawprod
+WorkingDirectory=/srv/rawprod/app
+EnvironmentFile=/etc/rawprod/vault-api.env
+ExecStart=/usr/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
+
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+
+[Install]
+WantedBy=multi-user.target

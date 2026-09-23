@@ -1,0 +1,22 @@
+# PLACEHOLDER — rename to vault-allowlist.conf and fill in before the Vault host goes live.
+#
+# H5 in MIGRATION_AWS_PLAN.md §5: "Office static IP(s) / VPN for the Vault allow-list." Nobody
+# has supplied one yet, so this file ships as a REFUSAL rather than a guess — an empty `allow
+# all;` here would be silently equivalent to no allow-list at all, on the one host in this
+# topology whose entire security model is "reachable only via allow-list" (§109.3 / SB-04).
+#
+# Once H5 is answered, replace the contents of vault-allowlist.conf (not this file) with:
+#
+#   allow 203.0.113.10;       # example office static IP — REPLACE
+#   allow 203.0.113.0/28;     # example office CIDR — REPLACE
+#   # allow <VPN egress IP/CIDR>;
+#   deny all;
+#
+# and reference it from infra/aws/nginx/vault.conf's `location /` (and every other location that
+# is not the ACME challenge path) with `include /etc/nginx/rawprod/vault-allowlist.conf;`. The
+# security group in front of this host (MIGRATION_AWS_PLAN.md §3 B4, SG `vault-web`) is the
+# OTHER half of this control, not a substitute for it — a security group is IP-based too, but a
+# change to one is not a change to the other, and both are meant to say the same thing.
+#
+# Until this file is replaced, infra/aws/nginx/vault.conf's own placeholder `deny all;` (see that
+# file) keeps the console unreachable rather than reachable-by-accident.
