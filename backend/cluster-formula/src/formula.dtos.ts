@@ -90,6 +90,15 @@ export const createDocumentMapping = z.object({
 });
 export type CreateDocumentMapping = z.infer<typeof createDocumentMapping>;
 
+/* ── owner/vault-role read: the actual (decrypted) recipe ──────────────── */
+
+/** GET .../actual — §109.6/§109.8 requires a caller-supplied purpose/reason on every
+ * plaintext read, recorded on the audit row (see VaultService.AuditInput). */
+export const actualReadQuery = z.object({
+  reason: z.string().trim().min(3, 'a decrypt reason is required (min 3 characters)').max(500),
+});
+export type ActualReadQuery = z.infer<typeof actualReadQuery>;
+
 /* ── approval (flow body) ─────────────────────────────────────────────── */
 
 export const approveVersion = z.object({
@@ -97,6 +106,12 @@ export const approveVersion = z.object({
   remarks: z.string().optional(),
 });
 export type ApproveVersion = z.infer<typeof approveVersion>;
+
+/** POST .../reject — the approve/reject pairing (§107 vault_approver, §109.8 lifecycle). */
+export const rejectVersion = z.object({
+  remarks: z.string().min(3, 'a rejection reason is required (min 3 characters)').max(2000),
+});
+export type RejectVersion = z.infer<typeof rejectVersion>;
 
 /* ── copy request (flow bodies) ───────────────────────────────────────── */
 

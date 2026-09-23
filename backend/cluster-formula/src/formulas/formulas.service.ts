@@ -344,23 +344,43 @@ export class FormulasService {
   /* ── owner read: the actual (decrypted) recipe ───────────────────── */
 
   /**
-   * GET /v1/formula-versions/:id/actual — the OWNER path. Edge-gated by `formula:actual:read`,
-   * and additionally scoped PER-FORMULA here: the caller must be the formula's owner or hold an
-   * active FORMULA_ACCESS_POLICY grant for it — the coarse permission alone does not unlock
-   * every owner's recipe. Returns the real material_id + %; the audited, locked-only decrypt
-   * happens in VaultService. 404 if the version doesn't exist.
+   * GET /v1/formula-versions/:id/actual — the Vault-role path (formulator/vault_approver
+   * only; §107). Edge-gated by `formula:actual:read` (never implicit — permissions.guard.ts)
+   * + `@FreshAuth()` (§109.5), and additionally scoped PER-FORMULA here: the caller must be
+   * the formula's owner or hold an active FORMULA_ACCESS_POLICY grant for it — the coarse
+   * permission alone does not unlock every formula's recipe. Returns the real material_id +
+   * %; the audited, locked-only decrypt happens in VaultService. 404 if the version doesn't
+   * exist. A refusal (not-authorized-for-this-formula, or version not yet APPROVED) is
+   * audited too (§109.8 "allow/refuse result") — `decryptVersion`'s own transaction rolls
+   * back on refusal and takes its audit insert with it, so the refusal is recorded here in a
+   * fresh, standalone transaction instead of being silently lost.
    */
-  async getActualFormula(versionId: string, principal: AuthPrincipal) {
+  async getActualFormula(versionId: string, reason: string, principal: AuthPrincipal) {
     const version = await this.getVersion(versionId);
     if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
-    await this.assertFormulaAccess(version.formulaId, principal);
 
-    const ingredients = await this.vault.decryptVersion(versionId, {
+    const auditBase = {
       actorId: principal.userId,
       action: 'formula.actual.read',
       entityType: 'formula_version',
       entityId: versionId,
-    });
+      reason,
+    } as const;
+
+    try {
+      await this.assertFormulaAccess(version.formulaId, principal);
+    } catch (err) {
+      await this.vault.writeStandaloneAudit({ ...auditBase, result: 'refuse' });
+      throw err;
+    }
+
+    let ingredients;
+    try {
+      ingredients = await this.vault.decryptVersion(versionId, auditBase);
+    } catch (err) {
+      await this.vault.writeStandaloneAudit({ ...auditBase, result: 'refuse' });
+      throw err;
+    }
     if (!ingredients) throw new NotFoundException(`formula_version not found: ${versionId}`);
     return { formulaVersionId: versionId, ingredients };
   }

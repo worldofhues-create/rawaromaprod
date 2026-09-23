@@ -12,7 +12,7 @@
  *
  * Everything mutating runs in one transaction so the outbox event commits iff its cause did.
  */
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -25,6 +25,7 @@ import type {
   CreateCopyRequest,
   DecideCopyRequest,
   ListQuery,
+  RejectVersion,
 } from '../formula.dtos.js';
 
 const { formulaVersion, formulaMaster, formulaApproval, formulaCopyRequest, formulaEventHist, outbox } =
@@ -53,6 +54,22 @@ export class ApprovalsService {
       if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
       if (version.status === 'APPROVED') {
         throw new ConflictException(`formula_version already approved: ${versionId}`);
+      }
+      // §108 SoD: "Formula author cannot final-approve same protected version." `createdBy`
+      // is stamped by createVersion() at draft time — that's this version's author. Checked
+      // server-side regardless of role/permission (the UI hides the button too, but the
+      // server must refuse it even if the button were bypassed).
+      if (version.createdBy && version.createdBy === principal.userId) {
+        await this.vault.writeStandaloneAudit({
+          actorId: principal.userId,
+          action: 'formula.version.approve.self_refused',
+          entityType: 'formula_version',
+          entityId: versionId,
+          result: 'refuse',
+        });
+        throw new ForbiddenException(
+          'segregation of duties: the author of this formula version cannot approve it (§108)',
+        );
       }
 
       const now = new Date();
@@ -124,6 +141,86 @@ export class ApprovalsService {
         action: 'formula.version.approved',
         entityType: 'formula_version',
         entityId: versionId,
+      });
+
+      return { version: updated, approval };
+    });
+  }
+
+  /**
+   * POST /v1/formula-versions/:id/reject — the approve/reject pairing (§107 vault_approver,
+   * §109.8). Same DRAFT-only guard as approve (a version already decided, either way, can't
+   * be re-decided — create a successor version instead). Unlike approve, rejection carries no
+   * SoD restriction: a version's own author rejecting their own submission isn't the
+   * conflict-of-interest §108 guards against (only self-APPROVAL is). Does not touch
+   * FORMULA_MASTER.current_version_id (rejection never becomes the selectable version).
+   */
+  async rejectVersion(versionId: string, body: RejectVersion, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const version = (
+        await tx
+          .select()
+          .from(formulaVersion)
+          .where(eq(formulaVersion.formulaVersionId, versionId))
+          .for('update')
+          .limit(1)
+      )[0];
+      if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
+      if (version.status !== 'DRAFT') {
+        throw new ConflictException(
+          `formula_version already decided (status=${version.status}): ${versionId}`,
+        );
+      }
+
+      const now = new Date();
+
+      const approval = (
+        await tx
+          .insert(formulaApproval)
+          .values({
+            formulaApprovalId: uuidv7(),
+            formulaVersionId: versionId,
+            approverUserId: principal.userId,
+            approvalLevel: 1,
+            approvalStatus: 'REJECTED',
+            approvedDt: now,
+            remarks: body.remarks,
+            status: 'REJECTED',
+            createdBy: principal.userId,
+            updatedBy: principal.userId,
+          })
+          .returning()
+      )[0];
+      if (!approval) throw new Error('insert failed: formula_approval');
+
+      const updated = (
+        await tx
+          .update(formulaVersion)
+          .set({ status: 'REJECTED', updatedBy: principal.userId })
+          .where(eq(formulaVersion.formulaVersionId, versionId))
+          .returning()
+      )[0];
+      if (!updated) throw new Error('update failed: formula_version');
+
+      await tx.insert(formulaEventHist).values({
+        formulaEventHistId: uuidv7(),
+        formulaId: version.formulaId,
+        formulaVersionId: versionId,
+        eventType: 'VERSION_REJECTED',
+        eventDt: now,
+        performedBy: principal.userId,
+        remarks: body.remarks,
+        status: 'ACTIVE',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      });
+
+      await this.vault.writeAudit(tx, {
+        actorId: principal.userId,
+        action: 'formula.version.rejected',
+        entityType: 'formula_version',
+        entityId: versionId,
+        reason: body.remarks,
       });
 
       return { version: updated, approval };
