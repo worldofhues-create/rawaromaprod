@@ -29,6 +29,20 @@ create table if not exists masterdata.material (
   updated_by varchar(255)
 );
 
+-- RP-S1 (lane S1, security review item 3): masterdata.rm_alias — DashboardService.
+-- traceFinishedGood left-joins it to resolve the masked material identity.
+create table if not exists masterdata.rm_alias (
+  rm_alias_id uuid primary key default gen_random_uuid(),
+  material_id uuid references masterdata.material(material_id),
+  alias_name varchar(200),
+  alias_type varchar(30),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 -- inventory (RP-FAC2) ------------------------------------------------------
 create table if not exists inventory.inventory_batch (
   inventory_batch_id uuid primary key default gen_random_uuid(),
@@ -699,6 +713,22 @@ create table if not exists packaging.finished_good_reservation (
   updated_by varchar(255)
 );
 
+-- RP-S1 (lane S1, security review item 3): packaging.product_master — DashboardService.
+-- traceFinishedGood left-joins it (via product_sku.product_id) for the product name.
+create table if not exists packaging.product_master (
+  product_id uuid primary key default gen_random_uuid(),
+  formula_id uuid,
+  brand_id uuid,
+  product_category_id uuid,
+  product_code varchar(50),
+  product_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists packaging.product_sku (
   product_sku_id uuid primary key default gen_random_uuid(),
   product_id uuid,
@@ -811,6 +841,37 @@ create table if not exists packaging.outbox (
 );
 
 -- sales -----------------------------------------------------------------
+-- RP-S1 (lane S1, security review item 3): sales.customer_master / sales.sales_order —
+-- DashboardService.traceFinishedGood left-joins them for the customer/SO on the trace's
+-- forward end.
+create table if not exists sales.customer_master (
+  customer_id uuid primary key default gen_random_uuid(),
+  customer_code varchar(50),
+  customer_name varchar(200),
+  address_id uuid,
+  base_currency_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists sales.sales_order (
+  sales_order_id uuid primary key default gen_random_uuid(),
+  so_number varchar(50),
+  customer_id uuid,
+  order_date date,
+  delivery_location_id uuid,
+  currency_id uuid,
+  total_amount numeric(18,4),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists sales.dispatch_master (
   dispatch_id uuid primary key,
   sales_order_id uuid,
@@ -894,6 +955,78 @@ create table if not exists iam.approval_matrix (
   created_by varchar(255),
   updated_by varchar(255),
   unique (organization_id, policy_type)
+);
+
+-- RP-S1 (lane S1, security review): the RBAC tables SecurityService (backend/cluster-org/src/
+-- security/security.service.ts) reads/writes — role_master/permission_master/
+-- role_permission_mapping/user_role_mapping/location_authority_master. Column names/types
+-- hand-matched to packages/data-org/src/schema/security.ts (@ra/data-org's orgSchema, the
+-- schema backend/test-support/db.ts's orgDb() is typed against).
+create table if not exists iam.role_master (
+  role_id uuid primary key default gen_random_uuid(),
+  role_code varchar(50),
+  role_name varchar(200),
+  description text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (role_code)
+);
+
+create table if not exists iam.permission_master (
+  permission_id uuid primary key default gen_random_uuid(),
+  permission_code varchar(50),
+  permission_name varchar(200),
+  module_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (permission_code)
+);
+
+create table if not exists iam.role_permission_mapping (
+  role_permission_mapping_id uuid primary key default gen_random_uuid(),
+  role_id uuid references iam.role_master(role_id),
+  permission_id uuid references iam.permission_master(permission_id),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (role_id, permission_id)
+);
+create index if not exists role_permission_mapping_role_idx on iam.role_permission_mapping (role_id);
+
+create table if not exists iam.user_role_mapping (
+  user_role_mapping_id uuid primary key default gen_random_uuid(),
+  user_id uuid references iam.user_master(user_id),
+  role_id uuid references iam.role_master(role_id),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (user_id, role_id)
+);
+create index if not exists user_role_mapping_user_idx on iam.user_role_mapping (user_id);
+
+create table if not exists iam.location_authority_master (
+  location_authority_id uuid primary key default gen_random_uuid(),
+  location_id uuid,
+  authority_user_id uuid references iam.user_master(user_id),
+  authority_role_id uuid references iam.role_master(role_id),
+  authority_type varchar(50),
+  effective_from_dt timestamptz,
+  effective_to_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
 );
 
 -- bridge (RP-EMIT, lane F6) --------------------------------------------------
