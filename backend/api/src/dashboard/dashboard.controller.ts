@@ -2,16 +2,19 @@
  * DashboardController — `GET v1/dashboard` (the rich role dashboards) + `GET v1/trace/...`
  * (reverse traceability). Both are authenticated-only and self-mask per caller.
  *
- * `trace` used to be gated by `@Permissions('formula:actual:read')` — that was correct back
- * when `formula:actual:read` was implicit for `owner`/`super_admin`, but §107 (this lane)
- * makes it a real, narrow Vault-authority grant held only by `formulator`/`vault_approver`.
- * Left gated here, EVERY factory role — owner included — would 403 on Traceability
- * (web/ws-vault.REMOVE.md flagged exactly this). The route is unguarded at the edge on
- * purpose: `DashboardService.traceFinishedGood` already computes its own per-caller
- * `seeProduct`/`seeMaterial` flags from the caller's REAL permissions
- * (`formula:actual:read` / `masterdata:material:reveal`) and returns the coded/masked
- * alias + 'Protected ◆' fallback otherwise — the same masking guarantee §109.7 requires of
- * `VaultPort.resolveManufacturingInstruction`, just applied to the traceability view.
+ * `trace` used to be fully edge-UNGUARDED (any authenticated caller, no `@Permissions` at
+ * all) — a read-only security review (item 3) rejected that: `DashboardService.
+ * traceFinishedGood` walks real customer/vendor/batch data, and "any authenticated caller"
+ * meant even `platform_super_admin` (a PLATFORM-operations role with zero tenant business
+ * data access anywhere else) could run it. Now gated on
+ * `packaging:finished_good_batch_master:read` — held by owner/admin/qc/packaging/sales
+ * (scripts/ra-roles.ts), which `platform_super_admin` does NOT hold, so the edge gate alone
+ * already refuses it; `DashboardService.traceFinishedGood` ALSO explicitly refuses the
+ * `platform_super_admin` role as defense-in-depth ("tenant business data never to platform
+ * roles" — the permission-catalogue state is not the only thing that must stay true here).
+ * The per-caller MASKING inside the service (`seeProduct`/`seeMaterial`, computed from the
+ * caller's REAL `formula:actual:read` / `masterdata:material:reveal` permissions) is
+ * unchanged — this gate controls WHO may run a trace at all, not what a given caller sees.
  */
 import { Controller, Get, Param } from '@nestjs/common';
 import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
@@ -37,6 +40,7 @@ export class DashboardController {
     return this.dashboard.notifications();
   }
 
+  @Permissions('packaging:finished_good_batch_master:read')
   @Get('v1/trace/finished-good/:id')
   trace(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.dashboard.traceFinishedGood(id, principal);
