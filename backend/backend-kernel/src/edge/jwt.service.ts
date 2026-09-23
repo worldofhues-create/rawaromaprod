@@ -21,13 +21,29 @@ export interface AccessClaims {
   pv: number;
   sid: string;
   /** When this token was issued (unix seconds). Set by `jose` via `setIssuedAt()`; surfaced
-   * on verify so `FreshAuthGuard` can measure token age for step-up-gated routes (§109.5). */
+   * on verify so callers that genuinely need mint time can read it. */
   iat: number;
+  /**
+   * S3 security review item 2 — when the underlying credential was actually PROVED (OIDC
+   * `auth_time` semantics), NOT when this particular access token was minted. For an ordinary
+   * password login this equals `iat` (the login itself IS the proof). For a session minted via
+   * the ALEMBIC assertion bridge, this is the assertion's own `auth_time` (the OTP-verification
+   * time of the ALEMBIC session, or a fresh step-up time for Vault) — carried forward across
+   * every `refresh()` re-mint rather than reset to "now", because a refresh re-presents an
+   * existing session's bearer token, not a fresh proof of the credential. `FreshAuthGuard`
+   * reads THIS field, never `iat`, to enforce §109.5's step-up window — see that guard's
+   * header for why `iat` was the wrong field to have used.
+   */
+  authTime: number;
 }
 
 export interface RefreshClaims {
   sub: string;
   sid: string;
+  /** Carried forward unchanged from the access token this refresh token was minted beside, so
+   *  `AuthService.refresh()` can re-mint an access token whose `authTime` still reflects the
+   *  ORIGINAL proof rather than the moment of refresh (S3 security review item 2). */
+  authTime: number;
 }
 
 @Injectable()
@@ -50,7 +66,9 @@ export class JwtService {
 
   /** Sign an access token. `aud` = portal so the audience check is a JWT-native compare.
    * `iat` is NOT a caller-supplied input — `.setIssuedAt()` stamps "now" below, which is the
-   * whole point: a caller can't backdate its own freshness. */
+   * whole point: a caller can't backdate its own freshness. `authTime` IS caller-supplied
+   * (S3 security review item 2) — unlike `iat`, it is not always "now": a refresh re-mint
+   * must carry the ORIGINAL proof time forward, never stamp a fresh one. */
   async signAccess(claims: Omit<AccessClaims, 'iat'>): Promise<string> {
     return new SignJWT({
       portal: claims.portal,
@@ -58,6 +76,7 @@ export class JwtService {
       perms: claims.perms,
       pv: claims.pv,
       sid: claims.sid,
+      authTime: claims.authTime,
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(claims.sub)
@@ -70,7 +89,7 @@ export class JwtService {
 
   /** Sign a refresh token (opaque-ish bearer; the hash lives in the session row). */
   async signRefresh(claims: RefreshClaims): Promise<string> {
-    return new SignJWT({ sid: claims.sid, typ: 'refresh' })
+    return new SignJWT({ sid: claims.sid, typ: 'refresh', authTime: claims.authTime })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(claims.sub)
       .setIssuer(this.issuer)
@@ -97,6 +116,10 @@ export class JwtService {
       // this service mints). 0 (1970) for a token from elsewhere — reads as maximally stale,
       // never as fresh, so a malformed/foreign token can't pass a freshness check by omission.
       iat: typeof payload.iat === 'number' ? payload.iat : 0,
+      // Same "reads as maximally stale, never fresh" fallback as `iat` above — a token from
+      // elsewhere (or signed before this claim existed) must never pass a step-up check by
+      // omission (S3 security review item 2).
+      authTime: typeof payload.authTime === 'number' ? payload.authTime : 0,
     };
   }
 
@@ -106,7 +129,11 @@ export class JwtService {
     if (payload.typ !== 'refresh' || typeof payload.sub !== 'string' || typeof payload.sid !== 'string') {
       throw DomainError.unauthorized('AUTH_TOKEN_INVALID', 'Malformed refresh token');
     }
-    return { sub: payload.sub, sid: payload.sid };
+    return {
+      sub: payload.sub,
+      sid: payload.sid,
+      authTime: typeof payload.authTime === 'number' ? payload.authTime : 0,
+    };
   }
 
   private async verify(token: string): Promise<JWTPayload & Record<string, unknown>> {

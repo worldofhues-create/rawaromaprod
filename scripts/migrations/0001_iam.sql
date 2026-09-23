@@ -341,6 +341,14 @@ ALTER TABLE "iam"."approval_matrix" ADD COLUMN IF NOT EXISTS "created_dt" timest
 ALTER TABLE "iam"."approval_matrix" ADD COLUMN IF NOT EXISTS "updated_dt" timestamp with time zone DEFAULT now() NOT NULL;
 ALTER TABLE "iam"."approval_matrix" ADD COLUMN IF NOT EXISTS "created_by" varchar(255);
 ALTER TABLE "iam"."approval_matrix" ADD COLUMN IF NOT EXISTS "updated_by" varchar(255);
+CREATE TABLE IF NOT EXISTS "iam"."assertion_jti" (
+	"jti" varchar(255) PRIMARY KEY NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE "iam"."assertion_jti" ADD COLUMN IF NOT EXISTS "expires_at" timestamp with time zone;  -- relaxed from NOT NULL: no default to backfill existing rows with safely
+ALTER TABLE "iam"."assertion_jti" ADD COLUMN IF NOT EXISTS "created_at" timestamp with time zone DEFAULT now() NOT NULL;
 CREATE TABLE IF NOT EXISTS "iam"."business_unit_master" (
 	"business_unit_id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
 	"organization_id" uuid,
@@ -542,6 +550,7 @@ CREATE TABLE IF NOT EXISTS "iam"."user_master" (
 	"mobile_number" varchar(20),
 	"password_hash" varchar(255),
 	"is_active" boolean,
+	"alembic_subject" varchar(255),
 	"status" varchar(30),
 	"created_dt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_dt" timestamp with time zone DEFAULT now() NOT NULL,
@@ -556,6 +565,7 @@ ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "email" varchar(150);
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "mobile_number" varchar(20);
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "password_hash" varchar(255);
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "is_active" boolean;
+ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "alembic_subject" varchar(255);
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "status" varchar(30);
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "created_dt" timestamp with time zone DEFAULT now() NOT NULL;
 ALTER TABLE "iam"."user_master" ADD COLUMN IF NOT EXISTS "updated_dt" timestamp with time zone DEFAULT now() NOT NULL;
@@ -849,6 +859,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS "role_permission_mapping_uq" ON "iam"."role_pe
 CREATE INDEX IF NOT EXISTS "role_permission_mapping_role_idx" ON "iam"."role_permission_mapping" USING btree ("role_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "user_master_email_uq" ON "iam"."user_master" USING btree ("email");
 CREATE INDEX IF NOT EXISTS "user_master_org_idx" ON "iam"."user_master" USING btree ("organization_id");
+CREATE UNIQUE INDEX IF NOT EXISTS "user_master_alembic_subject_uq" ON "iam"."user_master" USING btree ("alembic_subject") WHERE "iam"."user_master"."alembic_subject" IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS "user_role_mapping_uq" ON "iam"."user_role_mapping" USING btree ("user_id","role_id");
 CREATE INDEX IF NOT EXISTS "user_role_mapping_user_idx" ON "iam"."user_role_mapping" USING btree ("user_id");
 CREATE INDEX IF NOT EXISTS "vault_role_grant_request_user_idx" ON "iam"."vault_role_grant_request" USING btree ("user_id");

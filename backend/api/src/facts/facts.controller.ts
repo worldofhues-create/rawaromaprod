@@ -16,6 +16,11 @@
  * over the exact raw bytes (`req.rawBody`, populated by main.ts's content-type parser), and
  * re-parses those same bytes below rather than trusting Nest's already-parsed copy — a
  * re-serialization can differ byte-for-byte from what was signed.
+ *
+ * S3 SECURITY REVIEW ITEM 5 — `x-bridge-timestamp` + `x-bridge-nonce` join the signed material
+ * (see `FactsService.verifySignature`), and `caller.roles` from the body is never trusted for
+ * authorization — permissions are resolved from `caller.staffId` against RawProd's own grants
+ * (`FactsService.permissionsForCaller`, via `user_master.alembic_subject`).
  */
 import { Body, Controller, Headers, Post, Req, Res } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
@@ -36,10 +41,12 @@ export class FactsController {
     @Res({ passthrough: true }) reply: FastifyReply,
     @Body() _parsed: unknown,
     @Headers("x-bridge-signature") signature: string | undefined,
+    @Headers("x-bridge-timestamp") timestamp: string | undefined,
+    @Headers("x-bridge-nonce") nonce: string | undefined,
   ): Promise<Record<string, unknown>> {
     const rawBody = (req as unknown as { rawBody?: string }).rawBody ?? "";
 
-    const signed = await this.facts.verifySignature(rawBody, signature ?? null);
+    const signed = await this.facts.verifySignature(rawBody, signature ?? null, timestamp ?? null, nonce ?? null);
     if (!signed) {
       reply.status(401);
       return { ok: false, reason: "unauthenticated" };
@@ -77,7 +84,9 @@ export class FactsController {
       };
     }
 
-    const held = await this.facts.permissionsForRoles(caller.roles);
+    // S3 security review item 5: never `caller.roles` (ALEMBIC's own claim) — resolved from
+    // RawProd's own grants for the RawProd user `caller.staffId` is bound to.
+    const held = await this.facts.permissionsForCaller(caller.staffId);
     const required = FACT_KIND_PERMISSION[factKind];
     if (!held.has(required)) {
       reply.status(403);

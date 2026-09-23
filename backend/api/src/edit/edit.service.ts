@@ -48,9 +48,19 @@ const REGISTRY: Record<string, ResourceCfg> = {
     schema: 'sales', table: 'transporter_master', pk: 'transporter_id', perm: 'sales:transporter_master:write',
     cols: { transporterName: 'transporter_name', status: 'status' },
   },
+  // S3 security review item 1: `email` (and `alembic_subject`, never listed here at all) are
+  // deliberately ABSENT from this generic editable-column map. Before this fix, any caller
+  // holding `iam:user_master:write` (e.g. `admin`) could PATCH a privileged user's email
+  // straight through this route, then present an ALEMBIC assertion for an identity THEY
+  // control at that new address — `AuthService.loginWithAssertion` mapped by email alone, so
+  // that was an unattributed, unaudited full account takeover. Changing a user's email (or,
+  // now that it exists, their bound `alembic_subject`) goes through a dedicated, audited path
+  // only — see `SecurityService.changeUserEmail`, which additionally refuses outright for a
+  // Vault-authority role holder (formulator/vault_approver) rather than trying to build a full
+  // two-person flow for a rare, high-stakes edit.
   users: {
     schema: 'iam', table: 'user_master', pk: 'user_id', perm: 'iam:user_master:write',
-    cols: { userName: 'user_name', email: 'email', mobileNumber: 'mobile_number', isActive: 'is_active', status: 'status' },
+    cols: { userName: 'user_name', mobileNumber: 'mobile_number', isActive: 'is_active', status: 'status' },
     bool: ['is_active'],
   },
   documents: {

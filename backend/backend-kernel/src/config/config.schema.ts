@@ -128,6 +128,25 @@ export const configSchema = z.object({
   ALEMBIC_ASSERTION_VERIFY_KEY: z.string().optional(),
   ALEMBIC_ASSERTION_ISSUER: z.string().default('alembic'),
   ALEMBIC_ASSERTION_AUDIENCE: z.string().default('rawprod'),
+  /**
+   * S3 security review item 3 — comma-separated list of the RawProd console target(s) THIS
+   * deployment serves (`factory`, `platform`, `vault`). An assertion whose `target` claim is
+   * not in this list is refused, even if everything else about it verifies — closes a
+   * cross-console token-reuse path (an assertion minted for `platform` presented to the
+   * standalone Vault box, or vice versa). The shared factory+platform deployment (one process,
+   * both hostnames per infra/aws/nginx/rawprod-main.conf) sets `factory,platform`; the
+   * standalone Vault EC2 (infra/aws/nginx/vault.conf) sets `vault` alone. Optional/unset skips
+   * the check (dev/test default — the same "boots without it" posture ALEMBIC_ASSERTION_VERIFY_KEY
+   * itself takes).
+   */
+  RAWPROD_ASSERTION_EXPECTED_TARGETS: z.string().optional(),
+  /**
+   * S3 security review item 3 — this RawProd deployment's own tenant/org id. When set, an
+   * assertion's `tenant_id` AND `org_id` claims must both equal it exactly. Optional/unset
+   * skips the check (dev/test default; RAC is presently this deployment's one tenant, so a
+   * production config should set this to that tenant's id once it is provisioned).
+   */
+  ALEMBIC_ASSERTION_TENANT_ID: z.string().optional(),
 
   /**
    * PB-04 / SB-02 — password sign-in is RETIRED for launch (FINAL_OS §2.4/§9,

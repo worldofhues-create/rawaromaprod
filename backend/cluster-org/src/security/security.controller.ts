@@ -13,12 +13,14 @@ import {
 import { listQuery, type ListQuery } from '../cluster-org.dtos.js';
 import { SecurityService } from './security.service.js';
 import {
+  changeUserEmailBody,
   createLocationAuthorityBody,
   createPermissionBody,
   createRoleBody,
   createRolePermissionBody,
   createUserBody,
   createUserRoleBody,
+  type ChangeUserEmailBody,
   type CreateLocationAuthorityBody,
   type CreatePermissionBody,
   type CreateRoleBody,
@@ -51,6 +53,18 @@ export class SecurityController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.security.createUser(body, principal);
+  }
+
+  // S3 security review item 1 — the dedicated, audited path for changing a user's email.
+  // EditService's generic PATCH never exposes `email` (see that file's REGISTRY comment).
+  @Permissions('iam:user_master:write')
+  @Post('v1/users/:id/email')
+  changeUserEmail(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(changeUserEmailBody)) body: ChangeUserEmailBody,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.security.changeUserEmail(id, body.email, principal);
   }
 
   // ── role_master ───────────────────────────────────────────────────────────

@@ -468,3 +468,160 @@ test('item 6: the ordinary subset rule still applies to every OTHER role (unaffe
 
   await assert.rejects(() => svc.createUserRole({ userId: grantee, roleId: qcRoleId }, admin));
 });
+
+/* ── S3 security review item 11: puppet check walks the FULL created_by chain ─────────────── */
+
+test('item 11: a puppet-of-a-puppet (two hops) cannot approve either — the transitive close', async () => {
+  const formulatorRoleId = await findOrMakeRoleByCode('formulator');
+  const requesterId = uuidv7();
+  const requester = principal({ userId: requesterId, roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+  const grantee = await makeUser('grantee-2hop');
+  const request = await svc.createUserRole({ userId: grantee, roleId: formulatorRoleId }, requester);
+
+  // requester -> puppetA -> puppetB (the approver). One hop (approver.createdBy === requesterId)
+  // would miss this; the walk must not.
+  const puppetAId = await makeUserCreatedBy('puppetA', requesterId);
+  const puppetBId = await makeUserCreatedBy('puppetB', puppetAId);
+  const puppetB = principal({ userId: puppetBId, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+
+  await assert.rejects(
+    () => svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, puppetB),
+    (err: any) => {
+      assert.equal(err.status, 403);
+      assert.match(err.message, /created by the same person/i);
+      return true;
+    },
+  );
+});
+
+test('item 11: a THREE-hop puppet chain is still caught (within MAX_DEPTH)', async () => {
+  const vaultApproverRoleId = await findOrMakeRoleByCode('vault_approver');
+  const requesterId = uuidv7();
+  const requester = principal({ userId: requesterId, roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+  const grantee = await makeUser('grantee-3hop');
+  const request = await svc.createUserRole({ userId: grantee, roleId: vaultApproverRoleId }, requester);
+
+  const aId = await makeUserCreatedBy('chainA', requesterId);
+  const bId = await makeUserCreatedBy('chainB', aId);
+  const cId = await makeUserCreatedBy('chainC', bId);
+  const approver = principal({ userId: cId, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+
+  await assert.rejects(
+    () => svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, approver),
+    (err: any) => {
+      assert.equal(err.status, 403);
+      return true;
+    },
+  );
+});
+
+test('item 11: an approver descended from a DIFFERENT lineage (not the requester\'s) still succeeds', async () => {
+  audits = [];
+  const formulatorRoleId = await findOrMakeRoleByCode('formulator');
+  const requesterId = uuidv7();
+  const requester = principal({ userId: requesterId, roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+  const grantee = await makeUser('grantee-unrelated-chain');
+  const request = await svc.createUserRole({ userId: grantee, roleId: formulatorRoleId }, requester);
+
+  // A chain that exists but never passes through the requester at all.
+  const unrelatedRootId = uuidv7();
+  const unrelatedChildId = await makeUserCreatedBy('unrelated-child', unrelatedRootId);
+  const approver = principal({ userId: unrelatedChildId, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+
+  const mapping = await svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, approver);
+  assert.equal(mapping.userId, grantee);
+});
+
+/* ── S3 security review item 9: atomic approve — a race cannot double-decide one request ──── */
+
+test('item 9: two concurrent approve attempts on the SAME request — exactly one succeeds, '
+  + 'the other sees an honest conflict, and exactly one user_role_mapping row exists', async () => {
+  const formulatorRoleId = await findOrMakeRoleByCode('formulator');
+  const requesterId = uuidv7();
+  const requester = principal({ userId: requesterId, roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+  const grantee = await makeUser('grantee-race');
+  const request = await svc.createUserRole({ userId: grantee, roleId: formulatorRoleId }, requester);
+
+  const admin1Id = await makeUserCreatedBy('race-admin1', 'race-lineage-1');
+  const admin2Id = await makeUserCreatedBy('race-admin2', 'race-lineage-2');
+  const admin1 = principal({ userId: admin1Id, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+  const admin2 = principal({ userId: admin2Id, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+
+  const results = await Promise.allSettled([
+    svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, admin1),
+    svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, admin2),
+  ]);
+
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  const rejected = results.filter((r) => r.status === 'rejected');
+  assert.equal(fulfilled.length, 1, 'exactly one concurrent approval must succeed');
+  assert.equal(rejected.length, 1, 'the other must be refused, not silently duplicated');
+
+  const mappings = await db
+    .select()
+    .from(orgSchema.userRoleMapping)
+    .where(and(eq(orgSchema.userRoleMapping.userId, grantee), eq(orgSchema.userRoleMapping.roleId, formulatorRoleId)));
+  assert.equal(mappings.length, 1, 'exactly one user_role_mapping row — no duplicate from the race');
+
+  const resolved = await svc.getVaultRoleGrantRequestById((request as any).vaultRoleGrantRequestId);
+  assert.equal(resolved?.grantStatus, 'APPROVED');
+});
+
+test('item 9: a cancel racing an approve cannot both appear to succeed', async () => {
+  const vaultApproverRoleId = await findOrMakeRoleByCode('vault_approver');
+  const requesterId = await makeUser('race-requester2');
+  const requester = principal({ userId: requesterId, roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+  const grantee = await makeUser('grantee-race2');
+  const request = await svc.createUserRole({ userId: grantee, roleId: vaultApproverRoleId }, requester);
+
+  const adminId = await makeUserCreatedBy('race-admin3', 'race-lineage-3');
+  const admin = principal({ userId: adminId, roles: ['admin'], permissions: ['iam:user_role_mapping:write'] });
+
+  const results = await Promise.allSettled([
+    svc.approveVaultRoleGrant((request as any).vaultRoleGrantRequestId, admin),
+    svc.cancelVaultRoleGrant((request as any).vaultRoleGrantRequestId, requester),
+  ]);
+  const fulfilled = results.filter((r) => r.status === 'fulfilled');
+  assert.equal(fulfilled.length, 1, 'exactly one of approve/cancel may win the race');
+
+  const resolved = await svc.getVaultRoleGrantRequestById((request as any).vaultRoleGrantRequestId);
+  assert.ok(resolved?.grantStatus === 'APPROVED' || resolved?.grantStatus === 'CANCELLED');
+});
+
+/* ── S3 security review item 1: the dedicated, audited email-change path ──────────────────── */
+
+test('item 1: changeUserEmail changes an ordinary user\'s email and audits it', async () => {
+  audits = [];
+  const userId = await makeUser('emailchange');
+  const admin = principal({ userId: uuidv7(), roles: ['admin'], permissions: ['iam:user_master:write'] });
+  const updated = await svc.changeUserEmail(userId, 'NewAddress@RawAroma.local', admin);
+  assert.equal(updated.email, 'newaddress@rawaroma.local');
+  assert.equal(audits.length, 1);
+  assert.equal(audits[0]!.action, 'security.user_email.changed');
+  assert.equal(audits[0]!.result, 'allow');
+});
+
+test('item 1: changeUserEmail REFUSES for a Vault-authority role holder (formulator/vault_approver)', async () => {
+  audits = [];
+  const formulatorRoleId = await findOrMakeRoleByCode('formulator');
+  const userId = await makeUser('vaultholder-email');
+  await db.insert(orgSchema.userRoleMapping).values({
+    userRoleMappingId: uuidv7(), userId, roleId: formulatorRoleId, status: 'ACTIVE',
+    createdBy: 'test', updatedBy: 'test',
+  });
+  const admin = principal({ userId: uuidv7(), roles: ['admin'], permissions: ['iam:user_master:write'] });
+
+  await assert.rejects(
+    () => svc.changeUserEmail(userId, 'shouldnotwork@rawaroma.local', admin),
+    (err: any) => {
+      assert.equal(err.status, 403);
+      return true;
+    },
+  );
+  assert.equal(audits.length, 1, 'the refusal must be audited too');
+  assert.equal(audits[0]!.action, 'security.user_email.refused');
+  assert.equal(audits[0]!.result, 'refuse');
+
+  const stillOld = await svc.getUserById(userId);
+  assert.notEqual(stillOld?.email, 'shouldnotwork@rawaroma.local');
+});

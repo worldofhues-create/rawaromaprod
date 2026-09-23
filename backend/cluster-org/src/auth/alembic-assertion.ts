@@ -35,6 +35,14 @@ const ALLOWED_ALG = 'EdDSA';
  *  reason: a real clock difference must not read as a forged claim. */
 const CLOCK_SKEW_TOLERANCE_S = 5;
 
+/** FINAL_OS's own ceiling for a bridge-style assertion (S3 security review item 3): the
+ *  window between when ALEMBIC minted the token (`iat`) and when it stops being valid
+ *  (`exp`) must never exceed 60s, however the token's OWN `exp`/`iat` claims read.
+ *  `rawprod-assertion.ts` signs a 45s TTL today, but this file must not simply trust that —
+ *  a compromised or misconfigured issuer minting a longer-lived token is exactly what an
+ *  independent ceiling on the RECEIVING side is for. */
+const MAX_ASSERTION_WINDOW_S = 60;
+
 export interface AlembicAssertionClaims {
   readonly iss: string;
   readonly aud: string;
@@ -44,7 +52,10 @@ export interface AlembicAssertionClaims {
   readonly email: string;
   readonly roles: readonly string[];
   readonly target: string;
-  readonly auth_time?: number;
+  /** REQUIRED (S3 security review item 2) — when the credential behind this assertion was
+   *  actually PROVED (OIDC `auth_time` semantics), never when the assertion was minted. See
+   *  `rawprod-assertion.ts`'s own claim doc for how ALEMBIC computes it. */
+  readonly auth_time: number;
   readonly iat: number;
   readonly exp: number;
   readonly jti: string;
@@ -57,7 +68,10 @@ export type AlembicAssertionRefusal =
   | 'EXPIRED'
   | 'NOT_YET_VALID'
   | 'WRONG_ISSUER'
-  | 'WRONG_AUDIENCE';
+  | 'WRONG_AUDIENCE'
+  | 'WINDOW_TOO_LONG'
+  | 'WRONG_TARGET'
+  | 'WRONG_TENANT';
 
 export type AlembicAssertionResult =
   | { readonly ok: true; readonly claims: AlembicAssertionClaims }
@@ -84,8 +98,18 @@ export function verifyAlembicAssertion(opts: {
   readonly issuer: string;
   readonly audience: string;
   readonly now: Date;
+  /** S3 security review item 3 — when set, `target` must equal exactly one of these (the
+   *  console/audience this deployment IS). Omitted entirely (undefined/empty) skips the
+   *  check — the shared factory+platform deployment has no single fixed target, so callers
+   *  there configure both; the standalone Vault box configures only `['vault']`. */
+  readonly expectedTargets?: readonly string[];
+  /** S3 security review item 3 — when set, both `tenant_id` and `org_id` must equal this
+   *  RawProd deployment's own configured tenant/org id. Omitted skips the check (dev/test
+   *  default, same "boots without it" posture every other optional security config here
+   *  takes). */
+  readonly expectedTenantId?: string;
 }): AlembicAssertionResult {
-  const { token, verifyKeyB64, issuer, audience, now } = opts;
+  const { token, verifyKeyB64, issuer, audience, now, expectedTargets, expectedTenantId } = opts;
   const nowSec = Math.floor(now.getTime() / 1000);
 
   const parts = token.split('.');
@@ -133,6 +157,10 @@ export function verifyAlembicAssertion(opts: {
     || !isNonEmptyString(p.email) || !isStringArray(p.roles) || !isNonEmptyString(p.target)
     || !isNonEmptyString(p.jti) || typeof p.iat !== 'number' || typeof p.exp !== 'number'
     || typeof p.iss !== 'string' || typeof p.aud !== 'string'
+    // S3 security review item 2: auth_time is now a REQUIRED claim, not an optional one — a
+    // token minted without it (an older/misconfigured issuer) is malformed, the same as a
+    // missing sub/email, rather than silently treated as "no fresh-auth information".
+    || typeof p.auth_time !== 'number'
   ) {
     return { ok: false, refusal: 'MALFORMED', detail: 'The assertion is missing a required claim.' };
   }
@@ -148,13 +176,34 @@ export function verifyAlembicAssertion(opts: {
   if (p.iat - CLOCK_SKEW_TOLERANCE_S > nowSec) {
     return { ok: false, refusal: 'NOT_YET_VALID', detail: 'The assertion is not valid yet.' };
   }
+  // S3 security review item 3: never trust the token's own iat/exp spread — an issuer that is
+  // compromised, misconfigured, or simply changes its TTL later could mint a much longer-lived
+  // window otherwise. Independently enforce FINAL_OS's <=60s ceiling on the RECEIVING side.
+  if (p.exp - p.iat > MAX_ASSERTION_WINDOW_S) {
+    return {
+      ok: false, refusal: 'WINDOW_TOO_LONG',
+      detail: `The assertion's exp-iat window (${p.exp - p.iat}s) exceeds the ${MAX_ASSERTION_WINDOW_S}s ceiling.`,
+    };
+  }
+  if (expectedTargets && expectedTargets.length > 0 && !expectedTargets.includes(p.target)) {
+    return {
+      ok: false, refusal: 'WRONG_TARGET',
+      detail: `This deployment does not serve the "${p.target}" console.`,
+    };
+  }
+  if (expectedTenantId && (p.tenant_id !== expectedTenantId || p.org_id !== expectedTenantId)) {
+    return {
+      ok: false, refusal: 'WRONG_TENANT',
+      detail: `Expected tenant/org "${expectedTenantId}".`,
+    };
+  }
 
   return {
     ok: true,
     claims: {
       iss: p.iss, aud: p.aud, sub: p.sub, tenant_id: p.tenant_id, org_id: p.org_id,
       email: p.email, roles: p.roles, target: p.target, jti: p.jti, iat: p.iat, exp: p.exp,
-      ...(typeof p.auth_time === 'number' ? { auth_time: p.auth_time } : {}),
+      auth_time: p.auth_time,
     },
   };
 }

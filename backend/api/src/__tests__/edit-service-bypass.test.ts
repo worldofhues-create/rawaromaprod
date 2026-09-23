@@ -88,3 +88,50 @@ for (const [resource, perm] of [
     );
   });
 }
+
+/**
+ * S3 security review item 1 — `PATCH /v1/masters/users/:id` used to accept `email`, which
+ * combined with `AuthService.loginWithAssertion`'s old email-only mapping was a vault-takeover
+ * path: retarget a privileged account's email, then sign in as that account on the new
+ * address. `email` (and `alembic_subject`, never listed at all) must now be silently ignored
+ * by the generic editor, exactly like any other unknown field — same "silently ignore
+ * non-editable / unknown fields" behaviour `EditService.update` already gives every other
+ * column not in a resource's `cols` map, proven here for `users` specifically since it is the
+ * security-relevant one.
+ */
+test('edit-service: PATCH users/:id cannot change email through the generic editor', async () => {
+  const sql = testClient();
+  const id = crypto.randomUUID();
+  await sql`insert into iam.user_master (user_id, email, user_name, status)
+            values (${id}, 'before@rawaroma.local', 'Before Name', 'ACTIVE')`;
+
+  const updated = (await editSvc.update(
+    'users',
+    id,
+    { email: 'attacker@evil.example', userName: 'After Name' },
+    principal({ permissions: ['iam:user_master:write'] }),
+  )) as { email: string; user_name: string };
+
+  // The editable field DID apply...
+  assert.equal(updated.user_name, 'After Name');
+  // ...but email did not change at all — silently ignored, not even attempted.
+  assert.equal(updated.email, 'before@rawaroma.local');
+});
+
+test('edit-service: PATCH users/:id cannot set alembic_subject through the generic editor '
+  + '(not even listed as an editable column)', async () => {
+  const sql = testClient();
+  const id = crypto.randomUUID();
+  await sql`insert into iam.user_master (user_id, email, user_name, status)
+            values (${id}, 'alembicfield@rawaroma.local', 'Name', 'ACTIVE')`;
+
+  await assert.rejects(
+    () => editSvc.update(
+      'users',
+      id,
+      { alembicSubject: 'staff:attacker@evil.example' },
+      principal({ permissions: ['iam:user_master:write'] }),
+    ),
+    BadRequestException, // no editable fields supplied — the whole body was ignored
+  );
+});

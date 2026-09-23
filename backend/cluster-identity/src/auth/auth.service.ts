@@ -277,9 +277,22 @@ export class AuthService {
     return tokens;
   }
 
-  /** Sign an access+refresh pair carrying the resolved permission set. */
+  /**
+   * Sign an access+refresh pair carrying the resolved permission set.
+   *
+   * `authTime` (S3 security review item 2 on the shared `@core/backend-kernel` JwtService):
+   * this reusable-template identity cluster is NOT wired into `app.module.ts` for launch
+   * (RawProd's live auth is `cluster-org`'s dictionary-backed `AuthService`) and has no
+   * persisted "when was this credential proved" column of its own to carry forward across a
+   * refresh, unlike the live cluster. Stamping "now" here is therefore honest for what this
+   * file can actually prove today (every session begins here, whether via `issueSession` or
+   * `rotateSession`) — a future wiring of this cluster into a live `@FreshAuth`-gated route
+   * would need its own `sessions.auth_time`-shaped column, the same fix cluster-org's `iam.
+   * user_master`-backed path already has.
+   */
   private async mintTokens(user: AuthUser, sessionId: string): Promise<TokenPair> {
     const perms = await this.permissionsFor(user);
+    const authTime = Math.floor(Date.now() / 1000);
     const accessToken = await this.jwt.signAccess({
       sub: user.id,
       portal: user.portal,
@@ -287,8 +300,9 @@ export class AuthService {
       perms,
       pv: 1,
       sid: sessionId,
+      authTime,
     });
-    const refreshToken = await this.jwt.signRefresh({ sub: user.id, sid: sessionId });
+    const refreshToken = await this.jwt.signRefresh({ sub: user.id, sid: sessionId, authTime });
     return { accessToken, refreshToken, expiresIn: this.jwt.accessTtlSeconds };
   }
 

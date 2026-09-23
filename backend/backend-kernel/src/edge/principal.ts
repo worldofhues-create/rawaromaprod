@@ -18,12 +18,22 @@ export interface AuthPrincipal {
   /** The active session id (JWT `sid`), for revoke checks. */
   sessionId: string;
   /**
-   * When this access token was ISSUED (JWT `iat`, unix seconds) — NOT when the session
-   * started. A refreshed/re-minted token gets a fresh `iat`, so re-entering credentials
-   * (`POST /auth/login` again) is what moves this forward. `FreshAuthGuard` reads it to
-   * enforce §109.5's fresh-authentication window on high-risk plaintext/decrypt routes.
+   * When this access token was ISSUED (JWT `iat`, unix seconds) — NOT when the underlying
+   * credential was proved. A refreshed/re-minted token always gets a fresh `iat`, which is
+   * exactly why `FreshAuthGuard` must NOT read this field for step-up (S3 security review
+   * item 2) — see `authTime` below.
    */
   iat: number;
+  /**
+   * When the credential behind this session was actually PROVED (OIDC `auth_time`
+   * semantics) — carried forward unchanged across every token refresh, unlike `iat`.
+   * `FreshAuthGuard` reads THIS field to enforce §109.5's fresh-authentication window on
+   * high-risk plaintext/decrypt routes: a caller who refreshed their access token five
+   * times over six hours has an `iat` from moments ago but an `authTime` from six hours
+   * ago, and it is the latter that answers "how long since this person actually proved who
+   * they are".
+   */
+  authTime: number;
 }
 
 /** A Fastify request augmented with the verified principal. */
