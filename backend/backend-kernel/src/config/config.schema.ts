@@ -88,6 +88,37 @@ export const configSchema = z.object({
   RELAY_VERIFY_KEY: z.string().optional(),
 
   /**
+   * PB-04 / SB-02 — ALEMBIC->RawProd signed identity assertion (FINAL_OS §2.4, §9). The
+   * ONLY online staff identity rail for launch: a colleague signs in once on ALEMBIC
+   * (email OTP) and ALEMBIC mints a short-lived, single-use, Ed25519-signed assertion
+   * this deployment verifies at `POST /auth/alembic-assertion` and maps to an EXISTING
+   * `iam.user_master` row by email -- no auto-provisioning, ever (see auth.service.ts).
+   *
+   * `ALEMBIC_ASSERTION_VERIFY_KEY` is the PUBLIC half only (base64 DER, spki) of the
+   * keypair `ops/scripts/rawprod-assertion-keygen.cjs` generates in the ALEMBIC
+   * repository -- the private half never leaves ALEMBIC's own config. Optional so the
+   * app boots without it; the route throws a clear 503 until it is set, the same
+   * "refuse rather than silently degrade" rule FORMULA_KEK/RELAY_VERIFY_KEY follow.
+   */
+  ALEMBIC_ASSERTION_VERIFY_KEY: z.string().optional(),
+  ALEMBIC_ASSERTION_ISSUER: z.string().default('alembic'),
+  ALEMBIC_ASSERTION_AUDIENCE: z.string().default('rawprod'),
+
+  /**
+   * PB-04 / SB-02 — password sign-in is RETIRED for launch (FINAL_OS §2.4/§9,
+   * owner ruling: "RawProd password login must be removed from prod; ALEMBIC OTP +
+   * signed assertion"). `AuthService.login`/`setPassword` refuse UNCONDITIONALLY
+   * whenever `APP_ENV=prod`, regardless of this flag -- it cannot re-enable the rail
+   * in production. Outside prod it is the explicit, default-OFF escape hatch for a
+   * suite that still needs the password path (`TEST_DATABASE_URL` runs, local dev
+   * without an ALEMBIC box to hand): set it `true` deliberately, never as a default.
+   */
+  PASSWORD_LOGIN_ENABLED: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  /**
    * Build identity for the running process — Platform Ops' "Deployment / build" screen
    * (P0_UI_PARITY_PUBLIC_GREEN_ADDENDUM.md §6). Populated by the deploy platform at build/
    * deploy time (e.g. a CI step exporting the commit it built, or Render's

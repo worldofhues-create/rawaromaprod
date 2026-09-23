@@ -68,6 +68,28 @@ secrets in the service's Environment tab: `DATABASE_URL`, `JWT_SECRET`, `FORMULA
 - Health: `/health`. Free tier sleeps after 15 min idle → first request cold-starts (~30–60 s).
 - Verify: `curl https://<your-render-host>/health` → `{"data":{"status":"ok","deps":{"database":"up"}}}`
 
+## 3b. PB-04 / SB-02 — ALEMBIC one-login identity bridge
+
+Password sign-in (`/auth/login`, `/auth/users/:id/password`) is retired for launch —
+`AuthService` refuses both unconditionally once `APP_ENV=prod`. Set these on the backend
+service alongside the four secrets in step 3:
+
+- `ALEMBIC_ASSERTION_VERIFY_KEY` — base64 DER, spki, Ed25519 **PUBLIC** key. Generated in the
+  ALEMBIC repository by `node ops/scripts/rawprod-assertion-keygen.cjs` — only the public half
+  comes here; the private half stays in ALEMBIC's own config (env or a secrets connector) and
+  is never shared with this deployment.
+- `ALEMBIC_ASSERTION_ISSUER` / `ALEMBIC_ASSERTION_AUDIENCE` — default `alembic` / `rawprod`.
+  Leave unset unless this deployment talks to a differently-named ALEMBIC environment.
+- `PASSWORD_LOGIN_ENABLED` — leave unset (default `false`). **Production refuses password
+  sign-in unconditionally regardless of this flag** — it is a non-prod escape hatch only, for
+  a test suite or a local dev box with no ALEMBIC to hand.
+
+Also set `window.ALEMBIC_CONSOLE_URL` on each of `web/index.html`, `web-platform/index.html`
+and `web-vault/index.html` (or inject it from the reverse proxy in front of them) to ALEMBIC's
+console origin, so each console's "Sign in via ALEMBIC" button has somewhere to send the
+browser, and so `RawProd — Open Factory/Platform/Vault` on the ALEMBIC side has somewhere to
+land back.
+
 ## 4. Frontend (Vercel)
 
 Vercel → **New Project** → same repo → set **Root Directory = `web`** (framework: Other, no build).
@@ -84,7 +106,8 @@ so the app calls same-origin and the backend host stays hidden.
 4. DevTools → Network: only `POST /rpc` + `POST /crypto/handshake`, all ciphertext. No readable paths,
    tokens, or data.
 
-## Demo logins (rotate before public!)
+## Demo logins (rotate before public! — and see PB-04/SB-02 above: password sign-in is
+## refused outright once `APP_ENV=prod`, so these only work on a non-prod deployment)
 
 Owner: `owner@rawaroma.local` (password in your local `.env` as `BOOTSTRAP_OWNER_PASSWORD`). The other
 10 role users (`admin|procurement|receiving|qc|warehouse|compounding|filling|packaging|production|sales@rawaroma.local`)

@@ -74,15 +74,54 @@
   /* ---- session (in-memory; a reload returns to login — no persisted admin credential) ---- */
   var session = { token: null, iat: 0, email: null, roles: [], permissions: [] };
   function hasPerm(p) { return session.permissions.indexOf(p) >= 0; }
-  async function login(email, password) {
-    var data = await api('/auth/login', { method: 'POST', body: { identifier: email, password: password } });
+
+  /* PB-04 / SB-02: password sign-in is retired for launch (FINAL_OS §2.4/§9). The only
+   * online staff identity rail is ALEMBIC's — one email-OTP sign-in there buys a short-lived
+   * signed assertion this console exchanges for its OWN session, exactly the shape
+   * `POST /auth/login` used to mint. `backend/cluster-org/src/auth/auth.service.ts` refuses
+   * `/auth/login` unconditionally once APP_ENV=prod, so this is not merely the preferred
+   * door — it is, in production, the only one. */
+  async function loginWithAssertion(assertion) {
+    var data = await api('/auth/alembic-assertion', { method: 'POST', body: { assertion: assertion } });
     session.token = data.accessToken;
-    session.email = (data.user && data.user.email) || email;
+    session.email = (data.user && data.user.email) || null;
     var me = await api('/me');
     session.roles = me.roles || [];
     session.permissions = me.permissions || [];
   }
   function logout() { session.token = null; session.email = null; session.roles = []; session.permissions = []; location.hash = ''; render(); }
+
+  /* Where "Sign in via ALEMBIC" sends the browser: ALEMBIC's own console, which mints the
+   * assertion and returns here with it in the URL FRAGMENT (never a query string a server
+   * would log) at `#assertion=<token>`. Set at deploy time, same convention as `PLATFORM_API`
+   * above — unset is an honest "not configured" card, never a guessed URL. */
+  var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
+
+  /* Consumes `#assertion=...` left in the URL by an ALEMBIC redirect, exchanges it for a
+   * session, and scrubs the fragment with `history.replaceState` — which does NOT fire
+   * `hashchange`, so this cannot loop back into itself. A single-use token is worthless a
+   * moment after this call regardless, but it should not sit in the address bar either. */
+  var consumingAssertion = false;
+  async function tryConsumeAssertion() {
+    var m = /(?:^|[#&])assertion=([^&]+)/.exec(location.hash);
+    if (!m || consumingAssertion) return false;
+    consumingAssertion = true;
+    var token = decodeURIComponent(m[1]);
+    // Scrub the fragment BEFORE the exchange — a single-use token must not sit in the address
+    // bar even for the duration of one network round trip.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      await loginWithAssertion(token);
+      if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read') && !hasPerm('platformops:console:read')) {
+        toast('Signed in, but this account holds no Platform Operations permission. Contact an admin for the platform_super_admin role.', true);
+        logout();
+      }
+    } catch (e) {
+      toast('Could not complete sign-in from ALEMBIC: ' + ((e instanceof PlatformError) ? e.message : 'unknown error'), true);
+    }
+    consumingAssertion = false;
+    return true;
+  }
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js').catch(function () {});
@@ -142,34 +181,27 @@
 
   var root = document.getElementById('root');
 
+  /* PB-04 / SB-02: no password form. The only door is ALEMBIC — a platform_super_admin
+   * signs in there (email OTP) and clicks "Open Platform", which lands here with an
+   * assertion this console exchanges automatically (see `tryConsumeAssertion` above). This
+   * screen renders only when there is no session AND no assertion in the URL to consume. */
   function renderLogin() {
     root.innerHTML = '';
     var err = h('div', { class: 'err' });
-    var email = h('input', { class: 'fld', type: 'email', autocomplete: 'username', placeholder: 'you@rawaroma.local', style: 'width:100%' });
-    var pw = h('input', { class: 'fld', type: 'password', autocomplete: 'current-password', placeholder: 'Password', style: 'width:100%' });
-    var btn = h('button', { class: 'btn p', style: 'width:100%;justify-content:center' }, ['Sign in']);
-    async function submit() {
-      btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
-      try {
-        await login(email.value.trim(), pw.value);
-        if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read') && !hasPerm('platformops:console:read')) {
-          err.textContent = 'Signed in, but this account holds no Platform Operations permission. Contact an admin for the platform_super_admin role.';
-          btn.disabled = false; btn.textContent = 'Sign in'; return;
-        }
-        location.hash = '#/health'; render();
-      } catch (e) {
-        err.textContent = (e instanceof PlatformError) ? e.message : 'Could not sign in.';
-        btn.disabled = false; btn.textContent = 'Sign in';
-      }
+    var goBtn = h('a', {
+      class: 'btn p', style: 'width:100%;justify-content:center;text-decoration:none',
+      href: ALEMBIC_CONSOLE_URL || '#',
+    }, ['Sign in via ALEMBIC →']);
+    if (!ALEMBIC_CONSOLE_URL) {
+      goBtn.setAttribute('aria-disabled', 'true');
+      goBtn.style.opacity = '0.5'; goBtn.style.pointerEvents = 'none';
+      err.textContent = 'This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).';
     }
-    btn.addEventListener('click', submit);
-    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
     var card = h('div', { class: 'login-card' }, [
       h('div', { class: 'mark' }, ['Platform Operations']),
       h('div', { class: 'sub' }, ['Raw Aroma Chem — internal only. Never shows tenant business data or Formula Vault plaintext.']),
-      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Email']), email]),
-      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Password']), pw]),
-      btn, err,
+      h('p', { style: 'color:var(--ink-3)' }, ['Sign in on ALEMBIC, then choose "Open Platform" — one login, no separate password.']),
+      goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
   }
@@ -403,7 +435,11 @@
   }
 
   async function render() {
-    if (!session.token) { renderLogin(); return; }
+    if (!session.token) {
+      if (await tryConsumeAssertion()) { render(); return; }
+      renderLogin();
+      return;
+    }
     var v = currentView();
     if (v === 'flags') return screenFlags();
     if (v === 'tenants') return screenTenants();

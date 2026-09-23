@@ -12,9 +12,10 @@ import { eq } from "drizzle-orm";
 import * as argon2 from "argon2";
 import { createHash, randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
-import { DomainError, JwtService, PG_CLIENT, type AuthPrincipal } from "@core/backend-kernel";
+import { DomainError, JwtService, PG_CLIENT, ConfigService, type AuthPrincipal } from "@core/backend-kernel";
 import type { Portal } from "@core/contracts";
 import { ORG_DB, orgSchema, type OrgDb } from "../cluster-org.tokens.js";
+import { verifyAlembicAssertion } from "./alembic-assertion.js";
 
 const ARGON2_OPTIONS: argon2.Options = {
   type: argon2.argon2id,
@@ -55,11 +56,41 @@ export class AuthService {
   // In-memory brute-force throttle keyed by identifier (per-process; a shared store is the Stage-1 swap).
   private readonly loginFails = new Map<string, { count: number; until: number }>();
 
+  // PB-04/SB-02: single-use guard for `iat`-scoped assertion jtis. In-memory / per-process,
+  // same MVP posture as `loginFails` above ("a shared store is the Stage-1 swap") — a token
+  // this short-lived (<=60s, PB-04's ceiling) is spent within seconds of being minted, so a
+  // multi-process deployment's exposure is "two API processes each accept one presentation
+  // inside that same short window", not an unbounded replay. Swept lazily on every check.
+  private readonly usedAssertionJti = new Map<string, number>(); // jti -> exp (unix seconds)
+
   constructor(
     @Inject(ORG_DB) private readonly db: OrgDb,
     @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(PG_CLIENT) private readonly sql: Sql,
+    @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
+
+  // Password sign-in is RETIRED for launch (FINAL_OS §2.4/§9). Production refuses it
+  // UNCONDITIONALLY; PASSWORD_LOGIN_ENABLED (default OFF) is a non-prod escape hatch for a
+  // suite or a local dev box with no ALEMBIC to hand — it can never re-enable the rail once
+  // APP_ENV=prod, because that check runs first and is not gated by the flag.
+  private passwordLoginAllowed(): boolean {
+    if (this.config.isProd) return false;
+    return this.config.get('PASSWORD_LOGIN_ENABLED');
+  }
+
+  /** Single-use check for an assertion's `jti`. True the FIRST time a given jti is seen
+   *  before its own expiry; false on any later presentation (replay) — checked regardless
+   *  of what the rest of verification decides, so a spent token cannot be retried against a
+   *  different (or now-provisioned) email either. */
+  private consumeAssertionJti(jti: string, expSec: number, nowMs: number): boolean {
+    for (const [seenJti, seenExpSec] of this.usedAssertionJti) {
+      if (seenExpSec * 1000 <= nowMs) this.usedAssertionJti.delete(seenJti);
+    }
+    if (this.usedAssertionJti.has(jti)) return false;
+    this.usedAssertionJti.set(jti, expSec);
+    return true;
+  }
 
   /** Record a login in iam.login_history so the admin Login-history view has data (audit
    * requirement). We use a dedicated table keyed to iam.user_master rather than the legacy
@@ -88,8 +119,15 @@ export class AuthService {
     this.loginFails.set(key, g);
   }
 
-  /** Password login against user_master (identifier = email). */
+  /** Password login against user_master (identifier = email). RETIRED for launch —
+   *  see `passwordLoginAllowed()`. */
   async login(identifier: string, password: string): Promise<LoginResult> {
+    if (!this.passwordLoginAllowed()) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        'Password sign-in is retired. Sign in via ALEMBIC.',
+      );
+    }
     const { userMaster } = orgSchema;
     const key = String(identifier ?? '').toLowerCase();
     // Login lockout (audit LOW): refuse once an identifier has failed too many times recently.
@@ -132,6 +170,100 @@ export class AuthService {
     const consoleEnv = process.env.CONSOLE;
     if ((consoleEnv === "online" || consoleEnv === "factory") && !consoleAllows(consoleEnv, roles)) {
       throw DomainError.forbidden("AUTH_FORBIDDEN", `This account is not permitted on the ${consoleEnv} console.`);
+    }
+
+    const accessToken = await this.jwt.signAccess({
+      sub: row.userId,
+      portal: RA_PORTAL,
+      roles,
+      perms,
+      pv: 1,
+      sid: row.userId,
+    });
+    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    await this.recordSession(row.userId, refreshToken);
+    return {
+      user: { userId: row.userId, userName: row.userName, email: row.email },
+      accessToken,
+      refreshToken,
+      expiresIn: this.jwt.accessTtlSeconds,
+    };
+  }
+
+  /** PB-04 / SB-02 — the one-login identity bridge. Verifies a short-lived assertion
+   *  ALEMBIC signed, maps it to an EXISTING `user_master` row by email (NO
+   *  auto-provisioning — an unknown email is refused with a clear message, never
+   *  silently created as a privileged user), and mints RawProd's OWN access/refresh
+   *  tokens exactly as `login()` does. Because this always mints a BRAND-NEW token
+   *  (`iat` = now), a Vault route gated by `@FreshAuth()` reads it as fresh the moment
+   *  it is used — no change needed to `FreshAuthGuard`'s semantics; a fresh ALEMBIC
+   *  OTP assertion IS the re-authentication.
+   *
+   *  ROLES AND PERMISSIONS COME FROM THIS DEPLOYMENT'S OWN TABLES, never from the
+   *  assertion's `roles` claim — that claim is ALEMBIC's coarse "even allowed to try"
+   *  gate (see `rawprod-eligibility.ts` in that repository) and carries no authority
+   *  here. The existing role/permission mapping this rail has always used is
+   *  unchanged: `rolesFor`/`permissionsFor` off `user_master`'s own grants. */
+  async loginWithAssertion(assertion: string): Promise<LoginResult> {
+    const verifyKey = this.config.get('ALEMBIC_ASSERTION_VERIFY_KEY');
+    if (!verifyKey) {
+      throw DomainError.featureDisabled(
+        'ALEMBIC_ASSERTION_VERIFY_KEY is not configured; sign-in via ALEMBIC is unavailable.',
+      );
+    }
+    const now = new Date();
+    const verified = verifyAlembicAssertion({
+      token: assertion,
+      verifyKeyB64: verifyKey,
+      issuer: this.config.get('ALEMBIC_ASSERTION_ISSUER'),
+      audience: this.config.get('ALEMBIC_ASSERTION_AUDIENCE'),
+      now,
+    });
+    if (!verified.ok) {
+      throw new DomainError('AUTH_ASSERTION_INVALID', verified.detail, 401);
+    }
+    const { claims } = verified;
+
+    // SINGLE-USE, CHECKED RIGHT AFTER CRYPTOGRAPHIC VALIDITY — before any DB lookup,
+    // so a replayed token is refused as a replay even if the account it names has since
+    // been provisioned or suspended.
+    if (!this.consumeAssertionJti(claims.jti, claims.exp, now.getTime())) {
+      throw new DomainError('AUTH_ASSERTION_REPLAYED', 'This sign-in link has already been used.', 401);
+    }
+
+    const { userMaster } = orgSchema;
+    const email = claims.email.toLowerCase();
+    const row = (
+      await this.db
+        .select({
+          userId: userMaster.userId,
+          userName: userMaster.userName,
+          email: userMaster.email,
+          isActive: userMaster.isActive,
+        })
+        .from(userMaster)
+        .where(eq(userMaster.email, email))
+        .limit(1)
+    )[0];
+    if (!row) {
+      throw new DomainError(
+        'AUTH_UNKNOWN_USER',
+        `No RawProd account is provisioned for ${email}. Ask an administrator to create one before opening this console.`,
+        401,
+      );
+    }
+    if (row.isActive === false) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Account inactive');
+    }
+
+    const roles = await this.rolesFor(row.userId);
+    const perms = await this.permissionsFor(row.userId);
+
+    // Same two-console gate password sign-in already honours — unset CONSOLE (this
+    // deployment's current shape) applies no gate.
+    const consoleEnv = process.env.CONSOLE;
+    if ((consoleEnv === 'online' || consoleEnv === 'factory') && !consoleAllows(consoleEnv, roles)) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', `This account is not permitted on the ${consoleEnv} console.`);
     }
 
     const accessToken = await this.jwt.signAccess({
@@ -209,6 +341,12 @@ export class AuthService {
     password: string,
     principal: AuthPrincipal,
   ): Promise<{ userId: string }> {
+    if (!this.passwordLoginAllowed()) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        'Password sign-in is retired; there is no password to set. Sign in via ALEMBIC.',
+      );
+    }
     const { userMaster, userRoleMapping, roleMaster } = orgSchema;
     const exists = (
       await this.db
