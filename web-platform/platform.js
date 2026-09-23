@@ -52,8 +52,8 @@
     if (session.token) payload.token = session.token;
     var res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
     var envelope = await res.json();
-    if (!envelope || !envelope.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Could not reach the backend. Try again.', 0); }
-    var inner = JSON.parse(await open(envelope.enc));
+    if (!envelope || !envelope.data || !envelope.data.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Could not reach the backend. Try again.', 0); }
+    var inner = JSON.parse(await open(envelope.data.enc));
     var body = inner.body ? JSON.parse(inner.body) : null;
     return { status: inner.status, json: body };
   }

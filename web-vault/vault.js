@@ -98,12 +98,12 @@
       body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }),
     });
     var envelope = await res.json();
-    if (!envelope || !envelope.enc) {
+    if (!envelope || !envelope.data || !envelope.data.enc) {
       // Transient failure (cold start / dropped connection) — reset and let the caller retry.
       aesKey = null; handshakePromise = null;
       throw new VaultError('NETWORK', 'Could not reach the secure channel. Try again.', 0);
     }
-    var inner = JSON.parse(await open(envelope.enc));
+    var inner = JSON.parse(await open(envelope.data.enc));
     var body = inner.body ? JSON.parse(inner.body) : null;
     return { status: inner.status, json: body };
   }
