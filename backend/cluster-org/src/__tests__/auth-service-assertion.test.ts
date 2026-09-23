@@ -12,6 +12,7 @@
 import { test, before, after as afterAll } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID, generateKeyPairSync, sign as edSign } from 'node:crypto';
+import { eq } from 'drizzle-orm';
 import { uuidv7 } from '@core/data-kernel';
 import { ConfigService, JwtService } from '@core/backend-kernel';
 import { AuthService } from '../auth/auth.service.js';
@@ -56,6 +57,7 @@ function claimsFor(email: string, overrides: Record<string, unknown> = {}) {
     iss: 'alembic', aud: 'rawprod', sub: `staff:${email}`,
     tenant_id: 't1', org_id: 't1', email, roles: ['admin'], target: 'factory',
     iat: nowSec, exp: nowSec + 45, jti: randomUUID(),
+    auth_time: nowSec - 30,
     ...overrides,
   };
 }
@@ -284,6 +286,150 @@ test('setPassword is likewise refused once password sign-in is retired', async (
     () => svc.setPassword(userId, 'a-new-password-123', principal({ roles: ['owner'] })),
     (err: any) => {
       assert.equal(err.code, 'AUTH_FORBIDDEN');
+      return true;
+    },
+  );
+});
+
+/* ── S3 SECURITY REVIEW ITEM 1 — SUBJECT BINDING, NOT EMAIL-ONLY MAPPING ───────────────────── */
+
+test('first successful assertion login BINDS alembic_subject on the matched row', async () => {
+  const email = `bind-${sid()}@rawaroma.local`;
+  const userId = await makeActiveUser({ email });
+  const svc = makeService();
+  const sub = `staff:${email}`;
+  await svc.loginWithAssertion(signAssertion(claimsFor(email, { sub })));
+
+  const row = (await db.select({ alembicSubject: userMaster.alembicSubject }).from(userMaster)
+    .where(eq(userMaster.userId, userId)))[0];
+  assert.equal(row?.alembicSubject, sub);
+});
+
+test('once bound, a SECOND assertion for the SAME subject logs in by subject even if email '
+  + 'lookup would also have matched', async () => {
+  const email = `rebind-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const svc = makeService();
+  const sub = `staff:${email}`;
+  await svc.loginWithAssertion(signAssertion(claimsFor(email, { sub, jti: randomUUID() })));
+  // A second, later assertion for the same subject (fresh jti) still succeeds.
+  const second = await svc.loginWithAssertion(signAssertion(claimsFor(email, { sub, jti: randomUUID() })));
+  assert.ok(second.accessToken);
+});
+
+test('VAULT-TAKEOVER GUARD — an assertion presenting the right email but a DIFFERENT subject '
+  + 'than the one already bound is refused, never silently re-bound', async () => {
+  const email = `hijack-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email });
+  const svc = makeService();
+  const legitSub = `staff:${email}`;
+  await svc.loginWithAssertion(signAssertion(claimsFor(email, { sub: legitSub, jti: randomUUID() })));
+
+  // Attacker retargeted the row's email (e.g. via a since-closed edit-service path) to an
+  // address they control on ALEMBIC, then presents an assertion for THAT ALEMBIC identity
+  // naming the same RawProd email. Must be refused, not treated as a legitimate second login.
+  const attackerSub = `staff:attacker-${sid()}@evil.example`;
+  await assert.rejects(
+    () => svc.loginWithAssertion(signAssertion(claimsFor(email, { sub: attackerSub, jti: randomUUID() }))),
+    (err: any) => {
+      assert.equal(err.code, 'AUTH_FORBIDDEN');
+      assert.match(err.message, /different ALEMBIC identity/);
+      return true;
+    },
+  );
+});
+
+/* ── S3 SECURITY REVIEW ITEM 12 — status column, not just is_active ────────────────────────── */
+
+test('a row suspended via `status` (is_active left true) is refused just like is_active=false', async () => {
+  const email = `statussuspend-${sid()}@rawaroma.local`;
+  const userId = await makeActiveUser({ email, isActive: true });
+  await db.update(userMaster).set({ status: 'SUSPENDED' }).where(eq(userMaster.userId, userId));
+  const svc = makeService();
+  await assert.rejects(
+    () => svc.loginWithAssertion(signAssertion(claimsFor(email))),
+    (err: any) => {
+      assert.equal(err.code, 'AUTH_FORBIDDEN');
+      return true;
+    },
+  );
+});
+
+test('a row with status=ACTIVE (or no status set) is not refused on status grounds', async () => {
+  const email = `statusactive-${sid()}@rawaroma.local`;
+  const userId = await makeActiveUser({ email });
+  await db.update(userMaster).set({ status: 'ACTIVE' }).where(eq(userMaster.userId, userId));
+  const svc = makeService();
+  const out = await svc.loginWithAssertion(signAssertion(claimsFor(email)));
+  assert.ok(out.accessToken);
+});
+
+/* ── S3 SECURITY REVIEW ITEM 13 — random per-session sid, never the userId ─────────────────── */
+
+test('the minted access token carries a random sid, not the userId', async () => {
+  const email = `sidcheck-${sid()}@rawaroma.local`;
+  const userId = await makeActiveUser({ email });
+  const svc = makeService();
+  const out = await svc.loginWithAssertion(signAssertion(claimsFor(email)));
+  const config = testConfig();
+  const jwt = new JwtService(config);
+  const claims = await jwt.verifyAccess(out.accessToken);
+  assert.notEqual(claims.sid, userId);
+  // A UUID-shaped random id, not a recognisable derivative of the userId.
+  assert.match(claims.sid, /^[0-9a-f-]{36}$/i);
+});
+
+test('two separate logins for the same user mint two DIFFERENT sids', async () => {
+  const email = `sidunique-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email });
+  const svc = makeService();
+  const config = testConfig();
+  const jwt = new JwtService(config);
+  const first = await svc.loginWithAssertion(signAssertion(claimsFor(email, { jti: randomUUID() })));
+  const second = await svc.loginWithAssertion(signAssertion(claimsFor(email, { jti: randomUUID() })));
+  const c1 = await jwt.verifyAccess(first.accessToken);
+  const c2 = await jwt.verifyAccess(second.accessToken);
+  assert.notEqual(c1.sid, c2.sid);
+});
+
+/* ── S3 SECURITY REVIEW ITEM 2 — auth_time carried from the assertion, used by FreshAuthGuard ─ */
+
+test('the minted access token\'s authTime comes from the assertion\'s auth_time, not "now"', async () => {
+  const email = `authtime-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email });
+  const svc = makeService();
+  const nowSec = Math.floor(Date.now() / 1000);
+  const staleAuthTime = nowSec - 3600; // proved an hour ago (e.g. a long-lived ALEMBIC session)
+  const out = await svc.loginWithAssertion(signAssertion(claimsFor(email, { auth_time: staleAuthTime })));
+  const config = testConfig();
+  const jwt = new JwtService(config);
+  const claims: any = await jwt.verifyAccess(out.accessToken);
+  assert.equal(claims.authTime, staleAuthTime);
+  // authTime must genuinely differ from iat here — otherwise this test could not distinguish
+  // "carried from the assertion" from "just stamped as now" (iat always IS now).
+  assert.notEqual(claims.authTime, claims.iat);
+});
+
+/* ── S3 SECURITY REVIEW ITEM 4 — Postgres-backed jti replay store (cross-instance) ─────────── */
+
+test('REPLAY IS BLOCKED ACROSS SEPARATE AuthService INSTANCES sharing one Postgres — proves '
+  + 'the store is not the old in-process Map (which a second process/instance would not see)', async () => {
+  const email = `crossproc-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const token = signAssertion(claimsFor(email));
+
+  // Two independently-constructed AuthService instances — simulating two API processes —
+  // sharing the same underlying Postgres connection the test harness provides.
+  const svcA = makeService();
+  const svcB = makeService();
+
+  const first = await svcA.loginWithAssertion(token);
+  assert.ok(first.accessToken);
+
+  await assert.rejects(
+    () => svcB.loginWithAssertion(token),
+    (err: any) => {
+      assert.equal(err.code, 'AUTH_ASSERTION_REPLAYED');
       return true;
     },
   );

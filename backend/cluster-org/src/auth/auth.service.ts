@@ -8,7 +8,7 @@
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.
  */
 import { HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import * as argon2 from "argon2";
 import { createHash, randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
@@ -56,13 +56,6 @@ export class AuthService {
   // In-memory brute-force throttle keyed by identifier (per-process; a shared store is the Stage-1 swap).
   private readonly loginFails = new Map<string, { count: number; until: number }>();
 
-  // PB-04/SB-02: single-use guard for `iat`-scoped assertion jtis. In-memory / per-process,
-  // same MVP posture as `loginFails` above ("a shared store is the Stage-1 swap") — a token
-  // this short-lived (<=60s, PB-04's ceiling) is spent within seconds of being minted, so a
-  // multi-process deployment's exposure is "two API processes each accept one presentation
-  // inside that same short window", not an unbounded replay. Swept lazily on every check.
-  private readonly usedAssertionJti = new Map<string, number>(); // jti -> exp (unix seconds)
-
   constructor(
     @Inject(ORG_DB) private readonly db: OrgDb,
     @Inject(JwtService) private readonly jwt: JwtService,
@@ -79,17 +72,33 @@ export class AuthService {
     return this.config.get('PASSWORD_LOGIN_ENABLED');
   }
 
-  /** Single-use check for an assertion's `jti`. True the FIRST time a given jti is seen
-   *  before its own expiry; false on any later presentation (replay) — checked regardless
-   *  of what the rest of verification decides, so a spent token cannot be retried against a
-   *  different (or now-provisioned) email either. */
-  private consumeAssertionJti(jti: string, expSec: number, nowMs: number): boolean {
-    for (const [seenJti, seenExpSec] of this.usedAssertionJti) {
-      if (seenExpSec * 1000 <= nowMs) this.usedAssertionJti.delete(seenJti);
+  /**
+   * Single-use check for an assertion's `jti` — S3 security review item 4. Postgres-backed
+   * (`iam.assertion_jti`), not the old in-process `Map`: the old store's own doc candidly
+   * called out its exposure ("two API processes each accept one presentation inside that
+   * same short window") for a multi-process deployment, which the AWS target topology (a load
+   * balancer over more than one API process) actually is. `INSERT ... ON CONFLICT DO NOTHING`
+   * is atomic across every process sharing the one Postgres — the first process to reach this
+   * for a given `jti` wins the row; every other process (including a genuinely concurrent
+   * presentation) sees zero rows back and reads it as a replay, regardless of process
+   * boundaries. Sweeps expired rows lazily on every call, the same "no cron job needed" shape
+   * `expireVaultRoleGrant` uses elsewhere in this codebase.
+   */
+  private async consumeAssertionJti(jti: string, expSec: number): Promise<boolean> {
+    const { assertionJti } = orgSchema;
+    try {
+      await this.db.delete(assertionJti).where(lt(assertionJti.expiresAt, new Date()));
+    } catch (e) {
+      // Best-effort — a sweep failure must never block (or falsely allow) the actual
+      // single-use check below.
+      this.logger.warn(`assertion jti sweep failed: ${(e as Error).message}`);
     }
-    if (this.usedAssertionJti.has(jti)) return false;
-    this.usedAssertionJti.set(jti, expSec);
-    return true;
+    const inserted = await this.db
+      .insert(assertionJti)
+      .values({ jti, expiresAt: new Date(expSec * 1000) })
+      .onConflictDoNothing()
+      .returning({ jti: assertionJti.jti });
+    return inserted.length > 0;
   }
 
   /** Record a login in iam.login_history so the admin Login-history view has data (audit
@@ -172,15 +181,22 @@ export class AuthService {
       throw DomainError.forbidden("AUTH_FORBIDDEN", `This account is not permitted on the ${consoleEnv} console.`);
     }
 
+    // S3 security review item 13: a random per-session id, never the userId (which every
+    // session for the same user would then share, making sessionId useless for a future
+    // per-session revoke). Item 2: a password login IS the fresh proof, so authTime = now,
+    // same as iat.
+    const sid = randomUUID();
+    const nowSec = Math.floor(Date.now() / 1000);
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,
       roles,
       perms,
       pv: 1,
-      sid: row.userId,
+      sid,
+      authTime: nowSec,
     });
-    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid, authTime: nowSec });
     await this.recordSession(row.userId, refreshToken);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
@@ -203,7 +219,17 @@ export class AuthService {
    *  assertion's `roles` claim — that claim is ALEMBIC's coarse "even allowed to try"
    *  gate (see `rawprod-eligibility.ts` in that repository) and carries no authority
    *  here. The existing role/permission mapping this rail has always used is
-   *  unchanged: `rolesFor`/`permissionsFor` off `user_master`'s own grants. */
+   *  unchanged: `rolesFor`/`permissionsFor` off `user_master`'s own grants.
+   *
+   *  S3 SECURITY REVIEW ITEM 1 — SUBJECT BINDING, NOT EMAIL-ONLY MAPPING. The original
+   *  version mapped an assertion to a `user_master` row by EMAIL ALONE. Combined with
+   *  `EditService`'s generic PATCH once exposing `email` as an editable column, that was a
+   *  vault-takeover path: anyone holding `iam:user_master:write` could retarget a privileged
+   *  account's email to an address they control on ALEMBIC and sign in as that account.
+   *  `user_master.alembic_subject` closes it: the FIRST successful assertion login for a row
+   *  with no subject yet BINDS it (`claims.sub`, e.g. `staff:admin@rawaroma.local`); every
+   *  login after that must match the bound subject — an assertion presenting the right EMAIL
+   *  but a DIFFERENT subject is refused outright, never silently re-bound. */
   async loginWithAssertion(assertion: string): Promise<LoginResult> {
     const verifyKey = this.config.get('ALEMBIC_ASSERTION_VERIFY_KEY');
     if (!verifyKey) {
@@ -212,12 +238,18 @@ export class AuthService {
       );
     }
     const now = new Date();
+    const expectedTargetsRaw = this.config.get('RAWPROD_ASSERTION_EXPECTED_TARGETS');
+    const expectedTargets = expectedTargetsRaw
+      ? expectedTargetsRaw.split(',').map((t) => t.trim()).filter((t) => t.length > 0)
+      : undefined;
     const verified = verifyAlembicAssertion({
       token: assertion,
       verifyKeyB64: verifyKey,
       issuer: this.config.get('ALEMBIC_ASSERTION_ISSUER'),
       audience: this.config.get('ALEMBIC_ASSERTION_AUDIENCE'),
       now,
+      expectedTargets,
+      expectedTenantId: this.config.get('ALEMBIC_ASSERTION_TENANT_ID') || undefined,
     });
     if (!verified.ok) {
       throw new DomainError('AUTH_ASSERTION_INVALID', verified.detail, 401);
@@ -226,33 +258,65 @@ export class AuthService {
 
     // SINGLE-USE, CHECKED RIGHT AFTER CRYPTOGRAPHIC VALIDITY — before any DB lookup,
     // so a replayed token is refused as a replay even if the account it names has since
-    // been provisioned or suspended.
-    if (!this.consumeAssertionJti(claims.jti, claims.exp, now.getTime())) {
+    // been provisioned or suspended. Postgres-backed (S3 item 4) — see consumeAssertionJti.
+    if (!(await this.consumeAssertionJti(claims.jti, claims.exp))) {
       throw new DomainError('AUTH_ASSERTION_REPLAYED', 'This sign-in link has already been used.', 401);
     }
 
     const { userMaster } = orgSchema;
     const email = claims.email.toLowerCase();
-    const row = (
-      await this.db
-        .select({
-          userId: userMaster.userId,
-          userName: userMaster.userName,
-          email: userMaster.email,
-          isActive: userMaster.isActive,
-        })
-        .from(userMaster)
-        .where(eq(userMaster.email, email))
-        .limit(1)
+    const USER_COLS = {
+      userId: userMaster.userId,
+      userName: userMaster.userName,
+      email: userMaster.email,
+      isActive: userMaster.isActive,
+      status: userMaster.status,
+      alembicSubject: userMaster.alembicSubject,
+    } as const;
+
+    // First: a row already bound to THIS subject is authoritative, regardless of what its
+    // email column currently holds — a subject, once bound, is the identity; email is no
+    // longer load-bearing for lookup (only for display / the unknown-user message below).
+    let row = (
+      await this.db.select(USER_COLS).from(userMaster).where(eq(userMaster.alembicSubject, claims.sub)).limit(1)
     )[0];
+
     if (!row) {
-      throw new DomainError(
-        'AUTH_UNKNOWN_USER',
-        `No RawProd account is provisioned for ${email}. Ask an administrator to create one before opening this console.`,
-        401,
-      );
+      const byEmail = (
+        await this.db.select(USER_COLS).from(userMaster).where(eq(userMaster.email, email)).limit(1)
+      )[0];
+      if (!byEmail) {
+        throw new DomainError(
+          'AUTH_UNKNOWN_USER',
+          `No RawProd account is provisioned for ${email}. Ask an administrator to create one before opening this console.`,
+          401,
+        );
+      }
+      if (byEmail.alembicSubject) {
+        // This email already belongs to a row bound to a DIFFERENT ALEMBIC subject. Never
+        // silently re-bind — that is exactly the account-hijack path item 1 closes. This
+        // shape (right email, wrong subject) is what an email-hijacked account looks like the
+        // moment its attacker tries to sign in on the identity they actually control.
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          'This account is bound to a different ALEMBIC identity. Sign-in refused — contact an administrator.',
+        );
+      }
+      // First successful assertion login for this row — bind it now.
+      await this.db
+        .update(userMaster)
+        .set({ alembicSubject: claims.sub, updatedBy: 'system:alembic-assertion' })
+        .where(eq(userMaster.userId, byEmail.userId));
+      row = { ...byEmail, alembicSubject: claims.sub };
     }
-    if (row.isActive === false) {
+
+    // S3 security review item 12: refuse whatever suspension signal this row carries, not
+    // only the boolean. `is_active = false` is the original column; `status` (metaColumns,
+    // ACTIVE/INACTIVE/SUSPENDED/…) is the dictionary-wide lifecycle column every other master
+    // table already uses — a row suspended via `status` alone (is_active left true/null) must
+    // refuse exactly like one suspended via is_active.
+    const statusUpper = row.status ? row.status.toUpperCase() : null;
+    if (row.isActive === false || (statusUpper !== null && statusUpper !== 'ACTIVE')) {
       throw DomainError.forbidden('AUTH_FORBIDDEN', 'Account inactive');
     }
 
@@ -266,15 +330,21 @@ export class AuthService {
       throw DomainError.forbidden('AUTH_FORBIDDEN', `This account is not permitted on the ${consoleEnv} console.`);
     }
 
+    // S3 security review item 13: random per-session sid, never row.userId. Item 2: authTime
+    // comes from the assertion's OWN auth_time (the OTP-verification/step-up time ALEMBIC
+    // proved), never "now" — a fresh RawProd token minted off a not-so-fresh ALEMBIC session
+    // must not read as a fresh authentication for @FreshAuth's purposes.
+    const sid = randomUUID();
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,
       roles,
       perms,
       pv: 1,
-      sid: row.userId,
+      sid,
+      authTime: claims.auth_time,
     });
-    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid, authTime: claims.auth_time });
     await this.recordSession(row.userId, refreshToken);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
@@ -287,7 +357,7 @@ export class AuthService {
   /** Stateless refresh — verify the refresh token, re-load roles/perms, re-mint the access token
    * (so the portal survives a reload / 15-min access-token expiry). No reuse-detection yet (MVP). */
   async refresh(refreshToken: string): Promise<LoginResult> {
-    let claims: { sub: string };
+    let claims: { sub: string; sid: string; authTime: number };
     try {
       claims = await this.jwt.verifyRefresh(refreshToken);
     } catch {
@@ -318,15 +388,21 @@ export class AuthService {
       throw DomainError.forbidden("AUTH_FORBIDDEN", `This account is not permitted on the ${consoleEnv} console.`);
     }
 
+    // S3 security review items 2/13: carry the ORIGINAL sid and authTime forward unchanged —
+    // a refresh re-presents an existing session's bearer token, it does not start a new
+    // session and it is not a fresh proof of the credential. Minting a new random sid (or a
+    // fresh authTime) here would be a DIFFERENT session and a false "just authenticated"
+    // signal respectively, either of which defeats a step-up window measured off authTime.
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,
       roles,
       perms,
       pv: 1,
-      sid: row.userId,
+      sid: claims.sid,
+      authTime: claims.authTime,
     });
-    const newRefresh = await this.jwt.signRefresh({ sub: row.userId, sid: row.userId });
+    const newRefresh = await this.jwt.signRefresh({ sub: row.userId, sid: claims.sid, authTime: claims.authTime });
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,

@@ -173,6 +173,10 @@ export function principal(overrides: Partial<AuthPrincipal> = {}): AuthPrincipal
     // Default = "now" so a test that doesn't care about staleness passes any @FreshAuth check
     // too; a test asserting the step-up gate overrides this to an old value.
     iat: Math.floor(Date.now() / 1000),
+    // FreshAuthGuard reads authTime, not iat (S3 security review item 2) — default it to the
+    // same "now" so a test that only overrides `iat` (pre-existing callers) still passes any
+    // @FreshAuth check by default; a step-up test overrides authTime explicitly.
+    authTime: Math.floor(Date.now() / 1000),
     ...overrides,
   };
 }

@@ -47,6 +47,14 @@ ALTER TABLE "bridge"."connector_config" ADD COLUMN IF NOT EXISTS "webhook_url" t
 ALTER TABLE "bridge"."connector_config" ADD COLUMN IF NOT EXISTS "hmac_secret_sealed" text;
 ALTER TABLE "bridge"."connector_config" ADD COLUMN IF NOT EXISTS "configured_at" timestamp with time zone;
 ALTER TABLE "bridge"."connector_config" ADD COLUMN IF NOT EXISTS "configured_by" varchar(255);
+CREATE TABLE IF NOT EXISTS "bridge"."facts_nonce" (
+	"nonce" varchar(255) PRIMARY KEY NOT NULL,
+	"expires_at" timestamp with time zone NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE "bridge"."facts_nonce" ADD COLUMN IF NOT EXISTS "expires_at" timestamp with time zone;  -- relaxed from NOT NULL: no default to backfill existing rows with safely
+ALTER TABLE "bridge"."facts_nonce" ADD COLUMN IF NOT EXISTS "created_at" timestamp with time zone DEFAULT now() NOT NULL;
 CREATE TABLE IF NOT EXISTS "bridge"."inbound_event" (
 	"event_id" uuid PRIMARY KEY NOT NULL,
 	"version" integer NOT NULL,

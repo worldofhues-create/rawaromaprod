@@ -59,7 +59,12 @@ export class DashboardService {
     const perms = new Set(principal.permissions || []);
     const isOwner =
       (principal.roles || []).includes('owner') || (principal.roles || []).includes('super_admin');
-    const seeProduct = isOwner || perms.has('formula:actual:read');
+    // Security review item 10: `formula:actual:` is a NEVER_IMPLICIT permission
+    // (backend-kernel's PermissionsGuard.NEVER_IMPLICIT_PATTERNS) — owner/super_admin get NO
+    // implicit vault-adjacent reveal, here any more than at the guard layer. Product identity
+    // surfaces ONLY for a caller who explicitly holds formula:actual:read, never off the role
+    // alone.
+    const seeProduct = perms.has('formula:actual:read');
     const seeMaterial = isOwner || perms.has('masterdata:material:reveal');
     // Portal-audit WS7: supplier names + spend share are commercial procurement data — only
     // owner/procurement may see them (the spend-by-supplier panel renders for those roles only,

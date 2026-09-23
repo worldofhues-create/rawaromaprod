@@ -5,7 +5,7 @@
  * paginated (desc PK, limit+1). `passwordHash` is taken as-is for now (auth service later).
  */
 import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, inArray, lt } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import {
   DomainError,
@@ -48,6 +48,10 @@ const USER_SAFE = {
   email: userMaster.email,
   mobileNumber: userMaster.mobileNumber,
   isActive: userMaster.isActive,
+  // S3 security review item 1 — visible (never editable through the generic path; see
+  // edit.service.ts) so an admin screen can show whether a row is bound to an ALEMBIC
+  // identity, without exposing anything secret (it is an identity label, not a credential).
+  alembicSubject: userMaster.alembicSubject,
   status: userMaster.status,
   createdDt: userMaster.createdDt,
   updatedDt: userMaster.updatedDt,
@@ -157,6 +161,71 @@ export class SecurityService {
       .where(eq(userMaster.userId, id))
       .limit(1);
     return rows[0] ?? null;
+  }
+
+  /**
+   * S3 security review item 1 — the DEDICATED, AUDITED path for changing a user's email.
+   * `EditService`'s generic PATCH (`edit.service.ts`) never lists `email` as an editable
+   * column any more — this is the only way to change it. Refuses outright for a target
+   * holding a Vault-authority role (formulator/vault_approver): those accounts are exactly
+   * the ones `AuthService.loginWithAssertion`'s old email-only mapping made a takeover target
+   * for, and a rare, high-stakes edit like this is safer refused than built out into a second
+   * two-person flow nobody will exercise often enough to trust. An ordinary user's email may
+   * still be corrected here, permission-gated the same as the generic editor was
+   * (`iam:user_master:write`), and every attempt is written to the audit sink whether it
+   * succeeds or is refused.
+   */
+  async changeUserEmail(userId: string, newEmail: string, principal: AuthPrincipal): Promise<SafeUser> {
+    const target = await this.getUserById(userId);
+    if (!target) throw DomainError.notFound(`User not found: ${userId}`);
+
+    const vaultRoles = await this.db
+      .select({ code: roleMaster.roleCode })
+      .from(userRoleMapping)
+      .innerJoin(roleMaster, eq(roleMaster.roleId, userRoleMapping.roleId))
+      .where(and(eq(userRoleMapping.userId, userId), inArray(roleMaster.roleCode, VAULT_AUTHORITY_ROLES)));
+
+    if (vaultRoles.length > 0) {
+      if (this.auditSink) {
+        await this.auditSink
+          .record({
+            actorId: principal.userId,
+            action: 'security.user_email.refused',
+            entityType: 'user_master',
+            entityId: userId,
+            reason: `refused email change for a Vault-authority role holder (${vaultRoles.map((r) => r.code).join(', ')})`,
+            result: 'refuse',
+          })
+          .catch(() => {});
+      }
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        'This account holds a Vault-authority role (formulator/vault_approver) — its email cannot be changed through this path. Contact the owner.',
+      );
+    }
+
+    const email = newEmail.toLowerCase();
+    const actor = principal.userId;
+    const rows = await this.db
+      .update(userMaster)
+      .set({ email, updatedBy: actor })
+      .where(eq(userMaster.userId, userId))
+      .returning(USER_SAFE);
+    const updated = ensure(rows[0]);
+
+    if (this.auditSink) {
+      await this.auditSink
+        .record({
+          actorId: actor,
+          action: 'security.user_email.changed',
+          entityType: 'user_master',
+          entityId: userId,
+          reason: `email changed from "${target.email ?? ''}" to "${email}"`,
+          result: 'allow',
+        })
+        .catch(() => {});
+    }
+    return updated;
   }
 
   // ── role_master ───────────────────────────────────────────────────────────
@@ -459,156 +528,241 @@ export class SecurityService {
   }
 
   /**
+   * S3 security review item 11 — walks the FULL `created_by` ancestor chain from `startUserId`
+   * looking for `targetUserId`, not just one hop. The original puppet-account check only
+   * compared `approver.createdBy === request.createdBy` — a requester who created account A,
+   * who in turn created account B, could hand B to `approveVaultRoleGrant` and sail through:
+   * `B.createdBy` is A's id, not the requester's, so the one-hop check never fired even though
+   * B is transitively the requester's own puppet. `MAX_DEPTH` bounds the walk (both against a
+   * pathological/cyclic `created_by` chain and as a plain sanity limit — real onboarding chains
+   * are a handful of hops at most) and `visited` makes a cycle terminate rather than loop.
+   */
+  private async isInCreatorChain(startUserId: string, targetUserId: string): Promise<boolean> {
+    const MAX_DEPTH = 12;
+    // `created_by` is a free-text dictionary column (metaColumns' VARCHAR, not a uuid FK) —
+    // most rows carry a real userId there, but a seed/system/legacy row can carry a sentinel
+    // string like 'system' or 'test'. A non-uuid value can never itself be a user_master.
+    // user_id (a real uuid column), so the walk simply ends there rather than issuing a query
+    // Postgres would reject outright with an invalid-uuid-syntax error.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const lookupCreatedBy = async (id: string): Promise<string | null> => {
+      const rows = await this.db.select({ createdBy: userMaster.createdBy }).from(userMaster)
+        .where(eq(userMaster.userId, id)).limit(1);
+      return rows[0]?.createdBy ?? null;
+    };
+    const visited = new Set<string>();
+    let currentId: string | null = startUserId;
+    for (let depth = 0; depth < MAX_DEPTH && currentId; depth++) {
+      if (visited.has(currentId)) return false; // cycle — never resolves to targetUserId
+      visited.add(currentId);
+      if (!UUID_RE.test(currentId)) return false;
+      const createdBy: string | null = await lookupCreatedBy(currentId);
+      if (!createdBy) return false;
+      if (createdBy === targetUserId) return true;
+      currentId = createdBy;
+    }
+    return false;
+  }
+
+  /**
    * Approve a PENDING vault-role grant request (S2 item A) — the second person in the
    * two-person control. Only now does the mapping get inserted into user_role_mapping and take
    * effect; the approver must be a DIFFERENT owner/admin: not the requester, not the target
-   * user, and not a puppet account the requester themselves created (`user_master.created_by`).
+   * user, and not a puppet account the requester themselves created, directly OR transitively
+   * (`user_master.created_by`, walked by `isInCreatorChain` — S3 item 11).
+   *
+   * S3 SECURITY REVIEW ITEM 9 — ATOMIC, ONE TRANSACTION. The original version read the request,
+   * ran every check, inserted the mapping, and only THEN updated `grant_status` to APPROVED —
+   * four round trips with no lock between the read and the write. Two concurrent approvals
+   * (even by two genuinely different, individually-valid approvers) could both pass the
+   * `grantStatus !== 'PENDING'` check before either had committed, producing two user_role_
+   * mapping rows (caught only after the fact by the unique `(user_id, role_id)` index) or two
+   * `security.vault_role.assigned` audit rows for one request. Now every read and write for one
+   * decision happens inside a single `db.transaction`, the request row is locked
+   * (`.for('update')`) before any check runs, and the actual state transition is the literal
+   * `UPDATE ... WHERE grant_status = 'PENDING' RETURNING` this review item asks for — belt AND
+   * braces on top of the row lock, so the invariant holds even if a future refactor ever drops
+   * the lock.
    */
   async approveVaultRoleGrant(requestId: string, principal: AuthPrincipal): Promise<UserRoleRow> {
-    const request = (
-      await this.db
-        .select()
-        .from(vaultRoleGrantRequest)
-        .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
-        .limit(1)
+    // LAZY EXPIRY IS ITS OWN, IMMEDIATELY-COMMITTED STATEMENT — deliberately OUTSIDE the
+    // transaction below. It must survive even though this whole approval attempt is about to
+    // fail (a rollback of the main transaction would otherwise undo the EXPIRED mark too, since
+    // both would be the same transaction); running it first, as an ordinary auto-committing
+    // UPDATE, also avoids self-deadlocking against the `.for('update')` lock the main
+    // transaction takes on the very same row a moment later.
+    const preRow = (
+      await this.db.select({ grantStatus: vaultRoleGrantRequest.grantStatus, expiresDt: vaultRoleGrantRequest.expiresDt, userId: vaultRoleGrantRequest.userId })
+        .from(vaultRoleGrantRequest).where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId)).limit(1)
     )[0];
-    if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
-    if (request.grantStatus !== 'PENDING') {
-      throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
-    }
-    if (request.expiresDt && request.expiresDt.getTime() < Date.now()) {
-      await this.expireVaultRoleGrant(request);
-      throw DomainError.conflict('This grant request has expired — ask the requester to open a new one.');
-    }
-
-    const approverRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
-    if (!approverRoles.some((r) => OWNER_ADMIN.includes(r))) {
-      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only owner/admin may approve a Vault-authority role grant.');
-    }
-    if (principal.userId === request.createdBy) {
-      throw DomainError.forbidden('AUTH_FORBIDDEN', 'You cannot approve your own Vault-authority role request — a different owner/admin must approve it.');
-    }
-    if (principal.userId === request.userId) {
-      throw DomainError.forbidden('AUTH_FORBIDDEN', 'The user the role is being granted to cannot approve their own grant.');
-    }
-    // Puppet-account close: an approver whose OWN account was created by the same requester is
-    // not a genuinely independent second person — see the note in createUserRole.
-    const approver = await this.getUserById(principal.userId);
-    if (approver?.createdBy && approver.createdBy === request.createdBy) {
-      throw DomainError.forbidden(
-        'AUTH_FORBIDDEN',
-        'You cannot approve this grant — your account was created by the same person who requested it. A genuinely independent owner/admin must approve.',
-      );
+    if (preRow?.grantStatus === 'PENDING' && preRow.expiresDt && preRow.expiresDt.getTime() < Date.now()) {
+      const expired = await this.db
+        .update(vaultRoleGrantRequest)
+        .set({ grantStatus: 'EXPIRED', updatedBy: 'system' })
+        .where(and(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId), eq(vaultRoleGrantRequest.grantStatus, 'PENDING')))
+        .returning({ id: vaultRoleGrantRequest.vaultRoleGrantRequestId });
+      if (expired.length > 0 && this.auditSink) {
+        await this.auditSink
+          .record({
+            actorId: null,
+            action: 'security.vault_role.expired',
+            entityType: 'vault_role_grant_request',
+            entityId: requestId,
+            reason: `pending role request for user ${preRow.userId} expired unapproved after ${VAULT_GRANT_TTL_HOURS}h`,
+            result: 'refuse',
+          })
+          .catch(() => {});
+      }
     }
 
-    const role = (
-      await this.db
-        .select({ roleCode: roleMaster.roleCode })
-        .from(roleMaster)
-        .where(eq(roleMaster.roleId, request.roleId!))
-        .limit(1)
-    )[0];
+    return this.db.transaction(async (tx) => {
+      const request = (
+        await tx
+          .select()
+          .from(vaultRoleGrantRequest)
+          .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
+          .for('update')
+          .limit(1)
+      )[0];
+      if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
+      if (request.grantStatus !== 'PENDING') {
+        // Covers the just-expired case too (grantStatus is now 'EXPIRED' from the pre-pass
+        // above) with the same honest message every other already-decided state gets.
+        throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
+      }
 
-    const actor = principal.userId;
-    const mappingRows = await this.db
-      .insert(userRoleMapping)
-      .values({
-        userId: request.userId,
-        roleId: request.roleId,
-        status: 'ACTIVE',
-        createdBy: request.createdBy,
-        updatedBy: actor,
-      })
-      .returning();
-    const mapping = ensure(mappingRows[0]);
+      const approverRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+      if (!approverRoles.some((r) => OWNER_ADMIN.includes(r))) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only owner/admin may approve a Vault-authority role grant.');
+      }
+      if (principal.userId === request.createdBy) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', 'You cannot approve your own Vault-authority role request — a different owner/admin must approve it.');
+      }
+      if (principal.userId === request.userId) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', 'The user the role is being granted to cannot approve their own grant.');
+      }
+      // Puppet-account close, now transitive (S3 item 11): an approver anywhere in a chain of
+      // accounts ultimately created by the requester is not a genuinely independent second
+      // person — see the note in createUserRole.
+      if (request.createdBy && (await this.isInCreatorChain(principal.userId, request.createdBy))) {
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          'You cannot approve this grant — your account was created by the same person who requested it (directly or through an intermediate account). A genuinely independent owner/admin must approve.',
+        );
+      }
 
-    await this.db
-      .update(vaultRoleGrantRequest)
-      .set({
-        grantStatus: 'APPROVED',
-        decidedBy: actor,
-        decidedDt: new Date(),
-        userRoleMappingId: mapping.userRoleMappingId,
-        updatedBy: actor,
-      })
-      .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId));
+      const role = (
+        await tx
+          .select({ roleCode: roleMaster.roleCode })
+          .from(roleMaster)
+          .where(eq(roleMaster.roleId, request.roleId!))
+          .limit(1)
+      )[0];
 
-    if (this.auditSink) {
-      // Vault-authority role assignment is itself security-relevant enough to record on the
-      // tamper-evident chain (security review item 6, extended by item A) — fires on ACTIVATION
-      // (this approval), not on the initial request.
-      await this.auditSink
-        .record({
-          actorId: actor,
-          action: 'security.vault_role.assigned',
-          entityType: 'user_role_mapping',
-          entityId: mapping.userRoleMappingId,
-          reason: `approved role "${role?.roleCode ?? request.roleId}" for user ${request.userId} (requested by ${request.createdBy})`,
-          result: 'allow',
+      const actor = principal.userId;
+
+      // THE ATOMIC CLAIM (S3 item 9): every check above ran against the ROW LOCKED by
+      // `.for('update')`, so nothing could have changed its status since — but the state
+      // transition itself is still expressed as the conditional UPDATE this review item asks
+      // for, not an unconditional one, so the invariant is enforced by the statement's own WHERE
+      // clause and not only by the lock a future edit could accidentally drop.
+      const claimed = await tx
+        .update(vaultRoleGrantRequest)
+        .set({ grantStatus: 'APPROVED', decidedBy: actor, decidedDt: new Date(), updatedBy: actor })
+        .where(and(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId), eq(vaultRoleGrantRequest.grantStatus, 'PENDING')))
+        .returning();
+      if (claimed.length === 0) {
+        throw DomainError.conflict('This grant request was just decided by someone else — refresh and try again.');
+      }
+
+      // Unique (user_id, role_id) on user_role_mapping (packages/data-org/src/schema/
+      // security.ts) is the final backstop against a duplicate role row even if this
+      // transaction's own serialization were ever bypassed.
+      const mappingRows = await tx
+        .insert(userRoleMapping)
+        .values({
+          userId: request.userId,
+          roleId: request.roleId,
+          status: 'ACTIVE',
+          createdBy: request.createdBy,
+          updatedBy: actor,
         })
-        .catch(() => {
-          // Never fail the (already-committed, already-authorized) assignment over an audit
-          // write hiccup — same posture as the guard-layer sinks.
-        });
-    }
-    return mapping;
+        .returning();
+      const mapping = ensure(mappingRows[0]);
+
+      await tx
+        .update(vaultRoleGrantRequest)
+        .set({ userRoleMappingId: mapping.userRoleMappingId, updatedBy: actor })
+        .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId));
+
+      if (this.auditSink) {
+        // Vault-authority role assignment is itself security-relevant enough to record on the
+        // tamper-evident chain (security review item 6, extended by item A) — fires on ACTIVATION
+        // (this approval), not on the initial request.
+        await this.auditSink
+          .record({
+            actorId: actor,
+            action: 'security.vault_role.assigned',
+            entityType: 'user_role_mapping',
+            entityId: mapping.userRoleMappingId,
+            reason: `approved role "${role?.roleCode ?? request.roleId}" for user ${request.userId} (requested by ${request.createdBy})`,
+            result: 'allow',
+          })
+          .catch(() => {
+            // Never fail the (already-committed, already-authorized) assignment over an audit
+            // write hiccup — same posture as the guard-layer sinks.
+          });
+      }
+      return mapping;
+    });
   }
 
-  /** Requester-initiated cancel of their own still-PENDING request (S2 item A). */
+  /**
+   * Requester-initiated cancel of their own still-PENDING request (S2 item A). S3 security
+   * review item 9: same atomic-transaction, locked-row, conditional-UPDATE shape as
+   * `approveVaultRoleGrant` — a cancel racing an approve (or a second cancel) must not both
+   * appear to succeed.
+   */
   async cancelVaultRoleGrant(requestId: string, principal: AuthPrincipal): Promise<{ vaultRoleGrantRequestId: string }> {
-    const request = (
-      await this.db
-        .select()
-        .from(vaultRoleGrantRequest)
-        .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
-        .limit(1)
-    )[0];
-    if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
-    if (request.createdBy !== principal.userId) {
-      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only the requester may cancel this grant request.');
-    }
-    if (request.grantStatus !== 'PENDING') {
-      throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
-    }
-    const actor = principal.userId;
-    await this.db
-      .update(vaultRoleGrantRequest)
-      .set({ grantStatus: 'CANCELLED', decidedBy: actor, decidedDt: new Date(), updatedBy: actor })
-      .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId));
-    if (this.auditSink) {
-      await this.auditSink
-        .record({
-          actorId: actor,
-          action: 'security.vault_role.cancelled',
-          entityType: 'vault_role_grant_request',
-          entityId: requestId,
-          reason: `requester cancelled the pending role request for user ${request.userId}`,
-          result: 'allow',
-        })
-        .catch(() => {});
-    }
-    return { vaultRoleGrantRequestId: requestId };
-  }
-
-  /** Mark a single expired request EXPIRED (idempotent — no-ops if already resolved). Called
-   * lazily from approveVaultRoleGrant; also exported for a future scheduled sweep. */
-  private async expireVaultRoleGrant(request: VaultRoleGrantRequestRow): Promise<void> {
-    await this.db
-      .update(vaultRoleGrantRequest)
-      .set({ grantStatus: 'EXPIRED', updatedBy: 'system' })
-      .where(and(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, request.vaultRoleGrantRequestId), eq(vaultRoleGrantRequest.grantStatus, 'PENDING')));
-    if (this.auditSink) {
-      await this.auditSink
-        .record({
-          actorId: null,
-          action: 'security.vault_role.expired',
-          entityType: 'vault_role_grant_request',
-          entityId: request.vaultRoleGrantRequestId,
-          reason: `pending role request for user ${request.userId} expired unapproved after ${VAULT_GRANT_TTL_HOURS}h`,
-          result: 'refuse',
-        })
-        .catch(() => {});
-    }
+    return this.db.transaction(async (tx) => {
+      const request = (
+        await tx
+          .select()
+          .from(vaultRoleGrantRequest)
+          .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
+          .for('update')
+          .limit(1)
+      )[0];
+      if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
+      if (request.createdBy !== principal.userId) {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only the requester may cancel this grant request.');
+      }
+      if (request.grantStatus !== 'PENDING') {
+        throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
+      }
+      const actor = principal.userId;
+      const claimed = await tx
+        .update(vaultRoleGrantRequest)
+        .set({ grantStatus: 'CANCELLED', decidedBy: actor, decidedDt: new Date(), updatedBy: actor })
+        .where(and(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId), eq(vaultRoleGrantRequest.grantStatus, 'PENDING')))
+        .returning();
+      if (claimed.length === 0) {
+        throw DomainError.conflict('This grant request was just decided by someone else — refresh and try again.');
+      }
+      if (this.auditSink) {
+        await this.auditSink
+          .record({
+            actorId: actor,
+            action: 'security.vault_role.cancelled',
+            entityType: 'vault_role_grant_request',
+            entityId: requestId,
+            reason: `requester cancelled the pending role request for user ${request.userId}`,
+            result: 'allow',
+          })
+          .catch(() => {});
+      }
+      return { vaultRoleGrantRequestId: requestId };
+    });
   }
 
   async listVaultRoleGrantRequests(query: ListQuery): Promise<Page<VaultRoleGrantRequestRow>> {

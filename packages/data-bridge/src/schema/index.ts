@@ -6,4 +6,5 @@ export { bridge } from "./_schema.js";
 export { productionRequirement } from "./production-requirement.js";
 export { inboundEvent } from "./inbound-event.js";
 export { connectorConfig } from "./connector-config.js";
+export { factsNonce } from "./facts-nonce.js";
 export { outbox, auditEvents } from "./crosscutting.js";

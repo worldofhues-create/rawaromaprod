@@ -14,7 +14,7 @@
  * fail-closed state rather than a guess dressed up as an answer.
  */
 import { Inject, Injectable } from "@nestjs/common";
-import { eq } from "drizzle-orm";
+import { eq, lt } from "drizzle-orm";
 import type { Sql } from "postgres";
 import { PG_CLIENT } from "@core/backend-kernel";
 import { BRIDGE_DB, bridgeSchema, type BridgeDb } from "../bridge/bridge.tokens.js";
@@ -22,7 +22,15 @@ import { openSecret } from "../bridge/secret-box.js";
 import { verifyBody } from "../bridge/signing.js";
 import type { FactKind } from "./facts.contract.js";
 
-const { connectorConfig } = bridgeSchema;
+const { connectorConfig, factsNonce } = bridgeSchema;
+
+/** S3 security review item 5 — a signed request older than this (by its OWN `x-bridge-
+ *  timestamp`) is refused even with a valid signature. Bounds how long a captured, still
+ *  validly-signed request body stays presentable at all, before the nonce check even matters. */
+const MAX_TIMESTAMP_AGE_S = 300;
+/** Same margin `alembic-assertion.ts`'s clock-skew tolerance uses — a real clock difference
+ *  between two independent boxes must not read as a forged, from-the-future timestamp. */
+const CLOCK_SKEW_TOLERANCE_S = 5;
 
 interface Blocker {
   readonly kind: "material_shortage" | "qc_hold" | "pending_approval";
@@ -36,15 +44,96 @@ export class FactsService {
     @Inject(BRIDGE_DB) private readonly bridgeDb: BridgeDb,
   ) {}
 
-  /** Same secret, same algorithm as the event channel — signing.ts's own header states the
-   *  two must "agree byte-for-byte or nothing verifies". A second endpoint on the one bridge
-   *  trust relationship, not a second secret an admin has to provision. */
-  async verifySignature(rawBody: string, header: string | null): Promise<boolean> {
+  /**
+   * Same secret, same algorithm as the event channel — signing.ts's own header states the
+   * two must "agree byte-for-byte or nothing verifies". A second endpoint on the one bridge
+   * trust relationship, not a second secret an admin has to provision.
+   *
+   * S3 SECURITY REVIEW ITEM 5 — `timestamp` + `nonce` JOIN THE SIGNED MATERIAL, not just the
+   * body. Before this, the signature covered only the raw body — a captured, validly-signed
+   * request could be re-POSTed indefinitely (the HMAC never expires and never remembers it was
+   * already used). The signed material is now `${timestamp}.${nonce}.${rawBody}` (ALEMBIC's
+   * `rawprod-facts-client.ts` signs the identical string), so: (a) a request older than
+   * `MAX_TIMESTAMP_AGE_S` is refused even with a perfect signature, and (b) a nonce, once
+   * consumed via the `bridge.facts_nonce` unique-insert below, can never be presented again —
+   * an attacker cannot strip the timestamp/nonce back off and resubmit just the body, because
+   * doing so changes the signed material and breaks the signature.
+   */
+  async verifySignature(
+    rawBody: string,
+    header: string | null,
+    timestamp: string | null,
+    nonce: string | null,
+  ): Promise<boolean> {
+    if (!timestamp || !nonce) return false;
+    const timestampSec = Number(timestamp);
+    if (!Number.isFinite(timestampSec)) return false;
+    const nowSec = Math.floor(Date.now() / 1000);
+    if (nowSec - timestampSec > MAX_TIMESTAMP_AGE_S) return false; // too old
+    if (timestampSec - nowSec > CLOCK_SKEW_TOLERANCE_S) return false; // from the future
+
     const config = (await this.bridgeDb.select().from(connectorConfig)
       .where(eq(connectorConfig.id, "default")).limit(1))[0];
     const secret = config?.hmacSecretSealed ? openSecret(config.hmacSecretSealed) : null;
     if (!config?.enabled || !secret) return false;
-    return verifyBody(rawBody, secret, header);
+
+    const signedMaterial = `${timestamp}.${nonce}.${rawBody}`;
+    if (!verifyBody(signedMaterial, secret, header)) return false;
+
+    // ONLY NOW — after the signature over timestamp+nonce+body already verified — spend the
+    // nonce. Checking it earlier would let an unauthenticated caller burn nonces for free;
+    // checking it this late still closes the replay window because the signature itself binds
+    // the nonce to this exact body, so an attacker without the secret cannot mint a second,
+    // differently-nonced signature for a captured body.
+    return this.consumeFactsNonce(nonce, timestampSec + MAX_TIMESTAMP_AGE_S);
+  }
+
+  /** Postgres-backed single-use check for the Facts API's `nonce`, the same shape (and the
+   *  same cross-process reasoning) as `AuthService.consumeAssertionJti` in the RawProd auth
+   *  cluster (S3 item 4's sibling fix for item 5). `INSERT ... ON CONFLICT DO NOTHING` is
+   *  atomic across every process sharing this Postgres. */
+  private async consumeFactsNonce(nonce: string, expiresAtSec: number): Promise<boolean> {
+    try {
+      await this.bridgeDb.delete(factsNonce).where(lt(factsNonce.expiresAt, new Date()));
+    } catch {
+      // Best-effort sweep — never let it block or falsely allow the single-use check below.
+    }
+    const inserted = await this.bridgeDb
+      .insert(factsNonce)
+      .values({ nonce, expiresAt: new Date(expiresAtSec * 1000) })
+      .onConflictDoNothing()
+      .returning({ nonce: factsNonce.nonce });
+    return inserted.length > 0;
+  }
+
+  /**
+   * S3 security review item 5 — resolve the caller's RawProd identity from `staffId` (the
+   * ALEMBIC assertion `sub`/subject ALEMBIC attached to the request) via `alembic_subject`,
+   * and derive permissions from THAT USER'S OWN RawProd role grants — never from `caller.roles`
+   * in the request body, which is ALEMBIC's claim about itself and carries no authority here
+   * (the same principle `AuthService.loginWithAssertion`'s header comment states for the
+   * assertion bridge's own `roles` claim). A `staffId` bound to no RawProd user, or bound to a
+   * suspended one, resolves to NO permissions — fail closed, the same honest "nothing granted"
+   * `permissionsForRoles([])` already returns for an empty role list.
+   */
+  async permissionsForCaller(staffId: string): Promise<ReadonlySet<string>> {
+    const [user] = (await this.sql`
+      select user_id as "userId", is_active as "isActive", status
+        from iam.user_master
+       where alembic_subject = ${staffId}
+       limit 1`) as Array<{ userId: string; isActive: boolean | null; status: string | null }>;
+    if (!user) return new Set();
+    const statusUpper = user.status ? user.status.toUpperCase() : null;
+    if (user.isActive === false || (statusUpper !== null && statusUpper !== 'ACTIVE')) return new Set();
+
+    const roleRows = (await this.sql`
+      select distinct rm.role_code as "roleCode"
+        from iam.user_role_mapping urm
+        join iam.role_master rm on rm.role_id = urm.role_id
+       where urm.user_id = ${user.userId}
+         and coalesce(urm.status, 'ACTIVE') <> 'INACTIVE'`) as Array<{ roleCode: string | null }>;
+    const roles = roleRows.map((r) => r.roleCode).filter((c): c is string => !!c);
+    return this.permissionsForRoles(roles);
   }
 
   async permissionsForRoles(roleCodes: readonly string[]): Promise<ReadonlySet<string>> {

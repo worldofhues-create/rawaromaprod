@@ -44,12 +44,15 @@ function baseClaims(overrides: Record<string, unknown> = {}) {
     iss: ISSUER, aud: AUDIENCE, sub: 'staff:admin@rawaroma.local',
     tenant_id: 't1', org_id: 't1', email: 'admin@rawaroma.local',
     roles: ['admin'], target: 'factory', iat: nowSec, exp: nowSec + 45, jti: 'jti-1',
+    auth_time: nowSec - 30,
     ...overrides,
   };
 }
 
-function verify(token: string, now = NOW) {
-  return verifyAlembicAssertion({ token, verifyKeyB64: VERIFY_KEY_B64, issuer: ISSUER, audience: AUDIENCE, now });
+function verify(token: string, now = NOW, extra: Record<string, unknown> = {}) {
+  return verifyAlembicAssertion({
+    token, verifyKeyB64: VERIFY_KEY_B64, issuer: ISSUER, audience: AUDIENCE, now, ...extra,
+  });
 }
 
 test('a validly signed, in-window assertion verifies', () => {
@@ -146,12 +149,67 @@ test('MALFORMED — a required claim missing', () => {
   assert.equal(out.refusal, 'MALFORMED');
 });
 
-test('auth_time is carried through when present, absent when not', () => {
-  const withAuthTime = verify(sign(baseClaims({ auth_time: Math.floor(NOW.getTime() / 1000) - 30 })));
-  assert.equal(withAuthTime.ok, true);
-  if (withAuthTime.ok) assert.equal(typeof withAuthTime.claims.auth_time, 'number');
+test('auth_time is carried through when present', () => {
+  const nowSec = Math.floor(NOW.getTime() / 1000);
+  const out = verify(sign(baseClaims({ auth_time: nowSec - 30 })));
+  assert.equal(out.ok, true);
+  if (out.ok) assert.equal(out.claims.auth_time, nowSec - 30);
+});
 
-  const without = verify(sign(baseClaims()));
-  assert.equal(without.ok, true);
-  if (without.ok) assert.equal(without.claims.auth_time, undefined);
+test('MALFORMED — auth_time is now a REQUIRED claim, not an optional one', () => {
+  const claims = baseClaims() as Record<string, unknown>;
+  delete claims.auth_time;
+  const out = verify(sign(claims));
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.refusal, 'MALFORMED');
+});
+
+test('WINDOW_TOO_LONG — exp-iat over the 60s ceiling is refused independently of the '
+  + "token's own claims", () => {
+  const nowSec = Math.floor(NOW.getTime() / 1000);
+  const out = verify(sign(baseClaims({ iat: nowSec, exp: nowSec + 61, auth_time: nowSec })));
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.refusal, 'WINDOW_TOO_LONG');
+});
+
+test('exp-iat exactly at the 60s ceiling is accepted', () => {
+  const nowSec = Math.floor(NOW.getTime() / 1000);
+  const out = verify(sign(baseClaims({ iat: nowSec, exp: nowSec + 60, auth_time: nowSec })));
+  assert.equal(out.ok, true);
+});
+
+test('WRONG_TARGET — this deployment does not serve the console the assertion names', () => {
+  const out = verify(sign(baseClaims({ target: 'vault' })), NOW, { expectedTargets: ['factory', 'platform'] });
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.refusal, 'WRONG_TARGET');
+});
+
+test('a matching target passes when expectedTargets is configured', () => {
+  const out = verify(sign(baseClaims({ target: 'vault' })), NOW, { expectedTargets: ['vault'] });
+  assert.equal(out.ok, true);
+});
+
+test('no expectedTargets configured skips the check entirely', () => {
+  const out = verify(sign(baseClaims({ target: 'anything-unlisted' })));
+  assert.equal(out.ok, true);
+});
+
+test('WRONG_TENANT — tenant_id/org_id not matching this deployment\'s configured tenant', () => {
+  const out = verify(sign(baseClaims({ tenant_id: 'other-tenant' })), NOW, { expectedTenantId: 't1' });
+  assert.equal(out.ok, false);
+  if (out.ok) return;
+  assert.equal(out.refusal, 'WRONG_TENANT');
+});
+
+test('a matching tenant_id/org_id passes when expectedTenantId is configured', () => {
+  const out = verify(sign(baseClaims()), NOW, { expectedTenantId: 't1' });
+  assert.equal(out.ok, true);
+});
+
+test('no expectedTenantId configured skips the tenant check entirely', () => {
+  const out = verify(sign(baseClaims({ tenant_id: 'whatever', org_id: 'whatever' })));
+  assert.equal(out.ok, true);
 });

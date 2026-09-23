@@ -51,6 +51,14 @@ export const createUserRoleBody = z.object({
 });
 export type CreateUserRoleBody = z.infer<typeof createUserRoleBody>;
 
+/** S3 security review item 1 — the dedicated, audited path for changing a user's email.
+ *  Never routed through EditService's generic PATCH (see edit.service.ts's REGISTRY comment
+ *  on `users`). */
+export const changeUserEmailBody = z.object({
+  email: z.string().email(),
+});
+export type ChangeUserEmailBody = z.infer<typeof changeUserEmailBody>;
+
 export const createLocationAuthorityBody = z.object({
   locationId: z.string().uuid().optional(),
   authorityUserId: z.string().uuid().optional(),

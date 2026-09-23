@@ -973,11 +973,25 @@ create table if not exists iam.user_master (
   mobile_number varchar(20),
   password_hash varchar(255),
   is_active boolean,
+  -- S3 security review item 1: the ALEMBIC staff id (assertion `sub`) this row is bound to,
+  -- once a first successful alembic-assertion login has claimed it. See
+  -- packages/data-org/src/schema/users.ts's own comment.
+  alembic_subject varchar(255),
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
   created_by varchar(255),
   updated_by varchar(255)
+);
+create unique index if not exists user_master_alembic_subject_uq
+  on iam.user_master (alembic_subject) where alembic_subject is not null;
+
+-- S3 security review item 4: Postgres-backed single-use store for alembic-assertion `jti`s
+-- (replaces AuthService's old in-process Map). See packages/data-org/src/schema/assertion-jti.ts.
+create table if not exists iam.assertion_jti (
+  jti varchar(255) primary key,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
 );
 
 create table if not exists iam.approval_matrix (
@@ -1138,4 +1152,12 @@ create table if not exists bridge.connector_config (
   hmac_secret_sealed text,
   configured_at timestamptz,
   configured_by varchar(255)
+);
+
+-- S3 security review item 5: replay store for the Facts API's signed-request nonce. See
+-- packages/data-bridge/src/schema/facts-nonce.ts.
+create table if not exists bridge.facts_nonce (
+  nonce varchar(255) primary key,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
 );

@@ -30,6 +30,14 @@ after(async () => {
   await closeTestClient();
 });
 
+/** Signs `body` the way `rawprod-facts-client.ts` now does — over `timestamp.nonce.body`
+ *  (S3 security review item 5) — and returns the three pieces `verifySignature` takes. */
+function signedMaterial(body: string, secret: string, overrides: { timestamp?: string; nonce?: string } = {}) {
+  const timestamp = overrides.timestamp ?? String(Math.floor(Date.now() / 1000));
+  const nonce = overrides.nonce ?? randomUUID();
+  return { header: signBody(`${timestamp}.${nonce}.${body}`, secret), timestamp, nonce };
+}
+
 test("verifySignature: true for a correctly signed body, false when unconfigured or wrong", async () => {
   const sql = testClient();
   const secret = "facts-test-secret";
@@ -39,9 +47,78 @@ test("verifySignature: true for a correctly signed body, false when unconfigured
     on conflict (id) do update set enabled = true, hmac_secret_sealed = ${sealSecret(secret)}`;
 
   const body = JSON.stringify({ hello: "world" });
-  assert.equal(await facts.verifySignature(body, signBody(body, secret)), true);
-  assert.equal(await facts.verifySignature(body, signBody(body, "wrong-secret")), false);
-  assert.equal(await facts.verifySignature(body, null), false);
+  const good = signedMaterial(body, secret);
+  assert.equal(await facts.verifySignature(body, good.header, good.timestamp, good.nonce), true);
+
+  const wrongSecret = signedMaterial(body, "wrong-secret");
+  assert.equal(await facts.verifySignature(body, wrongSecret.header, wrongSecret.timestamp, wrongSecret.nonce), false);
+
+  assert.equal(await facts.verifySignature(body, null, good.timestamp, randomUUID()), false);
+});
+
+test("S3 item 5: a replayed nonce is refused on its second presentation", async () => {
+  const sql = testClient();
+  const secret = "facts-test-secret-replay";
+  await sql`
+    insert into bridge.connector_config (id, enabled, hmac_secret_sealed, configured_by)
+    values ('default', true, ${sealSecret(secret)}, 'test')
+    on conflict (id) do update set enabled = true, hmac_secret_sealed = ${sealSecret(secret)}`;
+
+  const body = JSON.stringify({ replay: "test" });
+  const { header, timestamp, nonce } = signedMaterial(body, secret);
+  assert.equal(await facts.verifySignature(body, header, timestamp, nonce), true);
+  // Identical presentation a second time — same signature, same timestamp, same nonce.
+  assert.equal(await facts.verifySignature(body, header, timestamp, nonce), false);
+});
+
+test("S3 item 5: a timestamp older than 300s is refused even with an otherwise-perfect signature", async () => {
+  const sql = testClient();
+  const secret = "facts-test-secret-stale";
+  await sql`
+    insert into bridge.connector_config (id, enabled, hmac_secret_sealed, configured_by)
+    values ('default', true, ${sealSecret(secret)}, 'test')
+    on conflict (id) do update set enabled = true, hmac_secret_sealed = ${sealSecret(secret)}`;
+
+  const body = JSON.stringify({ stale: "test" });
+  const staleTimestamp = String(Math.floor(Date.now() / 1000) - 301);
+  const { header, timestamp, nonce } = signedMaterial(body, secret, { timestamp: staleTimestamp });
+  assert.equal(await facts.verifySignature(body, header, timestamp, nonce), false);
+});
+
+test("S3 item 5: missing timestamp or nonce is refused outright", async () => {
+  const body = JSON.stringify({ x: 1 });
+  assert.equal(await facts.verifySignature(body, "sha256=whatever", null, randomUUID()), false);
+  assert.equal(await facts.verifySignature(body, "sha256=whatever", String(Math.floor(Date.now() / 1000)), null), false);
+});
+
+test("permissionsForCaller: S3 item 5 — resolves from RawProd's OWN grant via alembic_subject, "
+  + "never from a caller-claimed role list (there is none to trust here)", async () => {
+  const sql = testClient();
+  const staffId = `staff:facts-svc-${randomUUID()}@rawaroma.local`;
+  const userId = randomUUID();
+  const roleCode = `facts-role-${randomUUID()}`;
+  await sql`
+    insert into iam.user_master (user_id, email, user_name, is_active, status, alembic_subject)
+    values (${userId}, ${`${roleCode}@rawaroma.local`}, 'Facts Svc Test', true, 'ACTIVE', ${staffId})`;
+  const [role] = await sql`
+    insert into iam.role_master (role_code, status) values (${roleCode}, 'ACTIVE') returning role_id`;
+  const [perm] = await sql`
+    insert into iam.permission_master (permission_code, status)
+    values ('production:production_order:read', 'ACTIVE')
+    on conflict (permission_code) do update set status = 'ACTIVE'
+    returning permission_id`;
+  await sql`
+    insert into iam.user_role_mapping (user_id, role_id, status) values (${userId}, ${role!.role_id}, 'ACTIVE')`;
+  await sql`
+    insert into iam.role_permission_mapping (role_id, permission_id, status)
+    values (${role!.role_id}, ${perm!.permission_id}, 'ACTIVE')
+    on conflict (role_id, permission_id) do nothing`;
+
+  const held = await facts.permissionsForCaller(staffId);
+  assert.ok(held.has("production:production_order:read"));
+
+  const heldForUnboundStaffId = await facts.permissionsForCaller(`staff:nobody-${randomUUID()}@rawaroma.local`);
+  assert.equal(heldForUnboundStaffId.size, 0);
 });
 
 test("permissionsForRoles: real role->permission mapping, never trusting the caller's own claim", async () => {
