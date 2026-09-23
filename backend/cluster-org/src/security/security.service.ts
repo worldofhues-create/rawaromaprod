@@ -240,7 +240,12 @@ export class SecurityService {
     const roleCode = String(role[0].code ?? '').toLowerCase();
     const permCode = String(perm[0].code ?? '');
 
-    const violatesVaultFormula = VAULT_FORMULA_SENSITIVE(permCode) && !VAULT_FORMULA_ALLOWED_ROLES.includes(roleCode);
+    /* §107 role separation: the decision permissions belong to vault_approver alone —
+       mapping them onto formulator would let formulators approve each other's work. */
+    const approverOnly = permCode === 'formula:formula_approval:write' ||
+      permCode === 'formula:formula_access_policy:write';
+    const violatesVaultFormula = VAULT_FORMULA_SENSITIVE(permCode) &&
+      !(approverOnly ? roleCode === 'vault_approver' : VAULT_FORMULA_ALLOWED_ROLES.includes(roleCode));
     const violatesPlatformOps = PLATFORMOPS_SENSITIVE(permCode) && !PLATFORMOPS_ALLOWED_ROLES.includes(roleCode);
     if (violatesVaultFormula || violatesPlatformOps) {
       if (this.auditSink) {

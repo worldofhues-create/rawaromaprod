@@ -166,6 +166,19 @@ test('item 1: refuses mapping formula:formula_approval:write onto a non-vault_ap
   await assert.rejects(() => svc.createRolePermission({ roleId: someRoleId, permissionId: permId }, admin));
 });
 
+test('review B: decision permissions never map onto formulator (formulators cannot approve each other)', async () => {
+  const formulatorId = await findOrMakeRoleByCode('formulator');
+  const approverId = await findOrMakeRoleByCode('vault_approver');
+  const admin = principal({ userId: uuidv7(), roles: ['admin'], permissions: ['iam:role_permission_mapping:write'] });
+  for (const code of ['formula:formula_approval:write', 'formula:formula_access_policy:write']) {
+    const permId = await findOrMakeExactPermission(code);
+    await assert.rejects(() => svc.createRolePermission({ roleId: formulatorId, permissionId: permId }, admin));
+    /* control: the same permission still maps onto vault_approver */
+    const row = await svc.createRolePermission({ roleId: approverId, permissionId: permId }, admin);
+    assert.equal(row.roleId, approverId);
+  }
+});
+
 test('item 1: refuses mapping formula:formula_access_policy:write onto a non-vault_approver role', async () => {
   const someRoleId = await makeRole('floor2');
   const permId = await findOrMakeExactPermission('formula:formula_access_policy:write');
