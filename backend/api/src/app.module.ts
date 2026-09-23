@@ -53,6 +53,7 @@ import { OrgUnitsModule } from './orgunits/orgunits.module.js';
 import { DispatchDocsModule } from './dispatchdocs/dispatchdocs.module.js';
 import { RelayModule } from './relay/relay.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
+import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
 
 @Module({
@@ -86,6 +87,7 @@ import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
     DispatchDocsModule,
     RelayModule,
     BridgeModule,
+    FactsModule,
     PlatformOpsModule,
   ],
   providers: [
