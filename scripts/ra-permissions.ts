@@ -177,6 +177,7 @@ export const RA_PERMISSIONS: string[] = [
   'platform:uom_master:write',
   'platform:uom_type_master:read',
   'platform:uom_type_master:write',
+  'platformops:console:read',
   'procurement:po_approval_order:read',
   'procurement:po_approval_order:write',
   'procurement:purchase_order:read',
@@ -268,4 +269,5 @@ export const RA_PERMISSIONS: string[] = [
   'sales:sales_order_items:write',
   'sales:transporter_master:read',
   'sales:transporter_master:write',
+  'vault:material_search:read',
 ];

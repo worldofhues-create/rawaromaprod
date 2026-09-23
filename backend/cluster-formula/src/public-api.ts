@@ -4,10 +4,15 @@
  * boundary un-decrypted, and every read here writes a hash-chained audit row in the same
  * transaction (no un-audited read is possible).
  *
- * Two reads, two trust levels:
+ * Three reads, three trust levels:
  *   - getFloorView  → ALIAS + percentage only. What the production floor / any UI may see.
  *                     The real material_id is resolved to its RM_ALIAS inside the vault and
  *                     DROPPED; it never leaves. This is the masking guarantee.
+ *   - resolveManufacturingInstruction → §109.7's `VaultPort.resolveManufacturingInstruction`.
+ *                     CODE + a per-batch QUANTITY (never the raw formula percentage — the
+ *                     underlying recipe ratio never crosses this boundary in its own units).
+ *                     "Factory production does not read formula plaintext." Client-facing,
+ *                     production-permission-gated (FormulasController).
  *   - getPickList   → real material_id + percentage. SERVER-SIDE ONLY — consumed by
  *                     production's material-issue to compute inventory decrements. Must never
  *                     be serialized to a client response. Edge layer does not expose it.
@@ -20,6 +25,19 @@ export interface FloorIngredient {
   rmAliasId: string | null;
   aliasName: string | null;
   percentage: number;
+  sequenceNo: number | null;
+}
+
+/**
+ * §109.7 — one coded/masked manufacturing line: `RM-A123  2.75 kg`. `code` is the RM_ALIAS
+ * (never the real material_id); `quantity` is resolved FOR THIS `permittedBatchQuantity`
+ * (never the formula's raw percentage — that unit never leaves the vault). "The mapping
+ * from code to protected material/formula identity stays inside Vault authority."
+ */
+export interface CodedInstruction {
+  code: string | null;
+  quantity: number;
+  uom: string;
   sequenceNo: number | null;
 }
 
@@ -40,6 +58,16 @@ export interface ReadContext {
 export interface FormulaLookup {
   /** Masked recipe (alias + %). Audited. Returns null if the version isn't approved/locked. */
   getFloorView(formulaVersionId: string, ctx: ReadContext): Promise<FloorIngredient[] | null>;
+  /**
+   * §109.7 `VaultPort.resolveManufacturingInstruction(approved_formula_version,
+   * permitted_batch_quantity)`. Audited. Returns null only if the version row doesn't exist;
+   * throws (refuses, also audited) if it exists but isn't approved/locked yet.
+   */
+  resolveManufacturingInstruction(
+    formulaVersionId: string,
+    permittedBatchQuantity: number,
+    ctx: ReadContext,
+  ): Promise<CodedInstruction[] | null>;
   /** Real pick list (material_id + %) for SERVER-SIDE material issue. Audited. */
   getPickList(formulaVersionId: string, ctx: ReadContext): Promise<PickIngredient[] | null>;
 }

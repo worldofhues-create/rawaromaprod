@@ -81,6 +81,12 @@ const NOW_GRANTED: Array<[Function, string]> = [
   [PlanningController, 'createPlanItem'],
   [PlanningController, 'createOrder'],
   [PickingController, 'generatePickList'],
+  // §109.7 (lane U4b) — the coded/masked manufacturing instruction. Gated by the SAME
+  // ordinary production-order read permission as everything else on this order; the
+  // plaintext-never-leaks guarantee is proven at the response-shape level in
+  // cluster-formula/src/__tests__/manufacturing-instruction.test.ts, not by restricting who
+  // may call this route.
+  [PickingController, 'resolveManufacturingInstruction'],
 ];
 
 for (const [Controller, method] of NOW_GRANTED) {

@@ -3,6 +3,12 @@
  * `ORG_DB` Drizzle client off the shared `PG_CLIENT` pool (bound to the @ra/data-org
  * schema barrel), wires the CRUD services + controllers, and exports the `ORG_LOOKUP`
  * cold-read port. Foundation masters: no outbox, no events.
+ *
+ * `OrgService` is also exported (concrete class, not just the cold-read port) so
+ * `backend/api/src/platform-ops` can reuse `listOrgs` for the Platform Ops "tenant/
+ * organization list" screen (§6) without a second org_master query implementation —
+ * it maps the result down to id/code/name/status only, so no other org_master column
+ * leaks into that platform_super_admin-only, no-tenant-business-data surface.
  */
 import { Module } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
@@ -31,6 +37,6 @@ import { ORG_LOOKUP } from './public-api.js';
     OrgLookupService,
     { provide: ORG_LOOKUP, useExisting: OrgLookupService },
   ],
-  exports: [ORG_DB, ORG_LOOKUP],
+  exports: [ORG_DB, ORG_LOOKUP, OrgService],
 })
 export class ClusterOrgModule {}

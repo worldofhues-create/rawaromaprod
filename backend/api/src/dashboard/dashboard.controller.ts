@@ -1,8 +1,17 @@
 /**
  * DashboardController — `GET v1/dashboard` (the rich role dashboards) + `GET v1/trace/...`
- * (reverse traceability). The dashboard is authenticated-only and self-masks; the trace reveals a
- * product's full material/vendor sources (the recipe secret), so it's owner-gated by the
- * `formula:actual:read` permission.
+ * (reverse traceability). Both are authenticated-only and self-mask per caller.
+ *
+ * `trace` used to be gated by `@Permissions('formula:actual:read')` — that was correct back
+ * when `formula:actual:read` was implicit for `owner`/`super_admin`, but §107 (this lane)
+ * makes it a real, narrow Vault-authority grant held only by `formulator`/`vault_approver`.
+ * Left gated here, EVERY factory role — owner included — would 403 on Traceability
+ * (web/ws-vault.REMOVE.md flagged exactly this). The route is unguarded at the edge on
+ * purpose: `DashboardService.traceFinishedGood` already computes its own per-caller
+ * `seeProduct`/`seeMaterial` flags from the caller's REAL permissions
+ * (`formula:actual:read` / `masterdata:material:reveal`) and returns the coded/masked
+ * alias + 'Protected ◆' fallback otherwise — the same masking guarantee §109.7 requires of
+ * `VaultPort.resolveManufacturingInstruction`, just applied to the traceability view.
  */
 import { Controller, Get, Param } from '@nestjs/common';
 import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
@@ -28,7 +37,6 @@ export class DashboardController {
     return this.dashboard.notifications();
   }
 
-  @Permissions('formula:actual:read')
   @Get('v1/trace/finished-good/:id')
   trace(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.dashboard.traceFinishedGood(id, principal);

@@ -34,6 +34,9 @@ const stubFormulaLookup: FormulaLookup = {
   async getFloorView() {
     return null;
   },
+  async resolveManufacturingInstruction() {
+    return null;
+  },
   async getPickList(_formulaVersionId: string, _ctx: ReadContext): Promise<PickIngredient[] | null> {
     return [{ materialId: crypto.randomUUID(), percentage: 100, sequenceNo: 1 }];
   },

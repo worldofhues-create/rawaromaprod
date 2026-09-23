@@ -5,7 +5,7 @@
  * code/name refs.
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, or, sql } from 'drizzle-orm';
 import {
   MASTERDATA_DB,
   masterdataSchema,
@@ -71,5 +71,23 @@ export class MasterdataLookupService implements MasterdataLookup {
       }
     }
     return out;
+  }
+
+  async searchMaterials(query: string, limit: number): Promise<MaterialRef[]> {
+    const q = query.trim();
+    if (!q) return [];
+    const like = `%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
+    const cap = Math.max(1, Math.min(limit, 50));
+    return this.db
+      .select({
+        materialId: material.materialId,
+        materialCode: material.materialCode,
+        materialName: material.materialName,
+        uomId: material.uomId,
+      })
+      .from(material)
+      .where(or(sql`${material.materialCode} ilike ${like}`, sql`${material.materialName} ilike ${like}`))
+      .orderBy(material.materialCode)
+      .limit(cap);
   }
 }

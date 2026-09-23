@@ -12,13 +12,29 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { BadRequestException } from '@nestjs/common';
 import { PickingService } from '../../../cluster-production/src/picking/picking.service.js';
+import type { FormulaLookup } from '../../../cluster-formula/src/public-api.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
+
+// This suite exercises issueMaterials only — never the §109.7 manufacturing-instruction read
+// — so a stub that never resolves anything real is enough to satisfy PickingService's
+// constructor (it now also takes the FORMULA_LOOKUP port, see picking.service.ts).
+const stubFormulaLookup: FormulaLookup = {
+  async getFloorView() {
+    return null;
+  },
+  async resolveManufacturingInstruction() {
+    return null;
+  },
+  async getPickList() {
+    return null;
+  },
+};
 
 let svc: PickingService;
 
 before(async () => {
   await ensureSchema();
-  svc = new PickingService(productionDb());
+  svc = new PickingService(productionDb(), stubFormulaLookup);
 });
 
 after(async () => {
