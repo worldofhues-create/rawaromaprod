@@ -4,13 +4,14 @@
  * (so search can't bypass function-level auth — audit H-S3), and masking still applies.
  */
 import { Controller, Get, Query } from '@nestjs/common';
-import { CurrentUser, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, DynamicPermission, type AuthPrincipal } from '@core/backend-kernel';
 import { SearchService } from './search.service.js';
 
 @Controller()
 export class SearchController {
   constructor(private readonly svc: SearchService) {}
 
+  @DynamicPermission("the searched resource's own :read permission, checked in SearchService.search via readPerm()")
   @Get('v1/search')
   search(
     @CurrentUser() principal: AuthPrincipal,

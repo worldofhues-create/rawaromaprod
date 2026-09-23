@@ -8,6 +8,7 @@ import {
   CurrentUser,
   Permissions,
   Public,
+  SelfService,
   ZodValidationPipe,
   type AuthPrincipal,
 } from "@core/backend-kernel";
@@ -65,6 +66,7 @@ export class AuthController {
     return this.auth.setPassword(id, body.password, principal);
   }
 
+  @SelfService()
   @Get("me")
   me(@CurrentUser() principal: AuthPrincipal): Promise<{
     userId: string;

@@ -18,6 +18,7 @@ import {
   CurrentUser,
   Public,
   RequiredFlag,
+  SelfService,
   ZodValidationPipe,
   type AuthPrincipal,
 } from '@core/backend-kernel';
@@ -68,12 +69,14 @@ export class AuthController {
     return this.auth.refresh(body.refreshToken);
   }
 
+  @SelfService()
   @Post('v1/auth/logout')
   async logout(@CurrentUser() user: AuthPrincipal): Promise<{ ok: true }> {
     await this.auth.logout(user.sessionId);
     return { ok: true };
   }
 
+  @SelfService()
   @Get('v1/me')
   me(@CurrentUser() user: AuthPrincipal): Promise<MeProfile> {
     return this.auth.me(user);
