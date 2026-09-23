@@ -7,13 +7,13 @@
   function openAssignRole(user) {
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign role</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign role</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + (user.userName || user.email || 'User') + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Role <span style="color:#C0492E">*</span></label>' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Role <span style="color:var(--red)">*</span></label>' +
       '<select id="ra-role" style="' + fStyle() + '"><option value="">Select…</option></select>' +
-      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
+      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:8px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
@@ -33,13 +33,13 @@
   function openAssignPerm(role) {
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign permission</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign permission</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Role: ' + (role.roleName || role.roleCode || 'role') + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Permission <span style="color:#C0492E">*</span></label>' +
+      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Permission <span style="color:var(--red)">*</span></label>' +
       '<select id="ra-perm" style="' + fStyle() + '"><option value="">Loading…</option></select>' +
-      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
+      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:8px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });

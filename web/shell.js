@@ -84,24 +84,27 @@
   function registerViews(map) { Object.keys(map || {}).forEach(function (k) { RA_VIEWS[k] = map[k]; }); }
   window.RA = { tunnel: tunnel, registerViews: registerViews, views: RA_VIEWS };
 
-  /* ---------------- design system: skins × light/dark (the exact mockup tokens) ---------------- */
-  function skinTokens(skin, dark, A) {
-    if (skin === 'glass') {
-      if (dark) return "--page:radial-gradient(at 16% 14%, " + A + "44, transparent 46%),radial-gradient(at 84% 8%, #3A6FB03a, transparent 42%),radial-gradient(at 74% 90%, #6B4FA83a, transparent 46%),linear-gradient(150deg,#0E131A,#0A0D12);--bg:rgba(40,48,60,.5);--surface:rgba(44,53,66,.46);--well:rgba(14,19,26,.42);--track:rgba(255,255,255,.13);--cbord:rgba(255,255,255,.16);--wbord:rgba(255,255,255,.12);--cblur:blur(20px) saturate(1.4);--border:rgba(255,255,255,.1);--rai:0 14px 38px -12px rgba(0,0,0,.55),inset 0 1px 0 rgba(255,255,255,.14);--rai-sm:0 6px 16px -8px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.1);--ins:inset 0 2px 8px rgba(0,0,0,.42);--ins-sm:inset 0 1px 4px rgba(0,0,0,.36);--t1:#EEF1F6;--t2:#AEB7C3;--t3:#7E8794;--accent:" + A + ";--accent-soft:" + A + "33;--hov:rgba(255,255,255,.06);--barmute:rgba(255,255,255,.16)";
-      return "--page:radial-gradient(at 16% 14%, " + A + "33, transparent 46%),radial-gradient(at 84% 8%, #5FA8FF40, transparent 42%),radial-gradient(at 72% 92%, #B49CFF3a, transparent 46%),linear-gradient(150deg,#EEF3F7,#E3E9F0);--bg:rgba(255,255,255,.5);--surface:rgba(255,255,255,.5);--well:rgba(255,255,255,.32);--track:rgba(255,255,255,.46);--cbord:rgba(255,255,255,.7);--wbord:rgba(255,255,255,.55);--cblur:blur(20px) saturate(1.5);--border:rgba(255,255,255,.55);--rai:0 12px 34px -12px rgba(40,60,80,.3),inset 0 1px 0 rgba(255,255,255,.7);--rai-sm:0 5px 16px -8px rgba(40,60,80,.24),inset 0 1px 0 rgba(255,255,255,.6);--ins:inset 0 2px 8px rgba(40,60,80,.16);--ins-sm:inset 0 1px 4px rgba(40,60,80,.14);--t1:#1E2A33;--t2:#4F5E6B;--t3:#7C8B98;--accent:" + A + ";--accent-soft:" + A + "26;--hov:rgba(255,255,255,.4);--barmute:rgba(120,140,160,.32)";
-    }
-    if (skin === 'skeuomorphic') {
-      if (dark) return "--page:radial-gradient(130% 70% at 50% -10%, #2C313B, transparent 70%),linear-gradient(180deg,#1B1F25,#13161C);--bg:linear-gradient(180deg,#2F343D,#272B33);--surface:linear-gradient(180deg,#323843,#262A31);--well:linear-gradient(180deg,#1B1E24,#272B32);--track:linear-gradient(180deg,#141115,#22262C);--cbord:#13161B;--wbord:#13161B;--cblur:none;--border:rgba(255,255,255,.06);--rai:0 3px 7px rgba(0,0,0,.45),inset 0 1px 0 rgba(255,255,255,.06);--rai-sm:0 2px 4px rgba(0,0,0,.4),inset 0 1px 0 rgba(255,255,255,.05);--ins:inset 0 2px 6px rgba(0,0,0,.5),inset 0 -1px 0 rgba(255,255,255,.04);--ins-sm:inset 0 1px 4px rgba(0,0,0,.46);--t1:#E9ECF1;--t2:#A3ABB7;--t3:#727A86;--accent:" + A + ";--accent-soft:" + A + "33;--hov:rgba(255,255,255,.05);--barmute:rgba(255,255,255,.14)";
-      return "--page:radial-gradient(130% 70% at 50% -8%, #EDF1F5, transparent 70%),linear-gradient(180deg,#DFE3E9,#CACFD9);--bg:linear-gradient(180deg,#FCFDFF,#ECEFF3);--surface:linear-gradient(180deg,#FDFEFF,#ECEFF4);--well:linear-gradient(180deg,#DFE3EA,#EFF2F6);--track:linear-gradient(180deg,#C9CFD8,#DDE2E8);--cbord:#C3C9D3;--wbord:#C3C9D3;--cblur:none;--border:rgba(40,52,68,.13);--rai:0 2px 3px rgba(40,52,68,.16),0 7px 16px -6px rgba(40,52,68,.2),inset 0 1px 0 rgba(255,255,255,.9);--rai-sm:0 1px 2px rgba(40,52,68,.2),inset 0 1px 0 rgba(255,255,255,.9);--ins:inset 0 2px 5px rgba(40,52,68,.2),inset 0 -1px 0 rgba(255,255,255,.85);--ins-sm:inset 0 1px 3px rgba(40,52,68,.18);--t1:#272D38;--t2:#5C6573;--t3:#8A94A1;--accent:" + A + ";--accent-soft:" + A + "1f;--hov:rgba(40,52,68,.05);--barmute:rgba(120,135,155,.36)";
-    }
-    if (dark) return "--page:#24272F;--bg:#24272F;--surface:#282C35;--well:#24272F;--track:#1C1F26;--cbord:transparent;--wbord:transparent;--cblur:none;--border:rgba(255,255,255,.07);--rai:6px 6px 15px rgba(0,0,0,.5),-6px -6px 15px rgba(255,255,255,.05);--rai-sm:4px 4px 9px rgba(0,0,0,.5),-4px -4px 9px rgba(255,255,255,.05);--ins:inset 4px 4px 10px rgba(0,0,0,.5),inset -4px -4px 10px rgba(255,255,255,.05);--ins-sm:inset 3px 3px 6px rgba(0,0,0,.5),inset -3px -3px 6px rgba(255,255,255,.05);--t1:#ECEEF3;--t2:#A6ADBA;--t3:#727A86;--accent:" + A + ";--accent-soft:" + A + "33;--hov:rgba(255,255,255,.04);--barmute:rgba(255,255,255,.13)";
-    return "--page:#E7EAF0;--bg:#E7EAF0;--surface:#EAEDF3;--well:#E7EAF0;--track:#D7DCE7;--cbord:transparent;--wbord:transparent;--cblur:none;--border:rgba(120,134,162,.2);--rai:6px 6px 15px rgba(158,171,197,.55),-6px -6px 15px rgba(255,255,255,.95);--rai-sm:4px 4px 9px rgba(158,171,197,.55),-4px -4px 9px rgba(255,255,255,.95);--ins:inset 4px 4px 10px rgba(158,171,197,.55),inset -4px -4px 10px rgba(255,255,255,.95);--ins-sm:inset 3px 3px 6px rgba(158,171,197,.55),inset -3px -3px 6px rgba(255,255,255,.95);--t1:#2E3543;--t2:#697182;--t3:#98A1B2;--accent:" + A + ";--accent-soft:" + A + "1f;--hov:rgba(120,134,162,.07);--barmute:rgba(150,165,185,.4)";
-  }
+  /* ---------------- design system ----------------
+   * RawProd previously offered a neumorphic/glass/skeuomorphic "skin" picker plus a light/dark
+   * toggle (skinTokens(), below, generated ~120 lines of hardcoded hex/rgba gradients per
+   * combination). That directly contradicted P0_UI_PARITY_PUBLIC_GREEN_ADDENDUM.md §1 ("There is
+   * ONE Raw Aroma Chem product design language… Do not invent a new RAWPROD visual style"), so it
+   * is removed. The legacy custom-property names it used to populate at runtime (--surface, --well,
+   * --t1/2/3, --border, --cbord, --wbord, --rai, --rai-sm, --track, --barmute, --cblur) are still
+   * referenced throughout this file and the ws-*.js modules' many modal/table/dashboard renderers;
+   * rather than hand-edit every call site in one pass, web/ui-contract/shell.css now shims each of
+   * those old names to its ALEMBIC-token equivalent (e.g. --surface → var(--panel), --rai → none —
+   * ALEMBIC's admin/agent cards are flat by design, per ALEMBIC_VISUAL_CONTRACT.json shadows.
+   * admin_card_shadow), so every existing var(--surface)/var(--well)/… reference already renders in
+   * the ALEMBIC palette with zero JS changes required at those call sites. ALEMBIC's contract
+   * defines one fixed palette (no dark-mode tokens), so dark mode is retired along with the skins. */
 
   var ICONS = { grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', layers: 'M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5', lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75', shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', clipboard: 'M9 4h6v3H9zM8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2', sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6', truck: 'M1 4h13v11H1zM14 8h4l3 3v4h-7zM6 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0', box: 'M21 8 12 3 3 8v8l9 5 9-5V8zM3 8l9 5 9-5M12 13v8', flask: 'M9 3h6M10 3v6L5 19a1 1 0 0 0 1 1.5h12A1 1 0 0 0 19 19l-5-10V3M7.5 14h9', beaker: 'M6 3h12M8 3v7l-3 8a1 1 0 0 0 1 1.3h12A1 1 0 0 0 19 18l-3-8V3', droplet: 'M12 3l5.5 6.5a7 7 0 1 1-11 0z', tag: 'M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7 7h.01', refresh: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5', list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01', calendar: 'M3 5h18v16H3zM3 9h18M8 3v4M16 3v4', activity: 'M22 12h-4l-3 9L9 3l-3 9H2', bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0', search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3', logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9', pkg: 'M16 3 4 7v10l8 4 8-4V7zM4 7l8 4 8-4M12 11v10', building: 'M3 21h18M6 21V4h8v17M14 9h4v12M9 8h.01M9 12h.01M9 16h.01', sun: 'M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z', shelf: 'M3 7h18M3 12h18M3 17h18M7 7v10M17 7v10', mappin: 'M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11zM12 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5', panel: 'M4 4h16v16H4zM10 4v16', alert: 'M12 9v4M12 17h.01M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z' };
   function icon(k, sz) { return '<svg width="' + (sz || 18) + '" height="' + (sz || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="' + (ICONS[k] || ICONS.grid) + '"/></svg>'; }
 
-  var STATUS = { pending: ['#F8EFD8', '#9A6B1E', '#D9A53B'], pass: ['#E2F1E9', '#2E7D55', '#34A56F'], fail: ['#FBE6E1', '#C0492E', '#D85A38'], approved: ['#E2F1E9', '#2E7D55', '#34A56F'], ordered: ['#E5EDF7', '#2D5C8A', '#3B7BC0'], draft: ['#EBEDF0', '#5A626C', '#9298A2'], received: ['#E2F1E9', '#2E7D55', '#34A56F'], inprogress: ['#E5EDF7', '#2D5C8A', '#3B7BC0'], active: ['#E2F1E9', '#2E7D55', '#34A56F'], confirmed: ['#E2F1E9', '#2E7D55', '#34A56F'], pending_approval: ['#F8EFD8', '#9A6B1E', '#D9A53B'] };
+  // Status → .chip tone variant (COMPONENT_PARITY_MATRIX.json "Chip": n/b/g/a/r/p/k, admin.css:
+  // 119-126). Token-only — no hardcoded hex; fmt() below maps this to a "chip <tone>" class.
+  var STATUS = { pending: 'a', pass: 'g', fail: 'r', approved: 'g', ordered: 'b', draft: 'n', received: 'g', inprogress: 'b', active: 'g', confirmed: 'g', pending_approval: 'a' };
 
   /* ---------------- role → nav → real endpoints (Phase-1 modules, DB-driven) ---------------- */
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
@@ -285,23 +288,14 @@
   function roleView(r) { return VIEW[r] || r; }
 
   /* ---------------- state + helpers ---------------- */
-  var st = { skin: 'neumorphic', dark: false, role: null, nav: null, search: '', collapsed: false, drawer: false };
-  var ACCENT = '#117C66';
+  var st = { role: null, nav: null, search: '', collapsed: false, drawer: false };
   var $ = function (id) { return document.getElementById(id); };
-  function setTheme() {
-    var tokens = skinTokens(st.skin, st.dark, ACCENT);
-    // Promote the design tokens to :root so the WHOLE document inherits them — not just #root.
-    // Modals/overlays are appended to <body> (siblings of #root, NOT descendants), so without
-    // this they resolve every var(--surface)/var(--accent)/var(--well)/… to nothing → transparent
-    // cards, invisible inputs, unfilled buttons (the "create form ignores my design" bug).
-    var docEl = document.documentElement;
-    tokens.split(';').forEach(function (decl) {
-      var i = decl.indexOf(':'); if (i < 0) return;
-      docEl.style.setProperty(decl.slice(0, i).trim(), decl.slice(i + 1).trim());
-    });
-    docEl.style.setProperty('color-scheme', st.dark ? 'dark' : 'light');
-    $('root').setAttribute('style', tokens + ";font-family:'Urbanist',system-ui,sans-serif;color:var(--t1);min-height:100vh;color-scheme:" + (st.dark ? 'dark' : 'light'));
-  }
+  // No-op kept so every existing call site across shell.js/ws-*.js (which call setTheme() after
+  // inserting a modal into the DOM, from the old runtime skin-switching design) stays valid without
+  // hunting down each one — the ALEMBIC tokens are now a static stylesheet (ui-contract/
+  // alembic-tokens.css + shell.css), not JS-applied inline custom properties, so there is nothing
+  // left to (re)apply at render time.
+  function setTheme() {}
 
   // Curate which fields to show + how, from a real row object (DB is the source).
   var HIDE = { createdDt: 1, updatedDt: 1, createdBy: 1, updatedBy: 1 };
@@ -313,18 +307,18 @@
   var UOM = {};
   function trimNum(v) { var n = Number(v); return isFinite(n) && String(v).trim() !== '' ? String(n) : String(v); }
   function isQtyKey(k) { return /qty$/i.test(k) || k === 'available' || k === 'onHand' || k === 'reserved'; }
-  function unitHtml(k, r) { var u = (isQtyKey(k) && r && r.uomId && UOM[r.uomId]) ? UOM[r.uomId] : ''; return u ? ' <span style="color:var(--t3);font-weight:600;font-size:11.5px">' + u + '</span>' : ''; }
+  function unitHtml(k, r) { var u = (isQtyKey(k) && r && r.uomId && UOM[r.uomId]) ? UOM[r.uomId] : ''; return u ? ' <span style="color:var(--ink-3);font-weight:var(--w-med);font-size:var(--t-cap)">' + u + '</span>' : ''; }
   function fmt(k, v, r) {
-    if (v === null || v === undefined || v === '') return '<span style="color:var(--t3)">—</span>';
-    if (typeof v === 'boolean') return v ? '<span style="color:#2E7D55;font-weight:700">Yes</span>' : '<span style="color:var(--t3)">No</span>';
-    if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 0 ? '#C0492E' : (d <= 30 ? '#C0492E' : (d <= 90 ? '#9A6B1E' : 'var(--t2)')); return '<span style="font-weight:700;color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
-    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (a <= 0 ? '#C0492E' : '#2E7D55') + '">' + trimNum(v) + '</span>' + unitHtml(k, r); }
-    if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:800;font-family:\'JetBrains Mono\',monospace;color:' + (sh > 0 ? '#C0492E' : 'var(--t3)') + '">' + (sh > 0 ? '▲ ' + v : v) + '</span>'; }
-    if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;font-weight:600">' + trimNum(v) + '</span>' + unitHtml(k, r);
-    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var s = STATUS[String(v).toLowerCase()] || ['var(--well)', 'var(--t2)', '#9298A2']; return '<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:' + s[0] + ';color:' + s[1] + '"><i style="width:6px;height:6px;border-radius:50%;background:' + s[2] + '"></i>' + v + '</span>'; }
-    if (isUuid(v)) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;color:var(--t2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
-    if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--t2)">' + v.slice(0, 10) + '</span>';
-    if (/code|number|alias/i.test(k)) return '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12.5px;font-weight:600">' + v + '</span>';
+    if (v === null || v === undefined || v === '') return '<span style="color:var(--ink-3)">—</span>';
+    if (typeof v === 'boolean') return v ? '<span style="color:var(--green);font-weight:var(--w-med)">Yes</span>' : '<span style="color:var(--ink-3)">No</span>';
+    if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 30 ? 'var(--red)' : (d <= 90 ? 'var(--amber)' : 'var(--ink-2)'); return '<span style="font-weight:var(--w-med);color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
+    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (a <= 0 ? 'var(--red)' : 'var(--green)') + '">' + trimNum(v) + '</span>' + unitHtml(k, r); }
+    if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (sh > 0 ? 'var(--red)' : 'var(--ink-3)') + '">' + (sh > 0 ? '▲ ' + v : v) + '</span>'; }
+    if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + trimNum(v) + '</span>' + unitHtml(k, r);
+    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + v + '</span>'; }
+    if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
+    if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--ink-2)">' + v.slice(0, 10) + '</span>';
+    if (/code|number|alias/i.test(k)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + v + '</span>';
     return '<span>' + String(v) + '</span>';
   }
   function columns(rows, endpoint) {
@@ -346,64 +340,79 @@
   }
 
   /* ---------------- render: shell + data view ---------------- */
+  // Shell chrome, ported to ALEMBIC's rail/topbar grammar (release/ui/PORTING_GUIDE.md §Shell,
+  // COMPONENT_PARITY_MATRIX.json "Nav rail / sidebar" + "Topbar" + "Workspace switcher"). The rail
+  // is a fixed-width column (.app grid), not a flex sidebar; nav items are NOT filtered client-side
+  // beyond "what this session's permission-driven ROLES entry contains" — same rule ALEMBIC's own
+  // guide states (server enforces per-action authorization; the rail just reflects what the signed
+  // -in session's role set was granted). `.rail-min` collapses the rail on narrow / touch layouts.
   function shell() {
-    $('app').style.display = ''; // clear the login override → .ra-shell CSS (flex desktop / block mobile)
+    $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
     var navHtml = R.nav.map(function (n) {
       var on = st.nav === n[0];
-      return '<button data-nav="' + n[0] + '" class="ra-nav" style="display:flex;align-items:center;gap:13px;width:100%;padding:10px 12px;border:none;border-radius:13px;cursor:pointer;font-size:13.5px;text-align:left;font-family:inherit;' +
-        (on ? 'color:var(--accent);background:var(--accent-soft);box-shadow:var(--ins-sm);font-weight:700' : 'color:var(--t2);background:transparent;font-weight:600') + '">' +
-        '<span style="display:grid;place-items:center;flex:none">' + icon(n[2], 18) + '</span><span class="ra-nav-l">' + n[1] + '</span></button>';
+      return '<button data-nav="' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
+        '<span class="ic">' + icon(n[2], 14) + '</span><span class="nm">' + n[1] + '</span></button>';
     }).join('');
-    var skins = [['neumorphic', 'Neuro'], ['glass', 'Glass'], ['skeuomorphic', 'Skeuo']].map(function (s) {
-      return '<button data-skin="' + s[0] + '" style="padding:7px 12px;border:none;border-radius:9px;font-size:11.5px;font-weight:700;cursor:pointer;font-family:inherit;white-space:nowrap;background:' + (st.skin === s[0] ? 'var(--accent)' : 'transparent') + ';color:' + (st.skin === s[0] ? '#fff' : 'var(--t3)') + '">' + s[1] + '</button>';
-    }).join('');
+    // Workspace switcher: multi-role staff get a <select> in the rail footer and switch with no
+    // second login (addendum §5/§8) — st.role changes, ROLES[newRole] re-renders the same shell.
+    var roles = (session && session.availableRoles) || [st.role];
+    var switcher = roles.length > 1 ? (
+      '<div class="wsw" title="Switch workspace"><select id="ra-wsw">' +
+        roles.map(function (r) { return '<option value="' + r + '"' + (r === st.role ? ' selected' : '') + '>' + (ROLES[r] ? ROLES[r].label : r) + '</option>'; }).join('') +
+      '</select></div>'
+    ) : '';
     $('app').innerHTML =
-      '<div id="ra-drawer-bg" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:40"></div>' +
-      '<aside id="ra-side" style="width:256px;flex:none;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:24px;box-shadow:var(--rai);padding:18px 14px 14px;display:flex;flex-direction:column;position:sticky;top:14px;height:calc(100vh - 28px);margin:14px 0 14px 14px;z-index:50">' +
-        '<div style="display:flex;align-items:center;gap:12px;padding:0 4px 16px">' +
-          '<div style="width:40px;height:40px;border-radius:13px;background:var(--accent);color:#fff;display:grid;place-items:center;box-shadow:var(--rai-sm);flex:none">' + icon('droplet', 20) + '</div>' +
-          '<div style="line-height:1.15"><div style="font-weight:800;font-size:15px">Raw Aroma Chem</div><div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.14em;color:var(--t3)">PRODUCTION PORTAL</div></div></div>' +
-        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:.13em;color:var(--t3);font-weight:700;padding:4px 6px 10px">' + R.dept.toUpperCase() + '</div>' +
-        '<nav style="display:flex;flex-direction:column;gap:4px;overflow:auto">' + navHtml + '</nav>' +
-        '<div style="margin-top:auto;display:flex;align-items:center;gap:11px;padding:12px 6px 2px;border-top:1px solid var(--border)">' +
-          '<div style="width:38px;height:38px;border-radius:12px;background:var(--accent);color:#fff;display:grid;place-items:center;font-weight:800;font-size:13px;flex:none">' + initials + '</div>' +
-          '<div style="line-height:1.2;flex:1;min-width:0"><div style="font-weight:700;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + R.user + '</div><div style="font-size:11px;color:var(--t3)">' + R.label + '</div></div>' +
-          '<button id="ra-logout" title="Sign out" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:34px;height:34px;border-radius:10px;cursor:pointer;display:grid;place-items:center;flex:none">' + icon('logout', 16) + '</button></div>' +
-      '</aside>' +
-      '<main style="flex:1;min-width:0;padding:14px 18px 24px;display:flex;flex-direction:column;gap:16px">' +
-        '<header style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">' +
-          '<button id="ra-burger" style="display:none;border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t1);width:42px;height:42px;border-radius:12px;cursor:pointer;place-items:center">' + icon('panel', 18) + '</button>' +
-          '<div style="flex:1;min-width:120px"><div id="ra-title" style="font-size:21px;font-weight:800;letter-spacing:-.01em">' + R.label + '</div><div style="font-size:12.5px;color:var(--t3)">Raw Aroma Chem / ' + R.dept + '</div></div>' +
-          '<div style="display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--cbord);border-radius:13px;padding:5px;box-shadow:var(--rai-sm)">' + skins + '</div>' +
+      '<nav class="rail" id="ra-side">' +
+        '<button class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + icon('panel', 16) + '</button>' +
+        '<button class="rb">' +
+          '<span class="m">' + icon('droplet', 16) + '</span>' +
+          '<span class="t">Raw Aroma Chem<small>PRODUCTION</small></span></button>' +
+        '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div>' + navHtml + '</div></div>' +
+        '<div class="rme">' +
+          '<span class="av">' + initials + '</span>' +
+          '<span class="who">' + R.user + '<small>' + R.label + '</small></span>' +
+          '<button id="ra-logout" title="Sign out" aria-label="Sign out">' + icon('logout', 14) + '</button>' +
+        '</div>' +
+      '</nav>' +
+      '<div id="ra-drawer-bg" class="rail-scrim"></div>' +
+      '<div class="main">' +
+        '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline — showing the last data loaded. Nothing you do here is queued for later; actions need the secure channel and will tell you if they cannot reach it.</span></div>' +
+        '<div class="bar">' +
+          '<button id="ra-burger2" class="xp bar-burger" aria-label="Open navigation">' + icon('panel', 16) + '</button>' +
+          '<span class="bar-brand">RAW AROMA CHEM<i>·</i>' + R.dept + '</span>' +
+          '<h1 id="ra-title">' + R.label + '</h1>' +
+          switcher +
           '<div style="position:relative">' +
-            '<button id="ra-bell" title="Alerts" style="border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t2);width:42px;height:42px;border-radius:13px;cursor:pointer;display:grid;place-items:center;position:relative">' + icon('bell', 18) +
-              '<span id="ra-bell-badge" style="display:none;position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:#C0492E;color:#fff;font-size:10px;font-weight:800;place-items:center"></span></button>' +
-            '<div id="ra-bell-pop" style="display:none;position:absolute;right:0;top:50px;width:300px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:16px;box-shadow:var(--rai);padding:8px;z-index:60"><div style="padding:14px;text-align:center;color:var(--t3);font-size:12px;font-family:\'JetBrains Mono\',monospace">LOADING…</div></div>' +
+            '<button id="ra-bell" class="xp" title="Alerts" aria-label="Alerts" style="position:relative">' + icon('bell', 14) +
+              '<span id="ra-bell-badge" class="chip r" style="display:none;position:absolute;top:-8px;right:-8px;min-width:16px;height:16px;padding:0 3px;justify-content:center"></span></button>' +
+            '<div id="ra-bell-pop" class="card" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div style="padding:14px;text-align:center;color:var(--ink-3);font:var(--w-med) var(--t-cap)/1 var(--font-mono)">LOADING…</div></div>' +
           '</div>' +
-          '<button id="ra-dark" title="Toggle light / dark" style="border:none;background:var(--surface);box-shadow:var(--rai-sm);color:var(--t2);width:42px;height:42px;border-radius:13px;cursor:pointer;display:grid;place-items:center">' + icon(st.dark ? 'sun' : 'moon', 18) + '</button>' +
-        '</header>' +
-        '<section id="ra-view"></section>' +
-      '</main>';
+        '</div>' +
+        '<div class="content"><section id="ra-view"></section></div>' +
+      '</div>';
     wireShell();
-    setTheme();
     loadView();
     loadAlerts();
   }
 
+  // COMPONENT_PARITY_MATRIX.json "Card (glass / GCard, dashboard KPI surfaces)" simplified to the
+  // flat `.stat` tile admin.css also defines — see ALEMBIC_VISUAL_CONTRACT.json shadows.
+  // admin_card_shadow (flat by design). Caller wraps these in a `.stats` grid.
   function kpi(ic, value, lab) {
-    return '<div style="flex:1;min-width:180px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:18px;box-shadow:var(--rai);padding:18px 20px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between"><div style="width:40px;height:40px;border-radius:12px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center">' + icon(ic, 20) + '</div></div>' +
-      '<div style="font-size:30px;font-weight:800;margin:14px 0 2px;letter-spacing:-.02em">' + value + '</div>' +
-      '<div style="font-size:12.5px;color:var(--t3);font-weight:600">' + lab + '</div></div>';
+    return '<div class="stat"><span class="ic" style="color:var(--accent)">' + icon(ic, 18) + '</span>' +
+      '<div class="v">' + value + '</div><div class="l">' + lab + '</div></div>';
   }
 
   /* ================= rich dashboards (the original mockup designs, real DB data) ================= */
-  // Olfactive family palette (the mockup's CLS) — recolours per light/dark.
-  var CLS = { natural: ['#2E6B4A', '#5FBF93', 'Natural'], aroma: ['#2D5C8A', '#5C9BDA', 'Aroma chem'], base: ['#9A6B1E', '#D6A24A', 'Base'], solvent: ['#5A626C', '#9AA3B2', 'Solvent'] };
-  function clsCol(k) { var c = CLS[k] || CLS.aroma; return st.dark ? c[1] : c[0]; }
-  function card(inner, pad, extra) { return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:' + (pad || '20px') + ';' + (extra || '') + '">' + inner + '</div>'; }
-  function badge(ic, txt) { return '<div style="display:inline-flex;align-items:center;gap:7px;font-family:\'JetBrains Mono\',monospace;font-size:9.5px;letter-spacing:.16em;font-weight:700;color:var(--t3)"><span style="display:grid;place-items:center;width:24px;height:24px;border-radius:8px;background:var(--accent-soft);color:var(--accent)">' + icon(ic, 13) + '</span>' + txt + '</div>'; }
+  // Olfactive family palette (the mockup's CLS) — ALEMBIC has no such categorical palette of its
+  // own (this is RawProd dashboard content, not a shell primitive), so this reuses ALEMBIC's own
+  // semantic tokens rather than inventing new hex values: no dark mode variant needed either, now
+  // that ALEMBIC's single fixed palette has replaced the old light/dark skin system.
+  var CLS = { natural: ['var(--green)', 'Natural'], aroma: ['var(--blue)', 'Aroma chem'], base: ['var(--amber)', 'Base'], solvent: ['var(--purple)', 'Solvent'] };
+  function clsCol(k) { var c = CLS[k] || CLS.aroma; return c[0]; }
+  function card(inner, pad, extra) { return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:' + (pad || '20px') + ';' + (extra || '') + '">' + inner + '</div>'; }
+  function badge(ic, txt) { return '<div style="display:inline-flex;align-items:center;gap:7px;font-family:\'JetBrains Mono\',monospace;font-size:9.5px;letter-spacing:.16em;font-weight:700;color:var(--t3)"><span style="display:grid;place-items:center;width:24px;height:24px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent)">' + icon(ic, 13) + '</span>' + txt + '</div>'; }
   function relTime(ts) {
     if (!ts) return ''; var t = Date.parse(String(ts).replace(' ', 'T')); if (isNaN(t)) return '';
     var s = Math.max(1, Math.round((Date.now() - t) / 1000));
@@ -414,13 +423,13 @@
   // Deterministic mini bar-chart (the kpiBars motif) — stable per value, decorative chrome.
   function miniBars(seed) {
     var s = (Math.abs(Math.round(seed)) || 3) % 9973 + 7, out = '';
-    for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<i style="flex:1;border-radius:2px 2px 1px 1px;height:' + h + 'px;background:' + (i === 6 ? 'var(--accent)' : 'var(--barmute)') + '"></i>'; }
+    for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<i style="flex:1;border-radius:var(--r-sm) 2px 1px 1px;height:' + h + 'px;background:' + (i === 6 ? 'var(--accent)' : 'var(--barmute)') + '"></i>'; }
     return '<div style="display:flex;align-items:flex-end;gap:3px;height:24px;margin-top:14px">' + out + '</div>';
   }
   function kpiRich(ic, value, lab, chip, seed) {
-    return '<div style="flex:1;min-width:185px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:18px;box-shadow:var(--rai);padding:17px 19px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between"><div style="width:38px;height:38px;border-radius:11px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center">' + icon(ic, 19) + '</div>' +
-      (chip ? '<span style="font-size:11px;font-weight:800;padding:4px 9px;border-radius:999px;background:var(--bg);color:var(--t3);box-shadow:var(--ins-sm)">' + chip + '</span>' : '') + '</div>' +
+    return '<div style="flex:1;min-width:185px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:17px 19px">' +
+      '<div style="display:flex;align-items:center;justify-content:space-between"><div style="width:38px;height:38px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent);display:grid;place-items:center">' + icon(ic, 19) + '</div>' +
+      (chip ? '<span style="font-size:11px;font-weight:800;padding:4px 9px;border-radius:var(--r-pill);background:var(--bg);color:var(--t3);box-shadow:var(--ins-sm)">' + chip + '</span>' : '') + '</div>' +
       '<div style="font-size:29px;font-weight:800;margin:13px 0 1px;letter-spacing:-.02em">' + value + '</div>' +
       '<div style="font-size:12.5px;color:var(--t3);font-weight:600">' + lab + '</div>' + miniBars(seed) + '</div>';
   }
@@ -456,7 +465,7 @@
   }
   function heroBand(p, role, kset) {
     var hero = kset[0], sig = [kset[1], kset[2], kset[3]];
-    var g = gaugeFor(p, role), gc = g[0] >= 70 ? 'var(--accent)' : (g[0] >= 40 ? '#E0A33B' : '#D85A38');
+    var g = gaugeFor(p, role), gc = g[0] >= 70 ? 'var(--accent)' : (g[0] >= 40 ? 'var(--amber)' : 'var(--red)');
     var insight = card(
       badge('activity', 'INSIGHT') +
       '<div style="font-size:40px;font-weight:800;letter-spacing:-.03em;margin:16px 0 2px">' + hero[1] + '</div>' +
@@ -464,16 +473,16 @@
       '<p style="font-size:12.5px;line-height:1.55;color:var(--t3);margin:14px 0 0">' + (NOTE[role] || NOTE.superadmin) + '</p>' +
       miniBars((hero[1] + '').length * 31 + 5), '22px');
     var rows = sig.map(function (m, i) {
-      var dot = ['#D85A38', '#E0A33B', 'var(--accent)'][i];
+      var dot = ['var(--red)', 'var(--amber)', 'var(--accent)'][i];
       return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--border)">' +
-        '<i style="width:8px;height:8px;border-radius:3px;background:' + dot + ';flex:none"></i>' +
+        '<i style="width:8px;height:8px;border-radius:var(--r-sm);background:' + dot + ';flex:none"></i>' +
         '<div style="flex:1;font-size:13px;font-weight:600;color:var(--t2)">' + m[2] + '</div>' +
         '<div style="font-size:16px;font-weight:800">' + m[1] + '</div></div>';
     }).join('');
     var signals = card(badge('alert', 'PIPELINE SIGNALS') + '<div style="margin-top:14px">' + rows + '</div>', '22px');
     var output = card(badge('layers', 'OUTPUT') + '<div style="margin:16px 0 4px">' + ring(g[0], g[0] + '%', g[1], gc) + '</div>' +
       '<div style="display:flex;gap:10px;margin-top:6px">' +
-      [kset[1], kset[2]].map(function (m, i) { return '<div style="flex:1;background:var(--well);box-shadow:var(--ins-sm);border-radius:12px;padding:10px 12px"><div style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3)">' + ['TOP', 'MED'][i] + '</div><div style="font-size:13px;font-weight:800;margin-top:2px">' + m[1] + '</div><div style="font-size:10.5px;color:var(--t3)">' + m[2] + '</div></div>'; }).join('') +
+      [kset[1], kset[2]].map(function (m, i) { return '<div style="flex:1;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-md);padding:10px 12px"><div style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3)">' + ['TOP', 'MED'][i] + '</div><div style="font-size:13px;font-weight:800;margin-top:2px">' + m[1] + '</div><div style="font-size:10.5px;color:var(--t3)">' + m[2] + '</div></div>'; }).join('') +
       '</div>', '22px');
     // Procurement asked to drop the (redundant) PIPELINE SIGNALS card → 2-card band there.
     if (role === 'procurement') return '<div data-grid style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">' + insight + output + '</div>';
@@ -482,22 +491,22 @@
   // Side panel — donut / bars / feed / pipeline (mockup buildSide), real data.
   function sideDonut(p) {
     var q = p.qc, tot = q.pass + q.fail, pct = tot ? Math.round(q.pass / tot * 100) : 0;
-    var legend = [['Pass', q.pass, '#34A56F'], ['Fail', q.fail, '#D85A38'], ['Pending', q.pending, '#D9A53B']].map(function (l) {
-      return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0"><i style="width:9px;height:9px;border-radius:3px;background:' + l[2] + '"></i><div style="flex:1;font-size:13px;color:var(--t2);font-weight:600">' + l[0] + '</div><div style="font-weight:800">' + l[1] + '</div></div>';
+    var legend = [['Pass', q.pass, 'var(--green)'], ['Fail', q.fail, 'var(--red)'], ['Pending', q.pending, 'var(--amber)']].map(function (l) {
+      return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0"><i style="width:9px;height:9px;border-radius:var(--r-sm);background:' + l[2] + '"></i><div style="flex:1;font-size:13px;color:var(--t2);font-weight:600">' + l[0] + '</div><div style="font-weight:800">' + l[1] + '</div></div>';
     }).join('');
-    return '<div style="margin:6px 0 10px">' + ring(pct, pct + '%', 'Pass', '#34A56F') + '</div>' + legend;
+    return '<div style="margin:6px 0 10px">' + ring(pct, pct + '%', 'Pass', 'var(--green)') + '</div>' + legend;
   }
   function sideBars(items) {
     return items.map(function (it) {
       return '<div style="padding:9px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:7px"><span style="font-weight:700;color:var(--t2)">' + it.label + '</span><span style="font-weight:800">' + it.pct + '%</span></div>' +
-        '<div style="height:9px;border-radius:5px;background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + it.pct + '%;height:100%;background:' + clsCol(it.cls) + ';border-radius:5px"></i></div></div>';
+        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + it.pct + '%;height:100%;background:' + clsCol(it.cls) + ';border-radius:var(--r-sm)"></i></div></div>';
     }).join('');
   }
   function sidePipe(items) {
     var max = Math.max.apply(null, items.map(function (i) { return i[1]; })) || 1;
     return items.map(function (it) {
       return '<div style="display:flex;align-items:center;gap:11px;padding:6px 0"><div style="width:86px;font-size:12px;font-weight:700;color:var(--t2);flex:none">' + it[0] + '</div>' +
-        '<div style="flex:1;height:9px;border-radius:5px;background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + Math.round(it[1] / max * 100) + '%;height:100%;background:var(--accent);opacity:.85;border-radius:5px"></i></div>' +
+        '<div style="flex:1;height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + Math.round(it[1] / max * 100) + '%;height:100%;background:var(--accent);opacity:.85;border-radius:var(--r-sm)"></i></div>' +
         '<div style="width:26px;text-align:right;font-weight:800;font-size:13px">' + it[1] + '</div></div>';
     }).join('');
   }
@@ -535,9 +544,9 @@
     var codes = (stage.codes || []).map(function (c) {
       return '<div style="display:flex;flex-direction:column;padding:3px 0"><span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + (masked ? 'var(--t2)' : 'var(--accent)') + '">' + c.code + '</span><span style="font-size:10px;color:var(--t3)">' + c.sub + '</span></div>';
     }).join('') || '<div style="font-size:11px;color:var(--t3);padding:3px 0">—</div>';
-    return '<div style="flex:1;min-width:152px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:14px;box-shadow:var(--rai-sm);padding:12px 13px">' +
+    return '<div style="flex:1;min-width:152px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-md);box-shadow:var(--rai-sm);padding:12px 13px">' +
       '<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">' +
-      '<span style="width:21px;height:21px;border-radius:7px;background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none">' + num + '</span>' +
+      '<span style="width:21px;height:21px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none">' + num + '</span>' +
       '<span style="display:grid;place-items:center;color:var(--t2);flex:none">' + icon(ic, 14) + '</span>' +
       '<span style="font-weight:700;font-size:12.5px;flex:1;line-height:1.1;letter-spacing:-.01em">' + name + '</span>' +
       '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3);flex:none">' + stage.count + '</span></div>' + codes + '</div>';
@@ -554,15 +563,15 @@
     var rev = p.reveal.product, fv = p.flow.formula || { count: 0, codes: [] };
     var fcodes = (fv.codes || []).map(function (c) { return c.code; }).join(' · ');
     var sub = rev ? ('selects ' + (fcodes || 'the formula') + ' — everything below shows aliases only') : ('protected — ' + fv.count + ' formulas sealed');
-    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#fff;border-radius:16px;padding:14px 18px;box-shadow:var(--rai-sm)">' +
-      '<span style="width:40px;height:40px;border-radius:12px;background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
+    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#fff;border-radius:var(--r-md);padding:14px 18px;box-shadow:var(--rai-sm)">' +
+      '<span style="width:40px;height:40px;border-radius:var(--r-md);background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
       '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span style="font-weight:800;font-size:14px">6 · Formula selection</span><span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;opacity:.85">VAULT · MASKING BOUNDARY</span></div>' +
       '<div style="font-size:11.5px;opacity:.92;margin-top:2px">' + sub + '</div></div>' +
       '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;opacity:.85;flex:none">' + fv.count + ' formulas</span></div>';
     function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:10px;margin:4px 0"><span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:' + col + ';letter-spacing:.12em;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--border)"></div></div>'; }
     return card(
       '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><div style="flex:1"><div style="font-weight:800;font-size:16px">Chain of custody</div><div style="font-size:12px;color:var(--t3)">The real 24-step flow · stock planning &rarr; customer delivery</div></div>' +
-      '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:8px;padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
+      '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:var(--r-sm);padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
       divider('IDENTITY VISIBLE', 'var(--t3)') +
       flowRow(FLOW_PRE, p, 1, false) +
       ARROW_D + vault + ARROW_D +
@@ -586,17 +595,17 @@
   // Warehouse floor zone map (mockup buildWarehouse), real zones + rack counts + batch occupancy.
   function warehouseMap(p) {
     var zones = p.zones.map(function (z) {
-      var capCol = z.capPct >= 85 ? '#D85A38' : (z.capPct >= 65 ? '#E0A33B' : 'var(--accent)');
-      var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:3px;height:16px;background:' + (on ? clsCol(z.cls) : 'var(--well)') + ';box-shadow:' + (on ? 'none' : 'var(--ins-sm)') + '"></i>'; }
-      return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:18px;box-shadow:var(--rai);padding:17px 18px">' +
-        '<div style="display:flex;align-items:center;gap:9px;margin-bottom:3px"><i style="width:11px;height:11px;border-radius:4px;background:' + clsCol(z.cls) + '"></i><div style="font-weight:800;font-size:14.5px;flex:1">' + z.name + '</div>' + (z.code === 'Z4' ? '<span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;color:#C0492E;border:1px solid #D85A3833;border-radius:6px;padding:2px 6px">FLAMMABLE</span>' : '') + '</div>' +
+      var capCol = z.capPct >= 85 ? 'var(--red)' : (z.capPct >= 65 ? 'var(--amber)' : 'var(--accent)');
+      var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--well)') + ';box-shadow:' + (on ? 'none' : 'var(--ins-sm)') + '"></i>'; }
+      return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:17px 18px">' +
+        '<div style="display:flex;align-items:center;gap:9px;margin-bottom:3px"><i style="width:11px;height:11px;border-radius:var(--r-sm);background:' + clsCol(z.cls) + '"></i><div style="font-weight:800;font-size:14.5px;flex:1">' + z.name + '</div>' + (z.code === 'Z4' ? '<span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;color:var(--red);border:1px solid var(--red);border-radius:var(--r-sm);padding:2px 6px">FLAMMABLE</span>' : '') + '</div>' +
         '<div style="font-size:11.5px;color:var(--t3);margin-bottom:12px">' + z.racks + ' racks · ' + z.batches + ' batches stored</div>' +
         '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px">' + cells + '</div>' +
         '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px"><span style="color:var(--t3);font-weight:600">Capacity used</span><span style="font-weight:800;color:' + capCol + '">' + z.capPct + '%</span></div>' +
-        '<div style="height:9px;border-radius:5px;background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + z.capPct + '%;height:100%;background:' + capCol + ';border-radius:5px"></i></div></div>';
+        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + z.capPct + '%;height:100%;background:' + capCol + ';border-radius:var(--r-sm)"></i></div></div>';
     }).join('');
     var workSeed = p.counts.skusStored * 7 + p.counts.invOnHand;
-    var bars = ''; var s = workSeed; for (var i = 0; i < 14; i++) { s = (s * 48271) % 2147483647 || 11; var h = 14 + (s % 46); bars += '<i style="flex:1;border-radius:3px 3px 0 0;height:' + h + 'px;background:var(--accent);opacity:.82"></i>'; }
+    var bars = ''; var s = workSeed; for (var i = 0; i < 14; i++) { s = (s * 48271) % 2147483647 || 11; var h = 14 + (s % 46); bars += '<i style="flex:1;border-radius:var(--r-sm) 3px 0 0;height:' + h + 'px;background:var(--accent);opacity:.82"></i>'; }
     var workload = card(badge('activity', 'STORAGE WORKLOAD') + '<div style="display:flex;align-items:flex-end;gap:4px;height:74px;margin:16px 0 4px">' + bars + '</div>' +
       '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3)"><span>06:00</span><span>12:00</span><span>18:00</span></div>', '20px');
     return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:16px">' + zones + '</div>' +
@@ -625,7 +634,7 @@
     return (S[role] || S.superadmin).map(function (k) { var v = String(k[1]); return [k[0], v, k[2], '', (parseInt(v, 10) || v.length) * 13 + 3]; });
   }
   async function loadDashboard() {
-    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--t3);font-family:\'JetBrains Mono\',monospace;font-size:12px">LOADING · ENCRYPTED CHANNEL…</div>';
+    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING · ENCRYPTED CHANNEL…</div>';
     var res;
     try { res = await tunnel('/v1/dashboard'); } catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
     if (res.status === 403) { V.innerHTML = errBox('Your role does not have a dashboard yet.'); return; }
@@ -658,11 +667,11 @@
     var inner;
     if (!alerts.length) inner = '<div style="color:var(--t3);font-size:13px;padding:4px 2px">All clear — nothing needs your action right now &#10003;</div>';
     else inner = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + alerts.map(function (a) {
-      var col = a.severity === 'high' ? '#C0492E' : (a.severity === 'med' ? '#9A6B1E' : 'var(--accent)');
+      var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent)');
       var nk = alertNavKey(a.kind);
-      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);box-shadow:var(--ins-sm);border-radius:14px;padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.boxShadow=\'var(--rai-sm)\'" onmouseout="this.style.boxShadow=\'var(--ins-sm)\'"' : '') + '><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
+      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-md);padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.boxShadow=\'var(--rai-sm)\'" onmouseout="this.style.boxShadow=\'var(--ins-sm)\'"' : '') + '><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
     }).join('') + '</div>';
-    return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:18px 20px;margin-bottom:16px">' + head + inner + '</div>';
+    return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:18px 20px;margin-bottom:16px">' + head + inner + '</div>';
   }
   // Stack multi-column dashboard grids on narrow screens (remembers each grid's desktop template).
   function applyDashCols() {
@@ -913,8 +922,8 @@
     }).join('') || '<div style="color:var(--t3);font-size:12px;padding:8px 0">No details.</div>';
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + ' detail</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<div style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + ' detail</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="margin:10px 0 4px">' + fieldsHtml + '</div>' +
       (cfg.items ? '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:16px 0 6px">LINE ITEMS</div><div id="ra-ditems" style="color:var(--t3);font-size:12px;padding:8px 0">Loading…</div>' : '') + '</div>';
     document.body.appendChild(ov); setTheme();
@@ -945,11 +954,11 @@
     }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-eform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+    ov.innerHTML = '<form id="ra-eform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
-      '<button type="button" id="ra-eclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
-      rows + '<div id="ra-eerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-esave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save changes</button></form>';
+      '<button type="button" id="ra-eclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
+      rows + '<div id="ra-eerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-esave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save changes</button></form>';
     document.body.appendChild(ov); setTheme();
     // prefill current values (via JS so quotes/markup in data can't break the form)
     cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var cur = row[f.n]; el.value = cur == null ? '' : String(cur); });
@@ -1033,7 +1042,7 @@
         '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
         '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
         '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
-        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#117C66;color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
+        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#117C66;color:#fff;border:none;border-radius:var(--r-sm);font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
         '</body></html>';
       w.document.write(html); w.document.close();
     }
@@ -1049,12 +1058,12 @@
 
   var _acts = {}, _actSeq = 0;
   function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
-  function actBtn(k, label, bg, fg) { return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:9px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>'; }
+  function actBtn(k, label, bg, fg) { return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>'; }
   function rowActionsCell(endpoint, r) {
     var out = [];
     var avail = actionsFor(endpoint, r) || [];
     avail.forEach(function (a) {
-      var bg = a.tone === 'bad' ? '#C0492E' : a.tone === 'warn' ? '#9A6B1E' : a.tone === 'good' ? '#2E7D55' : 'var(--accent)';
+      var bg = a.tone === 'bad' ? 'var(--red)' : a.tone === 'warn' ? 'var(--amber)' : a.tone === 'good' ? 'var(--green)' : 'var(--accent)';
       var k = 'ra' + (_actSeq++); _acts[k] = { a: a, r: r };
       out.push(actBtn(k, a.label, bg));
     });
@@ -1065,7 +1074,7 @@
       if (!cfg.noDeactivate) {
         var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
         var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
-        out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? '#C0492E' : '#2E7D55'));
+        out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? 'var(--red)' : 'var(--green)'));
       }
     }
     if (PRINTABLE[endpoint]) {
@@ -1075,9 +1084,12 @@
     if (!out.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
     return out.join('');
   }
+  // COMPONENT_PARITY_MATRIX.json "Toast" (console.css:1471-1476 / admin-console.jsx setToast,
+  // 3400ms auto-dismiss). RawProd's toasts carry a tone (good/bad/neutral) ALEMBIC's bare `.toast`
+  // does not distinguish, so `.toast.good`/`.toast.bad` add that without a new visual grammar.
   function toast(msg, tone) {
-    var t = document.createElement('div'); t.textContent = msg;
-    t.style.cssText = 'position:fixed;top:18px;left:50%;transform:translateX(-50%);z-index:300;padding:11px 20px;border-radius:13px;font-size:13px;font-weight:700;color:#fff;box-shadow:0 12px 34px rgba(0,0,0,.28);background:' + (tone === 'bad' ? '#C0492E' : '#1D9E75');
+    var t = document.createElement('div'); t.className = 'toast' + (tone === 'bad' ? ' bad' : tone === 'good' ? ' good' : '');
+    t.innerHTML = '<span class="d"></span>' + escHtml(msg);
     document.body.appendChild(t);
     setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, 1900);
   }
@@ -1441,7 +1453,7 @@
     ] }
   };
   function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
-  function fStyle() { return 'width:100%;padding:11px 13px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);font-size:13.5px;color:var(--t1);font-family:inherit;outline:none'; }
+  function fStyle() { return 'width:100%;padding:11px 13px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);font-size:13.5px;color:var(--t1);font-family:inherit;outline:none'; }
   function openCreate(endpoint) {
     var cfg = CREATE[endpoint]; if (!cfg) return;
     var rows = cfg.fields.map(function (f) {
@@ -1451,15 +1463,15 @@
         ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' style="' + fStyle() + '">' + opts + '</select>';
       } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
       else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' style="' + fStyle() + '">'; }
-      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
+      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' + ctrl + '</div>';
     }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
-      '<button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
-      rows + '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
+      '<button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
+      rows + '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
@@ -1514,22 +1526,22 @@
     // Line-item fields have no label above them (they sit in a compact row), so carry the field
     // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
     function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" style="' + fStyle() + '">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" placeholder="' + escHtml(f.l) + '" style="' + fStyle() + '">'; }
-    var headerRows = cfg.header.map(function (f) { return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl(f, 'h') + '</div>'; }).join('');
+    var headerRows = cfg.header.map(function (f) { return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' + ctrl(f, 'h') + '</div>'; }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       headerRows +
-      '<div style="display:flex;align-items:center;gap:10px;margin:16px 0 8px"><div style="font-weight:800;font-size:13px;flex:1">Line items</div><button type="button" id="ra-addline" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer">+ Add line</button></div>' +
-      '<div id="ra-lines"></div><div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:6px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
+      '<div style="display:flex;align-items:center;gap:10px;margin:16px 0 8px"><div style="font-weight:800;font-size:13px;flex:1">Line items</div><button type="button" id="ra-addline" style="padding:6px 12px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer">+ Add line</button></div>' +
+      '<div id="ra-lines"></div><div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:6px 0 10px"></div>' +
+      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     var linesEl = ov.querySelector('#ra-lines');
     function addLine() {
       var row = document.createElement('div'); row.className = 'ra-line'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
-      row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none;font-size:15px">&times;</button>';
+      row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--red);width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;flex:none;font-size:15px">&times;</button>';
       linesEl.appendChild(row); row.querySelector('.ra-rmline').onclick = function () { row.remove(); };
     }
     for (var i = 0; i < (cfg.itemMin || 1); i++) addLine();
@@ -1572,8 +1584,8 @@
   function openTrace(fg) {
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Traceability</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Traceability</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12px;color:var(--t3);margin-bottom:16px">Customer → finished good → oil batch → raw materials → vendor</div>' +
       '<div id="ra-trace" style="color:var(--t3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div></div>';
     document.body.appendChild(ov); setTheme();
@@ -1581,8 +1593,8 @@
     $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
     var down = '<div style="display:flex;justify-content:center;padding:2px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
     function step(ic, title, sub, accent) {
-      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--well)') + ';' + (accent ? 'color:#fff;' : '') + 'border-radius:14px;padding:12px 15px;box-shadow:' + (accent ? 'var(--rai-sm)' : 'var(--ins-sm)') + '">' +
-        '<span style="width:34px;height:34px;border-radius:10px;background:' + (accent ? 'rgba(255,255,255,.18)' : 'var(--accent-soft)') + ';color:' + (accent ? '#fff' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
+      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--well)') + ';' + (accent ? 'color:#fff;' : '') + 'border-radius:var(--r-md);padding:12px 15px;box-shadow:' + (accent ? 'var(--rai-sm)' : 'var(--ins-sm)') + '">' +
+        '<span style="width:34px;height:34px;border-radius:var(--r-sm);background:' + (accent ? 'rgba(255,255,255,.18)' : 'var(--accent-soft)') + ';color:' + (accent ? '#fff' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
         '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px">' + title + '</div><div style="font-size:11.5px;' + (accent ? 'opacity:.92' : 'color:var(--t3)') + '">' + sub + '</div></div></div>';
     }
     tunnel('/v1/trace/finished-good/' + fg.finishedGoodBatchId).then(function (res) {
@@ -1590,7 +1602,7 @@
       if (res.status >= 400 || !res.json || !res.json.data) { el.textContent = (res.json && res.json.error && res.json.error.message) || 'Trace unavailable.'; return; }
       var t = res.json.data;
       var mats = (t.materials || []).map(function (m) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--well);box-shadow:var(--ins-sm);border-radius:11px;margin-bottom:7px;flex-wrap:wrap">' +
+        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-sm);margin-bottom:7px;flex-wrap:wrap">' +
           '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:var(--accent)">' + m.material + '</span>' +
           '<span style="color:var(--t3);font-size:11px">&larr; batch ' + m.rmBatch + '</span><span style="color:var(--t3);font-size:11px">&larr; ' + m.grn + '</span>' +
           '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m.vendor + '</span></div>';
@@ -1610,7 +1622,7 @@
     if (item[3] === '__dash__') return loadDashboard();
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
     if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
-    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--t3);font-family:\'JetBrains Mono\',monospace;font-size:12px">LOADING · ENCRYPTED CHANNEL…</div>';
+    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING · ENCRYPTED CHANNEL…</div>';
     var masked = item[4] === true;
     var res;
     try { res = await tunnel(item[3] + '?limit=100'); }
@@ -1634,19 +1646,19 @@
       (sKeys[0] ? kpi('activity', String(byStatus[sKeys[0]]), label(sKeys[0])) : kpi('grid', '—', 'Live')) +
       (sKeys[1] ? kpi('flask', String(byStatus[sKeys[1]]), label(sKeys[1])) : kpi('layers', cols.length ? String(cols.length) : '—', 'Fields')) +
       kpi('lock', masked ? 'Masked' : 'Live', masked ? 'Alias-protected' : 'DB source of truth');
-    var kpiBand = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kpis + '</div>';
+    var kpiBand = '<div class="stats">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
-    var newBtn = canNew ? '<button id="ra-new" style="padding:8px 14px;border:none;border-radius:11px;background:var(--accent);color:#fff;font-size:12.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm);white-space:nowrap">+ New</button>' : '';
+    var newBtn = canNew ? '<button id="ra-new" class="btn p">+ New</button>' : '';
     if (!rows.length && !st.search.trim()) {
-      V.innerHTML = kpiBand + '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);padding:48px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No records yet</div><div style="font-size:13px;color:var(--t3)">This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</div>' + (newBtn ? '<div style="margin-top:18px">' + newBtn + '</div>' : '') + '</div>';
+      V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3><p>This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</p>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
       var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
       return;
     }
-    var shell = '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:20px;box-shadow:var(--rai);overflow:hidden">' +
-      '<div style="display:flex;align-items:center;gap:12px;padding:16px 22px;flex-wrap:wrap"><div style="font-weight:800;font-size:15px;flex:1">' + item[1] + (masked ? ' <span style="font-size:11px;color:var(--accent);font-family:\'JetBrains Mono\',monospace">· ALIASES ONLY</span>' : '') + '</div>' +
-      '<div id="ra-count" style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:var(--t3)"></div>' +
-      '<div style="display:flex;align-items:center;gap:8px;background:var(--well);border:1px solid var(--wbord);border-radius:11px;padding:8px 13px;box-shadow:var(--ins-sm);color:var(--t3)">' + icon('search', 15) + '<input id="ra-search" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--t1);width:130px"></div>' + newBtn + '</div>' +
+    var shell = '<div class="card">' +
+      '<div class="card-hd"><h2>' + item[1] + '</h2>' + (masked ? '<span class="chip k mono">ALIASES ONLY</span>' : '') +
+      '<span class="n" id="ra-count"></span>' +
+      '<input id="ra-search" class="fld" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="max-width:220px;margin-left:auto">' + newBtn + '</div>' +
       '<div id="ra-results"></div></div>';
     V.innerHTML = kpiBand + shell;
     paintResults();
@@ -1681,22 +1693,22 @@
     var cnt = $('ra-count'); if (cnt) cnt.textContent = shown.length + ' of ' + v.rows.length;
     var el = $('ra-results'); if (!el) return;
     if (!shown.length) {
-      el.innerHTML = '<div style="padding:44px;text-align:center"><div style="color:var(--t2);font-weight:700;margin-bottom:6px">No results for "' + escHtml(st.search.trim()) + '"</div><div style="font-size:13px;color:var(--t3)">' + v.rows.length + ' record' + (v.rows.length === 1 ? '' : 's') + ' loaded — none match your search.</div><button id="ra-clear" style="margin-top:14px;padding:8px 16px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit">Clear search</button></div>';
+      el.innerHTML = '<div class="empty"><h3>No results for "' + escHtml(st.search.trim()) + '"</h3><p>' + v.rows.length + ' record' + (v.rows.length === 1 ? '' : 's') + ' loaded — none match your search.</p><button id="ra-clear" class="btn" style="margin-top:var(--s-snug)">Clear search</button></div>';
       var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; var s = $('ra-search'); if (s) { s.value = ''; s.focus(); } paintResults(); };
       return;
     }
     var head = cols.map(function (c) {
       var active = v.sortKey === c; var arrow = active ? (v.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
-      return '<th data-sort="' + c + '" title="Sort by ' + label(c) + '" style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:' + (active ? 'var(--accent)' : 'var(--t3)') + ';border-bottom:1px solid var(--border);white-space:nowrap;cursor:pointer;user-select:none">' + label(c) + arrow + '</th>';
+      return '<th data-sort="' + c + '" title="Sort by ' + label(c) + '"' + (active ? ' class="on"' : '') + '>' + label(c) + arrow + '</th>';
     }).join('') +
-      (hasActions ? '<th style="padding:13px 22px;text-align:right;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">Actions</th>' : '');
+      (hasActions ? '<th class="r">Actions</th>' : '');
     var clickable = !!DETAIL[item[3]];
-    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td style="padding:14px 22px;border-bottom:1px solid var(--border);white-space:nowrap;font-size:13px;color:var(--t1)">' + fmt(c, r[c], r) + '</td>'; }).join('') +
-      (hasActions ? '<td style="padding:10px 22px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
+      (hasActions ? '<td class="r">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
-    var more = (v.cursor && !q) ? '<div style="padding:14px 22px;text-align:center;border-top:1px solid var(--border)"><button id="ra-more" style="padding:9px 20px;border:none;border-radius:11px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-weight:700;cursor:pointer;font-family:inherit;font-size:12.5px">Load more · ' + v.rows.length + ' loaded</button></div>' : '';
-    el.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;min-width:560px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
+    var more = (v.cursor && !q) ? '<div class="tfoot" style="justify-content:center"><button id="ra-more" class="btn sm">Load more · ' + v.rows.length + ' loaded</button></div>' : '';
+    el.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     wireActions();
     if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) { tr.onclick = function (e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) openDetail(item[3], a.r); }; });
     var mb = $('ra-more'); if (mb) mb.onclick = loadMore;
@@ -1750,18 +1762,10 @@
     if (f.t === 'number') { var n = Number(v); if (isNaN(n)) return f.l + ' must be a number.'; if (f.min != null && n < f.min) return f.l + ' must be at least ' + f.min + '.'; if (f.max != null && n > f.max) return f.l + ' must be at most ' + f.max + '.'; }
     return null;
   }
-  function errBox(m) { return '<div style="background:var(--surface);border:1px solid var(--cbord);border-radius:20px;box-shadow:var(--rai);padding:40px;text-align:center;color:#C0492E;font-weight:600">' + m + '</div>'; }
+  // NotBuilt-style: state the specific reason, per PORTING_GUIDE.md §Empty/error/loading — never a
+  // generic spinner. Callers already pass a specific message (RP-PROC-007 etc.); this just frames it.
+  function errBox(m) { return '<div class="card notbuilt"><h2>This could not be loaded</h2><p>' + m + '</p></div>'; }
 
-  // Theme changes only re-apply the CSS variables + restyle the toggles — NO data re-fetch.
-  // Every card/table reads var(--*), so they recolor instantly without re-rendering.
-  function repaintTheme() {
-    setTheme();
-    [].forEach.call(document.querySelectorAll('[data-skin]'), function (b) {
-      var on = b.getAttribute('data-skin') === st.skin;
-      b.style.background = on ? 'var(--accent)' : 'transparent'; b.style.color = on ? '#fff' : 'var(--t3)';
-    });
-    var d = $('ra-dark'); if (d) d.innerHTML = icon(st.dark ? 'sun' : 'moon', 18);
-  }
   // Module 12 dashboard alerts — fill the header bell from /v1/alerts (real, role-filtered counts).
   // Map an alert kind → the nav key of the screen that resolves it, for the CURRENT role.
   function alertNavKey(kind) {
@@ -1783,58 +1787,91 @@
       var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
       pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS · tap to act</div>' + d.alerts.map(function (a) {
-        var col = a.severity === 'high' ? '#C0492E' : (a.severity === 'med' ? '#9A6B1E' : 'var(--accent)');
+        var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent)');
         var nk = alertNavKey(a.kind);
-        return '<div ' + (nk ? 'data-alert-nav="' + nk + '"' : '') + ' style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:11px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.background=\'var(--well)\'" onmouseout="this.style.background=\'transparent\'"' : '') + '><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
+        return '<div ' + (nk ? 'data-alert-nav="' + nk + '"' : '') + ' style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.background=\'var(--well)\'" onmouseout="this.style.background=\'transparent\'"' : '') + '><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
       }).join('')) : '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12.5px">No alerts &#10003;</div>';
       [].forEach.call(pop.querySelectorAll('[data-alert-nav]'), function (el) {
         el.onclick = function (e) { e.stopPropagation(); st.nav = el.getAttribute('data-alert-nav'); st.search = ''; pop.style.display = 'none'; shell(); };
       });
     }).catch(function () {});
   }
+  // Switch to another workspace the signed-in session already holds a role for — no second login
+  // (addendum §5/§8). Keeps the same session/token; only st.role + the rendered rail/nav change.
+  function switchRole(newRole) {
+    if (!ROLES[newRole] || newRole === st.role) return;
+    st.role = newRole; st.nav = ROLES[newRole].nav[0][0]; st.search = '';
+    shell();
+  }
   function wireShell() {
     [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
-    [].forEach.call(document.querySelectorAll('[data-skin]'), function (b) { b.onclick = function () { st.skin = b.getAttribute('data-skin'); repaintTheme(); }; });
-    $('ra-dark').onclick = function () { st.dark = !st.dark; repaintTheme(); };
     $('ra-logout').onclick = function () { session = null; st.role = null; try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
+    // .rail-min (ALEMBIC's own primitive) sits INSIDE .rail, so once the rail is off-canvas on
+    // mobile it can only ever CLOSE the drawer, never open it — a second toggle in the topbar
+    // (always visible) is what actually opens it; #ra-burger2 is RawProd's own addition for that.
+    var burger2 = $('ra-burger2'); if (burger2) burger2.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
     applyResponsive();
+    applyNetBanner();
   }
+  // Mobile: the rail becomes an off-canvas drawer, opened by the topbar's burger and closed by
+  // either the in-rail .rail-min button or tapping the scrim behind it. Desktop/tablet: the rail
+  // is the fixed 236px .app column (PORTING_GUIDE.md §Shell).
   function applyResponsive() {
-    var mobile = window.innerWidth <= 860; var side = $('ra-side'), burger = $('ra-burger'), bg = $('ra-drawer-bg');
+    var mobile = window.innerWidth <= 767; var side = $('ra-side'), burger2 = $('ra-burger2'), bg = $('ra-drawer-bg');
     if (!side) return;
     if (mobile) {
-      burger.style.display = 'grid';
-      side.style.position = 'fixed'; side.style.top = '0'; side.style.left = '0'; side.style.height = '100vh'; side.style.margin = '0'; side.style.borderRadius = '0 22px 22px 0';
-      side.style.transform = st.drawer ? 'translateX(0)' : 'translateX(-110%)'; side.style.transition = 'transform .28s cubic-bezier(.4,0,.2,1)';
-      bg.style.display = st.drawer ? 'block' : 'none';
+      if (burger2) burger2.style.display = 'grid';
+      side.style.position = 'fixed'; side.style.top = '0'; side.style.left = '0'; side.style.bottom = '0'; side.style.zIndex = '80';
+      side.style.transform = st.drawer ? 'translateX(0)' : 'translateX(-100%)'; side.style.transition = 'transform .28s cubic-bezier(.2,.9,.25,1)';
+      side.style.boxShadow = st.drawer ? '26px 0 64px -16px rgba(10,10,10,.36)' : 'none';
+      if (bg) bg.classList.toggle('show', !!st.drawer);
     } else {
-      burger.style.display = 'none'; bg.style.display = 'none';
-      side.style.position = 'sticky'; side.style.top = '14px'; side.style.height = 'calc(100vh - 28px)'; side.style.margin = '14px 0 14px 14px'; side.style.borderRadius = '24px'; side.style.transform = 'none';
+      if (burger2) burger2.style.display = 'none';
+      side.style.position = 'sticky'; side.style.top = '0'; side.style.bottom = ''; side.style.zIndex = ''; side.style.transform = 'none'; side.style.boxShadow = 'none';
+      if (bg) bg.classList.remove('show');
     }
+  }
+  // Truthful offline/degraded banner (addendum §13): says exactly what it is — the last data
+  // loaded — and never implies anything typed while offline is queued for later replay, because
+  // nothing here is. Inventory/QC/production writes need the live secure channel; every write
+  // path already surfaces "Could not reach the secure channel" on failure rather than queuing.
+  function applyNetBanner() {
+    var b = $('ra-net-banner'); if (!b) return;
+    b.classList.toggle('show', navigator.onLine === false);
+  }
+  if (!window.__raNetWired) {
+    window.__raNetWired = true;
+    window.addEventListener('online', applyNetBanner);
+    window.addEventListener('offline', applyNetBanner);
   }
   window.addEventListener('resize', function () { if (st.role) { applyResponsive(); applyDashCols(); } });
 
   /* ---------------- login ---------------- */
+  // Login/session chrome — composed from ALEMBIC primitives (.card + .fld + .btn.p): ALEMBIC's own
+  // captured reference has no login screen to port 1:1 (ALEMBIC_DEV_AUTH=1 skips it in dev, and a
+  // real session absent renders StaffSignIn — see PORTING_GUIDE.md §Nav gating by permission), so
+  // per addendum §1 ("where ALEMBIC has no exact equivalent, compose from ALEMBIC primitives") this
+  // composes the shared card/field/button grammar rather than inventing a new visual style.
   function showLogin() {
-    $('app').style.display = 'block'; // login is a single centered card, not the sidebar+main flex
+    $('app').className = '';
     $('app').innerHTML =
-      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px">' +
-      '<form id="lf" style="width:100%;max-width:380px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:28px;padding:40px 34px;box-shadow:var(--rai);text-align:center">' +
-        '<div style="width:58px;height:58px;border-radius:18px;background:var(--accent);color:#fff;display:grid;place-items:center;margin:0 auto 22px;box-shadow:var(--rai-sm)">' + icon('droplet', 26) + '</div>' +
-        '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;letter-spacing:.18em;color:var(--t3);font-weight:700">RAW AROMA CHEM</div>' +
-        '<h1 style="font-size:28px;font-weight:800;margin:6px 0 8px;letter-spacing:-.01em">Production Portal</h1>' +
-        '<p style="font-size:13.5px;line-height:1.5;color:var(--t3);margin:0 0 24px">Sign in. Your role is assigned by an administrator — you see only what it allows.</p>' +
-        '<input id="le" type="email" autocomplete="username" required placeholder="you@rawaroma.local" style="width:100%;padding:13px 15px;border:none;border-radius:13px;background:var(--well);box-shadow:var(--ins-sm);font-size:14px;color:var(--t1);font-family:inherit;margin-bottom:14px;outline:none">' +
-        '<input id="lp" type="password" autocomplete="current-password" required placeholder="Password" style="width:100%;padding:13px 15px;border:none;border-radius:13px;background:var(--well);box-shadow:var(--ins-sm);font-size:14px;color:var(--t1);font-family:inherit;margin-bottom:8px;outline:none">' +
-        '<div id="lerr" style="min-height:18px;font-size:12.5px;color:#C0492E;font-weight:600;text-align:left;margin:2px 0 12px"></div>' +
-        '<button id="lb" type="submit" style="width:100%;padding:15px;border:none;border-radius:15px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Enter portal &rarr;</button>' +
-        '<div style="margin-top:14px;font-family:\'JetBrains Mono\',monospace;font-size:10px;letter-spacing:.08em;color:var(--t3)">&#128274; END-TO-END ENCRYPTED CHANNEL</div>' +
+      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--s-base)">' +
+      '<form id="lf" class="card" style="width:100%;max-width:380px;padding:var(--s-open) var(--s-loose);text-align:center">' +
+        '<div style="width:52px;height:52px;border-radius:var(--r-lg);background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;margin:0 auto var(--s-base)">' + icon('droplet', 22) + '</div>' +
+        '<div style="font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.18em;color:var(--ink-3);font-weight:var(--w-med)">RAW AROMA CHEM</div>' +
+        '<h1 style="font:var(--w-light) var(--t-fig)/var(--lh-fig) var(--font-ui);margin:6px 0 8px;letter-spacing:var(--ls-tight)">Production Portal</h1>' +
+        '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-base)">Sign in. Your role is assigned by an administrator — you see only what it allows.</p>' +
+        '<input id="le" class="fld" type="email" autocomplete="username" required placeholder="you@rawaroma.local" style="margin-bottom:var(--s-tight)">' +
+        '<input id="lp" class="fld" type="password" autocomplete="current-password" required placeholder="Password" style="margin-top:var(--s-tight)">' +
+        '<div id="lerr" style="min-height:18px;font:var(--w-med) var(--t-cap)/1.3 var(--font-ui);color:var(--red);text-align:left;margin:var(--s-tight) 0"></div>' +
+        '<button id="lb" type="submit" class="btn p" style="width:100%;justify-content:center;height:var(--s-open)">Enter portal &rarr;</button>' +
+        '<div style="margin-top:var(--s-snug);font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.08em;color:var(--ink-3)">&#128274; END-TO-END ENCRYPTED CHANNEL</div>' +
       '</form></div>';
-    setTheme();
     $('lf').onsubmit = function (e) {
       e.preventDefault(); var lb = $('lb'), le = $('lerr'); le.textContent = ''; lb.disabled = true; lb.textContent = 'Securing channel…';
       tunnel('/auth/login', { method: 'POST', body: { identifier: $('le').value, password: $('lp').value } }).then(function (res) {
@@ -1847,12 +1884,15 @@
   }
 
   // Establish the session from a login/refresh result, persist the refresh token (survives reloads),
-  // fetch real permissions, and render the shell. Returns false if the role has no portal.
+  // fetch real permissions, and render the shell. Returns false if NONE of the JWT's roles has a
+  // portal. When it holds MORE than one, every one with a portal is kept on session.availableRoles
+  // so the workspace switcher (shell(), addendum §5/§8) can move between them without a second login.
   function enterPortal(d) {
     var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
-    var v = roleView((payload.roles || [])[0] || null);
+    var seen = {}, avail = (payload.roles || []).map(roleView).filter(function (r) { return ROLES[r] && !seen[r] && (seen[r] = 1); });
+    var v = avail[0] || null;
     if (!ROLES[v]) return false;
-    session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [] };
+    session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
     try { if (d.refreshToken) localStorage.setItem('ra_rt', d.refreshToken); } catch (e) {}
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
     tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });

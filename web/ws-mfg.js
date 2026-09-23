@@ -17,17 +17,17 @@
     }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-dform" style="width:100%;max-width:420px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Dispatch order</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-dform" style="width:100%;max-width:420px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Dispatch order</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + (row.soNumber || 'Sales order') + ' → ship finished goods. Only batches with available stock are listed.</div>' +
       (batches.length
-        ? '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Finished-good batch <span style="color:#C0492E">*</span></label><select id="ra-dfg" style="' + fStyle() + '">' + opts + '</select>' +
-          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch qty <span style="color:#C0492E">*</span></label><input id="ra-dq" type="number" min="1" value="1" style="' + fStyle() + '"><div id="ra-dhint" style="font-size:11px;color:var(--t3);margin-top:4px"></div>' +
+        ? '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Finished-good batch <span style="color:var(--red)">*</span></label><select id="ra-dfg" style="' + fStyle() + '">' + opts + '</select>' +
+          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch qty <span style="color:var(--red)">*</span></label><input id="ra-dq" type="number" min="1" value="1" style="' + fStyle() + '"><div id="ra-dhint" style="font-size:11px;color:var(--t3);margin-top:4px"></div>' +
           '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Vehicle number</label><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" style="' + fStyle() + '">' +
           '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch date</label><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" style="' + fStyle() + '">' +
-          '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-          '<button type="submit" id="ra-dsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Dispatch</button>'
-        : '<div style="font-size:13px;color:#9A6B1E;background:var(--well);border-radius:12px;padding:14px;text-align:center">No finished-good stock is available to dispatch. Produce or release stock first.</div>') +
+          '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:8px 0 10px"></div>' +
+          '<button type="submit" id="ra-dsave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Dispatch</button>'
+        : '<div style="font-size:13px;color:var(--amber);background:var(--well);border-radius:var(--r-md);padding:14px;text-align:center">No finished-good stock is available to dispatch. Produce or release stock first.</div>') +
       '</form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
@@ -71,13 +71,13 @@
     if (!svg) { toast('QR generator not loaded — hard-refresh the page.', 'bad'); return; }
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:330px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:22px 24px;text-align:center">' +
+    ov.innerHTML = '<div style="width:100%;max-width:330px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:22px 24px;text-align:center">' +
       '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:800;font-size:15px;flex:1;text-align:left">' + escHtml(title) + '</div>' +
-      '<button type="button" id="ra-qrclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:30px;height:30px;border-radius:10px;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>' +
-      '<div style="width:220px;height:220px;margin:6px auto 4px;background:#fff;border-radius:12px;padding:12px;box-sizing:border-box;box-shadow:var(--ins-sm)"><div id="ra-qrbox" style="width:100%;height:100%">' + svg + '</div></div>' +
+      '<button type="button" id="ra-qrclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;font-size:16px;line-height:1">&times;</button></div>' +
+      '<div style="width:220px;height:220px;margin:6px auto 4px;background:#fff;border-radius:var(--r-md);padding:12px;box-sizing:border-box;box-shadow:var(--ins-sm)"><div id="ra-qrbox" style="width:100%;height:100%">' + svg + '</div></div>' +
       '<div style="font-family:\'JetBrains Mono\',monospace;font-size:18px;font-weight:800;letter-spacing:.03em;margin:10px 0 2px;color:var(--t1);word-break:break-all">' + escHtml(code) + '</div>' +
       '<div style="font-size:12px;color:var(--t3);margin-bottom:15px">' + escHtml(sub) + '</div>' +
-      '<button type="button" id="ra-qrprint" style="width:100%;padding:11px;border:none;border-radius:13px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Print label</button></div>';
+      '<button type="button" id="ra-qrprint" style="width:100%;padding:11px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Print label</button></div>';
     document.body.appendChild(ov); setTheme();
     var svgEl = ov.querySelector('#ra-qrbox svg'); if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; svgEl.style.display = 'block'; }
     function close() { if (ov.parentNode) ov.remove(); }
@@ -105,12 +105,12 @@
     var params = [];
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-qform" style="width:100%;max-width:640px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Record QC results</div><button type="button" id="ra-qclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-qform" style="width:100%;max-width:640px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Record QC results</div><button type="button" id="ra-qclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Physical (color/odor/clarity) → text · Technical (density/solubility…) → value. Each line marked Pass/Fail.</div>' +
-      '<div id="ra-qlines"></div><button type="button" id="ra-qadd" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add parameter</button>' +
-      '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:10px 0"></div>' +
-      '<button type="submit" id="ra-qsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save results</button></form>';
+      '<div id="ra-qlines"></div><button type="button" id="ra-qadd" style="padding:6px 12px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add parameter</button>' +
+      '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:10px 0"></div>' +
+      '<button type="submit" id="ra-qsave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save results</button></form>';
     document.body.appendChild(ov); setTheme();
     var linesEl = ov.querySelector('#ra-qlines');
     function paramOptions() { return '<option value="">Parameter…</option>' + params.map(function (p) { var v = p.qcParameterId != null ? p.qcParameterId : guessId(p); return v ? '<option value="' + v + '">' + (p.parameterName || p.parameterCode || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
@@ -120,7 +120,7 @@
         '<div style="flex:1;min-width:70px"><input data-val type="number" step="0.0001" placeholder="Value" style="' + fStyle() + '"></div>' +
         '<div style="flex:1.4;min-width:90px"><input data-text placeholder="Observation" style="' + fStyle() + '"></div>' +
         '<div style="flex:1;min-width:80px"><select data-res style="' + fStyle() + '"><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>' +
-        '<button type="button" class="ra-qrm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none">&times;</button>';
+        '<button type="button" class="ra-qrm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--red);width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;flex:none">&times;</button>';
       linesEl.appendChild(row); row.querySelector('.ra-qrm').onclick = function () { row.remove(); };
     }
     tunnel('/v1/qc-parameters?limit=100').then(function (res) { params = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-param]'), function (s) { s.innerHTML = paramOptions(); }); });

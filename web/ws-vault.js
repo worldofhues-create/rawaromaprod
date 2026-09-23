@@ -16,15 +16,15 @@
     ];
     var rows = fields.map(function (f) {
       var ctrl = f.t === 'textarea' ? '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>' : '<input data-name="' + f.n + '" type="' + (f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">';
-      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
+      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' + ctrl + '</div>';
     }).join('');
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-iform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Attach IFRA certificate</div><button type="button" id="ra-iclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-iform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Attach IFRA certificate</div><button type="button" id="ra-iclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Formula: ' + fname + '</div>' + rows +
-      '<div id="ra-ierr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-isave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Attach certificate</button></form>';
+      '<div id="ra-ierr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:2px 0 10px"></div>' +
+      '<button type="submit" id="ra-isave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Attach certificate</button></form>';
     document.body.appendChild(ov); setTheme();
     function close() { if (ov.parentNode) ov.remove(); }
     $('ra-iclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
@@ -48,18 +48,18 @@
     var mats = [];
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-gform" style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Seal ingredients</div><button type="button" id="ra-gclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
+    ov.innerHTML = '<form id="ra-gform" style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Seal ingredients</div><button type="button" id="ra-gclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
       '<div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Formula version · real material + % (encrypted into the vault)</div>' +
-      '<div id="ra-glines"></div><button type="button" id="ra-gadd" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add ingredient</button>' +
-      '<div id="ra-gerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:10px 0"></div>' +
-      '<button type="submit" id="ra-gsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Seal into vault</button></form>';
+      '<div id="ra-glines"></div><button type="button" id="ra-gadd" style="padding:6px 12px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add ingredient</button>' +
+      '<div id="ra-gerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:10px 0"></div>' +
+      '<button type="submit" id="ra-gsave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Seal into vault</button></form>';
     document.body.appendChild(ov); setTheme();
     var linesEl = ov.querySelector('#ra-glines');
     function matOptions() { return '<option value="">Select material…</option>' + mats.map(function (m) { var v = m.materialId != null ? m.materialId : guessId(m); return v ? '<option value="' + v + '">' + (m.materialCode || m.materialName || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
     function addLine() {
       var row = document.createElement('div'); row.className = 'ra-gline'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
-      row.innerHTML = '<div style="flex:2"><select data-mat style="' + fStyle() + '">' + matOptions() + '</select></div><div style="flex:1"><input data-pct type="number" step="0.01" placeholder="%" style="' + fStyle() + '"></div><button type="button" class="ra-grm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none">&times;</button>';
+      row.innerHTML = '<div style="flex:2"><select data-mat style="' + fStyle() + '">' + matOptions() + '</select></div><div style="flex:1"><input data-pct type="number" step="0.01" placeholder="%" style="' + fStyle() + '"></div><button type="button" class="ra-grm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--red);width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;flex:none">&times;</button>';
       linesEl.appendChild(row); row.querySelector('.ra-grm').onclick = function () { row.remove(); };
     }
     tunnel('/v1/materials?limit=100').then(function (res) { mats = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-mat]'), function (s) { s.innerHTML = matOptions(); }); });

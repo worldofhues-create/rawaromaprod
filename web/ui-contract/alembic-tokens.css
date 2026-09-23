@@ -1,0 +1,140 @@
+/* ALEMBIC_TOKENS.css — GENERATED FILE. Do not hand-edit.
+ *
+ * Regenerate with: node ops/scripts/ui-contract.mjs
+ * Verify with:     node ops/scripts/ui-contract.mjs --check
+ *
+ * Derived from release/ui/ALEMBIC_VISUAL_CONTRACT.json
+ * contract_version: 1.0.0
+ * baseline_sha:     44dec2d
+ * contract_hash:    1eee849f3af80928f5738c397cb0d5393362fb54ffdb2e45ff13297ee73bcb7b
+ *
+ * This is the file RawProd (and every other porting lane) vendors
+ * verbatim. Every value here traces to an ALEMBIC source file:line —
+ * see the JSON contract for citations. Do not add a value here that is
+ * not in the JSON; do not edit a value here without editing the JSON
+ * and re-running the generator. */
+
+:root{
+  /* fonts */
+  --font-ui: 'Outfit','Helvetica Neue',ui-sans-serif,system-ui,sans-serif;
+  --font-mono: 'JetBrains Mono',ui-monospace,monospace;
+
+  /* type scale */
+  --t-hero: 38px;
+  --t-fig: 28px;
+  --t-fig-sm: 23px;
+  --t-h1: 21px;
+  --t-h2: 16.5px;
+  --t-h3: 14.5px;
+  --t-body: 13.5px;
+  --t-cap: 11.5px;
+  --t-micro: 10px;
+
+  /* weights (Outfit 300/400/500 only) */
+  --w-light: 300;
+  --w-reg: 400;
+  --w-med: 500;
+
+  /* line heights */
+  --lh-hero: 1.12;
+  --lh-fig: 1.18;
+  --lh-fig-sm: 1.08;
+  --lh-h1: 1.18;
+  --lh-h2: 1.24;
+  --lh-h3: 1.3;
+  --lh-body: 1.55;
+  --lh-cap: 1.35;
+  --lh-micro: 1;
+
+  /* letter spacing */
+  --ls-tight: -.02em;
+  --ls-flat: -.005em;
+  --ls-wide: .14em;
+
+  /* colors */
+  --bg: #EDEDEB;
+  --panel: #FFFFFF;
+  --panel-2: #F6F6F4;
+  --panel-3: #ECECE9;
+  --line: #E6E6E3;
+  --line-2: #D6D6D2;
+  --ink: #141413;
+  --ink-2: #5C5C56;
+  --ink-3: #66665E;
+  --rail: #26262B;
+  --rail-2: #33333A;
+  --accent: #E9F260;
+  --blue: #5A5A66;
+
+  /* semantic colors */
+  --green: #5C6829;
+  --amber: #6E5F0F;
+  --red: #8A5A4C;
+  --purple: #7A7A88;
+  --accent-ink: #5A6410;
+  --accent-soft: rgba(233,242,96,.16);
+  --accent-line: rgba(233,242,96,.55);
+  --accent-glow: rgba(233,242,96,.40);
+
+  /* spacing (six-step scale — nothing else) */
+  --s-hair: 2px;
+  --s-tight: 6px;
+  --s-snug: 12px;
+  --s-base: 20px;
+  --s-loose: 32px;
+  --s-open: 48px;
+  --pad-card-top: 26px;
+  --pad-card: 30px;
+  --pad-card-btm: 28px;
+  --pad-region: 40px;
+
+  /* radii */
+  --r-sm: 10px;
+  --r-md: 14px;
+  --r-lg: 20px;
+  --r-xl: 24px;
+  --r-pill: 999px;
+
+  /* glass / translucency */
+  --gl-tint: rgba(255,255,255,.62);
+  --gl-tint-2: rgba(255,255,255,.44);
+  --gl-tint-deep: rgba(255,255,255,.78);
+  --gl-blur: 26px;
+  --gl-sat: 190%;
+  --gl-rim: rgba(255,255,255,.92);
+  --gl-rim-2: rgba(255,255,255,.34);
+  --gl-hair: rgba(20,20,19,.07);
+
+  /* control heights */
+  --ch-topbar-admin: 56px;
+  --ch-topbar-agent: 54px;
+  --ch-button-default: 31px;
+  --ch-button-sm: 26px;
+  --ch-field-admin: 31px;
+  --ch-field-shared: 34px;
+  --ch-rail-item: 36px;
+  --ch-rail-width: 236px;
+  --ch-checkbox: 15px;
+  --ch-pager-button: 25px;
+  --ch-rows-per-page-select: 25px;
+  --ch-toggle-switch: 22px x 38px;
+  --ch-touch-floor-mouse: 24px;
+  --ch-touch-floor-coarse-pointer: 44px;
+
+  /* icon sizing */
+  --ic-default: 14px;
+  --ic-storefront: 16px;
+
+  /* breakpoints (reference only — @media queries cannot read custom properties) */
+  --bp-desktop: 1440px;
+  --bp-tablet-landscape: 1024px;
+  --bp-tablet-portrait: 768px;
+  --bp-phone: 375px;
+}
+
+/* Reduced motion — ported verbatim in spirit from apps/web/app/reduced-motion.css.
+ * A consumer of this token file must still apply its OWN blanket
+ * `*,*::before,*::after{ animation-duration:.01ms!important; animation-iteration-count:1!important; transition:none!important }`
+ * under `@media (prefers-reduced-motion: reduce)`; it is not a custom
+ * property and cannot be expressed as one. */
+

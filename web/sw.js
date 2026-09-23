@@ -5,13 +5,20 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v77';
+const CACHE = 'ra-shell-v78';
 const SHELL = [
   '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js', '/ws-vault.js',
   '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
-  '/fonts/adf5f325-e87d-4401-84a9-246e380c6864.woff2',
-  '/fonts/9b9b854c-5b1b-4e4a-88a5-0d3eec462f94.woff2',
-  '/fonts/ad1f26c5-34be-47f9-98b1-c73b902006f7.woff2',
+  // ALEMBIC visual contract (ui-contract/) — vendored tokens/fonts/shell CSS. Bumped past the old
+  // /fonts/*.woff2 (Urbanist) precache entries, which index.html no longer references.
+  '/ui-contract/alembic-tokens.css', '/ui-contract/shell.css',
+  '/ui-contract/fonts/outfit.css', '/ui-contract/fonts/jetbrains-mono.css',
+  '/ui-contract/fonts/outfit-300-latin.woff2', '/ui-contract/fonts/outfit-300-latin-ext.woff2',
+  '/ui-contract/fonts/outfit-400-latin.woff2', '/ui-contract/fonts/outfit-400-latin-ext.woff2',
+  '/ui-contract/fonts/outfit-500-latin.woff2', '/ui-contract/fonts/outfit-500-latin-ext.woff2',
+  '/ui-contract/fonts/jetbrains-mono-400-latin.woff2', '/ui-contract/fonts/jetbrains-mono-400-latin-ext.woff2',
+  '/ui-contract/fonts/jetbrains-mono-500-latin.woff2', '/ui-contract/fonts/jetbrains-mono-500-latin-ext.woff2',
+  '/ui-contract/fonts/jetbrains-mono-600-latin.woff2', '/ui-contract/fonts/jetbrains-mono-600-latin-ext.woff2',
 ];
 
 self.addEventListener('install', (e) => {
