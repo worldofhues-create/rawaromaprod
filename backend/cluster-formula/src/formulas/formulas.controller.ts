@@ -22,6 +22,7 @@ import {
   createStage,
   createVersion,
   listQuery,
+  searchMaterialsQuery,
   type ActualReadQuery,
   type AddIngredients,
   type AddStageIngredients,
@@ -29,6 +30,7 @@ import {
   type CreateStage,
   type CreateVersion,
   type ListQuery,
+  type SearchMaterialsQuery,
 } from '../formula.dtos.js';
 
 @Controller()
@@ -64,6 +66,15 @@ export class FormulasController {
   @Get('v1/formula-audit-verify')
   verifyAuditChain() {
     return this.formulas.verifyAuditChain();
+  }
+
+  // The Vault draft editor's material picker — `vault.*` permission (not the ordinary
+  // masterdata:material:* read/reveal), minimal fields (id/code/name), so sealing an
+  // ingredient no longer means typing a raw material UUID by hand.
+  @Permissions('vault:material_search:read')
+  @Get('v1/vault/materials')
+  searchMaterials(@Query(new ZodValidationPipe(searchMaterialsQuery)) query: SearchMaterialsQuery) {
+    return this.formulas.searchMaterials(query.q, query.limit);
   }
 
   /* ── formula version ──────────────────────────────────────────────── */
@@ -105,6 +116,13 @@ export class FormulasController {
   @Get('v1/formula-versions/:id/ingredients')
   listIngredients(@Param('id') id: string) {
     return this.formulas.listIngredients(id);
+  }
+
+  // §109.8 DRAFT → VERSIONED. Same authority as sealing ingredients (formulator side, no SoD).
+  @Permissions('formula:formula_version:write')
+  @Post('v1/formula-versions/:id/finalize')
+  finalizeVersion(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.formulas.finalizeVersion(id, principal);
   }
 
   /* ── Vault-role-only decrypted recipe (§107/§109) ─────────────────── */
