@@ -15,16 +15,24 @@ import {
   type ExecutionContext,
   Injectable,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { META_FRESH_AUTH } from '../decorators/metadata.keys.js';
 import { DomainError } from './domain-error.js';
 import type { RequestWithUser } from './principal.js';
+import { SECURITY_AUDIT_SINK, type SecurityAuditSink } from './security-audit-sink.js';
 
 @Injectable()
 export class FreshAuthGuard implements CanActivate {
-  constructor(@Inject(Reflector) private readonly reflector: Reflector) {}
+  constructor(
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Optional() @Inject(SECURITY_AUDIT_SINK) private readonly auditSink?: SecurityAuditSink,
+  ) {}
 
+  // Synchronous, same reasoning as PermissionsGuard.canActivate — the audit write is
+  // fire-and-forget so this guard's public contract (boolean, throws synchronously) never
+  // changes shape for callers/tests.
   canActivate(context: ExecutionContext): boolean {
     const maxAgeSeconds = this.reflector.getAllAndOverride<number>(META_FRESH_AUTH, [
       context.getHandler(),
@@ -44,6 +52,27 @@ export class FreshAuthGuard implements CanActivate {
     // -5s tolerance absorbs ordinary clock skew between the signer and this process without
     // ever letting a real backdated/forged `iat` read as fresh.
     if (!Number.isFinite(user.iat) || ageSeconds > maxAgeSeconds || ageSeconds < -5) {
+      // Every @FreshAuth()-gated route is, by construction, a vault/formula-decision route
+      // (decrypt, approve, reject, lock) — so unlike PermissionsGuard, every denial here is
+      // audit-worthy, not just a pattern-matched subset (security review item 5).
+      if (this.auditSink) {
+        // entityId is a real `uuid` column (packages/data-kernel/src/audit.ts) — the route
+        // path is not one, so it goes in `reason` instead (same fix as PermissionsGuard).
+        void this.auditSink
+          .record({
+            actorId: user.userId,
+            action: 'security.freshauth.denied',
+            entityType: 'route',
+            entityId: null,
+            reason: request.url ?? null,
+            requestId: request.requestId ?? null,
+            ip: request.ip ?? null,
+            result: 'refuse',
+          })
+          .catch(() => {
+            // Never let an audit-write failure mask the real 403.
+          });
+      }
       throw DomainError.forbidden(
         'AUTH_STEP_UP_REQUIRED',
         `Re-authenticate to continue — this action requires a session issued within the last ${maxAgeSeconds}s`,

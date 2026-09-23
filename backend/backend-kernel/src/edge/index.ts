@@ -11,3 +11,8 @@ export { RequestIdMiddleware } from './request-id.middleware.js';
 export { AllExceptionsFilter } from './all-exceptions.filter.js';
 export { ZodValidationPipe } from './zod-validation.pipe.js';
 export type { AuthPrincipal, RequestWithUser } from './principal.js';
+export {
+  SECURITY_AUDIT_SINK,
+  type SecurityAuditEntry,
+  type SecurityAuditSink,
+} from './security-audit-sink.js';

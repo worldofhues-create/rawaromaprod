@@ -221,6 +221,7 @@ export const RA_PERMISSIONS: string[] = [
   'procurement:vendor_po_ack:write',
   'procurement:vendor_rm_mapping:read',
   'procurement:vendor_rm_mapping:write',
+  'production:manufacturing_instruction:read',
   'production:material_issue:read',
   'production:material_issue:write',
   'production:material_issue_item:read',

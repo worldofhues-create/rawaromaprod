@@ -13,7 +13,7 @@
  * created_by/updated_by = principal.userId; numerics via num(); ISO timestamps → Date.
  * material/inventory/uom/order/pick-list refs are id-only soft refs (plain uuid, no FK here).
  */
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -32,6 +32,13 @@ const {
   materialIssueItem,
   outbox,
 } = productionSchema;
+
+/** Order statuses that may resolve a manufacturing instruction (security review item 4) — a
+ * still-PLANNING order (never released to the floor for picking) has no business exposing
+ * resolved batch quantities yet. Kept as an ALLOW-list (not "anything but PLANNING") so an
+ * unanticipated future status (e.g. CANCELLED, ON_HOLD) fails closed by default rather than
+ * silently being treated as active. */
+const ACTIVE_ORDER_STATUSES = new Set(['INPROGRESS']);
 
 @Injectable()
 export class PickingService {
@@ -155,6 +162,13 @@ export class PickingService {
    * caller can't inflate the resolved quantities beyond what the order actually permits.
    * Returns null (→ empty body, not an error) if the order has no formula version linked
    * yet; throws (403, also audited) if that version exists but isn't approved/locked yet.
+   *
+   * Security review item 4: additionally refuses an order that isn't yet ACTIVE (released to
+   * the floor — see ACTIVE_ORDER_STATUSES; a still-PLANNING order has no pick list and no
+   * business exposing resolved quantities yet), and threads `orderId` into the mandatory
+   * vault-decrypt audit row via `requestId` — the underlying `VaultService.decryptVersion`
+   * audit only ever recorded the formula_version_id, not WHICH production order the
+   * resolution was for; "who, order, time" all land on one row this way.
    */
   async resolveManufacturingInstruction(
     orderId: string,
@@ -165,6 +179,7 @@ export class PickingService {
         .select({
           formulaVersionId: productionOrder.formulaVersionId,
           orderQty: productionOrder.orderQty,
+          status: productionOrder.status,
         })
         .from(productionOrder)
         .where(eq(productionOrder.productionOrderId, orderId))
@@ -172,10 +187,16 @@ export class PickingService {
     )[0];
     if (!order) throw new NotFoundException(`production_order not found: ${orderId}`);
     if (!order.formulaVersionId) return null;
+    if (!ACTIVE_ORDER_STATUSES.has(String(order.status ?? ''))) {
+      throw new ForbiddenException(
+        `production_order ${orderId} is not in an active/released state (status: ${order.status ?? 'unknown'}) — the manufacturing instruction is only resolvable once the order has been released to the floor`,
+      );
+    }
 
     const permittedBatchQuantity = Number(order.orderQty ?? 0);
     return this.formula.resolveManufacturingInstruction(order.formulaVersionId, permittedBatchQuantity, {
       actorId: principal.userId,
+      requestId: `production_order:${orderId}`,
     });
   }
 

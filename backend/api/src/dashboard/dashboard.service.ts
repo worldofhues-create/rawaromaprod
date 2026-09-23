@@ -11,7 +11,7 @@
  * The payload feeds the hero cards, the planned-vs-actual donut, the super-admin chain-of-custody
  * flow graph, and the warehouse floor zone map.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 
@@ -337,8 +337,21 @@ export class DashboardService {
    * `seeProduct`/`seeMaterial` are computed from the caller's REAL, explicitly-held
    * permissions only, same rule permissions.guard.ts enforces for `formula:actual:read`
    * itself. A caller lacking the permission gets the alias/'Protected ◆' masked view.
+   *
+   * Security review item 3: `platform_super_admin` is refused outright, as defense-in-depth
+   * on top of the edge `@Permissions('packaging:finished_good_batch_master:read')` gate it
+   * doesn't hold anyway — tenant business data (who bought what, which vendor supplied it)
+   * never goes to a platform-operations role, regardless of what the permission catalogue
+   * says today or says tomorrow. Without `masterdata:material:reveal`, the response also
+   * OMITS vendor identity and the per-material list entirely (a masked `materialCount`
+   * instead) — the vendor+batch/GRN combination, even alongside a masked material alias,
+   * still correlates "which supplier fed which finished good" in a way plain alias-masking
+   * elsewhere in this codebase doesn't need to guard against.
    */
   async traceFinishedGood(id: string, principal: AuthPrincipal) {
+    if ((principal.roles || []).includes('platform_super_admin')) {
+      throw new ForbiddenException('Traceability is tenant business data — not available to a platform-operations role.');
+    }
     const sql = this.sql;
     const perms = new Set(principal.permissions || []);
     const seeProduct = perms.has('formula:actual:read');
@@ -403,12 +416,18 @@ export class DashboardService {
         product: seeProduct ? String(head.product_name || head.formula_name || '—') : 'Protected ◆',
       },
       oilBatch: oil ? { batch: String(oil.oilno || '—'), qty: num(oil.produced_qty) } : null,
-      materials: mats.map((r) => ({
-        material: seeMaterial ? String(r.material_code || r.material_name || '—') : String(r.alias_name || '—'),
-        rmBatch: r.rmbatch ? String(r.rmbatch) : '—',
-        grn: r.grn_number ? String(r.grn_number) : '—',
-        vendor: r.vendor_name ? String(r.vendor_name) : r.vendor_code ? String(r.vendor_code) : '—',
-      })),
+      // Security review item 3: the per-material list (vendor + rm batch + GRN, even keyed by
+      // a masked alias) correlates "which supplier fed which finished good" — omitted for a
+      // caller without `masterdata:material:reveal`, replaced with just a count.
+      materials: seeMaterial
+        ? mats.map((r) => ({
+            material: String(r.material_code || r.material_name || '—'),
+            rmBatch: r.rmbatch ? String(r.rmbatch) : '—',
+            grn: r.grn_number ? String(r.grn_number) : '—',
+            vendor: r.vendor_name ? String(r.vendor_name) : r.vendor_code ? String(r.vendor_code) : '—',
+          }))
+        : [],
+      materialCount: mats.length,
     };
   }
 

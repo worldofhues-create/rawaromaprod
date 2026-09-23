@@ -15,7 +15,7 @@ import {
 } from '@core/backend-kernel';
 import { FormulasService } from './formulas.service.js';
 import {
-  actualReadQuery,
+  actualReadBody,
   addIngredients,
   addStageIngredients,
   createFormula,
@@ -23,7 +23,7 @@ import {
   createVersion,
   listQuery,
   searchMaterialsQuery,
-  type ActualReadQuery,
+  type ActualReadBody,
   type AddIngredients,
   type AddStageIngredients,
   type CreateFormula,
@@ -130,16 +130,19 @@ export class FormulasController {
   // `formula:actual:read` never short-circuits via super_admin (permissions.guard.ts) — only
   // formulator/vault_approver hold it (scripts/ra-roles.ts). §109.5 fresh-auth + §109.6/§109.8
   // access-reason apply: the caller must have re-authenticated within the window AND supply a
-  // reason, both required before this ever reaches VaultService.decryptVersion.
+  // reason, both required before this ever reaches VaultService.decryptVersion. POST (not GET)
+  // so the reason travels in the body, never the query string (security review item 9) —
+  // never logged in access logs / history for what is, by definition, the most sensitive read
+  // in the system.
   @Permissions('formula:actual:read')
   @FreshAuth()
-  @Get('v1/formula-versions/:id/actual')
+  @Post('v1/formula-versions/:id/actual')
   getActualFormula(
     @Param('id') id: string,
-    @Query(new ZodValidationPipe(actualReadQuery)) query: ActualReadQuery,
+    @Body(new ZodValidationPipe(actualReadBody)) body: ActualReadBody,
     @CurrentUser() principal: AuthPrincipal,
   ) {
-    return this.formulas.getActualFormula(id, query.reason, principal);
+    return this.formulas.getActualFormula(id, body.reason, principal);
   }
 
   /* ── stages + sealed stage ingredients ───────────────────────────── */

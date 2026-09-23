@@ -39,9 +39,18 @@ password, re-point `DATABASE_URL` (DIRECT endpoint, not `-pooler`). To reseed de
 
 ```bash
 DATABASE_URL=... pnpm db:push           # idempotent schema
+DATABASE_URL=... [FORMULA_DATABASE_URL=...] pnpm db:migrate   # additive column/table migrations — ALWAYS run after db:push
 DATABASE_URL=... BOOTSTRAP_OWNER_PASSWORD=... pnpm db:seed       # roles + sample logins
 DATABASE_URL=... pnpm db:seed:data      # Phase-1 demo dataset (the dashboards read this)
 ```
+
+`db:push` is CREATE-ONCE (it skips any schema that already has tables), so a database
+provisioned before a given branch added new columns/tables to the Drizzle schema files will NOT
+pick them up from `db:push` alone. `pnpm db:migrate` applies `scripts/migrations/*.sql` —
+additive, idempotent (`ADD COLUMN IF NOT EXISTS` / `CREATE TABLE IF NOT EXISTS`), safe to re-run,
+and safe to run before OR after `db:seed`. Run it every time after `db:push`, on every
+environment (including one being provisioned for the first time — the migrations are no-ops
+there since `db:push` already created the current shape).
 
 ## 3. Backend (Render)
 

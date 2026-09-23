@@ -30,6 +30,11 @@ import {
   ROLE_GRANT_PERMISSION,
   ROLE_GRANTERS,
   CAPABILITY_PERMISSIONS,
+  FORMULA_DECISION_PERMISSIONS,
+  FORMULATOR_FORBIDDEN_PERMISSIONS,
+  VAULT_APPROVER_FORBIDDEN_PERMISSIONS,
+  MANUFACTURING_INSTRUCTION_PERMISSION,
+  MANUFACTURING_INSTRUCTION_ROLES,
   type RoleDef,
 } from './ra-roles.js';
 
@@ -86,6 +91,47 @@ async function grantRole(
   // HARD INVARIANT: only owner + admin may GRANT roles. "Only an admin can give the role."
   if (!ROLE_GRANTERS.includes(role.code) && granted.some((p) => p.code === ROLE_GRANT_PERMISSION)) {
     throw new Error(`SECURITY: role '${role.code}' must not be granted ${ROLE_GRANT_PERMISSION} (role-granting is admin-only)`);
+  }
+  // HARD INVARIANT (§107/§108, security review item 2): no role outside
+  // formulator/vault_approver may hold ANY formula-decision (drafting/seal/approve/lock/
+  // access-policy/copy-request) WRITE permission — `owner` included. See
+  // FORMULA_DECISION_PERMISSIONS's doc comment in scripts/ra-roles.ts.
+  if (!VAULT_PLAINTEXT_ROLES.includes(role.code)) {
+    const offending = granted.filter((p) => FORMULA_DECISION_PERMISSIONS.has(p.code));
+    if (offending.length) {
+      throw new Error(
+        `SECURITY: role '${role.code}' must not be granted formula-decision permission(s) [${offending.map((p) => p.code).join(', ')}] — only ${VAULT_PLAINTEXT_ROLES.join('/')} may hold Vault-authority decision permissions (§107/§108)`,
+      );
+    }
+  }
+  // HARD INVARIANT (§108 SoD, security review item 2): formulator (drafting) never holds an
+  // approve/lock/access-policy DECISION permission; vault_approver (review/decision) never
+  // holds a drafting/seal WRITE permission. "Approve/reject/lock require vault_approver-only
+  // perms; drafting requires formulator perms" — made explicit here, not just implicit in
+  // each role's `select` predicate.
+  if (role.code === 'formulator') {
+    const offending = granted.filter((p) => FORMULATOR_FORBIDDEN_PERMISSIONS.has(p.code));
+    if (offending.length) {
+      throw new Error(
+        `SECURITY: role 'formulator' must not be granted approval-decision permission(s) [${offending.map((p) => p.code).join(', ')}] — SoD complement of vault_approver (§108)`,
+      );
+    }
+  }
+  if (role.code === 'vault_approver') {
+    const offending = granted.filter((p) => VAULT_APPROVER_FORBIDDEN_PERMISSIONS.has(p.code));
+    if (offending.length) {
+      throw new Error(
+        `SECURITY: role 'vault_approver' must not be granted drafting/seal permission(s) [${offending.map((p) => p.code).join(', ')}] — SoD complement of formulator (§108)`,
+      );
+    }
+  }
+  // HARD INVARIANT (§109.7, security review item 4): the manufacturing-instruction read is
+  // held ONLY by production + compounding — owner, filling, and everyone else refused,
+  // including via owner's otherwise-blanket grant.
+  if (!MANUFACTURING_INSTRUCTION_ROLES.includes(role.code) && granted.some((p) => p.code === MANUFACTURING_INSTRUCTION_PERMISSION)) {
+    throw new Error(
+      `SECURITY: role '${role.code}' must not be granted ${MANUFACTURING_INSTRUCTION_PERMISSION} — only ${MANUFACTURING_INSTRUCTION_ROLES.join('/')} may hold it (§109.7)`,
+    );
   }
   const mapped = await db
     .select({ pid: rolePermissionMapping.permissionId })

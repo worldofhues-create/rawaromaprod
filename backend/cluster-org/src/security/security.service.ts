@@ -4,10 +4,15 @@
  * OrgService: create stamps created_by/updated_by + status "ACTIVE"; list is cursor
  * paginated (desc PK, limit+1). `passwordHash` is taken as-is for now (auth service later).
  */
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
 import * as argon2 from 'argon2';
-import { DomainError, type AuthPrincipal } from '@core/backend-kernel';
+import {
+  DomainError,
+  SECURITY_AUDIT_SINK,
+  type AuthPrincipal,
+  type SecurityAuditSink,
+} from '@core/backend-kernel';
 
 // Same Argon2id parameters the auth service uses to hash/verify passwords.
 const ARGON2_OPTIONS: argon2.Options = { type: argon2.argon2id, memoryCost: 64 * 1024, timeCost: 3, parallelism: 1 };
@@ -54,9 +59,42 @@ type RolePermissionRow = typeof rolePermissionMapping.$inferSelect;
 type UserRoleRow = typeof userRoleMapping.$inferSelect;
 type LocationAuthorityRow = typeof locationAuthorityMaster.$inferSelect;
 
+/**
+ * Permission-code predicates that are NEVER runtime-grantable to a role outside a HARD,
+ * code-level allow-list — regardless of what the caller who's granting already holds
+ * (security review item 1). Without this, anyone holding the ordinary
+ * `iam:role_permission_mapping:write` permission (e.g. `admin`) could POST
+ * /v1/role-permissions and hand `owner` (or any role) `formula:actual:read`,
+ * `vault:material_search:read`, `formula:formula_approval:write`,
+ * `formula:formula_access_policy:write`, or `platformops:console:read` — a one-request
+ * privilege escalation completely outside the go-live seed (scripts/ra-roles.ts) that fixes
+ * these grants. These assignments never change at runtime; only a code change + re-seed can.
+ */
+const VAULT_FORMULA_SENSITIVE = (code: string): boolean =>
+  code.startsWith('vault:') ||
+  code.startsWith('formula:actual:') ||
+  code === 'formula:formula_approval:write' ||
+  code === 'formula:formula_access_policy:write';
+
+const VAULT_FORMULA_ALLOWED_ROLES = ['formulator', 'vault_approver'];
+
+const PLATFORMOPS_SENSITIVE = (code: string): boolean => code.startsWith('platformops:');
+const PLATFORMOPS_ALLOWED_ROLES = ['platform_super_admin'];
+
+/** Target roles for user_role_mapping that get an explicit allow-list EXCEPTION to the
+ * ordinary "you can only grant a subset of your own permissions" rule (security review
+ * item 6) — see createUserRole. `owner`/`admin` never hold vault:* / formula:actual:read
+ * themselves (§107 "god-mode stops at the vault door"), so the ordinary subset check makes
+ * these two roles permanently unassignable by anyone; without this exception there would be
+ * NO working path to ever create a formulator or vault_approver user. */
+const VAULT_AUTHORITY_ROLES = ['formulator', 'vault_approver'];
+
 @Injectable()
 export class SecurityService {
-  constructor(@Inject(ORG_DB) private readonly db: OrgDb) {}
+  constructor(
+    @Inject(ORG_DB) private readonly db: OrgDb,
+    @Optional() @Inject(SECURITY_AUDIT_SINK) private readonly auditSink?: SecurityAuditSink,
+  ) {}
 
   // ── user_master ───────────────────────────────────────────────────────────
   async createUser(body: CreateUserBody, principal: AuthPrincipal): Promise<SafeUser> {
@@ -177,10 +215,52 @@ export class SecurityService {
   }
 
   // ── role_permission_mapping ───────────────────────────────────────────────
+  /**
+   * Runtime role↔permission self-grant guard (security review item 1). This endpoint's own
+   * gate is the ordinary `iam:role_permission_mapping:write` permission — held by `admin` —
+   * but that permission was never meant to let its holder hand out Vault/formula-decision/
+   * Platform-Ops authority to an arbitrary role. Refuse the mapping outright, regardless of
+   * what the CALLER holds, unless the target role is on the matching hard allow-list; audit
+   * every refusal (the attempt is itself security-relevant, same as a guard-layer 403).
+   */
   async createRolePermission(
     body: CreateRolePermissionBody,
     principal: AuthPrincipal,
   ): Promise<RolePermissionRow> {
+    const [role, perm] = await Promise.all([
+      this.db.select({ code: roleMaster.roleCode }).from(roleMaster).where(eq(roleMaster.roleId, body.roleId)).limit(1),
+      this.db
+        .select({ code: permissionMaster.permissionCode })
+        .from(permissionMaster)
+        .where(eq(permissionMaster.permissionId, body.permissionId))
+        .limit(1),
+    ]);
+    if (!role[0]) throw DomainError.notFound('Role not found');
+    if (!perm[0]) throw DomainError.notFound('Permission not found');
+    const roleCode = String(role[0].code ?? '').toLowerCase();
+    const permCode = String(perm[0].code ?? '');
+
+    const violatesVaultFormula = VAULT_FORMULA_SENSITIVE(permCode) && !VAULT_FORMULA_ALLOWED_ROLES.includes(roleCode);
+    const violatesPlatformOps = PLATFORMOPS_SENSITIVE(permCode) && !PLATFORMOPS_ALLOWED_ROLES.includes(roleCode);
+    if (violatesVaultFormula || violatesPlatformOps) {
+      if (this.auditSink) {
+        await this.auditSink
+          .record({
+            actorId: principal.userId,
+            action: 'security.role_permission.refused',
+            entityType: 'role_permission_mapping',
+            entityId: null,
+            reason: `refused mapping ${permCode} onto role "${role[0].code}"`,
+            result: 'refuse',
+          })
+          .catch(() => {});
+      }
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        `"${permCode}" may never be mapped onto role "${role[0].code}" at runtime — this grant is fixed by the go-live seed, not this endpoint.`,
+      );
+    }
+
     const actor = principal.userId;
     const rows = await this.db
       .insert(rolePermissionMapping)
@@ -240,23 +320,49 @@ export class SecurityService {
     if (PRIVILEGED.includes(targetCode) && !granterRoles.includes(targetCode)) {
       throw DomainError.forbidden('AUTH_FORBIDDEN', `You cannot grant the "${role.roleCode}" role.`);
     }
-    const rolePerms = (
-      await this.db
-        .select({ code: permissionMaster.permissionCode })
-        .from(rolePermissionMapping)
-        .innerJoin(
-          permissionMaster,
-          eq(permissionMaster.permissionId, rolePermissionMapping.permissionId),
-        )
-        .where(eq(rolePermissionMapping.roleId, body.roleId))
-    ).map((r) => r.code);
-    const held = new Set(principal.permissions ?? []);
-    const missing = rolePerms.filter((p): p is string => !!p && !held.has(p));
-    if (missing.length) {
-      throw DomainError.forbidden(
-        'AUTH_FORBIDDEN',
-        `You cannot grant a role carrying permissions you do not hold (e.g. ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}).`,
-      );
+
+    const isVaultAuthorityRole = VAULT_AUTHORITY_ROLES.includes(targetCode);
+    if (isVaultAuthorityRole) {
+      // Explicit allow-list EXCEPTION to the subset rule below (security review item 6):
+      // owner/admin never hold vault:*/formula:actual:read/formula-decision permissions
+      // themselves (§107 — see also FORMULA_DECISION_PERMISSIONS in scripts/ra-roles.ts), so
+      // the ordinary "you can only grant what you already hold" check can NEVER be satisfied
+      // for formulator/vault_approver — without this exception these two roles would be
+      // permanently unassignable to anyone. Restricted to owner/admin (the only roles ALSO
+      // holding `iam:user_role_mapping:write`, scripts/ra-roles.ts ROLE_GRANTERS) and NEVER
+      // to the granter themselves — a self-assigning owner/admin is exactly the runtime
+      // privilege escalation §107 exists to prevent.
+      if (!granterRoles.some((r) => ['owner', 'admin'].includes(r))) {
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          `Only owner/admin may assign the "${role.roleCode}" role.`,
+        );
+      }
+      if (body.userId === principal.userId) {
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          `You cannot assign yourself the "${role.roleCode}" role — self-assignment of a Vault-authority role is always refused, regardless of your own role.`,
+        );
+      }
+    } else {
+      const rolePerms = (
+        await this.db
+          .select({ code: permissionMaster.permissionCode })
+          .from(rolePermissionMapping)
+          .innerJoin(
+            permissionMaster,
+            eq(permissionMaster.permissionId, rolePermissionMapping.permissionId),
+          )
+          .where(eq(rolePermissionMapping.roleId, body.roleId))
+      ).map((r) => r.code);
+      const held = new Set(principal.permissions ?? []);
+      const missing = rolePerms.filter((p): p is string => !!p && !held.has(p));
+      if (missing.length) {
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          `You cannot grant a role carrying permissions you do not hold (e.g. ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}).`,
+        );
+      }
     }
 
     const actor = principal.userId;
@@ -270,7 +376,25 @@ export class SecurityService {
         updatedBy: actor,
       })
       .returning();
-    return ensure(rows[0]);
+    const inserted = ensure(rows[0]);
+    if (isVaultAuthorityRole && this.auditSink) {
+      // Vault-authority role assignment is itself security-relevant enough to record on the
+      // tamper-evident chain (security review item 6), not just the ordinary app DB row.
+      await this.auditSink
+        .record({
+          actorId: actor,
+          action: 'security.vault_role.assigned',
+          entityType: 'user_role_mapping',
+          entityId: inserted.userRoleMappingId,
+          reason: `granted role "${role.roleCode}" to user ${body.userId}`,
+          result: 'allow',
+        })
+        .catch(() => {
+          // Never fail the (already-committed, already-authorized) assignment over an audit
+          // write hiccup — same posture as the guard-layer sinks.
+        });
+    }
+    return inserted;
   }
 
   /**

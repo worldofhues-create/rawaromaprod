@@ -99,12 +99,16 @@ export type CreateDocumentMapping = z.infer<typeof createDocumentMapping>;
 
 /* ── owner/vault-role read: the actual (decrypted) recipe ──────────────── */
 
-/** GET .../actual — §109.6/§109.8 requires a caller-supplied purpose/reason on every
- * plaintext read, recorded on the audit row (see VaultService.AuditInput). */
-export const actualReadQuery = z.object({
+/** POST .../actual body — §109.6/§109.8 requires a caller-supplied purpose/reason on every
+ * plaintext read, recorded on the audit row (see VaultService.AuditInput). Security review
+ * item 9: this travels in the request BODY, never the query string — a decrypt reason in a
+ * URL lands in access logs, browser history, and any upstream proxy's request log, none of
+ * which should ever see it. (The route itself changed GET → POST for the same reason: an
+ * HTTP GET has no standard body.) */
+export const actualReadBody = z.object({
   reason: z.string().trim().min(3, 'a decrypt reason is required (min 3 characters)').max(500),
 });
-export type ActualReadQuery = z.infer<typeof actualReadQuery>;
+export type ActualReadBody = z.infer<typeof actualReadBody>;
 
 /* ── approval (flow body) ─────────────────────────────────────────────── */
 

@@ -701,7 +701,9 @@
     if (!reason) return;
     try {
       var result = await withFreshAuth(function () {
-        return api('/v1/formula-versions/' + encodeURIComponent(versionId) + '/actual?reason=' + encodeURIComponent(reason));
+        // Reason travels in the POST body, never the query string (security review item 9) —
+        // it must never land in an access log or browser history.
+        return api('/v1/formula-versions/' + encodeURIComponent(versionId) + '/actual', { method: 'POST', body: { reason: reason } });
       });
       var rows = (result.ingredients || []).map(function (i) {
         return h('tr', {}, [h('td', { class: 'mono' }, [i.materialId]), h('td', { class: 'r' }, [String(i.percentage) + '%']), h('td', {}, [String(i.sequenceNo != null ? i.sequenceNo : '—')])]);

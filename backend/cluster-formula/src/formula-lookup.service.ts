@@ -56,10 +56,23 @@ export class FormulaLookupService implements FormulaLookup {
   /**
    * §109.7 `VaultPort.resolveManufacturingInstruction`. Decrypts (approved-only + audited,
    * same chokepoint as getFloorView), then converts each ingredient's raw formula PERCENTAGE
-   * into an absolute QUANTITY for this specific `permittedBatchQuantity` — the recipe's own
-   * unit (a %, reusable across every batch size) never leaves; what leaves is a number that
-   * is only meaningful for THIS production order. The real material_id is resolved to its
-   * RM_ALIAS code and dropped, same as getFloorView.
+   * into an absolute QUANTITY for this specific `permittedBatchQuantity`. P0 DECISION: the
+   * quantity is kept (not further reduced) because weigh/dispense on the floor genuinely
+   * needs an absolute number — masking stops at material identity (alias, not material_id),
+   * not at the number itself.
+   *
+   * HONEST derivability note (the prior comment here overstated the guarantee): the
+   * PERCENTAGE itself is NOT transmitted, but it is mathematically DERIVABLE by anyone who
+   * has both this quantity and the order's `permittedBatchQuantity` (percentage =
+   * quantity / permittedBatchQuantity × 100) — and `permittedBatchQuantity` is the order's own
+   * `order_qty`, visible to any `production:production_order:read` holder. So "the percentage
+   * never leaves" is only true in the narrow sense that no field literally named `percentage`
+   * is serialized; a caller who can see both this response and the order's qty can reconstruct
+   * it exactly. What genuinely never leaves, and is the actual boundary this route protects,
+   * is the real `material_id` (dropped, resolved to an alias) and any OTHER formula this order
+   * doesn't cover. Access is therefore restricted at the route (production + compounding only,
+   * `production:manufacturing_instruction:read`, active orders only) and every resolution is
+   * audited — see PickingController/PickingService.
    */
   async resolveManufacturingInstruction(
     formulaVersionId: string,
