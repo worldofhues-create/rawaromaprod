@@ -5,9 +5,10 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v76';
+const CACHE = 'ra-shell-v77';
 const SHELL = [
-  '/', '/index.html', '/app.js', '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
+  '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js', '/ws-vault.js',
+  '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
   '/fonts/adf5f325-e87d-4401-84a9-246e380c6864.woff2',
   '/fonts/9b9b854c-5b1b-4e4a-88a5-0d3eec462f94.woff2',
   '/fonts/ad1f26c5-34be-47f9-98b1-c73b902006f7.woff2',
@@ -54,8 +55,8 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // app.js — NETWORK-FIRST (it IS the application; must be fresh), cache fallback for offline.
-  if (url.origin === self.location.origin && url.pathname === '/app.js') {
+  // shell.js + ws-*.js — NETWORK-FIRST (it IS the application; must be fresh), cache fallback offline.
+  if (url.origin === self.location.origin && /^\/(shell|ws-supply|ws-mfg|ws-platform|ws-vault)\.js$/.test(url.pathname)) {
     e.respondWith(
       fetch(req)
         .then((res) => {

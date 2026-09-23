@@ -2,8 +2,7 @@
  * Source of truth = the backend/DB. Every table shows exactly what its endpoint returns, masked
  * per the signed-in role. Transport is the encrypted tunnel (only /crypto/handshake + /rpc on the
  * wire). Role comes from the DB (the JWT), never self-picked. Responsive on every device. */
-(function () {
-  'use strict';
+'use strict';
   // Backend base. Local dev → :3000. Deployed → same-origin '' (Vercel rewrites /crypto + /rpc to
   // Render, so the backend host never appears in the network tab). Override with window.RA_API.
   var API = (typeof window.RA_API === 'string') ? window.RA_API
@@ -29,7 +28,13 @@
     return hsP;
   }
   async function seal(s) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, AES, te(s))); var o = new Uint8Array(12 + ct.length); o.set(iv, 0); o.set(ct, 12); return b64(o); }
-  async function open(bl) { var b = ub64(bl); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, AES, b.slice(12)); return new TextDecoder().decode(pt); }
+  // Renamed from the original closure-local `open` (AES-GCM decrypt) to `openCipher`: the former
+  // app.js wrapped this whole module in an IIFE, so a top-level `function open(){}` there safely
+  // shadowed `window.open` only inside that closure. Now that the module is split across plain
+  // <script> files sharing the global scope (no IIFE), a global `open` would instead OVERWRITE
+  // `window.open` for the whole page — breaking the native popup opener that printDoc/printQrLabel
+  // call via `window.open(...)`. Renaming avoids that collision; behavior is unchanged otherwise.
+  async function openCipher(bl) { var b = ub64(bl); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: b.slice(0, 12) }, AES, b.slice(12)); return new TextDecoder().decode(pt); }
   async function tunnel(path, opts, _retried, _ch) {
     opts = opts || {}; await handshake();
     var p = { method: (opts.method || 'GET').toUpperCase(), path: path };
@@ -53,7 +58,7 @@
       if (_ch < 2) { await new Promise(function (rs) { setTimeout(rs, 350 + _ch * 400); }); return tunnel(path, opts, _retried, _ch + 1); }
       throw new Error('channel');
     }
-    var inner = JSON.parse(await open(outer.data.enc));
+    var inner = JSON.parse(await openCipher(outer.data.enc));
     // Access token expired mid-session (15-min TTL) → silently refresh once and retry, so the user isn't bounced.
     if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login') {
       var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
@@ -69,7 +74,15 @@
     }
     return { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
   }
-  window.RA = { tunnel: tunnel };
+  // Tiny registration API for the ws-*.js workspace modules (scaffolding for future lanes —
+  // U2/U3/U4 restyling Procurement/Receiving/Warehouse, QC/Production/Packaging/Dispatch, and
+  // Platform/Vault respectively). Not wired into the render path yet: today's view dispatch is
+  // still the generic endpoint-driven engine below (ROLES/COLS/ACTIONS/CREATE + loadView), so
+  // registering here is inert and changes no behaviour. It exists so those lanes have a single,
+  // non-colliding place to declare per-workspace view renderers as they build them.
+  var RA_VIEWS = {};
+  function registerViews(map) { Object.keys(map || {}).forEach(function (k) { RA_VIEWS[k] = map[k]; }); }
+  window.RA = { tunnel: tunnel, registerViews: registerViews, views: RA_VIEWS };
 
   /* ---------------- design system: skins × light/dark (the exact mockup tokens) ---------------- */
   function skinTokens(skin, dark, A) {
@@ -991,99 +1004,6 @@
       toast('Rejected ✓', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
-  // reorder → raise requirement: a confirmation dialog (editable qty/priority/date), not a one-click.
-  // Vendor is NOT chosen here — that happens later at RFQ/quotation/PO (per the procurement flow).
-  function openRaiseRequirement(row) {
-    var mat = row.materialCode || row.materialName || 'material';
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-rform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Raise requirement</div><button type="button" id="ra-rclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + mat + ' · available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Order quantity <span style="color:#C0492E">*</span></label><input id="ra-rq" type="number" value="' + row.shortage + '" style="' + fStyle() + '">' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Unit</label><select id="ra-ru" style="' + fStyle() + '"><option value="">Unit…</option>' + Object.keys(UOM).map(function (id) { return '<option value="' + id + '">' + UOM[id] + '</option>'; }).join('') + '</select>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Priority</label><select id="ra-rp" style="' + fStyle() + '"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by <span style="color:#C0492E">*</span></label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
-      '<div id="ra-rerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-rsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Raise requirement</button>' +
-      '<div style="font-size:11px;color:var(--t3);text-align:center;margin-top:10px">Vendor is chosen later at RFQ / quotation / PO.</div></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-rclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-rform').onsubmit = function (e) {
-      e.preventDefault(); var qty = Number($('ra-rq').value); if (!(qty > 0)) { $('ra-rerr').textContent = 'Enter a quantity.'; return; }
-      var d = $('ra-rd').value; if (!d) { $('ra-rerr').textContent = 'A "Required by" date is required.'; return; }
-      var body = { materialId: row.materialId, requiredQty: qty, uomId: $('ra-ru').value || undefined, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION', requiredByDate: d };
-      var save = $('ra-rsave'); save.disabled = true; save.textContent = 'Raising…';
-      tunnel('/v1/stock-requirements', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('Requirement raised ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
-  // Dispatch a confirmed sales order: pick an FG batch that actually has stock (FEFO, avail > 0)
-  // and a real quantity. The server re-checks available (produced − reserved − already dispatched)
-  // and rejects over-dispatch (409). One line per dispatch here; add more via the Dispatches list.
-  async function openDispatch(row) {
-    var res0;
-    try { res0 = await tunnel('/v1/fg-stock?onlyAvailable=1&limit=100'); }
-    catch (e) { toast('Could not reach the secure channel', 'bad'); return; }
-    var batches = (res0.json && res0.json.data) || [];
-    var byId = {}; batches.forEach(function (b) { byId[b.finishedGoodBatchId] = b; });
-    var opts = batches.map(function (b) {
-      return '<option value="' + b.finishedGoodBatchId + '">' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + (b.skuCode ? ' · ' + b.skuCode : '') + ' · avail ' + b.availableQty + '</option>';
-    }).join('');
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-dform" style="width:100%;max-width:420px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Dispatch order</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + (row.soNumber || 'Sales order') + ' → ship finished goods. Only batches with available stock are listed.</div>' +
-      (batches.length
-        ? '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Finished-good batch <span style="color:#C0492E">*</span></label><select id="ra-dfg" style="' + fStyle() + '">' + opts + '</select>' +
-          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch qty <span style="color:#C0492E">*</span></label><input id="ra-dq" type="number" min="1" value="1" style="' + fStyle() + '"><div id="ra-dhint" style="font-size:11px;color:var(--t3);margin-top:4px"></div>' +
-          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Vehicle number</label><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" style="' + fStyle() + '">' +
-          '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Dispatch date</label><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" style="' + fStyle() + '">' +
-          '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-          '<button type="submit" id="ra-dsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Dispatch</button>'
-        : '<div style="font-size:13px;color:#9A6B1E;background:var(--well);border-radius:12px;padding:14px;text-align:center">No finished-good stock is available to dispatch. Produce or release stock first.</div>') +
-      '</form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-dclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    if (!batches.length) return;
-    function syncHint() { var b = byId[$('ra-dfg').value]; if (b) { $('ra-dhint').textContent = 'Available in this batch: ' + b.availableQty; $('ra-dq').setAttribute('max', b.availableQty); } }
-    $('ra-dfg').onchange = syncHint; syncHint();
-    $('ra-dform').onsubmit = function (e) {
-      e.preventDefault();
-      var b = byId[$('ra-dfg').value]; if (!b) { $('ra-derr').textContent = 'Pick a batch.'; return; }
-      var qty = Number($('ra-dq').value);
-      if (!(qty > 0)) { $('ra-derr').textContent = 'Enter a quantity.'; return; }
-      if (qty > Number(b.availableQty)) { $('ra-derr').textContent = 'Only ' + b.availableQty + ' available in this batch.'; return; }
-      var body = { salesOrderId: row.salesOrderId, customerId: row.customerId, dispatchDate: $('ra-dd').value || null, vehicleNumber: $('ra-dv').value || null, items: [{ finishedGoodBatchId: b.finishedGoodBatchId, dispatchedQty: qty, uomId: b.uomId || undefined }] };
-      var save = $('ra-dsave'); save.disabled = true; save.textContent = 'Dispatching…';
-      tunnel('/v1/dispatches', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('Dispatched ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
-  // delivery confirmation — the last flow stage (dispatch → delivered).
-  function markDelivered(row) {
-    var id = row.dispatchId != null ? row.dispatchId : guessId(row);
-    tunnel('/v1/masters/dispatches/' + id, { method: 'PATCH', body: { status: 'DELIVERED' } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-      toast('Marked delivered ✓', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
-  }
-  // FAIL-branch tail: spawn a replacement PO from a rejected GRN, linked to the original PO.
-  function generateReplacementPo(row) {
-    if (!window.confirm('Generate a replacement PO for GRN ' + (row.grnNumber || '') + ', linked to the original PO?')) return;
-    tunnel('/v1/replacement-po', { method: 'POST', body: { grnId: row.grnId } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'), 'bad'); return; }
-      var d = res.json && res.json.data;
-      toast('Replacement PO ' + (d && d.poNumber ? d.poNumber : '') + ' created ✓ (linked to original)', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
-  }
 
   /* ---------------- printable records (PO / GRN / dispatch note / CoA / batch certificate) ---------------- */
   var PRINTABLE = {
@@ -1634,32 +1554,6 @@
     };
   }
 
-  /* ---------------- assign a role to a user (admin only — "only admin can give the role") ---------------- */
-  function openAssignRole(user) {
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign role</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + (user.userName || user.email || 'User') + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Role <span style="color:#C0492E">*</span></label>' +
-      '<select id="ra-role" style="' + fStyle() + '"><option value="">Select…</option></select>' +
-      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    tunnel('/v1/roles?limit=100').then(function (res) {
-      ((res.json && res.json.data) || []).forEach(function (role) { var v = role.roleId != null ? role.roleId : guessId(role); var l = role.roleName || role.roleCode || (v ? String(v).slice(0, 8) : ''); if (v) { var o = document.createElement('option'); o.value = v; o.textContent = l; $('ra-role').appendChild(o); } });
-    }).catch(function () {});
-    $('ra-cform').onsubmit = function (e) {
-      e.preventDefault(); var roleId = $('ra-role').value; if (!roleId) { $('ra-merr').textContent = 'Pick a role.'; return; }
-      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
-      tunnel('/v1/user-roles', { method: 'POST', body: { userId: user.userId, roleId: roleId } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('Role assigned ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
 
   /* ---------------- reverse traceability (M10): FG → oil → materials → vendor (owner only) ---------------- */
   /* fetch every page of a list endpoint (cursor paginated), up to a sane cap. */
@@ -1674,208 +1568,6 @@
       }).catch(function () { done(out); });
     }
     return step(null);
-  }
-  /* assign a permission to a role (admin-gated — the RBAC operation that had no screen) */
-  function openAssignPerm(role) {
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Assign permission</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Role: ' + (role.roleName || role.roleCode || 'role') + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Permission <span style="color:#C0492E">*</span></label>' +
-      '<select id="ra-perm" style="' + fStyle() + '"><option value="">Loading…</option></select>' +
-      '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Assign</button></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    fetchAllPages('/v1/permissions', function (perms) {
-      var sel = $('ra-perm'); if (!sel) return;
-      sel.innerHTML = '<option value="">Select…</option>' + perms.map(function (p) { var v = p.permissionId != null ? p.permissionId : guessId(p); var l = p.permissionCode || p.permissionName || (v ? String(v).slice(0, 8) : ''); return v ? '<option value="' + v + '">' + l + '</option>' : ''; }).join('');
-    });
-    $('ra-cform').onsubmit = function (e) {
-      e.preventDefault(); var pid = $('ra-perm').value; if (!pid) { $('ra-merr').textContent = 'Pick a permission.'; return; }
-      var rid = role.roleId != null ? role.roleId : guessId(role);
-      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
-      tunnel('/v1/role-permissions', { method: 'POST', body: { roleId: rid, permissionId: pid } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('Permission assigned ✓', 'good');
-      }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
-  /* attach an IFRA (or IFRA conformity) certificate to a formula — one-click from the formula row.
-   * Generated externally from the composition; stored + expiry-tracked here, linked to the formula. */
-  function openAttachIfra(formula) {
-    var fid = formula.formulaId != null ? formula.formulaId : guessId(formula);
-    var fname = formula.formulaName || formula.formulaCode || 'formula';
-    var fields = [
-      { n: 'referenceNo', l: 'Certificate no.', t: 'text', req: true },
-      { n: 'sourceUrl', l: 'Certificate link (URL / drive)', t: 'text' },
-      { n: 'issueDate', l: 'Issue date', t: 'date' }, { n: 'expiryDate', l: 'Valid until', t: 'date' },
-      { n: 'notes', l: 'Notes (category, IFRA amendment…)', t: 'textarea' }
-    ];
-    var rows = fields.map(function (f) {
-      var ctrl = f.t === 'textarea' ? '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>' : '<input data-name="' + f.n + '" type="' + (f.t === 'date' ? 'date' : 'text') + '" style="' + fStyle() + '">';
-      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:#C0492E">*</span>' : '') + '</label>' + ctrl + '</div>';
-    }).join('');
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-iform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Attach IFRA certificate</div><button type="button" id="ra-iclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">Formula: ' + fname + '</div>' + rows +
-      '<div id="ra-ierr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-isave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Attach certificate</button></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-iclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-iform').onsubmit = function (e) {
-      e.preventDefault();
-      var body = { title: 'IFRA Certificate — ' + fname, documentType: 'IFRA Certificate', entityType: 'formula', entityId: fid };
-      var err = '';
-      fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; if (f.req && !v) err = err || (f.l + ' is required.'); if (v) body[f.n] = v; });
-      if (err) { $('ra-ierr').textContent = err; return; }
-      var save = $('ra-isave'); save.disabled = true; save.textContent = 'Attaching…';
-      tunnel('/v1/document-registry', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Attach certificate'; $('ra-ierr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('IFRA certificate attached ✓', 'good');
-      }).catch(function () { save.disabled = false; save.textContent = 'Attach certificate'; $('ra-ierr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
-  /* seal ingredients into a formula version (material + percentage) — the actual/alias mapping.
-   * The sensitive pair (real materialId + %) lives only in this request; the vault encrypts it. */
-  function openAddIngredients(version) {
-    var vid = version.formulaVersionId != null ? version.formulaVersionId : guessId(version);
-    var mats = [];
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-gform" style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Seal ingredients</div><button type="button" id="ra-gclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Formula version · real material + % (encrypted into the vault)</div>' +
-      '<div id="ra-glines"></div><button type="button" id="ra-gadd" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add ingredient</button>' +
-      '<div id="ra-gerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:10px 0"></div>' +
-      '<button type="submit" id="ra-gsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Seal into vault</button></form>';
-    document.body.appendChild(ov); setTheme();
-    var linesEl = ov.querySelector('#ra-glines');
-    function matOptions() { return '<option value="">Select material…</option>' + mats.map(function (m) { var v = m.materialId != null ? m.materialId : guessId(m); return v ? '<option value="' + v + '">' + (m.materialCode || m.materialName || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
-    function addLine() {
-      var row = document.createElement('div'); row.className = 'ra-gline'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
-      row.innerHTML = '<div style="flex:2"><select data-mat style="' + fStyle() + '">' + matOptions() + '</select></div><div style="flex:1"><input data-pct type="number" step="0.01" placeholder="%" style="' + fStyle() + '"></div><button type="button" class="ra-grm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none">&times;</button>';
-      linesEl.appendChild(row); row.querySelector('.ra-grm').onclick = function () { row.remove(); };
-    }
-    tunnel('/v1/materials?limit=100').then(function (res) { mats = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-mat]'), function (s) { s.innerHTML = matOptions(); }); });
-    addLine();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-gclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-gadd').onclick = addLine;
-    $('ra-gform').onsubmit = function (e) {
-      e.preventDefault(); var ings = [], err = '', seq = 1;
-      [].forEach.call(ov.querySelectorAll('.ra-gline'), function (row) {
-        var mid = row.querySelector('[data-mat]').value; var pct = Number(row.querySelector('[data-pct]').value);
-        if (mid && pct > 0) ings.push({ materialId: mid, percentage: pct, sequenceNo: seq++ });
-        else if (mid || row.querySelector('[data-pct]').value) err = 'Each ingredient needs a material and a % > 0.';
-      });
-      if (!ings.length) err = err || 'Add at least one ingredient.';
-      if (err) { $('ra-gerr').textContent = err; return; }
-      var save = $('ra-gsave'); save.disabled = true; save.textContent = 'Sealing…';
-      tunnel('/v1/formula-versions/' + vid + '/ingredients', { method: 'POST', body: { ingredients: ings } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Seal into vault'; $('ra-gerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('Ingredients sealed ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Seal into vault'; $('ra-gerr').textContent = 'Could not reach the secure channel.'; });
-    };
-  }
-  // Build a scannable QR (byte mode, ECC-M) as an inline SVG using the vendored qrcode generator.
-  function qrSvg(text, cell) {
-    if (typeof qrcode === 'undefined') return '';
-    try { var q = qrcode(0, 'M'); q.addData(String(text)); q.make(); return q.createSvgTag({ cellSize: cell || 6, margin: (cell || 6) * 2, scalable: true }); }
-    catch (e) { return ''; }
-  }
-  // Open a print-ready label window: QR (encoding the traceable payload) + human-readable code.
-  // In-page QR preview: renders the scannable code inline (on a white tile so it scans in any
-  // theme) with the human code + a Print button. Print still opens a clean print-ready window.
-  function openQrLabel(title, code, payload, sub) {
-    var svg = qrSvg(payload, 6);
-    if (!svg) { toast('QR generator not loaded — hard-refresh the page.', 'bad'); return; }
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:330px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:22px 24px;text-align:center">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px"><div style="font-weight:800;font-size:15px;flex:1;text-align:left">' + escHtml(title) + '</div>' +
-      '<button type="button" id="ra-qrclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:30px;height:30px;border-radius:10px;cursor:pointer;font-size:16px;line-height:1">&times;</button></div>' +
-      '<div style="width:220px;height:220px;margin:6px auto 4px;background:#fff;border-radius:12px;padding:12px;box-sizing:border-box;box-shadow:var(--ins-sm)"><div id="ra-qrbox" style="width:100%;height:100%">' + svg + '</div></div>' +
-      '<div style="font-family:\'JetBrains Mono\',monospace;font-size:18px;font-weight:800;letter-spacing:.03em;margin:10px 0 2px;color:var(--t1);word-break:break-all">' + escHtml(code) + '</div>' +
-      '<div style="font-size:12px;color:var(--t3);margin-bottom:15px">' + escHtml(sub) + '</div>' +
-      '<button type="button" id="ra-qrprint" style="width:100%;padding:11px;border:none;border-radius:13px;background:var(--accent);color:#fff;font-size:13.5px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Print label</button></div>';
-    document.body.appendChild(ov); setTheme();
-    var svgEl = ov.querySelector('#ra-qrbox svg'); if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; svgEl.style.display = 'block'; }
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-qrclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-qrprint').onclick = function () { printQrLabel(title, code, svg, sub); };
-  }
-  function printQrLabel(title, code, svg, sub) {
-    var w = window.open('', '_blank', 'width=420,height=580');
-    if (!w) { toast('Allow pop-ups to print the QR label (the preview above is still scannable).', 'warn'); return; }
-    var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; }); };
-    w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
-      '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#111}' +
-      '.qr{width:250px;height:250px;margin:0 auto 10px}.qr svg{width:100%;height:100%}' +
-      '.code{font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:800;letter-spacing:.04em;margin:6px 0 2px}' +
-      '.sub{color:#555;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#999}' +
-      '@media print{@page{margin:8mm}}</style></head><body>' +
-      '<div class="qr">' + svg + '</div><div class="code">' + esc(code) + '</div><div class="sub">' + esc(sub) + '</div>' +
-      '<div class="brand">RAW AROMACHEM</div>' +
-      '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},180);};</scr' + 'ipt>' +
-      '</body></html>');
-    w.document.close();
-  }
-  function openRecordQc(inspection) {
-    var iid = inspection.qcInspectionId != null ? inspection.qcInspectionId : guessId(inspection);
-    var params = [];
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-qform" style="width:100%;max-width:640px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:22px;box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Record QC results</div><button type="button" id="ra-qclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:10px;cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Physical (color/odor/clarity) → text · Technical (density/solubility…) → value. Each line marked Pass/Fail.</div>' +
-      '<div id="ra-qlines"></div><button type="button" id="ra-qadd" style="padding:6px 12px;border:none;border-radius:9px;background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer;margin-top:4px">+ Add parameter</button>' +
-      '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:#C0492E;font-weight:600;margin:10px 0"></div>' +
-      '<button type="submit" id="ra-qsave" style="width:100%;padding:13px;border:none;border-radius:14px;background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save results</button></form>';
-    document.body.appendChild(ov); setTheme();
-    var linesEl = ov.querySelector('#ra-qlines');
-    function paramOptions() { return '<option value="">Parameter…</option>' + params.map(function (p) { var v = p.qcParameterId != null ? p.qcParameterId : guessId(p); return v ? '<option value="' + v + '">' + (p.parameterName || p.parameterCode || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
-    function addLine() {
-      var row = document.createElement('div'); row.className = 'ra-qline'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px;flex-wrap:wrap';
-      row.innerHTML = '<div style="flex:2;min-width:150px"><select data-param style="' + fStyle() + '">' + paramOptions() + '</select></div>' +
-        '<div style="flex:1;min-width:70px"><input data-val type="number" step="0.0001" placeholder="Value" style="' + fStyle() + '"></div>' +
-        '<div style="flex:1.4;min-width:90px"><input data-text placeholder="Observation" style="' + fStyle() + '"></div>' +
-        '<div style="flex:1;min-width:80px"><select data-res style="' + fStyle() + '"><option value="PASS">PASS</option><option value="FAIL">FAIL</option></select></div>' +
-        '<button type="button" class="ra-qrm" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:#C0492E;width:30px;height:30px;border-radius:9px;cursor:pointer;flex:none">&times;</button>';
-      linesEl.appendChild(row); row.querySelector('.ra-qrm').onclick = function () { row.remove(); };
-    }
-    tunnel('/v1/qc-parameters?limit=100').then(function (res) { params = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-param]'), function (s) { s.innerHTML = paramOptions(); }); });
-    addLine();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-qclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-qadd').onclick = addLine;
-    $('ra-qform').onsubmit = function (e) {
-      e.preventDefault(); var results = [], err = '';
-      [].forEach.call(ov.querySelectorAll('.ra-qline'), function (row) {
-        var pid = row.querySelector('[data-param]').value;
-        var val = row.querySelector('[data-val]').value;
-        var txt = row.querySelector('[data-text]').value.trim();
-        var res = row.querySelector('[data-res]').value;
-        if (!pid) { if (val || txt) err = 'Pick a parameter for each row.'; return; }
-        if (val === '' && !txt) { err = 'Each parameter needs a value or an observation.'; return; }
-        var r = { qcParameterId: pid, result: res };
-        if (val !== '') r.observedValue = val;
-        if (txt) r.observedText = txt;
-        results.push(r);
-      });
-      if (!results.length) err = err || 'Add at least one parameter reading.';
-      if (err) { $('ra-qerr').textContent = err; return; }
-      var save = $('ra-qsave'); save.disabled = true; save.textContent = 'Saving…';
-      tunnel('/v1/qc-inspections/' + iid + '/results', { method: 'POST', body: { results: results } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        close(); toast('QC results recorded ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Could not reach the secure channel.'; });
-    };
   }
   function openTrace(fg) {
     var ov = document.createElement('div');
@@ -2180,4 +1872,3 @@
     }).catch(function () { try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); });
   }
   if (document.readyState !== 'loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
-})();

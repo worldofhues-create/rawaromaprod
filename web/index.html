@@ -28,6 +28,14 @@
     <div id="app" class="ra-shell"></div>
   </div>
   <script src="/qrcode.js"></script>
-  <script src="/app.js"></script>
+  <!-- Split from the former monolithic app.js (mechanical, no behaviour change) so parallel
+       UI-parity lanes stop colliding. Plain classic scripts (no bundler): shell.js declares the
+       shared globals (tunnel, ROLES, COLS, ACTIONS, primitives, router, boot); the ws-*.js files
+       add workspace-specific view specials and MUST load after it. -->
+  <script src="/shell.js"></script>
+  <script src="/ws-supply.js"></script>
+  <script src="/ws-mfg.js"></script>
+  <script src="/ws-platform.js"></script>
+  <script src="/ws-vault.js"></script>
 </body>
 </html>
