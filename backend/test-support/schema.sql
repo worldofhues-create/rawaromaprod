@@ -361,6 +361,25 @@ create table if not exists procurement.purchase_request (
   updated_by varchar(255)
 );
 
+-- L-AR (PB-06, RawProd Facts API): procurement.purchase_request_items — matches
+-- packages/data-procurement/src/schema/requirement.ts's purchaseRequestItems exactly.
+-- Needed by facts.service.ts's production_requirement_status pending-approval blocker
+-- (joins a production order's unissued ingredient materials to an open PR line, then to
+-- its approval); omitted from this file until now even though the real cluster schema
+-- always had it.
+create table if not exists procurement.purchase_request_items (
+  purchase_request_item_id uuid primary key default gen_random_uuid(),
+  purchase_request_id uuid references procurement.purchase_request(purchase_request_id),
+  material_id uuid,
+  required_qty numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists procurement.purchase_request_approval (
   purchase_request_approval_id uuid primary key default gen_random_uuid(),
   purchase_request_id uuid references procurement.purchase_request(purchase_request_id),
@@ -898,6 +917,24 @@ create table if not exists sales.dispatch_items (
   updated_dt timestamptz not null default now(),
   created_by varchar(255),
   updated_by varchar(255)
+);
+
+-- L-AR (PB-06, RawProd Facts API): sales.transporter_master — matches
+-- packages/data-sales/src/schema/customers.ts's transporterMaster exactly. Needed by
+-- facts.service.ts's dispatch_status fact kind (dispatch_master.transporter_id -> here);
+-- omitted from this file until now even though the real cluster schema always had it.
+create table if not exists sales.transporter_master (
+  transporter_id uuid primary key default gen_random_uuid(),
+  transporter_code varchar(50),
+  transporter_name varchar(200),
+  contact_id uuid,
+  address_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (transporter_code)
 );
 
 create table if not exists sales.outbox (
