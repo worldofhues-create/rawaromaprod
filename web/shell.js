@@ -586,7 +586,7 @@
     var rev = p.reveal.product, fv = p.flow.formula || { count: 0, codes: [] };
     var fcodes = (fv.codes || []).map(function (c) { return c.code; }).join(' · ');
     var sub = rev ? ('selects ' + (fcodes || 'the formula') + ' — everything below shows aliases only') : ('protected — ' + fv.count + ' formulas sealed');
-    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#fff;border-radius:var(--r-md);padding:14px 18px;box-shadow:var(--rai-sm)">' +
+    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#26262B;border-radius:var(--r-md);padding:14px 18px;box-shadow:var(--rai-sm)">' +
       '<span style="width:40px;height:40px;border-radius:var(--r-md);background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
       '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span style="font-weight:800;font-size:14px">6 · Formula selection</span><span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;opacity:.85">VAULT · MASKING BOUNDARY</span></div>' +
       '<div style="font-size:11.5px;opacity:.92;margin-top:2px">' + sub + '</div></div>' +
@@ -1139,18 +1139,18 @@
     function open(extra) {
       var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print', 'bad'); return; }
       var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + docTitle + '</title><style>' +
-        'body{font-family:Arial,Helvetica,sans-serif;color:#1a1a1a;padding:40px;max-width:720px;margin:auto}' +
-        'h1{font-size:14px;letter-spacing:.16em;color:#117C66;margin:0}h2{font-size:20px;margin:4px 0}.sub{color:#666;font-size:12px}' +
-        'hr{border:none;border-top:2px solid #117C66;margin:14px 0}table{width:100%;border-collapse:collapse;margin-top:8px}' +
-        'td{padding:7px 10px;border-bottom:1px solid #eee;font-size:13px}.k{color:#666;width:42%;font-weight:600}.v{font-weight:700}' +
-        '.sec{margin-top:20px;font-size:11px;letter-spacing:.1em;color:#117C66;font-weight:800}' +
-        '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #999;padding-top:6px;font-size:12px;color:#666;width:210px;text-align:center}' +
+        'body{font-family:Arial,Helvetica,sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto}' +
+        'h1{font-size:14px;letter-spacing:.16em;color:#141413;margin:0}h2{font-size:20px;margin:4px 0}.sub{color:#66665E;font-size:12px}' +
+        'hr{border:none;border-top:2px solid #E6E6E3;margin:14px 0}table{width:100%;border-collapse:collapse;margin-top:8px}' +
+        'td{padding:7px 10px;border-bottom:1px solid #E6E6E3;font-size:13px}.k{color:#66665E;width:42%;font-weight:600}.v{font-weight:700}' +
+        '.sec{margin-top:20px;font-size:11px;letter-spacing:.1em;color:#66665E;font-weight:800}' +
+        '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #D6D6D2;padding-top:6px;font-size:12px;color:#66665E;width:210px;text-align:center}' +
         '@media print{.noprint{display:none}}</style></head><body>' +
         '<h1>RAW AROMACHEM</h1><div class="sub">Formula-Protected Perfume-Oil Manufacturing Platform</div><hr>' +
         '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
         '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
         '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
-        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#117C66;color:#fff;border:none;border-radius:var(--r-sm);font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
+        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#E9F260;color:#141413;border:none;border-radius:var(--r-sm);font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
         '</body></html>';
       w.document.write(html); w.document.close();
     }
