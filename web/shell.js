@@ -421,7 +421,11 @@
   // that ALEMBIC's single fixed palette has replaced the old light/dark skin system.
   var CLS = { natural: ['var(--green)', 'Natural'], aroma: ['var(--blue)', 'Aroma chem'], base: ['var(--amber)', 'Base'], solvent: ['var(--purple)', 'Solvent'] };
   function clsCol(k) { var c = CLS[k] || CLS.aroma; return c[0]; }
-  function card(inner, pad, extra) { return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:' + (pad || '20px') + ';' + (extra || '') + '">' + inner + '</div>'; }
+  // U3b: real ALEMBIC GCard (console.css:172-196, "Uniform card grid") — a .gwrap 12-col grid
+  // row of .gcard.glass surfaces, replacing the ad-hoc shimmed card() this used to call. `span`
+  // is one of the c3.._c12 utility classes (shell.css "U3b" block); omit it for a plain,
+  // non-grid-item card (e.g. a single zone tile inside .gwrap-auto).
+  function gcard(inner, span) { return '<div class="gcard glass' + (span ? ' ' + span : '') + '"><div class="gcard-bd">' + inner + '</div></div>'; }
   function badge(ic, txt) { return '<div style="display:inline-flex;align-items:center;gap:7px;font-family:\'JetBrains Mono\',monospace;font-size:9.5px;letter-spacing:.16em;font-weight:700;color:var(--t3)"><span style="display:grid;place-items:center;width:24px;height:24px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent)">' + icon(ic, 13) + '</span>' + txt + '</div>'; }
   function relTime(ts) {
     if (!ts) return ''; var t = Date.parse(String(ts).replace(' ', 'T')); if (isNaN(t)) return '';
@@ -439,12 +443,13 @@
     for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<div class="bcol' + (i === 6 ? ' hi' : '') + '"><span style="height:' + h + 'px"></span></div>'; }
     return '<div class="bseries" style="height:24px;margin-top:14px">' + out + '</div>';
   }
+  // U3b: real "KPI tiles" — the .stats/.stat grid + tile already ported to this stylesheet
+  // (matches release/ui/reference/admin-shell-1440.png's ORDERS/ORDER BOOK/CATALOGUE/LOTS row:
+  // .l uppercase label, .v big figure), plus U3's .bseries sparkline underneath. `chip` is kept
+  // as a param for call-site compatibility but is never populated by kpiSet() — no fake badges.
   function kpiRich(ic, value, lab, chip, seed) {
-    return '<div style="flex:1;min-width:185px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:17px 19px">' +
-      '<div style="display:flex;align-items:center;justify-content:space-between"><div style="width:38px;height:38px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent);display:grid;place-items:center">' + icon(ic, 19) + '</div>' +
-      (chip ? '<span style="font-size:11px;font-weight:800;padding:4px 9px;border-radius:var(--r-pill);background:var(--bg);color:var(--t3);box-shadow:var(--ins-sm)">' + chip + '</span>' : '') + '</div>' +
-      '<div style="font-size:29px;font-weight:800;margin:13px 0 1px;letter-spacing:-.02em">' + value + '</div>' +
-      '<div style="font-size:12.5px;color:var(--t3);font-weight:600">' + lab + '</div>' + miniBars(seed) + '</div>';
+    return '<div class="stat"><span class="l" style="display:inline-flex;align-items:center;gap:6px">' + icon(ic, 12) + lab + '</span>' +
+      '<span class="v">' + value + '</span>' + miniBars(seed) + '</div>';
   }
   // SVG ring gauge / donut. U3: svg + track/value circles now carry the real ALEMBIC chart
   // classes (.chart, .arc-track, .arc-val — console.css:260-280 via shell.css "U3" block) instead
@@ -481,12 +486,12 @@
   function heroBand(p, role, kset) {
     var hero = kset[0], sig = [kset[1], kset[2], kset[3]];
     var g = gaugeFor(p, role), gc = g[0] >= 70 ? 'var(--accent)' : (g[0] >= 40 ? 'var(--amber)' : 'var(--red)');
-    var insight = card(
+    var insightIn =
       badge('activity', 'INSIGHT') +
       '<div style="font-size:40px;font-weight:800;letter-spacing:-.03em;margin:16px 0 2px">' + hero[1] + '</div>' +
       '<div style="font-size:13px;color:var(--t2);font-weight:700">' + hero[2] + '</div>' +
       '<p style="font-size:12.5px;line-height:1.55;color:var(--t3);margin:14px 0 0">' + (NOTE[role] || NOTE.superadmin) + '</p>' +
-      miniBars((hero[1] + '').length * 31 + 5), '22px');
+      miniBars((hero[1] + '').length * 31 + 5);
     var rows = sig.map(function (m, i) {
       var dot = ['var(--red)', 'var(--amber)', 'var(--accent)'][i];
       return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--border)">' +
@@ -494,14 +499,17 @@
         '<div style="flex:1;font-size:13px;font-weight:600;color:var(--t2)">' + m[2] + '</div>' +
         '<div style="font-size:16px;font-weight:800">' + m[1] + '</div></div>';
     }).join('');
-    var signals = card(badge('alert', 'PIPELINE SIGNALS') + '<div style="margin-top:14px">' + rows + '</div>', '22px');
-    var output = card(badge('layers', 'OUTPUT') + '<div style="margin:16px 0 4px">' + ring(g[0], g[0] + '%', g[1], gc) + '</div>' +
+    var signalsIn = badge('alert', 'PIPELINE SIGNALS') + '<div style="margin-top:14px">' + rows + '</div>';
+    var outputIn = badge('layers', 'OUTPUT') + '<div style="margin:16px 0 4px">' + ring(g[0], g[0] + '%', g[1], gc) + '</div>' +
       '<div style="display:flex;gap:10px;margin-top:6px">' +
       [kset[1], kset[2]].map(function (m, i) { return '<div style="flex:1;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-md);padding:10px 12px"><div style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3)">' + ['TOP', 'MED'][i] + '</div><div style="font-size:13px;font-weight:800;margin-top:2px">' + m[1] + '</div><div style="font-size:10.5px;color:var(--t3)">' + m[2] + '</div></div>'; }).join('') +
-      '</div>', '22px');
+      '</div>';
     // Procurement asked to drop the (redundant) PIPELINE SIGNALS card → 2-card band there.
-    if (role === 'procurement') return '<div data-grid style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">' + insight + output + '</div>';
-    return '<div data-grid style="display:grid;grid-template-columns:1.25fr 1fr 1fr;gap:14px">' + insight + signals + output + '</div>';
+    // U3b: real ALEMBIC .gwrap 12-col grid (console.css:172-183, shell.css "U3b" block) replaces
+    // the old ad-hoc data-grid/applyDashCols JS stack — .gwrap already collapses to one card per
+    // row at <=1023, so tablet/phone single-column is CSS-native, no resize listener needed.
+    if (role === 'procurement') return '<div class="gwrap">' + gcard(insightIn, 'c6') + gcard(outputIn, 'c6') + '</div>';
+    return '<div class="gwrap">' + gcard(insightIn, 'c4') + gcard(signalsIn, 'c4') + gcard(outputIn, 'c4') + '</div>';
   }
   // Side panel — donut / bars / feed / pipeline (mockup buildSide), real data.
   function sideDonut(p) {
@@ -545,7 +553,7 @@
       compounding: ['Mixing room', 'Recent activity', sideFeed(p.feed)],
       sales: ['Dispatch activity', 'Orders & dispatches, latest first', sideFeed(p.feed)]
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
-    return card('<div style="font-weight:800;font-size:15px">' + spec[0] + '</div><div style="font-size:12px;color:var(--t3);margin:2px 0 12px">' + spec[1] + '</div>' + spec[2]);
+    return '<div class="card"><div class="card-hd"><h2>' + spec[0] + '</h2><span class="n">' + spec[1] + '</span></div><div class="card-bd">' + spec[2] + '</div></div>';
   }
   // Super-Admin chain of custody — the REAL 24-step flow grouped into 10 stages, with the formula-
   // vault masking boundary in its true position (after Formula Selection). Flex layout (no absolute
@@ -584,51 +592,59 @@
       '<div style="font-size:11.5px;opacity:.92;margin-top:2px">' + sub + '</div></div>' +
       '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;opacity:.85;flex:none">' + fv.count + ' formulas</span></div>';
     function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:10px;margin:4px 0"><span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:' + col + ';letter-spacing:.12em;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--border)"></div></div>'; }
-    return card(
-      '<div style="display:flex;align-items:center;gap:12px;margin-bottom:10px"><div style="flex:1"><div style="font-weight:800;font-size:16px">Chain of custody</div><div style="font-size:12px;color:var(--t3)">The real 24-step flow · stock planning &rarr; customer delivery</div></div>' +
-      '<span style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:var(--r-sm);padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
+    return '<div class="card"><div class="card-hd"><h2>Chain of custody</h2><span class="n">The real 24-step flow · stock planning &rarr; customer delivery</span>' +
+      '<span style="margin-left:auto;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:var(--r-sm);padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
+      '<div class="card-bd">' +
       divider('IDENTITY VISIBLE', 'var(--t3)') +
       flowRow(FLOW_PRE, p, 1, false) +
       ARROW_D + vault + ARROW_D +
       divider('&#128274; ANONYMISED — ALIASES ONLY', 'var(--accent)') +
       flowRow(FLOW_POST, p, 7, true) +
-      '<div style="font-size:10.5px;color:var(--t3);margin-top:12px;line-height:1.5">1 stock planning &middot; 2 procurement (PR&rarr;RFQ&rarr;quote&rarr;PO) &middot; 3 receiving (gate&rarr;GRN&rarr;batch) &middot; 4 QC &middot; 5 storage &middot; 6 formula vault &middot; 7 compounding (pick&rarr;issue&rarr;mix&rarr;oil) &middot; 8 production QC &middot; 9 packaging (fill&rarr;FG) &middot; 10 sales &amp; dispatch.</div>'
-    , '18px 20px');
+      '<div style="font-size:10.5px;color:var(--t3);margin-top:12px;line-height:1.5">1 stock planning &middot; 2 procurement (PR&rarr;RFQ&rarr;quote&rarr;PO) &middot; 3 receiving (gate&rarr;GRN&rarr;batch) &middot; 4 QC &middot; 5 storage &middot; 6 formula vault &middot; 7 compounding (pick&rarr;issue&rarr;mix&rarr;oil) &middot; 8 production QC &middot; 9 packaging (fill&rarr;FG) &middot; 10 sales &amp; dispatch.</div>' +
+      '</div></div>';
   }
   function runsTable(p) {
-    var head = ['Run', 'Product', 'Stage', 'Batch', 'Target', 'Status'].map(function (h) { return '<th style="padding:13px 22px;text-align:left;font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--border);white-space:nowrap">' + h + '</th>'; }).join('');
+    // U3b: real Data table grammar (shell.css thead th/tbody td, COMPONENT_PARITY_MATRIX.json
+    // "Data table") — bare <table> inside .card-bd picks up sticky header/hover/mono styling for
+    // free, no more per-cell inline styles. .tscroll (shell.css "U3b" block) lets a wide table
+    // scroll inside its own card instead of pushing the page wide.
+    var head = ['Run', 'Product', 'Stage', 'Batch', 'Target', 'Status'].map(function (h) { return '<th>' + h + '</th>'; }).join('');
     var body = p.runs.map(function (r) {
-      return '<tr><td style="padding:13px 22px;border-bottom:1px solid var(--border);font-family:\'JetBrains Mono\',monospace;font-size:12.5px;font-weight:700">' + r.run + '</td>' +
-        '<td style="padding:13px 22px;border-bottom:1px solid var(--border);font-weight:700;font-size:13px">' + r.product + '</td>' +
-        '<td style="padding:13px 22px;border-bottom:1px solid var(--border);font-size:13px;color:var(--t2)">' + r.stage + '</td>' +
-        '<td style="padding:13px 22px;border-bottom:1px solid var(--border);font-family:\'JetBrains Mono\',monospace;font-size:12.5px">' + r.batch + '</td>' +
-        '<td style="padding:13px 22px;border-bottom:1px solid var(--border);font-size:13px">' + r.target + '</td>' +
-        '<td style="padding:13px 22px;border-bottom:1px solid var(--border)">' + fmt('status', r.status) + '</td></tr>';
+      return '<tr><td class="mono">' + r.run + '</td>' +
+        '<td>' + r.product + '</td>' +
+        '<td>' + r.stage + '</td>' +
+        '<td class="mono">' + r.batch + '</td>' +
+        '<td>' + r.target + '</td>' +
+        '<td>' + fmt('status', r.status) + '</td></tr>';
     }).join('');
-    return card('<div style="font-weight:800;font-size:15px;padding:4px 4px 14px">Master run index</div><div style="overflow-x:auto"><table style="width:100%;min-width:620px;border-collapse:collapse"><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>', '12px 6px 6px');
+    return '<div class="card"><div class="card-hd"><h2>Master run index</h2></div><div class="card-bd tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
   }
   // Warehouse floor zone map (mockup buildWarehouse), real zones + rack counts + batch occupancy.
   function warehouseMap(p) {
+    // U3b: zone tiles are a dynamic-length collection (however many zones this tenant has
+    // seeded), so they sit in .gwrap-auto (shell.css "U3b" block — an auto-fit track built on
+    // the same .gwrap gap/card language) as .gcard.glass surfaces rather than a fixed c-span.
     var zones = p.zones.map(function (z) {
       var capCol = z.capPct >= 85 ? 'var(--red)' : (z.capPct >= 65 ? 'var(--amber)' : 'var(--accent)');
       var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--well)') + ';box-shadow:' + (on ? 'none' : 'var(--ins-sm)') + '"></i>'; }
-      return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:17px 18px">' +
+      return gcard(
         '<div style="display:flex;align-items:center;gap:9px;margin-bottom:3px"><i style="width:11px;height:11px;border-radius:var(--r-sm);background:' + clsCol(z.cls) + '"></i><div style="font-weight:800;font-size:14.5px;flex:1">' + z.name + '</div>' + (z.code === 'Z4' ? '<span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;color:var(--red);border:1px solid var(--red);border-radius:var(--r-sm);padding:2px 6px">FLAMMABLE</span>' : '') + '</div>' +
         '<div style="font-size:11.5px;color:var(--t3);margin-bottom:12px">' + z.racks + ' racks · ' + z.batches + ' batches stored</div>' +
         '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px">' + cells + '</div>' +
         '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px"><span style="color:var(--t3);font-weight:600">Capacity used</span><span style="font-weight:800;color:' + capCol + '">' + z.capPct + '%</span></div>' +
-        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + z.capPct + '%;height:100%;background:' + capCol + ';border-radius:var(--r-sm)"></i></div></div>';
+        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + z.capPct + '%;height:100%;background:' + capCol + ';border-radius:var(--r-sm)"></i></div>'
+      );
     }).join('');
     var workSeed = p.counts.skusStored * 7 + p.counts.invOnHand;
     var bars = ''; var s = workSeed; for (var i = 0; i < 14; i++) { s = (s * 48271) % 2147483647 || 11; var h = 14 + (s % 46); bars += '<i style="flex:1;border-radius:var(--r-sm) 3px 0 0;height:' + h + 'px;background:var(--accent);opacity:.82"></i>'; }
-    var workload = card(badge('activity', 'STORAGE WORKLOAD') + '<div style="display:flex;align-items:flex-end;gap:4px;height:74px;margin:16px 0 4px">' + bars + '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3)"><span>06:00</span><span>12:00</span><span>18:00</span></div>', '20px');
-    return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:14px;margin-bottom:16px">' + zones + '</div>' +
-      '<div data-grid style="display:grid;grid-template-columns:1fr 1fr;gap:14px">' + workload +
-      card('<div style="font-weight:800;font-size:15px;margin-bottom:4px">Floor summary</div><div style="font-size:12.5px;color:var(--t3);margin-bottom:14px">Live totals across the warehouse</div>' +
-        [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Total racks', p.counts.racks]].map(function (r) {
-          return '<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px;color:var(--t2);font-weight:600">' + r[0] + '</span><span style="font-weight:800;font-size:15px">' + r[1] + '</span></div>';
-        }).join('')) + '</div>';
+    var workload = gcard(badge('activity', 'STORAGE WORKLOAD') + '<div style="display:flex;align-items:flex-end;gap:4px;height:74px;margin:16px 0 4px">' + bars + '</div>' +
+      '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3)"><span>06:00</span><span>12:00</span><span>18:00</span></div>', 'c6');
+    var floorSummary = '<div class="card c6"><div class="card-hd"><h2>Floor summary</h2><span class="n">Live totals across the warehouse</span></div><div class="card-bd">' +
+      [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Total racks', p.counts.racks]].map(function (r) {
+        return '<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px;color:var(--t2);font-weight:600">' + r[0] + '</span><span style="font-weight:800;font-size:15px">' + r[1] + '</span></div>';
+      }).join('') + '</div></div>';
+    return '<div class="gwrap-auto" style="margin-bottom:16px">' + zones + '</div>' +
+      '<div class="gwrap">' + workload + floorSummary + '</div>';
   }
   // Per-role KPI set (4 cards) computed from the real counts payload.
   function kpiSet(p, role) {
@@ -657,15 +673,17 @@
     if (!p) { V.innerHTML = errBox('No dashboard data returned.'); return; }
     st.dash = p;
     var role = st.role, kset = kpiSet(p, role);
-    var kpis = '<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:16px">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
+    var kpis = '<div class="stats" style="margin-bottom:16px">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
     // "My work" — the role's actionable queue at the top of the home (tap a tile to jump to the screen that resolves it)
     var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.json && ar.json.data; } catch (e) {}
     var html = myWorkPanel(ad) + kpis;
     if (role === 'warehouse') {
       html += warehouseMap(p);
     } else if (role === 'superadmin') {
+      // U3b: .gwrap c8/c4 (shell.css "U3b" block) — real GCard grid row, collapsing to one
+      // card per row at <=1023 on its own (see heroBand comment); no data-grid/applyDashCols.
       html += '<div style="margin-bottom:16px">' + heroBand(p, role, kset) + '</div>' + '<div style="margin-bottom:16px">' + flowGraph(p) + '</div>' +
-        '<div data-grid style="display:grid;grid-template-columns:1.6fr 1fr;gap:14px">' + runsTable(p) + sidePanel(p, role) + '</div>';
+        '<div class="gwrap"><div class="c8">' + runsTable(p) + '</div><div class="c4">' + sidePanel(p, role) + '</div></div>';
     } else {
       html += '<div style="margin-bottom:16px">' + heroBand(p, role, kset) + '</div>' + sidePanel(p, role);
     }
@@ -673,30 +691,22 @@
     [].forEach.call(document.querySelectorAll('#ra-view [data-work-nav]'), function (el) {
       el.onclick = function () { st.nav = el.getAttribute('data-work-nav'); st.search = ''; shell(); };
     });
-    applyDashCols();
   }
   // The role's actionable queue: clickable tiles from the role-filtered alerts.
   function myWorkPanel(ad) {
     var alerts = (ad && ad.alerts) || [];
-    var head = '<div style="display:flex;align-items:center;gap:10px;margin-bottom:12px"><div style="font-weight:800;font-size:15px">My work</div><div style="font-size:11.5px;color:var(--t3)">what needs your attention · tap to act</div></div>';
     var inner;
     if (!alerts.length) inner = '<div style="color:var(--t3);font-size:13px;padding:4px 2px">All clear — nothing needs your action right now &#10003;</div>';
     else inner = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + alerts.map(function (a) {
       var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent)');
       var nk = alertNavKey(a.kind);
-      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-md);padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.boxShadow=\'var(--rai-sm)\'" onmouseout="this.style.boxShadow=\'var(--ins-sm)\'"' : '') + '><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
+      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);border-radius:var(--r-md);padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
     }).join('') + '</div>';
-    return '<div style="background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:18px 20px;margin-bottom:16px">' + head + inner + '</div>';
+    // U3b: real .card/.card-hd/.card-bd grammar for the outer panel; the hover feedback on a
+    // clickable tile moves from inline onmouseover/onmouseout box-shadow swaps (the legacy
+    // --ins-sm/--rai-sm shim) to a plain CSS rule on [data-work-nav] (shell.css "U3b" block).
+    return '<div class="card" style="margin-bottom:16px"><div class="card-hd"><h2>My work</h2><span class="n">what needs your attention · tap to act</span></div><div class="card-bd">' + inner + '</div></div>';
   }
-  // Stack multi-column dashboard grids on narrow screens (remembers each grid's desktop template).
-  function applyDashCols() {
-    var narrow = window.innerWidth <= 980;
-    [].forEach.call(document.querySelectorAll('#ra-view [data-grid]'), function (el) {
-      if (!el.getAttribute('data-cols')) el.setAttribute('data-cols', el.style.gridTemplateColumns);
-      el.style.gridTemplateColumns = narrow ? '1fr' : el.getAttribute('data-cols');
-    });
-  }
-
   /* ---------------- flow actions: existing POST routes wired to per-row buttons ---------------- */
   // The role must hold the permission (owner/super_admin hold all) AND the row must be in the
   // action's precondition status. The backend re-checks both — this is UX only.
@@ -1954,7 +1964,7 @@
     window.addEventListener('online', applyNetBanner);
     window.addEventListener('offline', applyNetBanner);
   }
-  window.addEventListener('resize', function () { if (st.role) { applyResponsive(); applyDashCols(); } });
+  window.addEventListener('resize', function () { if (st.role) { applyResponsive(); } });
 
   /* ---------------- login ---------------- */
   // Login/session chrome — composed from ALEMBIC primitives (.card + .fld + .btn.p): ALEMBIC's own
