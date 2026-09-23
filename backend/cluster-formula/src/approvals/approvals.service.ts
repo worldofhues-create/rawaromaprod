@@ -52,8 +52,13 @@ export class ApprovalsService {
           .limit(1)
       )[0];
       if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
-      if (version.status === 'APPROVED') {
-        throw new ConflictException(`formula_version already approved: ${versionId}`);
+      // DRAFT-only (not just "not already APPROVED" — a REJECTED version must not be
+      // resurrected by approving it later; it needs a new successor version, same as an
+      // already-APPROVED one needs a new version to change anything, §109.8).
+      if (version.status !== 'DRAFT') {
+        throw new ConflictException(
+          `formula_version already decided (status=${version.status}): ${versionId}`,
+        );
       }
       // §108 SoD: "Formula author cannot final-approve same protected version." `createdBy`
       // is stamped by createVersion() at draft time — that's this version's author. Checked
