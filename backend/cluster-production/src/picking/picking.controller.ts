@@ -63,6 +63,17 @@ export class PickingController {
     return this.picking.generatePickList(id, body, principal);
   }
 
+  // §109.7 — the ONLY formula-derived read the factory floor gets: CODE + a per-batch
+  // quantity, never the recipe's real material_id or its raw percentage. Gated by the same
+  // ordinary production-order read permission as everything else on this order (production +
+  // compounding both hold it) — the masking guarantee comes from FORMULA_LOOKUP itself, not
+  // from restricting who may call this route.
+  @Permissions('production:production_order:read')
+  @Get('v1/production-orders/:id/manufacturing-instruction')
+  resolveManufacturingInstruction(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.picking.resolveManufacturingInstruction(id, principal);
+  }
+
   /* ── material issue ───────────────────────────────────────────────── */
 
   @Permissions('production:material_issue:read')
