@@ -280,8 +280,10 @@
     });
   }
 
+  // §109.8 lifecycle: DRAFT → VERSIONED → REVIEW → APPROVED → LOCKED → SUPERSEDED, plus the
+  // pre-existing terminal REJECTED/ARCHIVED.
   function statusChip(status) {
-    var tone = { DRAFT: 'n', APPROVED: 'g', REJECTED: 'r', ARCHIVED: 'a' }[status] || 'n';
+    var tone = { DRAFT: 'n', VERSIONED: 'n', REVIEW: 'a', APPROVED: 'g', LOCKED: 'g', SUPERSEDED: 'a', REJECTED: 'r', ARCHIVED: 'a' }[status] || 'n';
     return h('span', { class: 'chip ' + tone }, [status || 'UNKNOWN']);
   }
   function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
@@ -517,11 +519,28 @@
         h('p', { style: 'color:var(--ink-3)' }, ['Structure: ' + (ingredients || []).length + ' ingredient(s) sealed (real material/percentage never shown here — only the audited /actual read decrypts them).']),
       ]);
 
+      var PRE_DECISION = ['DRAFT', 'VERSIONED', 'REVIEW'];
       var actions = h('div', { style: 'display:flex;gap:8px;flex-wrap:wrap' });
+      var reasons = []; // plain-language reasons no (or fewer) actions are offered here
+
       if (version.status === 'DRAFT' && hasPerm('formula:formula_ingredients:write')) {
         actions.appendChild(h('button', { class: 'btn', onclick: function () { sealIngredientDialog(versionId); } }, ['Seal ingredient']));
+      } else if (hasPerm('formula:formula_ingredients:write') && version.status !== 'DRAFT') {
+        reasons.push('Sealing ingredients is only possible while the version is DRAFT — this version is ' + version.status + '.');
       }
-      if (version.status === 'DRAFT' && hasPerm('formula:formula_approval:write')) {
+
+      if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_version:write')) {
+        if (version.status === 'DRAFT') {
+          var finalizeBtn = h('button', { class: 'btn', onclick: function () { finalize(versionId); } }, ['Finalize (→ VERSIONED)']);
+          if (!(ingredients || []).length) {
+            finalizeBtn.disabled = true; finalizeBtn.title = 'Seal at least one ingredient before finalizing.';
+          }
+          actions.appendChild(finalizeBtn);
+        }
+        actions.appendChild(h('button', { class: 'btn', onclick: function () { submitForReview(versionId); } }, ['Submit for review']));
+      }
+
+      if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_approval:write')) {
         var approveBtn = h('button', { class: 'btn g', onclick: function () { decide(versionId, 'approve'); } }, ['Approve']);
         if (isAuthor) {
           approveBtn.disabled = true; approveBtn.title = 'You authored this draft — segregation of duties requires a different reviewer to approve it (§108).';
@@ -529,7 +548,8 @@
         actions.appendChild(approveBtn);
         actions.appendChild(h('button', { class: 'btn r', onclick: function () { decide(versionId, 'reject'); } }, ['Reject']));
       }
-      if (version.status === 'APPROVED') {
+
+      if (version.status === 'APPROVED' || version.status === 'LOCKED') {
         if (hasPerm('formula:actual:read')) {
           actions.appendChild(h('button', { class: 'btn r', onclick: function () { revealPlaintext(versionId, content); } }, ['Reveal plaintext']));
         }
@@ -537,7 +557,51 @@
           actions.appendChild(h('button', { class: 'btn', onclick: function () { createVersion(version.formulaId, (version.versionNumber || 0) + 1); } }, ['Create successor version (supersede)']));
         }
       }
-      var actionsCard = h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Actions'])]), actions.children.length ? actions : h('p', { style: 'color:var(--ink-3)' }, ['No actions available for your role at this stage.'])]);
+      if (version.status === 'APPROVED' && hasPerm('formula:formula_approval:write')) {
+        actions.appendChild(h('button', { class: 'btn g', onclick: function () { lockVersion(versionId); } }, ['Lock']));
+      } else if (version.status === 'LOCKED') {
+        reasons.push('This version is LOCKED — the final freeze after approval. A recipe change requires a new successor version, which supersedes this one automatically once approved.');
+      }
+      if (version.status === 'SUPERSEDED') {
+        reasons.push('This version was SUPERSEDED' + (version.supersededByVersionId ? (' by formula_version_id ' + version.supersededByVersionId) : '') + ' — no longer the current version. It stays here as a read-only record.');
+      }
+      if (version.status === 'REJECTED') {
+        reasons.push('This version was REJECTED. It cannot be resurrected — create a new version to try again.');
+      }
+
+      var actionsCard = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Actions'])]),
+        actions.children.length ? actions : null,
+        reasons.length ? h('div', { style: 'color:var(--ink-3);font-size:12.5px;margin-top:' + (actions.children.length ? '10px' : '0') }, reasons.map(function (r) { return h('p', {}, [r]); })) : null,
+        (!actions.children.length && !reasons.length) ? h('p', { style: 'color:var(--ink-3)' }, ['No actions available for your role at this stage.']) : null,
+      ]);
+
+      async function finalize(id) {
+        try {
+          await api('/v1/formula-versions/' + encodeURIComponent(id) + '/finalize', { method: 'POST' });
+          toast('Version finalized (VERSIONED).');
+          location.hash = location.hash; render();
+        } catch (e) { toast(e.message, true); }
+      }
+
+      async function submitForReview(id) {
+        try {
+          await api('/v1/formula-versions/' + encodeURIComponent(id) + '/submit-for-review', { method: 'POST', body: {} });
+          toast('Submitted for review.');
+          location.hash = location.hash; render();
+        } catch (e) { toast(e.message, true); }
+      }
+
+      async function lockVersion(id) {
+        if (!window.confirm('Lock this version? This is the final freeze after approval — a recipe change after this requires a new successor version.')) return;
+        try {
+          await withFreshAuth(function () {
+            return api('/v1/formula-versions/' + encodeURIComponent(id) + '/lock', { method: 'POST', body: {} });
+          });
+          toast('Version locked.');
+          location.hash = location.hash; render();
+        } catch (e) { toast(e.message, true); }
+      }
 
       async function decide(id, kind) {
         // Gather remarks BEFORE the fresh-auth check — withFreshAuth's callback can run
@@ -551,7 +615,7 @@
           await withFreshAuth(function () {
             return api('/v1/formula-versions/' + encodeURIComponent(id) + '/' + kind, { method: 'POST', body: kind === 'approve' ? { remarks: remarks || undefined } : { remarks: remarks } });
           });
-          toast(kind === 'approve' ? 'Version approved and locked.' : 'Version rejected.');
+          toast(kind === 'approve' ? 'Version approved.' : 'Version rejected.');
           location.hash = location.hash; render();
         } catch (e) { toast(e.message, true); }
       }
@@ -563,22 +627,65 @@
     }
   }
 
+  // Material picker — searches GET /v1/vault/materials?q=... (vault:material_search:read;
+  // minimal fields, no raw-UUID typing). Debounced live search into a <select> of matches;
+  // picking a row sets `selected` to its {materialId, label}. Replaces the old plain
+  // "Material UUID" text field.
+  function materialPicker(onChange) {
+    var selected = null;
+    var searchInput = h('input', { class: 'fld', style: 'width:100%', placeholder: 'Search material by code or name…', autocomplete: 'off' });
+    var results = h('select', { class: 'fld', style: 'width:100%;margin-top:6px', size: '5' });
+    var picked = h('div', { style: 'font-size:12px;color:var(--ink-2);margin-top:6px;min-height:16px' }, ['No material selected.']);
+    var timer = null;
+    function renderResults(mats) {
+      results.innerHTML = '';
+      (mats || []).forEach(function (m) {
+        var label = (m.materialCode || '—') + ' — ' + (m.materialName || m.materialId);
+        results.appendChild(h('option', { value: m.materialId }, [label]));
+      });
+      results.style.display = (mats && mats.length) ? '' : 'none';
+    }
+    searchInput.addEventListener('input', function () {
+      var q = searchInput.value.trim();
+      if (timer) clearTimeout(timer);
+      if (q.length < 2) { renderResults([]); return; }
+      timer = setTimeout(function () {
+        api('/v1/vault/materials?q=' + encodeURIComponent(q) + '&limit=20').then(function (mats) {
+          renderResults(mats);
+        }).catch(function () { renderResults([]); });
+      }, 220);
+    });
+    results.addEventListener('change', function () {
+      var opt = results.options[results.selectedIndex];
+      if (!opt) return;
+      selected = { materialId: opt.value, label: opt.textContent };
+      picked.textContent = 'Selected: ' + selected.label;
+      onChange && onChange(selected);
+    });
+    renderResults([]);
+    return {
+      el: h('div', {}, [searchInput, results, picked]),
+      get: function () { return selected; },
+    };
+  }
+
   function sealIngredientDialog(versionId) {
     openDialog('Seal ingredient into the vault', function (body, close) {
       var err = h('div', { class: 'err' });
-      var mat = h('input', { class: 'fld', style: 'width:100%', placeholder: 'Material UUID (Masterdata)' });
+      var picker = materialPicker();
       var pct = h('input', { class: 'fld', style: 'width:100%', type: 'number', step: '0.01', placeholder: 'Percentage' });
       var seq = h('input', { class: 'fld', style: 'width:100%', type: 'number', placeholder: 'Sequence (optional)' });
       body.appendChild(h('p', { style: 'color:var(--ink-2);margin-bottom:10px' }, ['The material id + percentage are encrypted before they ever leave this request — they are never stored or shown as plaintext again outside an audited reveal.']));
-      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Material UUID']), mat]));
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Material']), picker.el]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Percentage']), pct]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Sequence']), seq]));
       body.appendChild(err);
       var submit = h('button', { class: 'btn p' }, ['Seal into vault']);
       submit.addEventListener('click', async function () {
-        if (!mat.value.trim() || !pct.value) { err.textContent = 'Material UUID and percentage are required.'; return; }
+        var mat = picker.get();
+        if (!mat || !pct.value) { err.textContent = 'A material (search and select one) and a percentage are required.'; return; }
         try {
-          var ing = { materialId: mat.value.trim(), percentage: Number(pct.value) };
+          var ing = { materialId: mat.materialId, percentage: Number(pct.value) };
           if (seq.value) ing.sequenceNo = Number(seq.value);
           await api('/v1/formula-versions/' + encodeURIComponent(versionId) + '/ingredients', { method: 'POST', body: { ingredients: [ing] } });
           close(); toast('Ingredient sealed.'); location.hash = location.hash; render();
@@ -615,8 +722,8 @@
    * access decisions; `formula.floor.read` / `formula.picklist.read` are the server-resolved
    * manufacturing reads (FormulaLookupService, §109.7) that never leave the backend as
    * plaintext but ARE audited the same way. */
-  var HUMAN_PREFIXES = ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage'];
-  var MFG_PREFIXES = ['formula.floor.read', 'formula.picklist.read'];
+  var HUMAN_PREFIXES = ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.version.finalized', 'formula.version.submitted_for_review', 'formula.version.locked', 'formula.version.superseded', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage'];
+  var MFG_PREFIXES = ['formula.floor.read', 'formula.picklist.read', 'formula.manufacturing_instruction.resolve'];
 
   function auditTable(rows) {
     if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['No rows']), h('p', {}, ['Nothing recorded yet.'])]);
