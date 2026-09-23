@@ -6,7 +6,7 @@
  * Derived from release/ui/ALEMBIC_VISUAL_CONTRACT.json
  * contract_version: 1.0.0
  * baseline_sha:     44dec2d
- * contract_hash:    1eee849f3af80928f5738c397cb0d5393362fb54ffdb2e45ff13297ee73bcb7b
+ * contract_hash:    c04b07230f2c3135a705b53bcfb646e73195309074b7a53cf2ba3eb8744caaf2
  *
  * This is the file RawProd (and every other porting lane) vendors
  * verbatim. Every value here traces to an ALEMBIC source file:line —
@@ -69,7 +69,7 @@
   /* semantic colors */
   --green: #5C6829;
   --amber: #6E5F0F;
-  --red: #8A5A4C;
+  --red: #734A3F;
   --purple: #7A7A88;
   --accent-ink: #5A6410;
   --accent-soft: rgba(233,242,96,.16);
