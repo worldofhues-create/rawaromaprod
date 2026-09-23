@@ -708,20 +708,22 @@
     ],
     '/v1/user-roles': [
       { label: 'Revoke', perm: 'iam:user_role_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
-        if (!window.confirm('Revoke this role assignment? (takes effect on the user\'s next sign-in / token refresh)')) return;
-        tunnel('/v1/user-roles/' + (r.userRoleMappingId != null ? r.userRoleMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
-          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-          toast('Revoked ✓', 'good'); loadView();
-        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        raConfirm('Revoke this role assignment? It takes effect on the user\'s next sign-in / token refresh.', function () {
+          tunnel('/v1/user-roles/' + (r.userRoleMappingId != null ? r.userRoleMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
+            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+            toast('Revoked ✓', 'good'); loadView();
+          }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        }, { title: 'Revoke role assignment', confirmLabel: 'Revoke', tone: 'bad' });
       } }
     ],
     '/v1/role-permissions': [
       { label: 'Revoke', perm: 'iam:role_permission_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
-        if (!window.confirm('Revoke this permission from the role?')) return;
-        tunnel('/v1/role-permissions/' + (r.rolePermissionMappingId != null ? r.rolePermissionMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
-          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-          toast('Revoked ✓', 'good'); loadView();
-        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        raConfirm('Revoke this permission from the role?', function () {
+          tunnel('/v1/role-permissions/' + (r.rolePermissionMappingId != null ? r.rolePermissionMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
+            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+            toast('Revoked ✓', 'good'); loadView();
+          }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        }, { title: 'Revoke permission', confirmLabel: 'Revoke', tone: 'bad' });
       } }
     ],
     '/v1/dispatches': [
@@ -889,9 +891,9 @@
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['RECEIVED', 'PENDING', 'CANCELLED'] }] },
     '/v1/rfqs': { resource: 'rfqs', idKey: 'rfqId', perm: 'procurement:rfq_master:write', statusField: 'status', title: 'Edit RFQ',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['OPEN', 'CLOSED', 'CANCELLED'] }] },
-    '/v1/purchase-requests': { resource: 'purchase-requests', idKey: 'purchaseRequestId', perm: 'procurement:purchase_request:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, title: 'Edit purchase request (draft)',
+    '/v1/purchase-requests': { resource: 'purchase-requests', idKey: 'purchaseRequestId', perm: 'procurement:purchase_request:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, editWhenReason: function (r) { return 'Only a DRAFT purchase request can be edited — this one is ' + UP(r.status) + '.'; }, title: 'Edit purchase request (draft)',
       fields: [{ n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'SUBMITTED'] }] },
-    '/v1/purchase-orders': { resource: 'purchase-orders', idKey: 'purchaseOrderId', perm: 'procurement:purchase_order:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, title: 'Edit purchase order (draft)',
+    '/v1/purchase-orders': { resource: 'purchase-orders', idKey: 'purchaseOrderId', perm: 'procurement:purchase_order:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, editWhenReason: function (r) { return 'Only a DRAFT purchase order can be edited — this one is ' + UP(r.status) + '.'; }, title: 'Edit purchase order (draft)',
       fields: [{ n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT'] }] },
     '/v1/formula-versions': { resource: 'formula-versions', idKey: 'formulaVersionId', perm: 'formula:formula_version:write', statusField: 'status', title: 'Edit formula version',
       fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'ARCHIVED', 'REJECTED'] }] },
@@ -908,58 +910,141 @@
     '/v1/document-registry': { resource: 'documents', idKey: 'documentRegistryId', perm: 'platform:document_master:write', statusField: 'status', title: 'Edit document',
       fields: [{ n: 'title', l: 'Title' }, { n: 'documentType', l: 'Type' }, { n: 'referenceNo', l: 'Reference no.' }, { n: 'sourceUrl', l: 'Document link' }, { n: 'issueDate', l: 'Issue date' }, { n: 'expiryDate', l: 'Expiry date' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'SUPERSEDED', 'INACTIVE'] }] }
   };
-  // Read-only drill-down: the record's readable fields + its line items (fetched on open).
-  function openDetail(endpoint, row) {
-    var cfg = DETAIL[endpoint]; if (!cfg) return;
-    var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
+  /* ---------------- shared modal engine (PORTING_GUIDE.md "Dialog (true modal)" / COMPONENT_
+   * PARITY_MATRIX.json "Dialog / expand sheet — ExpandSheet parity") ----------------
+   * Every shared overlay below (openEdit/openCreate/openCreateDoc/openTrace) and raConfirm() build
+   * on this: .xp-scrim > .xp-sheet[role=dialog aria-modal aria-labelledby], Escape + backdrop-click
+   * + header-× to close, Tab trapped inside the sheet while it's open, and focus restored to
+   * whatever triggered it on close (WCAG dialog pattern; addendum §12.D "0 critical a11y failures").
+   * Kept under this name (not private to one call site) so ws-*.js workspace callers building their
+   * own xp-scrim/xp-sheet dialogs (e.g. ws-supply.js openRaiseRequirement) can adopt it too. */
+  var _sheetSeq = 0;
+  function openSheet(o) {
+    var trigger = (document.activeElement && document.activeElement !== document.body) ? document.activeElement : null;
+    var scrim = document.createElement('div');
+    scrim.className = 'xp-scrim open'; if (o.scrimId) scrim.id = o.scrimId;
+    var titleId = 'ra-sheet-t' + (_sheetSeq++);
+    var tag = o.tag || 'div';
+    scrim.innerHTML = '<' + tag + (o.id ? ' id="' + o.id + '"' : '') + ' class="xp-sheet' + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + ' role="dialog" aria-modal="true" aria-labelledby="' + titleId + '">' +
+      '<div class="xp-sheet-hd"><h2 id="' + titleId + '">' + o.title + '</h2><button type="button" class="xp" data-sheet-x aria-label="Close">&times;</button></div>' +
+      '<div class="xp-sheet-bd">' + o.body + '</div>' +
+    '</' + tag + '>';
+    document.body.appendChild(scrim); setTheme();
+    var sheet = scrim.firstElementChild;
+    function focusables() {
+      return [].filter.call(sheet.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'),
+        function (el) { return !!(el.offsetWidth || el.offsetHeight || el.getClientRects().length); });
+    }
+    function close() {
+      if (!scrim.parentNode) return;
+      scrim.remove(); document.removeEventListener('keydown', onKey, true);
+      if (trigger && typeof trigger.focus === 'function') { try { trigger.focus(); } catch (e) {} }
+    }
+    function onKey(e) {
+      if (e.key === 'Escape') { e.stopPropagation(); close(); return; }
+      if (e.key !== 'Tab') return;
+      var f = focusables(); if (!f.length) return;
+      var first = f[0], last = f[f.length - 1], back = e.shiftKey;
+      if (back && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!back && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+    document.addEventListener('keydown', onKey, true);
+    scrim.addEventListener('click', function (e) { if (e.target === scrim) close(); });
+    sheet.querySelector('[data-sheet-x]').onclick = close;
+    // Land focus on the first real field/control, not the × (Tab still cycles through every
+    // focusable including ×, so nothing becomes unreachable — this only picks where focus starts).
+    var bd = sheet.querySelector('.xp-sheet-bd');
+    var firstField = bd && bd.querySelector('input,select,textarea,button:not([disabled]),a[href]');
+    (firstField || sheet.querySelector('[data-sheet-x]')).focus();
+    return { scrim: scrim, sheet: sheet, close: close };
+  }
+  // ALEMBIC confirm sheet — replaces window.confirm() for irreversible actions (addendum §9 "clear
+  // irreversible-action confirmations", §10 "no hover-only critical actions"). Async: pass what
+  // happens on confirm as `onYes`. Single shared helper — ws-*.js callers may call it by this name.
+  function raConfirm(message, onYes, opts) {
+    opts = opts || {};
+    var tone = opts.tone === 'good' ? 'g' : (opts.tone === 'accent' ? 'p' : 'r');
+    var m = openSheet({
+      id: 'ra-confirm', tag: 'div', style: 'max-width:380px', title: opts.title || 'Confirm',
+      body: '<div style="font-size:13.5px;color:var(--ink-2);line-height:1.5">' + escHtml(message) + '</div>' +
+        '<div style="display:flex;gap:8px;margin-top:4px">' +
+          '<button type="button" class="btn" data-confirm-no style="flex:1;justify-content:center">Cancel</button>' +
+          '<button type="button" class="btn ' + tone + '" data-confirm-yes style="flex:1;justify-content:center">' + escHtml(opts.confirmLabel || 'Confirm') + '</button>' +
+        '</div>'
+    });
+    m.sheet.querySelector('[data-confirm-no]').onclick = m.close;
+    m.sheet.querySelector('[data-confirm-yes]').onclick = function () { m.close(); onYes(); };
+  }
+  // Shared ALEMBIC form-field label (PORTING_GUIDE.md §Form field, simplified to the `.fld` bare-
+  // input grammar that same section cites for "outside a form grid"). Matches ws-supply.js's own
+  // copy of this helper exactly, so every workspace's forms read identically.
+  function fLabel(text, req) { return '<span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">' + text + (req ? ' <span style="color:var(--red)">*</span>' : '') + '</span>'; }
+
+  // Read-only drill-down: ALEMBIC's live pattern is an inline row-expansion, not a modal
+  // (PORTING_GUIDE.md "Drawer / inline detail" — "port the inline pattern for parity with what
+  // ships"). Nothing outside this file calls the old modal-based openDetail(), so it is fully
+  // replaced (see toggleRowDetail() + the paintResults() row-click wiring below) rather than kept
+  // as a second UI alongside it.
+  function rowDetailHtml(endpoint, row) {
+    var cfg = DETAIL[endpoint]; if (!cfg) return '';
     var skip = {}; skip[cfg.idKey] = 1;
-    var fieldsHtml = Object.keys(row).filter(function (k) {
+    var cells = Object.keys(row).filter(function (k) {
       var v = row[k]; if (skip[k]) return false; if (v == null || v === '') return false;
       if (/Id$/.test(k) && isUuid(v)) return false;
       return true;
     }).map(function (k) {
-      return '<div style="display:flex;justify-content:space-between;gap:14px;padding:8px 0;border-bottom:1px solid var(--border)"><span style="font-size:12px;color:var(--t3);font-weight:600">' + label(k) + '</span><span style="font-size:13px;color:var(--t1);font-weight:600;text-align:right;word-break:break-word">' + fmt(k, row[k]) + '</span></div>';
-    }).join('') || '<div style="color:var(--t3);font-size:12px;padding:8px 0">No details.</div>';
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:520px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:6px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + ' detail</div><button type="button" id="ra-dclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="margin:10px 0 4px">' + fieldsHtml + '</div>' +
-      (cfg.items ? '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:16px 0 6px">LINE ITEMS</div><div id="ra-ditems" style="color:var(--t3);font-size:12px;padding:8px 0">Loading…</div>' : '') + '</div>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-dclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    if (cfg.items) {
-      tunnel(cfg.items.ep + '?limit=100').then(function (res) {
-        var mine = ((res.json && res.json.data) || []).filter(function (x) { return x[cfg.items.fk] === id; });
-        var box = $('ra-ditems'); if (!box) return;
-        if (!mine.length) { box.textContent = 'No line items recorded.'; return; }
-        var cols = cfg.items.cols;
-        box.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>' +
-          cols.map(function (c) { return '<th style="text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);padding:6px 8px;border-bottom:1px solid var(--border)">' + label(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-          mine.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:8px 8px;border-bottom:1px solid var(--border);font-size:12.5px;color:var(--t1);white-space:nowrap">' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
-      }).catch(function () { var box = $('ra-ditems'); if (box) box.textContent = 'Could not load line items.'; });
+      return '<div><div class="sect" style="margin-bottom:4px">' + label(k) + '</div><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui);color:var(--ink);word-break:break-word">' + fmt(k, row[k], row) + '</div></div>';
+    }).join('') || '<div style="color:var(--ink-3);font-size:12px">No details.</div>';
+    return '<div class="fgrid">' + cells + '</div>' + (cfg.items ? '<div class="sect" style="margin:16px 0 6px">Line items</div><div class="ra-ditems">Loading…</div>' : '');
+  }
+  function loadRowDetailItems(cfg, id, box) {
+    tunnel(cfg.items.ep + '?limit=100').then(function (res) {
+      var mine = ((res.json && res.json.data) || []).filter(function (x) { return x[cfg.items.fk] === id; });
+      if (!box.parentNode) return;
+      if (!mine.length) { box.textContent = 'No line items recorded.'; return; }
+      var cols = cfg.items.cols;
+      box.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>' +
+        cols.map(function (c) { return '<th style="text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:6px 8px;border-bottom:1px solid var(--line)">' + label(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        mine.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:8px 8px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink);white-space:nowrap">' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+    }).catch(function () { if (box.parentNode) box.textContent = 'Could not load line items.'; });
+  }
+  // Toggle the inline detail row under `tr` (only one open at a time — keeps dense tables legible).
+  function toggleRowDetail(tr, endpoint, row) {
+    var cfg = DETAIL[endpoint]; if (!cfg) return;
+    var table = tr.closest('table');
+    var openRow = table && table.querySelector('.row-detail-row');
+    var wasOwnRow = false;
+    if (openRow) {
+      var ownerId = openRow.getAttribute('data-owner');
+      wasOwnRow = (ownerId === tr.id);
+      var owner = ownerId && document.getElementById(ownerId); if (owner) owner.setAttribute('aria-expanded', 'false');
+      openRow.remove();
     }
+    if (wasOwnRow) return;
+    tr.setAttribute('aria-expanded', 'true');
+    var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
+    var dtr = document.createElement('tr'); dtr.className = 'row-detail-row'; dtr.id = 'detail-for-' + tr.id; dtr.setAttribute('data-owner', tr.id);
+    tr.setAttribute('aria-controls', dtr.id);
+    var td = document.createElement('td'); td.colSpan = tr.children.length; td.className = 'row-detail';
+    td.innerHTML = rowDetailHtml(endpoint, row);
+    dtr.appendChild(td); tr.insertAdjacentElement('afterend', dtr);
+    if (cfg.items) loadRowDetailItems(cfg, id, td.querySelector('.ra-ditems'));
   }
   function openEdit(endpoint, row) {
     var cfg = EDIT[endpoint]; if (!cfg) return;
     var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
     var rows = cfg.fields.map(function (f) {
       var ctrl;
-      if (f.fk) { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '"><option value="">— none —</option></select>'; }
-      else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" style="' + fStyle() + '">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
-      else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical"></textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '" style="' + fStyle() + '">'; }
-      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + '</label>' + ctrl + '</div>';
+      if (f.fk) { ctrl = '<select data-name="' + f.n + '" class="fld"><option value="">— none —</option></select>'; }
+      else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" class="fld">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
+      else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical"></textarea>'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '" class="fld">'; }
+      return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l) + ctrl + '</label>';
     }).join('');
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-eform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
-      '<button type="button" id="ra-eclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
-      rows + '<div id="ra-eerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-esave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Save changes</button></form>';
-    document.body.appendChild(ov); setTheme();
+    var body = rows + '<div id="ra-eerr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+      '<button type="submit" class="btn p" id="ra-esave" style="width:100%;justify-content:center;height:40px">Save changes</button>';
+    var m = openSheet({ id: 'ra-eform', tag: 'form', style: 'max-width:440px', title: cfg.title, body: body });
+    var ov = m.sheet;
     // prefill current values (via JS so quotes/markup in data can't break the form)
     cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var cur = row[f.n]; el.value = cur == null ? '' : String(cur); });
     // FK dropdowns: fetch options, then re-select the current value.
@@ -970,18 +1055,16 @@
         if (row[f.n] != null) sel.value = String(row[f.n]);
       }).catch(function () {});
     });
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-eclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    $('ra-eform').onsubmit = function (e) {
-      e.preventDefault(); var body = {}, verr = '';
-      cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); var fe = validateField(f, v); if (fe) verr = verr || fe; if (f.n === 'isActive') body[f.n] = (v === 'true'); else body[f.n] = v; });
-      if (verr) { $('ra-eerr').textContent = verr; return; }
-      var save = $('ra-esave'); save.disabled = true; save.textContent = 'Saving…';
+    ov.onsubmit = function (e) {
+      e.preventDefault(); var body2 = {}, verr = '';
+      cfg.fields.forEach(function (f) { var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim(); var fe = validateField(f, v); if (fe) verr = verr || fe; if (f.n === 'isActive') body2[f.n] = (v === 'true'); else body2[f.n] = v; });
+      if (verr) { ov.querySelector('#ra-eerr').textContent = verr; return; }
+      var save = ov.querySelector('#ra-esave'); save.disabled = true; save.textContent = 'Saving…';
       var editUrl = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
-      tunnel(editUrl, { method: 'PATCH', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
-        close(); toast('Saved ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Save changes'; $('ra-eerr').textContent = 'Could not reach the secure channel.'; });
+      tunnel(editUrl, { method: 'PATCH', body: body2 }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save changes'; ov.querySelector('#ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
+        m.close(); toast('Saved ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save changes'; ov.querySelector('#ra-eerr').textContent = 'Could not reach the secure channel.'; });
     };
   }
   function toggleActive(endpoint, cfg, row) {
@@ -989,12 +1072,14 @@
     var active = cfg.statusField === 'isActive' ? (row.isActive === true || String(row.isActive) === 'true') : String(row[cfg.statusField]).toUpperCase() === 'ACTIVE';
     var body = cfg.statusField === 'isActive' ? { isActive: !active } : { status: active ? 'INACTIVE' : 'ACTIVE' };
     var verb = active ? 'Deactivate' : 'Activate';
-    if (!window.confirm(verb + ' this record?')) return;
-    var url = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
-    tunnel(url, { method: 'PATCH', body: body }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
-      toast(verb + 'd ✓', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    var consequence = active ? 'It stops appearing in pickers and new transactions until reactivated.' : 'It becomes available again in pickers and new transactions.';
+    raConfirm(verb + ' this record? ' + consequence, function () {
+      var url = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
+      tunnel(url, { method: 'PATCH', body: body }).then(function (res) {
+        if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
+        toast(verb + 'd ✓', 'good'); loadView();
+      }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    }, { title: verb + ' record', confirmLabel: verb, tone: active ? 'bad' : 'good' });
   }
   // generic status transition via the guarded edit registry (maturation, etc.).
   function setStatus(resource, idKey, row, status, verb) {
@@ -1007,11 +1092,13 @@
   // workflow reject — send a PR/PO back (status → REJECTED). Approvals were one-way before.
   function rejectDoc(resource, idKey, row) {
     var id = row[idKey] != null ? row[idKey] : guessId(row);
-    if (!window.confirm('Reject this ' + resource.replace(/-/g, ' ').replace(/s$/, '') + '?')) return;
-    tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: 'REJECTED' } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Reject failed', 'bad'); return; }
-      toast('Rejected ✓', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    var noun = resource.replace(/-/g, ' ').replace(/s$/, '');
+    raConfirm('Reject this ' + noun + '? This sends it back and cannot be undone from here.', function () {
+      tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: 'REJECTED' } }).then(function (res) {
+        if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Reject failed', 'bad'); return; }
+        toast('Rejected ✓', 'good'); loadView();
+      }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    }, { title: 'Reject ' + noun, confirmLabel: 'Reject', tone: 'bad' });
   }
 
   /* ---------------- printable records (PO / GRN / dispatch note / CoA / batch certificate) ---------------- */
@@ -1058,7 +1145,26 @@
 
   var _acts = {}, _actSeq = 0;
   function actionsFor(endpoint, r) { var defs = ACTIONS[endpoint]; return defs ? defs.filter(function (a) { return can(a.perm) && a.when(r); }) : null; }
-  function actBtn(k, label, bg, fg) { return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>'; }
+  // Activate/Deactivate only belongs to an ACTIVE/INACTIVE status domain, never a workflow-status
+  // one (DRAFT/APPROVED/OPEN/… — those have their own lifecycle buttons via ACTIONS instead). A
+  // config can force this off with `noDeactivate`; otherwise it's inferred from the actual `en`
+  // enum on the status field, so every EDIT entry gets this right without hand-flagging each one.
+  function isActiveDomain(cfg) {
+    if (cfg.noDeactivate) return false;
+    if (cfg.statusField === 'isActive') return true;
+    var sf = cfg.fields.filter(function (f) { return f.n === cfg.statusField; })[0];
+    var en = sf && sf.en;
+    return !!(en && en.length === 2 && en.indexOf('ACTIVE') >= 0 && en.indexOf('INACTIVE') >= 0);
+  }
+  function actBtn(k, label, bg, fg, opts) {
+    opts = opts || {};
+    // Disabled action: plain-language reason via `title` (desktop hover) + a visible inline hint
+    // on touch, where hover tooltips don't fire (addendum §9/§10).
+    if (opts.disabled) {
+      return '<button class="ra-act" disabled aria-disabled="true" title="' + escHtml(opts.reason || '') + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;font-family:inherit;color:var(--ink-3);background:var(--panel-2);white-space:nowrap;opacity:.7">' + label + '<span class="act-hint">' + escHtml(opts.reason || '') + '</span></button>';
+    }
+    return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>';
+  }
   function rowActionsCell(endpoint, r) {
     var out = [];
     var avail = actionsFor(endpoint, r) || [];
@@ -1068,10 +1174,16 @@
       out.push(actBtn(k, a.label, bg));
     });
     var cfg = EDIT[endpoint];
-    if (cfg && can(cfg.perm) && (!cfg.editWhen || cfg.editWhen(r))) {
-      var kE = 'ra' + (_actSeq++); _acts[kE] = { a: { label: 'Edit', run: function (row) { openEdit(endpoint, row); } }, r: r };
-      out.push(actBtn(kE, 'Edit', 'var(--well)', 'var(--t1)'));
-      if (!cfg.noDeactivate) {
+    if (cfg && can(cfg.perm)) {
+      var editOk = !cfg.editWhen || cfg.editWhen(r);
+      var kE = 'ra' + (_actSeq++);
+      if (editOk) {
+        _acts[kE] = { a: { label: 'Edit', run: function (row) { openEdit(endpoint, row); } }, r: r };
+        out.push(actBtn(kE, 'Edit', 'var(--well)', 'var(--t1)'));
+      } else {
+        out.push(actBtn(kE, 'Edit', null, null, { disabled: true, reason: cfg.editWhenReason ? cfg.editWhenReason(r) : 'Cannot be edited in its current status.' }));
+      }
+      if (isActiveDomain(cfg)) {
         var active = cfg.statusField === 'isActive' ? (r.isActive === true || String(r.isActive) === 'true') : String(r[cfg.statusField]).toUpperCase() === 'ACTIVE';
         var kD = 'ra' + (_actSeq++); _acts[kD] = { a: { label: active ? 'Deactivate' : 'Activate', run: function (row) { toggleActive(endpoint, cfg, row); } }, r: r };
         out.push(actBtn(kD, active ? 'Deactivate' : 'Activate', active ? 'var(--red)' : 'var(--green)'));
@@ -1453,28 +1565,21 @@
     ] }
   };
   function guessId(row) { for (var k in row) { if (/Id$/.test(k) && isUuid(row[k])) return row[k]; } return ''; }
-  function fStyle() { return 'width:100%;padding:11px 13px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);font-size:13.5px;color:var(--t1);font-family:inherit;outline:none'; }
   function openCreate(endpoint) {
     var cfg = CREATE[endpoint]; if (!cfg) return;
     var rows = cfg.fields.map(function (f) {
       var ctrl;
       if (f.t === 'select') {
         var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') : '');
-        ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' style="' + fStyle() + '">' + opts + '</select>';
-      } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" style="' + fStyle() + ';resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' style="' + fStyle() + '">'; }
-      return '<div style="margin-bottom:13px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' + ctrl + '</div>';
+        ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' class="fld">' + opts + '</select>';
+      } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' class="fld">'; }
+      return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl + '</label>';
     }).join('');
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:440px;max-height:88vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:18px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div>' +
-      '<button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px;line-height:1">&times;</button></div>' +
-      rows + '<div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:2px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    var body = rows + '<div id="ra-merr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:40px">Create</button>';
+    var m = openSheet({ id: 'ra-cform', tag: 'form', style: 'max-width:440px', title: cfg.title, body: body });
+    var ov = m.sheet;
     cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
       var sel = ov.querySelector('[data-name="' + f.n + '"][data-fk]'); if (!sel) return;
       tunnel(f.fk + '?limit=100').then(function (res) {
@@ -1484,19 +1589,19 @@
         });
       }).catch(function () {});
     });
-    $('ra-cform').onsubmit = function (e) {
-      e.preventDefault(); var body = {}, err = '';
+    ov.onsubmit = function (e) {
+      e.preventDefault(); var body2 = {}, err = '';
       cfg.fields.forEach(function (f) {
         var el = ov.querySelector('[data-name="' + f.n + '"]'); if (!el) return; var v = String(el.value).trim();
         var fe = validateField(f, v); if (fe) { err = err || fe; }
-        if (v) body[f.n] = f.t === 'number' ? Number(v) : v;
+        if (v) body2[f.n] = f.t === 'number' ? Number(v) : v;
       });
-      if (err) { $('ra-merr').textContent = err; return; }
-      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
-      tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+      if (err) { ov.querySelector('#ra-merr').textContent = err; return; }
+      var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
+      tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        m.close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Could not reach the secure channel.'; });
     };
   }
 
@@ -1525,30 +1630,25 @@
     function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option>' + v + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
     // Line-item fields have no label above them (they sit in a compact row), so carry the field
     // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
-    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" style="' + fStyle() + '">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" placeholder="' + escHtml(f.l) + '" style="' + fStyle() + '">'; }
-    var headerRows = cfg.header.map(function (f) { return '<div style="margin-bottom:12px"><label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">' + f.l + (f.req ? ' <span style="color:var(--red)">*</span>' : '') + '</label>' + ctrl(f, 'h') + '</div>'; }).join('');
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-cform" style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px"><div style="font-weight:800;font-size:17px;flex:1">' + cfg.title + '</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
-      headerRows +
-      '<div style="display:flex;align-items:center;gap:10px;margin:16px 0 8px"><div style="font-weight:800;font-size:13px;flex:1">Line items</div><button type="button" id="ra-addline" style="padding:6px 12px;border:none;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);color:var(--accent);font-size:12px;font-weight:700;cursor:pointer">+ Add line</button></div>' +
-      '<div id="ra-lines"></div><div id="ra-merr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:6px 0 10px"></div>' +
-      '<button type="submit" id="ra-msave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Create</button></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" class="fld">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" placeholder="' + escHtml(f.l) + '" class="fld">'; }
+    var headerRows = cfg.header.map(function (f) { return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl(f, 'h') + '</label>'; }).join('');
+    var body = headerRows +
+      '<div style="display:flex;align-items:center;gap:10px;margin:6px 0 0"><div class="sect" style="flex:1">Line items</div><button type="button" id="ra-addline" class="btn sm">+ Add line</button></div>' +
+      '<div id="ra-lines"></div><div id="ra-merr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:40px">Create</button>';
+    var m = openSheet({ id: 'ra-cform', tag: 'form', style: 'max-width:560px', title: cfg.title, body: body });
+    var ov = m.sheet;
     var linesEl = ov.querySelector('#ra-lines');
     function addLine() {
       var row = document.createElement('div'); row.className = 'ra-line'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
-      row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--red);width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;flex:none;font-size:15px">&times;</button>';
+      row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline xp" aria-label="Remove line" style="flex:none">&times;</button>';
       linesEl.appendChild(row); row.querySelector('.ra-rmline').onclick = function () { row.remove(); };
     }
     for (var i = 0; i < (cfg.itemMin || 1); i++) addLine();
-    $('ra-addline').onclick = addLine;
-    $('ra-cform').onsubmit = function (e) {
-      e.preventDefault(); var body = {}, err = '';
-      cfg.header.forEach(function (f) { var el = ov.querySelector('[data-h="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; var fe = validateField(f, v); if (fe) err = err || fe; if (v) body[f.n] = f.t === 'number' ? Number(v) : v; });
+    ov.querySelector('#ra-addline').onclick = addLine;
+    ov.onsubmit = function (e) {
+      e.preventDefault(); var body2 = {}, err = '';
+      cfg.header.forEach(function (f) { var el = ov.querySelector('[data-h="' + f.n + '"]'); var v = el ? String(el.value).trim() : ''; var fe = validateField(f, v); if (fe) err = err || fe; if (v) body2[f.n] = f.t === 'number' ? Number(v) : v; });
       var items = [];
       [].forEach.call(ov.querySelectorAll('.ra-line'), function (row) {
         var it = {}, has = false;
@@ -1556,13 +1656,13 @@
         if (has) items.push(it);
       });
       if (items.length < (cfg.itemMin || 1)) err = err || ('Add at least ' + (cfg.itemMin || 1) + ' line item.');
-      if (err) { $('ra-merr').textContent = err; return; }
-      body.items = items;
-      var save = $('ra-msave'); save.disabled = true; save.textContent = 'Creating…';
-      tunnel(endpoint, { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Create'; $('ra-merr').textContent = 'Could not reach the secure channel.'; });
+      if (err) { ov.querySelector('#ra-merr').textContent = err; return; }
+      body2.items = items;
+      var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
+      tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        m.close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Could not reach the secure channel.'; });
     };
   }
 
@@ -1582,38 +1682,33 @@
     return step(null);
   }
   function openTrace(fg) {
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<div style="width:100%;max-width:560px;max-height:90vh;overflow:auto;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Traceability</div><button type="button" id="ra-mclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12px;color:var(--t3);margin-bottom:16px">Customer → finished good → oil batch → raw materials → vendor</div>' +
-      '<div id="ra-trace" style="color:var(--t3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div></div>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-mclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
-    var down = '<div style="display:flex;justify-content:center;padding:2px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
+    var body = '<div style="font-size:12px;color:var(--ink-3)">Customer → finished good → oil batch → raw materials → vendor</div>' +
+      '<div id="ra-trace" style="color:var(--ink-3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div>';
+    var m = openSheet({ id: 'ra-trace-sheet', tag: 'div', style: 'max-width:560px', title: 'Traceability', body: body });
+    var ov = m.sheet;
+    var down = '<div style="display:flex;justify-content:center;padding:2px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
     function step(ic, title, sub, accent) {
-      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--well)') + ';' + (accent ? 'color:#fff;' : '') + 'border-radius:var(--r-md);padding:12px 15px;box-shadow:' + (accent ? 'var(--rai-sm)' : 'var(--ins-sm)') + '">' +
-        '<span style="width:34px;height:34px;border-radius:var(--r-sm);background:' + (accent ? 'rgba(255,255,255,.18)' : 'var(--accent-soft)') + ';color:' + (accent ? '#fff' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
-        '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px">' + title + '</div><div style="font-size:11.5px;' + (accent ? 'opacity:.92' : 'color:var(--t3)') + '">' + sub + '</div></div></div>';
+      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--panel-2)') + ';' + (accent ? 'color:var(--accent-ink);' : '') + 'border-radius:var(--r-md);padding:12px 15px">' +
+        '<span style="width:34px;height:34px;border-radius:var(--r-sm);background:' + (accent ? 'rgba(255,255,255,.35)' : 'var(--panel-3)') + ';color:' + (accent ? 'inherit' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
+        '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px">' + title + '</div><div style="font-size:11.5px;' + (accent ? 'opacity:.85' : 'color:var(--ink-3)') + '">' + sub + '</div></div></div>';
     }
     tunnel('/v1/trace/finished-good/' + fg.finishedGoodBatchId).then(function (res) {
-      var el = $('ra-trace');
-      if (res.status >= 400 || !res.json || !res.json.data) { el.textContent = (res.json && res.json.error && res.json.error.message) || 'Trace unavailable.'; return; }
+      var el = ov.querySelector('#ra-trace');
+      if (res.status >= 400 || !res.json || !res.json.data) { if (el) el.textContent = (res.json && res.json.error && res.json.error.message) || 'Trace unavailable.'; return; }
       var t = res.json.data;
-      var mats = (t.materials || []).map(function (m) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-sm);margin-bottom:7px;flex-wrap:wrap">' +
-          '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:var(--accent)">' + m.material + '</span>' +
-          '<span style="color:var(--t3);font-size:11px">&larr; batch ' + m.rmBatch + '</span><span style="color:var(--t3);font-size:11px">&larr; ' + m.grn + '</span>' +
-          '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m.vendor + '</span></div>';
-      }).join('') || '<div style="color:var(--t3);font-size:12px;padding:6px 0">No upstream materials linked.</div>';
+      var mats = (t.materials || []).map(function (m2) {
+        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--panel-2);border-radius:var(--r-sm);margin-bottom:7px;flex-wrap:wrap">' +
+          '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:var(--accent)">' + m2.material + '</span>' +
+          '<span style="color:var(--ink-3);font-size:11px">&larr; batch ' + m2.rmBatch + '</span><span style="color:var(--ink-3);font-size:11px">&larr; ' + m2.grn + '</span>' +
+          '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m2.vendor + '</span></div>';
+      }).join('') || '<div style="color:var(--ink-3);font-size:12px;padding:6px 0">No upstream materials linked.</div>';
       var custStep = t.customer ? (step('users', 'Customer · ' + t.customer.name, t.customer.soNumber ? ('Sales order ' + t.customer.soNumber) : 'shipped to', false) + down) : '';
-      el.outerHTML = '<div id="ra-trace">' +
+      if (el) el.outerHTML = '<div id="ra-trace">' +
         custStep +
         step('pkg', 'Finished good · ' + t.finishedGood.batch, t.finishedGood.product + ' · ' + t.finishedGood.sku, true) + down +
         step('droplet', 'Oil batch · ' + (t.oilBatch ? t.oilBatch.batch : '—'), 'the compounded juice', false) + down +
-        '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;color:var(--t3);margin:8px 0 9px">RAW MATERIALS &rarr; VENDOR</div>' + mats + '</div>';
-    }).catch(function () { $('ra-trace').textContent = 'Could not reach the secure channel.'; });
+        '<div class="sect" style="margin:8px 0 9px">Raw materials → vendor</div>' + mats + '</div>';
+    }).catch(function () { var el = ov.querySelector('#ra-trace'); if (el) el.textContent = 'Could not reach the secure channel.'; });
   }
 
   async function loadView() {
@@ -1702,15 +1797,22 @@
       return '<th data-sort="' + c + '" title="Sort by ' + label(c) + '"' + (active ? ' class="on"' : '') + '>' + label(c) + arrow + '</th>';
     }).join('') +
       (hasActions ? '<th class="r">Actions</th>' : '');
+    // Row click drills into an inline row-expansion, not a modal (PORTING_GUIDE.md "Drawer / inline
+    // detail" — the tr itself is the trigger, kept keyboard-operable with tabindex + Enter/Space
+    // since it's not a native button; aria-expanded reflects open/closed state for AT).
     var clickable = !!DETAIL[item[3]];
-    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' data-k="' + k + '" class="ra-drow" style="cursor:pointer"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' id="' + k + '" data-k="' + k + '" class="ra-drow" style="cursor:pointer" tabindex="0" aria-expanded="false"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
       (hasActions ? '<td class="r">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
     var more = (v.cursor && !q) ? '<div class="tfoot" style="justify-content:center"><button id="ra-more" class="btn sm">Load more · ' + v.rows.length + ' loaded</button></div>' : '';
     el.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     wireActions();
-    if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) { tr.onclick = function (e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) openDetail(item[3], a.r); }; });
+    if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) {
+      function activate(e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) toggleRowDetail(tr, item[3], a.r); }
+      tr.onclick = activate;
+      tr.onkeydown = function (e) { if (e.key === 'Enter' || e.key === ' ' || e.key === 'Spacebar') { e.preventDefault(); activate(e); } };
+    });
     var mb = $('ra-more'); if (mb) mb.onclick = loadMore;
     // WS3: clicking a header sorts by that column; clicking the active column flips the direction.
     [].forEach.call(el.querySelectorAll('th[data-sort]'), function (th) {
