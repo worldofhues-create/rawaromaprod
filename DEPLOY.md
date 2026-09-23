@@ -1,3 +1,11 @@
+> **RETIRED-for-production (PB-01, L-DEP).** This Vercel + Render + Neon runbook is no longer
+> the production deploy path — FINAL_OS §2.2/§5/§41 require AWS-only (EC2 + systemd + nginx +
+> RDS PostgreSQL; no Vercel/Render/Neon/Aurora). The AWS path lives in `infra/aws/` and
+> `infra/aws/DEPLOY_AWS.md`. This file is kept, not deleted, because a Vercel/Render preview
+> deploy is still a legitimate way to demo a branch before AWS cutover (MIGRATION_AWS_PLAN.md
+> Phase D7 decommissions it only after 7 days green + a restore drill) — it is retired as the
+> path to PRODUCTION, not removed as a tool.
+
 # RAW AROMACHEM — Go-Live Runbook (Vercel + Render + Neon)
 
 Topology: **Vercel** (static portal `web/`) → rewrites the encrypted tunnel to **Render**

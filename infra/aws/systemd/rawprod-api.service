@@ -1,0 +1,65 @@
+# The RawProd API (NestJS on Fastify) + in-process outbox worker.
+#
+# Mirrors /Users/apple/Downloads/alembic/ops/systemd/alembic-api.service's hardening exactly
+# (NoNewPrivileges, ProtectSystem=strict, ProtectHome, PrivateDevices, RestrictAddressFamilies,
+# LockPersonality — MemoryDenyWriteExecute deliberately ABSENT, same reason: Node/V8 is a JIT and
+# will not start under it). Two real differences from that unit, both explained below rather than
+# silently copied over:
+#
+#   NOT socket-activated. alembic-api.service is handed an already-listening fd by
+#   alembic-api.socket; RawProd's backend/api/src/main.ts calls `app.listen(port, '0.0.0.0')`
+#   itself and has no code path that would accept a systemd-held socket. Adding one is an
+#   application change (main.ts), out of this lane's scope (L-DEP is ops/deploy, not app code) —
+#   tracked as a follow-up, not invented here. The practical consequence: a restart is NOT
+#   lossless the way alembic-api's is (a request arriving mid-restart gets a connection refused
+#   instead of queueing), and Type=exec is used for the same reason alembic-api.service uses it —
+#   nothing in this codebase calls sd_notify, so Type=notify/notify-reload would wait out
+#   TimeoutStartSec and declare a working process failed.
+#
+#   BINDS 0.0.0.0, NOT 127.0.0.1. main.ts hardcodes `app.listen(port, '0.0.0.0')` — there is no
+#   HOST/HOSTNAME env var it reads (unlike alembic-web.service's Next renderer, which this
+#   project's own history shows shipped that exact bug: HOST= set in the unit and silently
+#   ignored until a drop-in fixed the actual flag Next reads). Here the flag WOULD be ignored by
+#   the app entirely; setting one in this unit would be decorative. The API is reachable ONLY
+#   because the AWS security group for this host allows 80/443 inbound and NOTHING else — see
+#   infra/aws/DEPLOY_AWS.md's security-group table. Losing that SG rule is losing the only thing
+#   standing between this port and the internet; a loopback-bind fix in main.ts is the belt this
+#   host does not have to go with the SG's braces, and is a real follow-up, not a hedge.
+
+[Unit]
+Description=RawProd API
+After=network-online.target rawprod-migrate.service
+# The schema must be current before the API talks to it — same reasoning as
+# alembic-api.service's Requires= on alembic-migrate.service, same consequence: an API that
+# started against last week's schema is worse than one that refused to start at all.
+Requires=rawprod-migrate.service
+
+[Service]
+Type=exec
+User=rawprod
+Group=rawprod
+WorkingDirectory=/srv/rawprod/app
+EnvironmentFile=/etc/rawprod/api.env
+# /usr/bin/node must resolve to the version pinned in .node-version (22.12.0) — install via
+# NodeSource or nvm's system-wide mode, the same way the ALEMBIC host pins its Node. Run from
+# source via the swc ESM loader (DEPLOY.md §3): the workspace packages export `src/*.ts`, and a
+# compiled `dist/main.js` resolves those deps to `.ts` and crashes with ERR_UNKNOWN_FILE_EXTENSION.
+ExecStart=/usr/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
+
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# MemoryDenyWriteExecute is deliberately absent — see alembic-api.service's own note. Node/V8
+# needs writable+executable memory for its JIT; the process does not start under this control.
+
+[Install]
+WantedBy=multi-user.target

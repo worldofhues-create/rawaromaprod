@@ -1,3 +1,7 @@
+# RETIRED-for-production (PB-01, L-DEP). Production runs on AWS EC2 + systemd + nginx + RDS —
+# see infra/aws/ and infra/aws/DEPLOY_AWS.md. Kept, not deleted, for branch preview deploys only
+# (see DEPLOY.md's own RETIRED note for why).
+#
 # RAW AROMACHEM — Render blueprint (one free web service: API + in-process worker).
 # Mirrors the proven local build. PORT is injected by Render. APP_ENV=prod makes the API refuse to
 # boot unless CORS_ORIGINS is set (fail-closed), so CORS_ORIGINS is a required secret below.

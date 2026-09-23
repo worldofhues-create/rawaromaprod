@@ -1,0 +1,34 @@
+# Vault schema migrations — the formula-targeted half of scripts/migrations/*.sql, run on the
+# Vault EC2 against vault-pg. Pairs with infra/aws/systemd/rawprod-migrate.service, which runs
+# the other half on the main EC2. Neither host can reach the other's database (MIGRATION_AWS_PLAN
+# §2's whole point), so db:migrate's SKIP_TARGETS is what keeps a run on one side from ever
+# attempting to write the other side's schema — see scripts/db-migrate.ts's own comment on
+# SKIP_TARGETS for the exact failure this prevents.
+#
+# vault-migrate.env sets FORMULA_DATABASE_URL only (vault-pg, ra_vault_owner role) and
+# SKIP_TARGETS=main; DATABASE_URL is correctly left UNSET — db:migrate does not require it once
+# every target that would fall back to it is either skipped or independently resolvable, which
+# `formula` is here (verified: SKIP_TARGETS=main + FORMULA_DATABASE_URL with no DATABASE_URL
+# applies only 0013_formula.sql / 0019_adhoc_vault_audit_guard.sql / the formula block of
+# 0000_prerequisites.sql and 2026-09-24-ui-parity.sql, and skips everything else cleanly).
+
+[Unit]
+Description=Vault database migrations
+After=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rawprod
+Group=rawprod
+WorkingDirectory=/srv/rawprod/app
+EnvironmentFile=/etc/rawprod/vault-migrate.env
+ExecStart=/usr/bin/pnpm db:migrate
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

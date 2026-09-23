@@ -1,5 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
+  "_RETIRED_FOR_PRODUCTION": "PB-01/L-DEP: production is AWS EC2+nginx (infra/aws/, infra/aws/DEPLOY_AWS.md), not Vercel. This file is kept for branch preview deploys only — see DEPLOY.md's own RETIRED note.",
   "rewrites": [
     { "source": "/crypto/:path*", "destination": "https://raw-aroma-api.onrender.com/crypto/:path*" },
     { "source": "/rpc", "destination": "https://raw-aroma-api.onrender.com/rpc" }
