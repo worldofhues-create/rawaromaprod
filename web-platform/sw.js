@@ -1,0 +1,43 @@
+/* Platform Operations PWA service worker. Installable-shell caching ONLY — the static
+ * HTML/CSS/JS/manifest/icon that makes the app installable and boot offline. NO business
+ * data is ever cached: every backend call (/health, /v1/*, /auth/*, /crypto/*, /rpc) is
+ * network-only and falls straight through, same principle as the factory PWA's sw.js but
+ * simpler (this console has no offline-write workflow to support at all — it's read-mostly
+ * platform telemetry, not factory operations). */
+const CACHE = 'platform-shell-v1';
+const SHELL = ['/', '/index.html', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg'];
+
+self.addEventListener('install', (event) => {
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+});
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()),
+  );
+});
+
+self.addEventListener('fetch', (event) => {
+  const req = event.request;
+  const url = new URL(req.url);
+
+  // Backend calls: network-only, never cached, never intercepted beyond pass-through.
+  if (url.pathname === '/health' || url.pathname.startsWith('/v1/') || url.pathname.startsWith('/auth/')
+    || url.pathname.startsWith('/crypto/') || url.pathname === '/rpc') {
+    return; // let it hit the network untouched
+  }
+
+  if (req.method !== 'GET') return;
+
+  // App shell: network-first (so a redeploy is picked up promptly), cache fallback for the
+  // installable/offline-boot case. Never cache-first — a stale shell must not trap a user.
+  event.respondWith(
+    fetch(req)
+      .then((res) => {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy));
+        return res;
+      })
+      .catch(() => caches.match(req).then((cached) => cached || caches.match('/index.html'))),
+  );
+});

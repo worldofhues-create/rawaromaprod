@@ -20,6 +20,9 @@ export interface AccessClaims {
   perms: string[];
   pv: number;
   sid: string;
+  /** When this token was issued (unix seconds). Set by `jose` via `setIssuedAt()`; surfaced
+   * on verify so `FreshAuthGuard` can measure token age for step-up-gated routes (§109.5). */
+  iat: number;
 }
 
 export interface RefreshClaims {
@@ -45,8 +48,10 @@ export class JwtService {
     return this.accessTtl;
   }
 
-  /** Sign an access token. `aud` = portal so the audience check is a JWT-native compare. */
-  async signAccess(claims: AccessClaims): Promise<string> {
+  /** Sign an access token. `aud` = portal so the audience check is a JWT-native compare.
+   * `iat` is NOT a caller-supplied input — `.setIssuedAt()` stamps "now" below, which is the
+   * whole point: a caller can't backdate its own freshness. */
+  async signAccess(claims: Omit<AccessClaims, 'iat'>): Promise<string> {
     return new SignJWT({
       portal: claims.portal,
       roles: claims.roles,
@@ -88,6 +93,10 @@ export class JwtService {
       perms: asStringArray(payload.perms),
       pv: typeof payload.pv === 'number' ? payload.pv : 0,
       sid: typeof payload.sid === 'string' ? payload.sid : '',
+      // `jose` always stamps `iat` when `.setIssuedAt()` was used to sign (every access token
+      // this service mints). 0 (1970) for a token from elsewhere — reads as maximally stale,
+      // never as fresh, so a malformed/foreign token can't pass a freshness check by omission.
+      iat: typeof payload.iat === 'number' ? payload.iat : 0,
     };
   }
 

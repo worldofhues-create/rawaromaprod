@@ -32,7 +32,13 @@ export class AuditService {
     const items = await this.sql`
       select ae.id, ae.action, ae.entity_type as "entityType", ae.entity_id as "entityId",
              ae.actor_id as "actorId", u.email as "actor", ae.ip, ae.request_id as "requestId",
-             ae.occurred_at as "occurredAt"
+             ae.occurred_at as "occurredAt",
+             -- section 109.6/109.8: the caller's decrypt reason + allow/refuse result, written
+             -- into the row's after jsonb snapshot by VaultService.writeAudit (see
+             -- backend/cluster-formula/src/vault.service.ts -- NOT part of the tamper-evident
+             -- hash chain; see that file's AuditInput doc comment for why).
+             ae.after ->> 'reason' as "reason",
+             coalesce(ae.after ->> 'result', 'allow') as "result"
       from formula.audit_events ae
       left join iam.user_master u on u.user_id = ae.actor_id
       order by ae.occurred_at desc

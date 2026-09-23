@@ -36,6 +36,17 @@ export interface AuditInput {
   entityId: string | null;
   requestId?: string | null;
   ip?: string | null;
+  /** §109.8 "purpose/reason" — the caller-supplied justification for a plaintext read, shown
+   * back on the access-audit screen. Stored in the row's `after` jsonb snapshot column
+   * (added here without a schema migration — every cluster's audit_events table already has
+   * it). NOT folded into the tamper-evident hash chain (`canonicalAudit` is unchanged): doing
+   * so would change every row_hash computation, including any already-written rows, which
+   * would break `verifyAuditChain()` retroactively. A version-safe way to add it to the MAC
+   * (e.g. keyed by chain_seq cutover) is a deliberate fast-follow, not done here. */
+  reason?: string | null;
+  /** §109.8 "allow/refuse result". Defaults to 'allow' — callers on a refusal path pass
+   * 'refuse' explicitly (see `writeStandaloneAudit`). Same non-hashed `after` treatment. */
+  result?: 'allow' | 'refuse';
 }
 
 /** Stable bigint key for the advisory lock that serializes audit-chain appends. */
@@ -135,11 +146,18 @@ export class VaultService {
     });
     const rowHash = this.kms.macAudit((prevHash ?? '') + canonical);
 
+    // Non-hashed metadata (see the AuditInput doc comment for why reason/result stay outside
+    // the MAC). Omitted entirely (column stays null) when the caller supplies neither, so an
+    // ordinary lifecycle audit row (create/seal/approve) looks exactly as it did before.
+    const after =
+      e.reason || e.result ? { ...(e.reason ? { reason: e.reason } : {}), result: e.result ?? 'allow' } : null;
+
     await tx.insert(auditEvents).values({
       actorId: e.actorId,
       action: e.action,
       entityType: e.entityType,
       entityId: e.entityId,
+      after,
       requestId,
       ip,
       occurredAt,
@@ -147,6 +165,18 @@ export class VaultService {
       prevHash,
       rowHash,
     });
+  }
+
+  /**
+   * Write one audit row in its OWN fresh transaction. For a refusal path that happens BEFORE
+   * (or independent of) the transaction that would have performed the audited action — e.g.
+   * a per-formula authorization failure, or `decryptVersion`'s own transaction rolling back
+   * (and taking its would-be audit insert with it) when the version isn't APPROVED. Without
+   * this, a refused attempt leaves no trace at all, which is exactly the gap §109.8's
+   * "allow/refuse result" exists to close.
+   */
+  async writeStandaloneAudit(e: AuditInput): Promise<void> {
+    await this.db.transaction((tx) => this.writeAudit(tx, e));
   }
 
   /**

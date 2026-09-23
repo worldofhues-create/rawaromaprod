@@ -8,18 +8,21 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   CurrentUser,
+  FreshAuth,
   Permissions,
   ZodValidationPipe,
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { FormulasService } from './formulas.service.js';
 import {
+  actualReadQuery,
   addIngredients,
   addStageIngredients,
   createFormula,
   createStage,
   createVersion,
   listQuery,
+  type ActualReadQuery,
   type AddIngredients,
   type AddStageIngredients,
   type CreateFormula,
@@ -104,12 +107,21 @@ export class FormulasController {
     return this.formulas.listIngredients(id);
   }
 
-  /* ── owner-only decrypted recipe ─────────────────────────────────── */
+  /* ── Vault-role-only decrypted recipe (§107/§109) ─────────────────── */
 
+  // `formula:actual:read` never short-circuits via super_admin (permissions.guard.ts) — only
+  // formulator/vault_approver hold it (scripts/ra-roles.ts). §109.5 fresh-auth + §109.6/§109.8
+  // access-reason apply: the caller must have re-authenticated within the window AND supply a
+  // reason, both required before this ever reaches VaultService.decryptVersion.
   @Permissions('formula:actual:read')
+  @FreshAuth()
   @Get('v1/formula-versions/:id/actual')
-  getActualFormula(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
-    return this.formulas.getActualFormula(id, principal);
+  getActualFormula(
+    @Param('id') id: string,
+    @Query(new ZodValidationPipe(actualReadQuery)) query: ActualReadQuery,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.formulas.getActualFormula(id, query.reason, principal);
   }
 
   /* ── stages + sealed stage ingredients ───────────────────────────── */

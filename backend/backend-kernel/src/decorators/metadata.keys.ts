@@ -3,3 +3,4 @@ export const META_PUBLIC = 'core:public';
 export const META_PERMISSIONS = 'core:permissions';
 export const META_PORTALS = 'core:portals';
 export const META_FLAG = 'core:flag';
+export const META_FRESH_AUTH = 'core:fresh-auth';

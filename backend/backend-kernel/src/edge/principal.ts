@@ -17,6 +17,13 @@ export interface AuthPrincipal {
   permVersion: number;
   /** The active session id (JWT `sid`), for revoke checks. */
   sessionId: string;
+  /**
+   * When this access token was ISSUED (JWT `iat`, unix seconds) — NOT when the session
+   * started. A refreshed/re-minted token gets a fresh `iat`, so re-entering credentials
+   * (`POST /auth/login` again) is what moves this forward. `FreshAuthGuard` reads it to
+   * enforce §109.5's fresh-authentication window on high-risk plaintext/decrypt routes.
+   */
+  iat: number;
 }
 
 /** A Fastify request augmented with the verified principal. */

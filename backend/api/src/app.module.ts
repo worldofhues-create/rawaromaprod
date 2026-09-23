@@ -3,7 +3,7 @@
  *
  * Imports the reusable kernel (config, db, jwt, flags, event bus, health) + the Phase-1
  * clusters (identity, platform), and installs the edge layer globally:
- *   - guards (order matters): JwtAuthGuard → PermissionsGuard → FlagGuard
+ *   - guards (order matters): JwtAuthGuard → PermissionsGuard → FreshAuthGuard → FlagGuard
  *   - ResponseEnvelopeInterceptor (every success → { data, meta, error })
  *   - AllExceptionsFilter (every error → normalized envelope)
  *   - RequestIdMiddleware (x-request-id on every route)
@@ -15,6 +15,7 @@ import {
   AllExceptionsFilter,
   BackendKernelModule,
   FlagGuard,
+  FreshAuthGuard,
   JwtAuthGuard,
   PermissionsGuard,
   RequestIdMiddleware,
@@ -86,9 +87,11 @@ import { BridgeModule } from './bridge/bridge.module.js';
     BridgeModule,
   ],
   providers: [
-    // Edge guards run in registration order: authenticate, then authorize, then flag-gate.
+    // Edge guards run in registration order: authenticate, then authorize, then step-up
+    // (§109.5), then flag-gate.
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: PermissionsGuard },
+    { provide: APP_GUARD, useClass: FreshAuthGuard },
     { provide: APP_GUARD, useClass: FlagGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
     // Registered AFTER the envelope → on the response path it runs FIRST, masking material_id

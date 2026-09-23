@@ -7,9 +7,10 @@
  * Seeds, in the iam schema:
  *   1. permission_master       — every 'cluster:table:action' the controllers guard (RA_PERMISSIONS).
  *   2. role_master             — owner + floor + qc + procurement (scripts/ra-roles.ts).
- *   3. role_permission_mapping — each role granted its own subset (RoleDef.select). HARD INVARIANT:
- *      only `owner` may hold `formula:actual:read` — the seed throws if any other role's grant
- *      would include it (the production floor must never reach the decrypted recipe).
+ *   3. role_permission_mapping — each role granted its own subset (RoleDef.select). HARD INVARIANT
+ *      (§107): only `formulator`/`vault_approver` may hold `formula:actual:read` — the seed
+ *      throws if any other role's grant (owner/admin/platform_super_admin/production/…included)
+ *      would include it. Vault authority is a separate grant, never implicit.
  *   4. user_master             — one Argon2id sample login per role whose password env is set.
  *   5. user_role_mapping       — each sample user → its role.
  */
@@ -22,7 +23,8 @@ import * as orgSchema from '@ra/data-org';
 import { RA_PERMISSIONS } from './ra-permissions.js';
 import {
   ROLES,
-  OWNER_ONLY_PERMISSION,
+  VAULT_PLAINTEXT_PERMISSION,
+  VAULT_PLAINTEXT_ROLES,
   ROLE_GRANT_PERMISSION,
   ROLE_GRANTERS,
   CAPABILITY_PERMISSIONS,
@@ -65,9 +67,12 @@ async function grantRole(
   allPerms: { id: string; code: string }[],
 ): Promise<number> {
   const granted = allPerms.filter((p) => role.select(p.code));
-  // HARD INVARIANT: only owner may hold the decrypted-recipe permission.
-  if (role.code !== 'owner' && granted.some((p) => p.code === OWNER_ONLY_PERMISSION)) {
-    throw new Error(`SECURITY: role '${role.code}' must not be granted ${OWNER_ONLY_PERMISSION}`);
+  // HARD INVARIANT (§107): only formulator/vault_approver may hold the decrypted-recipe
+  // permission — NOT owner/admin/platform_super_admin. Vault authority is a separate grant.
+  if (!VAULT_PLAINTEXT_ROLES.includes(role.code) && granted.some((p) => p.code === VAULT_PLAINTEXT_PERMISSION)) {
+    throw new Error(
+      `SECURITY: role '${role.code}' must not be granted ${VAULT_PLAINTEXT_PERMISSION} — only ${VAULT_PLAINTEXT_ROLES.join('/')} may hold Vault plaintext access (§107)`,
+    );
   }
   // HARD INVARIANT: only owner + admin may GRANT roles. "Only an admin can give the role."
   if (!ROLE_GRANTERS.includes(role.code) && granted.some((p) => p.code === ROLE_GRANT_PERMISSION)) {
@@ -189,7 +194,7 @@ async function main(): Promise<void> {
       const roleId = await upsertRole(db, role);
       const count = await grantRole(db, role, roleId, allPerms);
       // eslint-disable-next-line no-console
-      console.log(`role '${role.code}': holds ${count} perms${role.code === 'owner' ? ' (ALL incl formula:actual:read)' : ''}`);
+      console.log(`role '${role.code}': holds ${count} perms${VAULT_PLAINTEXT_ROLES.includes(role.code) ? ` (incl ${VAULT_PLAINTEXT_PERMISSION})` : ''}`);
 
       const email =
         role.code === 'owner' ? process.env.BOOTSTRAP_OWNER_EMAIL ?? role.sampleEmail : role.sampleEmail;

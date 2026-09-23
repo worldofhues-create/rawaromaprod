@@ -1,0 +1,338 @@
+/* Platform Operations console — installable PWA for platform_super_admin only. Built from
+ * EXISTING admin/platform endpoints (backend/backend-kernel/src/health,
+ * backend/cluster-platform/src/flags, backend/api/src/audit). No business-data caching
+ * (see sw.js — API calls are network-only); no tenant business data or Formula Vault
+ * plaintext is ever requested or rendered here (this console has no formula:* permission
+ * at all — platform_super_admin's grant is `platform:flag:write` + `iam:user_master:read`
+ * only, per scripts/ra-roles.ts).
+ *
+ * Three of the eight screens the addendum's §6 lists (tenant list, provider health,
+ * deployment/build identity) have NO backing endpoint anywhere in this backend — confirmed
+ * by reading backend/cluster-platform in full. Per "no fake data, no dead controls; hide
+ * nothing as security — server must refuse too", they are wired as real nav items that
+ * show an honest NotBuilt state naming exactly what's missing, not omitted silently and
+ * not faked with placeholder numbers.
+ */
+(function () {
+  'use strict';
+
+  var API = (typeof window.PLATFORM_API === 'string') ? window.PLATFORM_API
+    : (/(localhost|127\.0\.0\.1)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+
+  /* ---- encrypted tunnel (own implementation, same wire contract as backend/api/src/crypto;
+     verified against session-keys.service.ts's exact HKDF salt/info + iv|ct|tag layout) ---- */
+  var aesKey = null, keyId = null, handshakePromise = null;
+  function te(s) { return new TextEncoder().encode(s); }
+  function b64(bytes) { var s = '', CHUNK = 0x8000; for (var i = 0; i < bytes.length; i += CHUNK) s += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK)); return btoa(s); }
+  function ub64(s) { var bin = atob(s), out = new Uint8Array(bin.length); for (var i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i); return out; }
+  function handshake() {
+    if (aesKey) return Promise.resolve();
+    if (handshakePromise) return handshakePromise;
+    handshakePromise = (async function () {
+      var kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+      var pub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+      var res = await fetch(API + '/crypto/handshake', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ clientPub: b64(pub) }) });
+      var hs = (await res.json()).data;
+      var serverKey = await crypto.subtle.importKey('raw', ub64(hs.serverPub), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+      var shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: serverKey }, kp.privateKey, 256);
+      var hk = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
+      var bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te('ra-session-v1') }, hk, 256);
+      aesKey = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+      keyId = hs.keyId;
+    })();
+    return handshakePromise;
+  }
+  async function seal(pt) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, te(pt))); var out = new Uint8Array(12 + ct.length); out.set(iv, 0); out.set(ct, 12); return b64(out); }
+  async function open(blob) { var raw = ub64(blob); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, aesKey, raw.slice(12)); return new TextDecoder().decode(pt); }
+  async function tunnel(path, opts) {
+    opts = opts || {};
+    await handshake();
+    var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
+    if (opts.body !== undefined) payload.body = opts.body;
+    if (session.token) payload.token = session.token;
+    var res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
+    var envelope = await res.json();
+    if (!envelope || !envelope.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Could not reach the backend. Try again.', 0); }
+    var inner = JSON.parse(await open(envelope.enc));
+    var body = inner.body ? JSON.parse(inner.body) : null;
+    return { status: inner.status, json: body };
+  }
+  function PlatformError(code, message, status) { this.code = code; this.message = message; this.status = status; }
+  PlatformError.prototype = Object.create(Error.prototype);
+  async function api(path, opts) {
+    var r = await tunnel(path, opts);
+    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status); }
+    return r.json ? r.json.data : null;
+  }
+
+  /* Health is @Public() — usable to prove connectivity even before login, but the rest of
+   * the console still requires a platform_super_admin session. */
+  function publicHealth() {
+    return fetch(API + '/health').then(function (r) { return r.json(); });
+  }
+
+  /* ---- session (in-memory; a reload returns to login — no persisted admin credential) ---- */
+  var session = { token: null, iat: 0, email: null, roles: [], permissions: [] };
+  function hasPerm(p) { return session.permissions.indexOf(p) >= 0; }
+  async function login(email, password) {
+    var data = await api('/auth/login', { method: 'POST', body: { identifier: email, password: password } });
+    session.token = data.accessToken;
+    session.email = (data.user && data.user.email) || email;
+    var me = await api('/me');
+    session.roles = me.roles || [];
+    session.permissions = me.permissions || [];
+  }
+  function logout() { session.token = null; session.email = null; session.roles = []; session.permissions = []; location.hash = ''; render(); }
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('/sw.js').catch(function () {});
+  }
+
+  /* ---- tiny DOM helpers (own copy — this console shares no code with web-vault either) ---- */
+  function h(tag, attrs, children) {
+    var el = document.createElement(tag); attrs = attrs || {};
+    for (var k in attrs) {
+      if (k === 'class') el.className = attrs[k];
+      else if (k.indexOf('on') === 0 && typeof attrs[k] === 'function') el.addEventListener(k.slice(2), attrs[k]);
+      else if (attrs[k] !== null && attrs[k] !== undefined) el.setAttribute(k, attrs[k]);
+    }
+    (children || []).forEach(function (c) { if (c == null) return; el.appendChild(typeof c === 'string' ? document.createTextNode(c) : c); });
+    return el;
+  }
+  function icon(path, size) {
+    var svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('width', size || 14); svg.setAttribute('height', size || 14);
+    svg.setAttribute('fill', 'none'); svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.7');
+    svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round'); svg.setAttribute('class', 'ic');
+    var p = document.createElementNS('http://www.w3.org/2000/svg', 'path'); p.setAttribute('d', path); svg.appendChild(p);
+    return svg;
+  }
+  var ICONS = {
+    activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+    sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+    building: 'M3 21h18M6 21V4h8v17M14 9h4v12M9 8h.01M9 12h.01M9 16h.01',
+    clipboard: 'M9 4h6v3H9zM8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2',
+    tag: 'M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7 7h.01',
+    logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+    menu: 'M3 6h18M3 12h18M3 18h18',
+  };
+  function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); setTimeout(function () { t.remove(); }, 3400); }
+  var dialogRoot = null;
+  function closeDialog() { if (dialogRoot) { dialogRoot.remove(); dialogRoot = null; } }
+  function openDialog(title, bodyFn) {
+    closeDialog();
+    var scrim = h('div', { class: 'xp-scrim open', onclick: closeDialog });
+    var body = h('div', { class: 'xp-sheet-bd' });
+    var sheet = h('div', { class: 'xp-sheet open', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
+      [h('div', { class: 'xp-sheet-hd' }, [h('h2', {}, [title]), h('button', { class: 'xp', 'aria-label': 'Close', onclick: closeDialog }, ['×'])]), body]);
+    sheet.addEventListener('click', function (e) { e.stopPropagation(); });
+    dialogRoot = h('div', {}, [scrim, sheet]);
+    document.body.appendChild(dialogRoot);
+    bodyFn(body, closeDialog);
+    document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { closeDialog(); document.removeEventListener('keydown', onKey); } });
+  }
+  function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
+  function notBuilt(title, why, needs) {
+    return h('div', { class: 'card notbuilt' }, [h('h2', {}, [title]), h('p', {}, [why]), needs ? h('div', { class: 'needs' }, [needs]) : null]);
+  }
+  function skeletonCard() { return h('div', { class: 'card' }, [h('div', { class: 'skl' })]); }
+
+  window.addEventListener('hashchange', render);
+  function currentView() { return location.hash.replace(/^#\/?/, '') || 'health'; }
+
+  var root = document.getElementById('root');
+
+  function renderLogin() {
+    root.innerHTML = '';
+    var err = h('div', { class: 'err' });
+    var email = h('input', { class: 'fld', type: 'email', autocomplete: 'username', placeholder: 'you@rawaroma.local', style: 'width:100%' });
+    var pw = h('input', { class: 'fld', type: 'password', autocomplete: 'current-password', placeholder: 'Password', style: 'width:100%' });
+    var btn = h('button', { class: 'btn p', style: 'width:100%;justify-content:center' }, ['Sign in']);
+    async function submit() {
+      btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
+      try {
+        await login(email.value.trim(), pw.value);
+        if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read')) {
+          err.textContent = 'Signed in, but this account holds no Platform Operations permission. Contact an admin for the platform_super_admin role.';
+          btn.disabled = false; btn.textContent = 'Sign in'; return;
+        }
+        location.hash = '#/health'; render();
+      } catch (e) {
+        err.textContent = (e instanceof PlatformError) ? e.message : 'Could not sign in.';
+        btn.disabled = false; btn.textContent = 'Sign in';
+      }
+    }
+    btn.addEventListener('click', submit);
+    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
+    var card = h('div', { class: 'login-card' }, [
+      h('div', { class: 'mark' }, ['Platform Operations']),
+      h('div', { class: 'sub' }, ['Raw Aroma Chem — internal only. Never shows tenant business data or Formula Vault plaintext.']),
+      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Email']), email]),
+      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Password']), pw]),
+      btn, err,
+    ]);
+    root.appendChild(h('div', { class: 'login-wrap' }, [card]));
+  }
+
+  var NAV = [
+    { id: 'health', label: 'Environment & diagnostics', icon: 'activity' },
+    { id: 'flags', label: 'Feature flags', icon: 'sliders', need: 'platform:flag:write' },
+    { id: 'tenants', label: 'Tenant list', icon: 'building' },
+    { id: 'providers', label: 'Provider health', icon: 'activity' },
+    { id: 'deploy', label: 'Deployment / build', icon: 'tag' },
+    { id: 'support', label: 'Audit & support', icon: 'clipboard' },
+  ];
+
+  function renderShell(activeView, contentEl) {
+    root.innerHTML = '';
+    var navButtons = NAV.filter(function (n) { return !n.need || hasPerm(n.need); }).map(function (n) {
+      return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
+    });
+    var rail = h('nav', { class: 'rail' }, [
+      h('button', { class: 'rb' }, [h('div', {}, [h('div', { class: 'mark' }, ['Platform Ops']), h('div', { class: 'sub' }, ['INTERNAL ONLY'])])]),
+      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['OPERATIONS']), h('div', {}, navButtons)]),
+      h('div', { class: 'rme' }, [
+        h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
+        h('span', { class: 'who' }, [session.email]),
+        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
+      ]),
+    ]);
+    var banner = h('div', { class: 'platform-banner' }, [
+      h('span', { class: 'dot' }), h('span', {}, ['PLATFORM OPERATIONS']), h('span', { class: 'vault-mark' }, ['INTERNAL']),
+      h('span', {}, ['— no tenant business data or Formula Vault plaintext is ever available in this console.']),
+      h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()]),
+    ]);
+    var toggle = h('button', { class: 'rail-toggle', 'aria-label': 'Toggle navigation', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.menu, 18)]);
+    var label = (NAV.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform Operations';
+    var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [toggle, h('h1', {}, [label])]), h('div', { class: 'content' }, [contentEl])]);
+    root.appendChild(h('div', { class: 'app' }, [rail, main]));
+  }
+
+  /* ── environment & diagnostics (real: GET /health) ─────────────────────────────────────── */
+  async function screenHealth() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('health', content);
+    try {
+      var r = await publicHealth();
+      var tiles = Object.keys(r.deps || {}).map(function (k) {
+        return h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, [k]), h('div', { class: 'v' }, [h('span', { class: 'chip ' + (r.deps[k] === 'up' ? 'g' : 'r') }, [r.deps[k]])])]);
+      });
+      var card = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Environment health']), h('span', { class: 'chip ' + (r.status === 'ok' ? 'g' : 'a') }, [r.status])]),
+        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Checked ' + fmtDt(r.at) + '. Source: GET /health (liveness + dependency probe).']),
+        h('div', { class: 'health-grid' }, tiles),
+      ]);
+      var diagNote = h('div', { class: 'card notbuilt' }, [
+        h('h2', {}, ['Deeper diagnostics']),
+        h('p', {}, ['Only DB connectivity is currently exposed. Queue depth, outbox backlog, worker lag, and process memory/CPU are not (no metrics endpoint exists in backend/backend-kernel or backend/cluster-platform).']),
+        h('div', { class: 'needs' }, ['Needs: a metrics/diagnostics route (e.g. GET /health/deep) surfacing outbox lag, event-bus subscriber counts, and process resource usage.']),
+      ]);
+      content.innerHTML = ''; content.appendChild(card); content.appendChild(diagNote);
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Health check failed', e.message));
+    }
+  }
+
+  /* ── feature flags (real: GET /v1/flags/snapshot, PUT /v1/admin/flags/:key) ───────────────── */
+  async function screenFlags() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('flags', content);
+    if (!hasPerm('platform:flag:write')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags unavailable', 'Your role does not hold platform:flag:write.'));
+      return;
+    }
+    try {
+      var snap = await api('/v1/flags/snapshot');
+      var rows = (snap.flags || []).map(function (f) {
+        return h('tr', {}, [
+          h('td', { class: 'mono', 'data-label': 'Key' }, [f.key]),
+          h('td', { 'data-label': 'State' }, [h('span', { class: 'chip ' + (f.state === 'on' ? 'g' : f.state === 'degraded' ? 'a' : 'r') }, [f.state])]),
+          h('td', { 'data-label': 'Action' }, [h('button', { class: 'btn sm', onclick: function () { toggleFlagDialog(f); } }, ['Change'])]),
+        ]);
+      });
+      var card = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Feature flags']), h('span', { class: 'n' }, ['snapshot v' + snap.version])]),
+        rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Key']), h('th', {}, ['State']), h('th', {}, ['Action'])])]), h('tbody', {}, rows)]) : h('div', { class: 'empty' }, [h('h3', {}, ['No flags registered'])]),
+      ]);
+      content.innerHTML = ''; content.appendChild(card);
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags could not be loaded', e.message));
+    }
+  }
+  function toggleFlagDialog(flag) {
+    openDialog('Change flag: ' + flag.key, function (body, close) {
+      var err = h('div', { class: 'err' });
+      var env = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'staging' }, ['staging']), h('option', { value: 'prod' }, ['prod'])]);
+      var state = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'on' }, ['on']), h('option', { value: 'degraded' }, ['degraded']), h('option', { value: 'off' }, ['off'])]);
+      state.value = flag.state;
+      var reason = h('textarea', { placeholder: 'Mandatory — written to flag_audit' });
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Environment']), env]));
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['New state']), state]));
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason (min 3 chars, mandatory)']), reason]));
+      body.appendChild(err);
+      var submit = h('button', { class: 'btn p' }, ['Save']);
+      submit.addEventListener('click', async function () {
+        if (reason.value.trim().length < 3) { err.textContent = 'A reason is required.'; return; }
+        try {
+          await api('/v1/admin/flags/' + encodeURIComponent(flag.key), { method: 'PUT', body: { env: env.value, state: state.value, reason: reason.value.trim() } });
+          close(); toast('Flag updated.'); location.hash = location.hash; render();
+        } catch (e) { err.textContent = e.message; }
+      });
+      body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
+    });
+  }
+
+  /* ── audit & support (real route, honestly not-implemented server-side today) ─────────────── */
+  async function screenSupport() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('support', content);
+    try {
+      var page = await api('/v1/login-history?limit=100');
+      var rows = (page.items || []).map(function (r) { return h('tr', {}, [h('td', {}, [fmtDt(r.occurredAt)]), h('td', {}, [r.actor || '—'])]); });
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Login history'])]), h('table', {}, [h('tbody', {}, rows)])]));
+    } catch (e) {
+      content.innerHTML = '';
+      content.appendChild(notBuilt(
+        'Login history is not available',
+        (e instanceof PlatformError ? e.message : 'The backend reports this feature is not implemented.'),
+        'Needs: iam.login_history added to the Phase-1A Data Dictionary + @core/data-iam or @ra/data-org schema (backend/api/src/audit/audit.service.ts already documents this exact gap).',
+      ));
+    }
+  }
+
+  function screenTenants() {
+    renderShell('tenants', notBuilt(
+      'Tenant list is not available',
+      'No tenant/org-list endpoint exists in this backend today. RawProd is currently a single manufacturing tenant (RAC/Raw Aroma Chem itself) with no multi-tenant catalogue table or route.',
+      'Needs: a tenant/org registry (table + GET /v1/platform/tenants route, platform:tenant:read-gated) once multi-tenant onboarding is real.',
+    ));
+  }
+  function screenProviders() {
+    renderShell('providers', notBuilt(
+      'Provider health is not available',
+      'No integration/provider-status endpoint exists. GET /health only reports this process’s own DB connectivity, not third-party providers (payment/SMS/email/storage, etc.).',
+      'Needs: each self-service integration (per the Shopify-style provider-connect model) to report a health/last-success status, aggregated behind a new GET /v1/platform/providers route.',
+    ));
+  }
+  function screenDeploy() {
+    renderShell('deploy', notBuilt(
+      'Deployment / build identity is not available',
+      'No endpoint or env var exposes the running build’s git SHA, version, or deploy time anywhere in this backend (checked GET /health’s response shape and the whole repo for GIT_SHA/BUILD_SHA/APP_VERSION — none exist).',
+      'Needs: GET /health (or a new GET /version) to include a build identity field, populated at deploy time from the platform’s commit SHA (e.g. Render’s RENDER_GIT_COMMIT).',
+    ));
+  }
+
+  async function render() {
+    if (!session.token) { renderLogin(); return; }
+    var v = currentView();
+    if (v === 'flags') return screenFlags();
+    if (v === 'tenants') return screenTenants();
+    if (v === 'providers') return screenProviders();
+    if (v === 'deploy') return screenDeploy();
+    if (v === 'support') return screenSupport();
+    return screenHealth();
+  }
+
+  render();
+})();

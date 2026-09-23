@@ -60,6 +60,7 @@ export class JwtAuthGuard implements CanActivate {
       permissions: claims.perms,
       permVersion: claims.pv,
       sessionId: claims.sid,
+      iat: claims.iat,
     };
     request.user = principal;
     return true;

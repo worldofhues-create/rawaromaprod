@@ -152,6 +152,9 @@ export function principal(overrides: Partial<AuthPrincipal> = {}): AuthPrincipal
     ],
     permVersion: 1,
     sessionId: '00000000-0000-7000-8000-0000000000ff',
+    // Default = "now" so a test that doesn't care about staleness passes any @FreshAuth check
+    // too; a test asserting the step-up gate overrides this to an old value.
+    iat: Math.floor(Date.now() / 1000),
     ...overrides,
   };
 }

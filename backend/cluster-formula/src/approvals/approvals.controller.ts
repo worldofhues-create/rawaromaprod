@@ -6,6 +6,7 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
   CurrentUser,
+  FreshAuth,
   Permissions,
   ZodValidationPipe,
   type AuthPrincipal,
@@ -16,10 +17,12 @@ import {
   createCopyRequest,
   decideCopyRequest,
   listQuery,
+  rejectVersion,
   type ApproveVersion,
   type CreateCopyRequest,
   type DecideCopyRequest,
   type ListQuery,
+  type RejectVersion,
 } from '../formula.dtos.js';
 
 @Controller()
@@ -34,7 +37,12 @@ export class ApprovalsController {
     return this.approvals.listApprovals(query);
   }
 
+  // §108 SoD (the version's author may not approve it) is enforced server-side in the
+  // service regardless of caller/role — this decorator pair is the edge-layer half:
+  // vault_approver-only permission (never implicit, per permissions.guard.ts) + a
+  // recently-issued token (§109.5).
   @Permissions('formula:formula_approval:write')
+  @FreshAuth()
   @Post('v1/formula-versions/:id/approve')
   approveVersion(
     @Param('id') id: string,
@@ -42,6 +50,17 @@ export class ApprovalsController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.approvals.approveVersion(id, body, principal);
+  }
+
+  @Permissions('formula:formula_approval:write')
+  @FreshAuth()
+  @Post('v1/formula-versions/:id/reject')
+  rejectVersion(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(rejectVersion)) body: RejectVersion,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.approvals.rejectVersion(id, body, principal);
   }
 
   /* ── copy requests ────────────────────────────────────────────────── */

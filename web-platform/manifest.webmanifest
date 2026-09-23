@@ -1,0 +1,13 @@
+{
+  "name": "Platform Operations · Raw Aroma Chem",
+  "short_name": "Platform Ops",
+  "description": "Internal platform operations console — environment health, feature flags, audit/support tooling. platform_super_admin only.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#26262B",
+  "theme_color": "#26262B",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
