@@ -37,7 +37,7 @@ button, input, select, textarea { font-family: inherit; color: inherit; }
 .rb .mark { font: var(--w-med) var(--t-h2)/1 var(--font-ui); letter-spacing: var(--ls-tight); }
 .rb .sub { font: var(--w-reg) var(--t-micro)/1 var(--font-mono); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--rail-2); }
 .rail-deep { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-snug); }
-.rs { font: var(--w-med) var(--t-micro)/1 var(--font-mono); letter-spacing: var(--ls-wide); text-transform: uppercase; color: #8A8A92; padding: 0 var(--s-tight); margin-bottom: var(--s-hair); }
+.rs { font: var(--w-med) var(--t-micro)/1 var(--font-mono); letter-spacing: var(--ls-wide); text-transform: uppercase; color: #6E6E66; padding: 0 var(--s-tight); margin-bottom: var(--s-hair); }
 .ri { display: flex; align-items: center; gap: var(--s-tight); width: 100%; height: var(--ch-rail-item); padding: 0 var(--s-tight); border-radius: var(--r-sm); background: none; border: none; color: var(--panel); cursor: pointer; font: var(--w-reg) var(--t-body)/1 var(--font-ui); text-align: left; }
 .ri:hover { background: var(--rail-2); }
 .ri.on { background: var(--accent); color: var(--ink); font-weight: var(--w-med); }

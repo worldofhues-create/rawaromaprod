@@ -96,7 +96,7 @@ input,select,textarea{font-family:inherit;color:inherit}
 .rme .who{font:var(--w-reg) 12px/1.25 var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
 .rme .who small{display:block;font:var(--w-reg) 9.75px/1 var(--font-ui);color:#87877F;margin-top:3px}
 .rme #ra-logout{border:none;background:var(--rail-2);color:#EDEDEA;width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center;flex:0 0 auto}
-.rme #ra-logout:hover{background:#3C3C44}
+.rme #ra-logout:hover{background:color-mix(in srgb,var(--rail-2) 85%,#000)}
 
 /* Main column */
 .main{display:flex;flex-direction:column;min-width:0}
@@ -259,10 +259,12 @@ tbody tr:last-child td{border-bottom:0}
 .chart .arc-track{fill:none;stroke:var(--line-2);stroke-width:13}
 .chart .arc-val{fill:none;stroke-width:13;stroke-linecap:round}
 /* HTML bar series — no SVG stretch, so radius stays true at any width (console.css:288-289) */
-.bseries{display:flex;align-items:flex-end;gap:3px;width:100%;min-width:0}
+.bseries{display:flex;align-items:flex-end;gap:6px;width:100%;min-width:0}
 .bcol{flex:1 1 0;min-width:0;display:flex;align-items:flex-end;height:100%;position:relative}
-.bcol>span{display:block;width:100%;max-width:22px;margin:0 auto;border-radius:var(--r-sm) 2px 1px 1px;background:var(--line-2);transition:background .2s;transform-origin:bottom}
+.bcol>span{display:block;width:100%;max-width:22px;margin:0 auto;border-radius:5px;background:rgba(20,20,19,.13);transition:background .2s,transform .2s;transform-origin:bottom}
 .bcol.hi>span{background:var(--accent)}
+.bcol:hover>span{background:rgba(20,20,19,.24)}
+.bcol.hi:hover>span{background:#DCE84C}
 /* end U3 */
 
 /* U2b */

@@ -126,10 +126,10 @@
     if (!w) { toast('Allow pop-ups to print the QR label (the preview above is still scannable).', 'warn'); return; }
     var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; }); };
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
-      '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#111}' +
+      '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#141413}' +
       '.qr{width:250px;height:250px;margin:0 auto 10px}.qr svg{width:100%;height:100%}' +
       '.code{font-family:ui-monospace,Menlo,monospace;font-size:22px;font-weight:800;letter-spacing:.04em;margin:6px 0 2px}' +
-      '.sub{color:#555;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#999}' +
+      '.sub{color:#66665E;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#66665E}' +
       '@media print{@page{margin:8mm}}</style></head><body>' +
       '<div class="qr">' + svg + '</div><div class="code">' + esc(code) + '</div><div class="sub">' + esc(sub) + '</div>' +
       '<div class="brand">RAW AROMACHEM</div>' +
