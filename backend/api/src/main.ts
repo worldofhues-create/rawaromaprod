@@ -12,9 +12,11 @@ import {
   type NestFastifyApplication,
 } from '@nestjs/platform-fastify';
 import { Logger } from '@nestjs/common';
-import { ConfigService } from '@core/backend-kernel';
+import { ConfigService, PG_CLIENT } from '@core/backend-kernel';
+import type { Sql } from 'postgres';
 import { AppModule } from './app.module.js';
 import { WorkerModule } from './worker.module.js';
+import { assertMainRoleCannotReadVault } from './vault-isolation-check.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -70,6 +72,17 @@ async function bootstrap(): Promise<void> {
     allowedHeaders: ['content-type', 'authorization', 'x-ra-key'],
   });
   app.enableShutdownHooks();
+
+  // PB-03 / SB-01 (V4 §109.1, FINAL_OS §7.2): boot-time self-check that the MAIN app DB role
+  // — the one every other cluster's PG_CLIENT queries run as — cannot read the vault's
+  // crown-jewel ciphertext tables. Prod-only (dev/CI may legitimately run both roles as the
+  // same Postgres user). A successful read here means the ra_vault isolation
+  // (scripts/provision-vault-isolation.sql) was never applied, or was applied against a
+  // different database than the one DATABASE_URL points at — fail CLOSED: refuse to boot
+  // rather than serve traffic with the wall down.
+  if (config.get('APP_ENV') === 'prod') {
+    await assertMainRoleCannotReadVault(app.get<Sql>(PG_CLIENT));
+  }
 
   const port = config.get('PORT');
 

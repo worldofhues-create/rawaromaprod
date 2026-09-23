@@ -19,6 +19,7 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "db:seed:data": "tsx scripts/db-seed-data.ts",
     "db:provision": "node scripts/db-provision.mjs",
+    "vault:rewrap": "tsx scripts/vault-rewrap.ts",
     "test": "node backend/test-support/run-tests.mjs",
     "test:db:setup": "bash backend/test-support/setup-db.sh"
   },

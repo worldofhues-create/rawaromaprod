@@ -48,24 +48,49 @@ export const configSchema = z.object({
   /**
    * Formula Vault's OWN Postgres connection (its own `ra_vault` role — the app role
    * cannot read the formula schema). The role-isolation wall + the in-house extraction
-   * seam: later this points at the on-prem DB, no code change. Falls back to DATABASE_URL
-   * if unset (Phase-1 single-Neon convenience — set a distinct role in prod).
+   * seam: later this points at the on-prem DB, no code change.
+   *
+   * PB-03 / V4 §109.1, §7.2: MANDATORY when APP_ENV=prod — production NEVER falls back to
+   * DATABASE_URL (formula.tokens.ts createFormulaClient throws a clear boot error instead).
+   * Optional outside prod purely for dev/CI convenience (falls back to DATABASE_URL there).
    */
   FORMULA_DATABASE_URL: z.string().url().optional(),
   /**
    * Vault KEK (key-encryption key), base64 32 bytes, held in the app secret store (never
-   * in Postgres). Phase-1 env-secret KMS; a real KMS adapter swaps in later via KmsPort.
+   * in Postgres). DEV/TEST ONLY as of PB-03 — production refuses EnvKmsAdapter/FileKmsAdapter
+   * entirely (formula.module.ts) and requires FORMULA_KMS_KEY_ID (AwsKmsAdapter) instead.
    * Optional so the app boots without it; vault encrypt/decrypt throws a clear error until set.
    */
   FORMULA_KEK: z.string().optional(),
 
   /**
-   * OFFLINE console: path to a file holding the 32-byte base64 KEK on removable / encrypted media.
-   * When set, the vault binds FileKmsAdapter instead of EnvKmsAdapter — the master key lives on
-   * mounted media (read per-op, mount only during unseal), never in an env secret. Optional; unset
-   * on the online console (keeps EnvKmsAdapter). Generate with `node scripts/formula-kek-keygen.cjs`.
+   * OFFLINE console (FUTURE_OPTIONAL, dev/test only as of PB-03): path to a file holding the
+   * 32-byte base64 KEK on removable / encrypted media. When set outside prod, the vault binds
+   * FileKmsAdapter instead of EnvKmsAdapter. Generate with `node scripts/formula-kek-keygen.cjs`.
    */
   FORMULA_KEK_FILE: z.string().optional(),
+
+  /**
+   * PB-03 / V4 §109.2: the AWS KMS customer-managed key (CMK) id/ARN the Formula Vault wraps
+   * every DEK under. MANDATORY when APP_ENV=prod — formula.module.ts refuses to boot without
+   * it (production accepts ONLY AwsKmsAdapter; FORMULA_KEK/FORMULA_KEK_FILE are ignored in
+   * prod even if set). Unused outside prod unless a developer opts into exercising the real
+   * adapter locally.
+   */
+  FORMULA_KMS_KEY_ID: z.string().optional(),
+  /** Region for the AWS KMS client. Optional — unset lets the AWS SDK's ambient region chain resolve it. */
+  FORMULA_KMS_REGION: z.string().optional(),
+  /** Deployment-scoped tenant id folded into every KMS EncryptionContext (see kms.port.ts VaultKeyContext). Default "rac" (this deployment IS the one tenant). */
+  FORMULA_KMS_TENANT_ID: z.string().optional(),
+  /** Fail-closed bound (ms) on every AWS KMS round trip (§109.6 / F7). */
+  FORMULA_KMS_TIMEOUT_MS: z.coerce.number().int().positive().default(4000),
+  /**
+   * Opaque AWS KMS ciphertext (base64) wrapping the STABLE audit-chain HMAC key — see
+   * aws-kms.adapter.ts `loadOrMintAuditKey`. Safe to store as an ordinary config value (it is
+   * KMS-wrapped ciphertext, not a key). Optional: unset on first boot mints one and logs the
+   * wrapped form for an operator to persist here.
+   */
+  FORMULA_AUDIT_HMAC_WRAPPED: z.string().optional(),
 
   /**
    * Which console this deployment is. `online` = cloud/public (orders, sales, sealed blobs, no

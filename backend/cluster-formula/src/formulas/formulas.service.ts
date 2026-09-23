@@ -20,7 +20,7 @@ import { uuidv7 } from '@core/data-kernel';
 import { MASTERDATA_LOOKUP, type MasterdataLookup, type MaterialRef } from '@ra/cluster-masterdata';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from '../formula.tokens.js';
 import { KMS_PORT, type KmsPort } from '../crypto/kms.port.js';
-import { newDek, seal } from '../crypto/vault-crypto.js';
+import { seal } from '../crypto/vault-crypto.js';
 import { VaultService } from '../vault.service.js';
 import type {
   AddIngredients,
@@ -79,12 +79,17 @@ export class FormulasService {
 
   /* ── formula master (+ vault) ─────────────────────────────────────── */
 
-  /** Create the formula and its vault row (fresh DEK, wrapped under the KEK). */
+  /** Create the formula and its vault row (fresh DEK, wrapped under the KEK/CMK). */
   async createFormula(body: CreateFormula, principal: AuthPrincipal) {
-    const wrapped = this.kms.wrapDek(newDek());
+    // Generated up front (not inside the tx below) so the KMS EncryptionContext — bound to
+    // {formulaId, vaultId}, see kms.port.ts VaultKeyContext — is fixed BEFORE the wrap call,
+    // and the very same ids land in the inserted rows. The plaintext DEK itself isn't needed
+    // here (no ingredients sealed yet) — only the wrapped form is persisted.
+    const formulaId = uuidv7();
+    const formulaVaultId = uuidv7();
+    const { wrapped } = await this.kms.generateDek({ formulaId, vaultId: formulaVaultId });
 
     return this.db.transaction(async (tx) => {
-      const formulaId = uuidv7();
       const formula = (
         await tx
           .insert(formulaMaster)
@@ -104,7 +109,7 @@ export class FormulasService {
       if (!formula) throw new Error('insert failed: formula_master');
 
       await tx.insert(formulaVault).values({
-        formulaVaultId: uuidv7(),
+        formulaVaultId,
         formulaId,
         encryptionKeyRef: this.kms.keyRef,
         vaultLocation: JSON.stringify(wrapped),

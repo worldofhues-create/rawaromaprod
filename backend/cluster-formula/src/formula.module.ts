@@ -23,9 +23,10 @@ import { VaultService } from './vault.service.js';
 import { VaultSecurityAuditSink } from './security-audit-sink.adapter.js';
 import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
-import { KMS_PORT } from './crypto/kms.port.js';
+import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
+import { AwsKmsAdapter } from './crypto/aws-kms.adapter.js';
 import {
   FORMULA_DB,
   FORMULA_PG_CLIENT,
@@ -33,6 +34,33 @@ import {
   drizzle,
   formulaSchema,
 } from './formula.tokens.js';
+
+/**
+ * PB-03 / V4 §109.2: production (APP_ENV=prod) accepts ONLY AwsKmsAdapter — a real AWS KMS
+ * CMK, never the env/file KEK adapters, even if FORMULA_KEK/FORMULA_KEK_FILE happen to be set
+ * in a prod environment (they are simply never consulted below). Missing FORMULA_KMS_KEY_ID in
+ * prod is a boot error, not a silent downgrade to a weaker adapter — "fail CLOSED", not "fail
+ * open to whatever secret is lying around" (SB-01).
+ *
+ * Outside prod: the OFFLINE console (FORMULA_KEK_FILE set) keeps the master key on mounted
+ * media via FileKmsAdapter; everything else uses EnvKmsAdapter. Dev/test only.
+ *
+ * Exported (not an inline `useFactory` closure) so this exact decision can be unit-tested
+ * without booting the Nest DI container — see formula-module-kms-selection.test.ts.
+ */
+export function resolveKmsAdapter(config: ConfigService): KmsPort {
+  if (config.get('APP_ENV') === 'prod') {
+    if (!config.get('FORMULA_KMS_KEY_ID')) {
+      throw new Error(
+        'FORMULA_KMS_KEY_ID is required when APP_ENV=prod. The Formula Vault refuses to ' +
+          'boot with any adapter other than AWS KMS in production (V4 §109.2, PB-03) — ' +
+          'env/file KEK adapters are dev/test only.',
+      );
+    }
+    return new AwsKmsAdapter(config);
+  }
+  return config.get('FORMULA_KEK_FILE') ? new FileKmsAdapter(config) : new EnvKmsAdapter(config);
+}
 
 @Global()
 @Module({
@@ -49,13 +77,10 @@ import {
       inject: [FORMULA_PG_CLIENT],
       useFactory: (client: Sql) => drizzle(client, { schema: formulaSchema }),
     },
-    // Env-driven KMS: the OFFLINE console (FORMULA_KEK_FILE set) keeps the master key on mounted
-    // media via FileKmsAdapter; everything else uses EnvKmsAdapter. One line, vault unchanged.
     {
       provide: KMS_PORT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService) =>
-        config.get('FORMULA_KEK_FILE') ? new FileKmsAdapter(config) : new EnvKmsAdapter(config),
+      useFactory: (config: ConfigService) => resolveKmsAdapter(config),
     },
     VaultService,
     CatalogService,
