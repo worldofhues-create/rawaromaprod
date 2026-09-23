@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Formula Vault · Raw Aroma Chem</title>
+  <!-- Deliberately NO <link rel="manifest">, NO theme-color/apple-mobile-web-app tags, NO
+       service-worker registration anywhere in this page or vault.js. §109.4: "Vault Console
+       is NOT a PWA." vault.js also actively unregisters any SW previously registered for
+       this origin/scope, in case a stray one exists from local dev testing. -->
+  <link rel="icon" href="data:,">
+  <meta name="robots" content="noindex, nofollow, noarchive">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/alembic-tokens.css">
+  <link rel="stylesheet" href="/vault.css">
+</head>
+<body>
+  <div id="root"></div>
+  <script src="/vault.js"></script>
+</body>
+</html>
