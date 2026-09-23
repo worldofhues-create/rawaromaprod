@@ -243,3 +243,24 @@ tbody tr:last-child td{border-bottom:0}
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition:none !important}
 }
+
+/* U3 — chart primitives, genuinely missing from this stylesheet (COMPONENT_PARITY_MATRIX.json
+ * "Charts (spark line / area / bar / arc / bar series)" listed rawprod_factory:"unmapped").
+ * Ported from apps/web/app/console.css:260-289 (.chart/.spark-*/.bseries/.bcol), token-mapped to
+ * this file's own :root vars (already ALEMBIC-native here, no shimming needed). Used by
+ * web/shell.js ring() (arc gauge: .chart svg + .arc-track/.arc-val circles) and miniBars()
+ * (sparkline bar strip: .bseries/.bcol), both dashboard-chart primitives owned by lane U3. */
+.chart{overflow:visible;width:100%;display:block}
+.chart .grid{stroke:rgba(20,20,19,.07);stroke-width:1;stroke-dasharray:2 4}
+.chart .axis{font:var(--w-reg) 9px var(--font-ui);fill:var(--ink-3)}
+.chart .spark-line{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.chart .spark-accent{stroke:#C8D43A}
+.chart .spark-dot{fill:var(--accent);stroke:var(--ink);stroke-width:1.2}
+.chart .arc-track{fill:none;stroke:var(--line-2);stroke-width:13}
+.chart .arc-val{fill:none;stroke-width:13;stroke-linecap:round}
+/* HTML bar series — no SVG stretch, so radius stays true at any width (console.css:288-289) */
+.bseries{display:flex;align-items:flex-end;gap:3px;width:100%;min-width:0}
+.bcol{flex:1 1 0;min-width:0;display:flex;align-items:flex-end;height:100%;position:relative}
+.bcol>span{display:block;width:100%;max-width:22px;margin:0 auto;border-radius:var(--r-sm) 2px 1px 1px;background:var(--line-2);transition:background .2s;transform-origin:bottom}
+.bcol.hi>span{background:var(--accent)}
+/* end U3 */

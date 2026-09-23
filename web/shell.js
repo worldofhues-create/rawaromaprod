@@ -104,7 +104,22 @@
 
   // Status → .chip tone variant (COMPONENT_PARITY_MATRIX.json "Chip": n/b/g/a/r/p/k, admin.css:
   // 119-126). Token-only — no hardcoded hex; fmt() below maps this to a "chip <tone>" class.
-  var STATUS = { pending: 'a', pass: 'g', fail: 'r', approved: 'g', ordered: 'b', draft: 'n', received: 'g', inprogress: 'b', active: 'g', confirmed: 'g', pending_approval: 'a' };
+  // MFG-lifecycle additions (U3): HOLD/REJECT/REWORK/etc. surfaced by QC disposition, oil-batch
+  // transitions, and dispatch/filling/production-plan lifecycles (§9/§10 of the addendum — a HOLD
+  // or REJECT must read as a warning/danger chip, never fall through to the neutral default).
+  // Values match the exact enum strings the backend writes (verified against
+  // cluster-quality/production/packaging/sales service.ts sources, not guessed): qc_inspections
+  // disposition PENDING/ACCEPT/REJECT/REWORK/HOLD; production_order PLANNING/INPROGRESS/HOLD/
+  // COMPLETED; secure_mixing_session IN_PROGRESS/COMPLETED/ABORTED; oil_batch_master ACTIVE/
+  // PRODUCED/IN_MATURATION/MATURING/HOLD/REWORK/RELEASED/FAILED; filling_session ACTIVE/DONE;
+  // package_order DRAFT/MATERIALS_ISSUED/IN_PROGRESS/COMPLETED/CANCELLED; packaging_qc PASS/FAIL/
+  // HOLD; dispatch_master ACTIVE/DELIVERED; qc_capa OPEN/IN_PROGRESS/CLOSED/VERIFIED. (No IN_TRANSIT/
+  // NDR/RTO/DAMAGED/PARTIAL dispatch states exist in this backend — not added here; a chip for a
+  // status the DB never writes would be fake state, which the addendum forbids.)
+  var STATUS = { pending: 'a', pass: 'g', fail: 'r', approved: 'g', ordered: 'b', draft: 'n', received: 'g', inprogress: 'b', active: 'g', confirmed: 'g', pending_approval: 'a',
+    hold: 'a', accept: 'g', accepted: 'g', reject: 'r', rejected: 'r', rework: 'a', released: 'g', release: 'g', in_maturation: 'b', maturing: 'b', failed: 'r', produced: 'b',
+    done: 'g', completed: 'g', delivered: 'g', issued: 'b', cancelled: 'r', archived: 'n', closed: 'n', open: 'b', submitted: 'b', planning: 'n',
+    in_progress: 'b', aborted: 'r', materials_issued: 'b', verified: 'g' };
 
   /* ---------------- role → nav → real endpoints (Phase-1 modules, DB-driven) ---------------- */
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
@@ -421,10 +436,13 @@
     return d === 1 ? 'Yesterday' : d + 'd ago';
   }
   // Deterministic mini bar-chart (the kpiBars motif) — stable per value, decorative chrome.
+  // U3: markup ported to ALEMBIC's HTML bar-series primitive (.bseries/.bcol, console.css:284-289
+  // via web/ui-contract/shell.css "U3" block) instead of ad-hoc <i> divs — same visual result
+  // (7 bars, last one accent-highlighted), real primitive classes.
   function miniBars(seed) {
     var s = (Math.abs(Math.round(seed)) || 3) % 9973 + 7, out = '';
-    for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<i style="flex:1;border-radius:var(--r-sm) 2px 1px 1px;height:' + h + 'px;background:' + (i === 6 ? 'var(--accent)' : 'var(--barmute)') + '"></i>'; }
-    return '<div style="display:flex;align-items:flex-end;gap:3px;height:24px;margin-top:14px">' + out + '</div>';
+    for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<div class="bcol' + (i === 6 ? ' hi' : '') + '"><span style="height:' + h + 'px"></span></div>'; }
+    return '<div class="bseries" style="height:24px;margin-top:14px">' + out + '</div>';
   }
   function kpiRich(ic, value, lab, chip, seed) {
     return '<div style="flex:1;min-width:185px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-lg);box-shadow:var(--rai);padding:17px 19px">' +
@@ -433,12 +451,14 @@
       '<div style="font-size:29px;font-weight:800;margin:13px 0 1px;letter-spacing:-.02em">' + value + '</div>' +
       '<div style="font-size:12.5px;color:var(--t3);font-weight:600">' + lab + '</div>' + miniBars(seed) + '</div>';
   }
-  // SVG ring gauge / donut.
+  // SVG ring gauge / donut. U3: svg + track/value circles now carry the real ALEMBIC chart
+  // classes (.chart, .arc-track, .arc-val — console.css:260-280 via shell.css "U3" block) instead
+  // of inline stroke/fill; only the per-call dynamic bits (color, dasharray) stay inline.
   function ring(pct, center, sub, color) {
     var C = 2 * Math.PI * 52, dash = (C * Math.max(0, Math.min(100, pct)) / 100).toFixed(1) + ' ' + C.toFixed(1);
-    return '<div style="position:relative;width:140px;height:140px;margin:0 auto"><svg width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)">' +
-      '<circle cx="70" cy="70" r="52" fill="none" stroke="var(--track)" stroke-width="13"/>' +
-      '<circle cx="70" cy="70" r="52" fill="none" stroke="' + (color || 'var(--accent)') + '" stroke-width="13" stroke-linecap="round" stroke-dasharray="' + dash + '"/></svg>' +
+    return '<div style="position:relative;width:140px;height:140px;margin:0 auto"><svg class="chart" width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)">' +
+      '<circle class="arc-track" cx="70" cy="70" r="52"/>' +
+      '<circle class="arc-val" cx="70" cy="70" r="52" stroke="' + (color || 'var(--accent)') + '" stroke-dasharray="' + dash + '"/></svg>' +
       '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px;font-weight:800;letter-spacing:-.02em">' + center + '</div>' +
       '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3);text-transform:uppercase">' + (sub || '') + '</div></div></div>';
   }
