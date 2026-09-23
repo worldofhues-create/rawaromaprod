@@ -356,12 +356,16 @@
   }
 
   /* ---------------- render: shell + data view ---------------- */
-  // Shell chrome, ported to ALEMBIC's rail/topbar grammar (release/ui/PORTING_GUIDE.md §Shell,
-  // COMPONENT_PARITY_MATRIX.json "Nav rail / sidebar" + "Topbar" + "Workspace switcher"). The rail
-  // is a fixed-width column (.app grid), not a flex sidebar; nav items are NOT filtered client-side
+  // Shell chrome, corrected to ALEMBIC's ACTUAL rendered grammar — a top bar + a floating/docked
+  // bottom command dock, with the rail off-canvas by DEFAULT at every width (see shell.css's own
+  // header comment + ALEMBIC_GUIDE_CORRECTIONS.md; not the permanently-visible rail column the
+  // original PORTING_GUIDE.md §Shell reading produced). Nav items are NOT filtered client-side
   // beyond "what this session's permission-driven ROLES entry contains" — same rule ALEMBIC's own
-  // guide states (server enforces per-action authorization; the rail just reflects what the signed
-  // -in session's role set was granted). `.rail-min` collapses the rail on narrow / touch layouts.
+  // guide states (server enforces per-action authorization; the rail/dock just reflect what the
+  // signed-in session's role set was granted). The dock (`.qdock`) carries the SAME `R.nav` set as
+  // the rail — `data-nav` on its buttons reuses wireShell()'s existing `[data-nav]` click wiring —
+  // so every route the rail could reach, the dock can too; `HOT` just picks which ones keep a
+  // labelled segment in the phone tab-bar variant (shell.css `@media (max-width:1023px)`).
   function shell() {
     $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
@@ -370,8 +374,24 @@
       return '<button data-nav="' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
         '<span class="ic">' + icon(n[2], 14) + '</span><span class="nm">' + n[1] + '</span></button>';
     }).join('');
-    // Workspace switcher: multi-role staff get a <select> in the rail footer and switch with no
-    // second login (addendum §5/§8) — st.role changes, ROLES[newRole] re-renders the same shell.
+    // The four destinations kept as labelled segments in the phone tab bar (ALEMBIC's DOCK_HOT —
+    // admin-console.jsx: "the five destinations an owner actually reaches for" / "dashboard is the
+    // landing screen..."). Every role's dashboard is first in R.nav (unshift, above), so this is
+    // "dashboard + the role's own top three" rather than a hand-curated list per role.
+    var HOT = {}; R.nav.slice(0, 4).forEach(function (n) { HOT[n[0]] = 1; });
+    var dockHtml =
+      '<button id="ra-dock-toggle" class="qb dock-toggle hot" aria-label="Show navigation" title="Sections">' +
+        icon('panel', 17) + '<span class="nm">Sections</span></button><span class="sep"></span>' +
+      R.nav.map(function (n) {
+        var on = st.nav === n[0];
+        return '<button data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
+          ' title="' + n[1] + '" aria-label="' + n[1] + '"' + (on ? ' aria-current="page"' : '') + '>' +
+          icon(n[2], 17) + '<span class="nm">' + n[1] + '</span></button>';
+      }).join('');
+    // Workspace switcher: multi-role staff get a <select> in the topbar and switch with no second
+    // login (addendum §5/§8) — st.role changes, ROLES[newRole] re-renders the same shell. ALEMBIC
+    // has no directly-cited equivalent chrome (rac-console.jsx's consoles are one role each); this
+    // stays a RawProd composition from ALEMBIC primitives, in the topbar next to the section title.
     var roles = (session && session.availableRoles) || [st.role];
     var switcher = roles.length > 1 ? (
       '<div class="wsw" title="Switch workspace"><select id="ra-wsw">' +
@@ -395,7 +415,6 @@
       '<div class="main">' +
         '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline — showing the last data loaded. Nothing you do here is queued for later; actions need the secure channel and will tell you if they cannot reach it.</span></div>' +
         '<div class="bar">' +
-          '<button id="ra-burger2" class="xp bar-burger" aria-label="Open navigation">' + icon('panel', 16) + '</button>' +
           '<span class="bar-brand">RAW AROMA CHEM<i>·</i>' + R.dept + '</span>' +
           '<h1 id="ra-title">' + R.label + '</h1>' +
           switcher +
@@ -406,7 +425,8 @@
           '</div>' +
         '</div>' +
         '<div class="content"><section id="ra-view"></section></div>' +
-      '</div>';
+      '</div>' +
+      '<div class="qdock" id="ra-dock" role="navigation" aria-label="Sections">' + dockHtml + '</div>';
     wireShell();
     loadView();
     loadAlerts();
@@ -1930,31 +1950,32 @@
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
-    var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
-    // .rail-min (ALEMBIC's own primitive) sits INSIDE .rail, so once the rail is off-canvas on
-    // mobile it can only ever CLOSE the drawer, never open it — a second toggle in the topbar
-    // (always visible) is what actually opens it; #ra-burger2 is RawProd's own addition for that.
-    var burger2 = $('ra-burger2'); if (burger2) burger2.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
+    // .rail-min (ALEMBIC's own primitive) sits INSIDE .rail, so — now the rail is off-canvas at
+    // every width, not just mobile — it only ever CLOSES the sheet; the dock's "Sections" pill
+    // (#ra-dock-toggle, always visible in .qdock) is the one control that OPENS it, at any width.
+    var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = false; applyResponsive(); };
+    var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
     applyResponsive();
     applyNetBanner();
   }
-  // Mobile: the rail becomes an off-canvas drawer, opened by the topbar's burger and closed by
-  // either the in-rail .rail-min button or tapping the scrim behind it. Desktop/tablet: the rail
-  // is the fixed 236px .app column (PORTING_GUIDE.md §Shell).
+  if (!window.__raRailKeyWired) {
+    window.__raRailKeyWired = true;
+    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); } });
+  }
+  // The rail is an off-canvas sheet at EVERY width now (ALEMBIC parity — see shell.css's header
+  // comment): `body.rail-open` slides it in over the content, `#ra-drawer-bg` dims behind it, and
+  // `inert`/`aria-hidden` keep it out of the tab order and off-screen-reader while shut — the same
+  // pairing ALEMBIC's own ConsoleHost.jsx uses for its rail (`inert={rail?undefined:''} aria-hidden=
+  // {rail?undefined:'true'}`). CSS (not inline styles) owns position/transform at every breakpoint.
   function applyResponsive() {
-    var mobile = window.innerWidth <= 767; var side = $('ra-side'), burger2 = $('ra-burger2'), bg = $('ra-drawer-bg');
-    if (!side) return;
-    if (mobile) {
-      if (burger2) burger2.style.display = 'grid';
-      side.style.position = 'fixed'; side.style.top = '0'; side.style.left = '0'; side.style.bottom = '0'; side.style.zIndex = '80';
-      side.style.transform = st.drawer ? 'translateX(0)' : 'translateX(-100%)'; side.style.transition = 'transform .28s cubic-bezier(.2,.9,.25,1)';
-      side.style.boxShadow = st.drawer ? '26px 0 64px -16px rgba(10,10,10,.36)' : 'none';
-      if (bg) bg.classList.toggle('show', !!st.drawer);
-    } else {
-      if (burger2) burger2.style.display = 'none';
-      side.style.position = 'sticky'; side.style.top = '0'; side.style.bottom = ''; side.style.zIndex = ''; side.style.transform = 'none'; side.style.boxShadow = 'none';
-      if (bg) bg.classList.remove('show');
+    var open = !!st.drawer;
+    document.body.classList.toggle('rail-open', open);
+    var bg = $('ra-drawer-bg'); if (bg) bg.classList.toggle('show', open);
+    var side = $('ra-side');
+    if (side) {
+      if (open) { side.removeAttribute('inert'); side.removeAttribute('aria-hidden'); }
+      else { side.setAttribute('inert', ''); side.setAttribute('aria-hidden', 'true'); }
     }
   }
   // Truthful offline/degraded banner (addendum §13): says exactly what it is — the last data

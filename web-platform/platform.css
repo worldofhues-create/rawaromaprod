@@ -26,12 +26,13 @@ button, input, select, textarea { font-family: inherit; color: inherit; }
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
 }
 
-.app { display: grid; grid-template-columns: minmax(0, var(--ch-rail-width)) minmax(0, 1fr); min-height: 100vh; }
-@media (max-width: 1024px) {
-  .app { grid-template-columns: 1fr; }
-  .rail { position: fixed; inset: 0 auto 0 0; z-index: 40; transform: translateX(-100%); transition: transform .18s ease; }
-  .rail.open { transform: translateX(0); }
-}
+/* Topbar + floating dock, rail off-canvas by default at every width — ALEMBIC parity correction,
+ * see web/ui-contract/shell.css's header comment + ALEMBIC_GUIDE_CORRECTIONS.md. The rail is kept
+ * (still the complete nav) but is never the permanently-visible column PORTING_GUIDE.md §Shell's
+ * literal "rail + bar" reading produced; `.qdock` (below) is the default way to navigate. */
+.app { display: block; min-height: 100vh; }
+.rail { position: fixed; inset: 0 auto 0 0; z-index: 92; width: min(86vw, var(--ch-rail-width)); transform: translateX(-100%); transition: transform .28s cubic-bezier(.2,.9,.25,1); }
+.rail.open { transform: translateX(0); box-shadow: 26px 0 64px -16px rgba(10,10,10,.36); }
 .rail { background: var(--rail); color: var(--panel); display: flex; flex-direction: column; padding: var(--s-base) var(--s-tight); gap: var(--s-base); }
 .rb { display: flex; align-items: center; gap: var(--s-tight); background: none; border: none; color: inherit; cursor: pointer; padding: var(--s-tight); text-align: left; }
 .rb .mark { font: var(--w-med) var(--t-h2)/1 var(--font-ui); letter-spacing: var(--ls-tight); }
@@ -47,12 +48,35 @@ button, input, select, textarea { font-family: inherit; color: inherit; }
 .av { width: 26px; height: 26px; border-radius: var(--r-pill); background: var(--accent); color: var(--ink); display: flex; align-items: center; justify-content: center; font: var(--w-med) var(--t-cap)/1 var(--font-ui); flex: none; }
 .who { font: var(--w-reg) var(--t-cap)/1.2 var(--font-ui); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.main { display: flex; flex-direction: column; min-width: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; width: 100%; }
 .bar { height: var(--ch-topbar-admin); flex: none; display: flex; align-items: center; gap: var(--s-base); padding: 0 var(--s-base); border-bottom: 1px solid var(--line); background: var(--panel); }
 .bar h1 { font: var(--w-med) var(--t-h1)/1 var(--font-ui); letter-spacing: var(--ls-flat); }
-.rail-toggle { display: none; background: none; border: none; cursor: pointer; padding: var(--s-tight); }
-@media (max-width: 1024px) { .rail-toggle { display: inline-flex; } }
-.content { flex: 1; padding: var(--s-base); overflow-y: auto; }
+/* Always the CLOSE control now the rail is off-canvas everywhere (ALEMBIC's rail-min semantics —
+   opening it is the dock's job, below). */
+.rail-toggle { display: inline-flex; background: none; border: none; cursor: pointer; padding: var(--s-tight); }
+.content { flex: 1; padding: var(--s-base) var(--s-base) calc(var(--s-open, 40px) + 74px); overflow-y: auto; }
+
+/* ---------------- quick-access dock — same primitive as web/ui-contract/shell.css's .qdock ------ */
+.qdock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:520;
+  display:flex;align-items:center;gap:2px;padding:5px;border-radius:var(--r-pill);
+  width:max-content;max-width:calc(100vw - 24px);overflow-x:auto;
+  background:var(--rail);box-shadow:0 14px 34px -14px rgba(20,20,19,.4),0 2px 6px -2px rgba(20,20,19,.24)}
+.qdock::-webkit-scrollbar{display:none}
+.qdock .qb{width:40px;height:40px;flex:0 0 auto;border-radius:14px;border:0;cursor:pointer;position:relative;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:var(--panel);background:transparent;transition:background .18s,color .18s}
+.qdock .qb .nm{display:none}
+.qdock .qb:hover{background:var(--rail-2)}
+.qdock .qb.on{background:var(--accent);color:var(--ink)}
+.qdock .sep{width:1px;height:22px;background:rgba(255,255,255,.16);margin:0 4px;flex:0 0 auto}
+@media (max-width:1024px){
+  .qdock{left:0;right:0;bottom:0;transform:none;width:100%;max-width:none;border-radius:0;
+    justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+    box-shadow:0 -2px 12px -4px rgba(20,20,19,.28);overflow-x:visible}
+  .qdock .qb:not(.hot){display:none}
+  .qdock .qb{flex:1 1 0;width:auto;height:52px;border-radius:var(--r-sm)}
+  .qdock .qb .nm{display:block;font:var(--w-med) 10px/1 var(--font-ui);white-space:nowrap}
+}
 
 .platform-banner { display: flex; align-items: center; gap: var(--s-tight); flex-wrap: wrap; background: var(--rail); color: var(--panel); padding: var(--s-tight) var(--s-base); font: var(--w-med) var(--t-cap)/1.3 var(--font-mono); letter-spacing: var(--ls-wide); text-transform: uppercase; }
 .platform-banner .dot { width: 7px; height: 7px; border-radius: var(--r-pill); background: var(--accent); flex: none; }
