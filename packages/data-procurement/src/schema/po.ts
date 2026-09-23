@@ -1,11 +1,13 @@
 /**
  * Purchase order (Phase-1A Data Dictionary, schema `procurement`): PURCHASE_ORDER,
  * PURCHASE_ORDER_ITEMS, PO_APPROVAL_ORDER, VENDOR_PO_ACK. In-schema FKs:
- * purchase_order->vendor_details, purchase_order_items->purchase_order,
- * po_approval_order->purchase_order, vendor_po_ack->vendor_details.
+ * purchase_order->vendor_details, purchase_order->purchase_order (replacement_of_po_id,
+ * self-ref — the "Generate replacement PO" flow, FAIL-03/04), purchase_order_items->
+ * purchase_order, po_approval_order->purchase_order, vendor_po_ack->vendor_details.
  * quotation/purchase_request/location/currency/approver refs are id-only SOFT refs.
  */
 import {
+  type AnyPgColumn,
   date,
   index,
   integer,
@@ -33,11 +35,21 @@ export const purchaseOrder = procurement.table(
     deliveryLocationId: uuid("delivery_location_id"),
     currencyId: uuid("currency_id"),
     totalAmount: numeric("total_amount", { precision: 18, scale: 4 }),
+    /**
+     * Self-ref → the original PO this one replaces (FAIL-03/04 "Generate replacement PO" off a
+     * rejected/short/damaged GRN — po.service.ts#createReplacementPo,
+     * procanalytics.service.ts#createReplacementPo). Null for an ordinary PO. In-schema FK to
+     * this same table; nullable so it never blocks inserting an ordinary (non-replacement) PO.
+     */
+    replacementOfPoId: uuid("replacement_of_po_id").references(
+      (): AnyPgColumn => purchaseOrder.purchaseOrderId,
+    ),
     ...metaColumns(),
   },
   (t) => [
     uniqueIndex("purchase_order_po_number_uq").on(t.poNumber),
     index("purchase_order_vendor_idx").on(t.vendorId),
+    index("purchase_order_replacement_of_po_idx").on(t.replacementOfPoId),
   ],
 );
 

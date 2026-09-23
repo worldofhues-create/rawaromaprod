@@ -38,7 +38,7 @@ async function main() {
       pkg.finishedGoodsBatchConsumption, pkg.finishedGoodBatchMaster, pkg.fillingSessionDetails, pkg.fillingSession, pkg.packageOrderItem, pkg.packageOrder, pkg.packagingBomMaster, pkg.productSku, pkg.productMaster, pkg.packagingMaterialMaster, pkg.productCategoryMaster,
       prod.oilBatchQcHistory, prod.productionQc, prod.oilBatchEventHistory, prod.oilBatchConsumption, prod.oilBatchMaster, prod.mixingStepLog, prod.secureMixingSession, prod.materialIssueItem, prod.materialIssue, prod.materialPickListItems, prod.materialPickList, prod.productionOrderIngredients, prod.productionOrder, prod.productionPlanItems, prod.productionPlan,
       fm.formulaEventHist, fm.formulaIngredients, fm.formulaStageIngredients, fm.formulaStageMaster, fm.formulaApproval, fm.formulaVersion, fm.formulaVault, fm.formulaMaster, fm.formulaTypeMaster,
-      qual.qcResultDetails, qual.qcSampleRetention, qual.qcDisposition, qual.qcInspections,
+      qual.qcResultDetails, qual.qcSampleRetention, qual.qcDisposition, qual.qcInspections, qual.qcParameterMaster,
       inv.stockTransfer, inv.inventoryBatch, inv.rmBatchMaster, inv.grnItems, inv.grnMaster, inv.gateEntryMaster,
       proc.purchaseOrderItems, proc.purchaseOrder, proc.quotationItems, proc.quotations, proc.purchaseRequestItems, proc.purchaseRequest, proc.vendorMaterialMap, proc.vendorDetails,
       md.materialQcSpecifications, md.materialStorageRules, md.rmAlias, md.material, md.materialSubcategoryMaster, md.materialCategoryMaster, md.materialGroup, md.materialTypeMaster,
@@ -87,6 +87,22 @@ async function main() {
       const po = id(); poIds.push(po);
       await db.insert(proc.purchaseOrder).values({ purchaseOrderId: po, poNumber: `PO-2406-${201 + i}`, vendorId: pick(vendorIds, i), orderDate: dstr(10 - i), totalAmount: n(12000 + i * 4500), ...meta(POSTAT[i]) });
       await db.insert(proc.purchaseOrderItems).values({ purchaseOrderItemId: id(), purchaseOrderId: po, materialId: pick(matIds, i), orderedQty: n(25 + i * 10), rate: n(120 + i * 30), amount: n((25 + i * 10) * (120 + i * 30)), ...meta() });
+    }
+
+    // ── QC parameter catalog (reference data, not per-batch — P0 follow-up on lane B1: the
+    // "Record results" QC form has nothing to pick from without this). Standard perfume-oil
+    // release checks; uom_id left null (this script doesn't seed platform.uom_master).
+    const QC_PARAMS: [string, string][] = [
+      ['APPEARANCE', 'Appearance'],
+      ['COLOUR', 'Colour'],
+      ['ODOUR', 'Odour'],
+      ['SG20', 'Specific Gravity @ 20°C'],
+      ['RI20', 'Refractive Index @ 20°C'],
+      ['FLASHPT', 'Flash Point'],
+      ['ACIDVAL', 'Acid Value'],
+    ];
+    for (const [code, name] of QC_PARAMS) {
+      await db.insert(qual.qcParameterMaster).values({ qcParameterId: id(), parameterCode: code, parameterName: name, ...meta() });
     }
 
     // ── M05 receiving + QC: gate → GRN → RM batch → inventory ──
@@ -164,7 +180,7 @@ async function main() {
     for (let i = 0; i < 4; i++) await db.insert(sales.salesOrder).values({ salesOrderId: id(), soNumber: `SO-2406-${401 + i}`, customerId: pick(custIds, i), orderDate: dstr(5 - i), totalAmount: n(48000 - i * 6000), ...meta(['CONFIRMED', 'DRAFT'][i % 2]) });
 
     // eslint-disable-next-line no-console
-    console.log('db:seed:data complete — materials', matIds.length, '| vendors', vendorIds.length, '| POs 6 | batches', batchIds.length, '| formulas', formulaIds.length, '| production orders 6 | customers', custIds.length);
+    console.log('db:seed:data complete — materials', matIds.length, '| vendors', vendorIds.length, '| POs 6 | batches', batchIds.length, '| formulas', formulaIds.length, '| production orders 6 | customers', custIds.length, '| qc parameters', QC_PARAMS.length);
   } finally {
     await client.end({ timeout: 5 });
   }
