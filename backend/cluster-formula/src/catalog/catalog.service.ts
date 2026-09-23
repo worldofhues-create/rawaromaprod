@@ -6,7 +6,7 @@
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { desc, lt, eq } from 'drizzle-orm';
-import { type AuthPrincipal } from '@core/backend-kernel';
+import { DomainError, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from '../formula.tokens.js';
 import { paginate, type Page } from '../formulas/formulas.service.js';
@@ -71,7 +71,22 @@ export class CatalogService {
 
   /* ── access policy ────────────────────────────────────────────────── */
 
+  /**
+   * Grant a per-formula Vault-authority access — held ONLY by `formula:formula_access_policy:
+   * write` (`vault_approver`, scripts/ra-roles.ts). Security review item 7: a vault_approver
+   * self-granting themselves access to a formula they otherwise couldn't read would be a
+   * one-step bypass of the whole per-formula scoping FormulasService.assertFormulaAccess
+   * enforces — so a grant naming the CALLER as the grantee (`userId === principal.userId`) is
+   * refused outright. This is a genuine two-person rule: the grant must always come from a
+   * DIFFERENT vault_approver than the one receiving access.
+   */
   async createAccessPolicy(body: CreateAccessPolicy, principal: AuthPrincipal) {
+    if (body.userId && body.userId === principal.userId) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        'You cannot grant yourself a formula access policy — a grant must come from a different vault_approver than the one receiving access.',
+      );
+    }
     const row = (
       await this.db
         .insert(formulaAccessPolicy)
