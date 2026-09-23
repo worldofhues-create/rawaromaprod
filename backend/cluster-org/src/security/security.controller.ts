@@ -154,6 +154,33 @@ export class SecurityController {
     return this.security.revokeUserRole(id, principal);
   }
 
+  // ── vault_role_grant_request (S2 security review item A: two-person control on assigning
+  // formulator/vault_approver — POST /v1/user-roles above opens the PENDING request when the
+  // target role is Vault-authority; these routes are the approve/cancel second half) ─────────
+  @Permissions('iam:user_role_mapping:read')
+  @Get('v1/vault-role-grant-requests')
+  listVaultRoleGrantRequests(@Query(new ZodValidationPipe(listQuery)) query: ListQuery) {
+    return this.security.listVaultRoleGrantRequests(query);
+  }
+
+  @Permissions('iam:user_role_mapping:read')
+  @Get('v1/vault-role-grant-requests/:id')
+  getVaultRoleGrantRequest(@Param('id') id: string) {
+    return this.security.getVaultRoleGrantRequestById(id);
+  }
+
+  @Permissions('iam:user_role_mapping:write')
+  @Post('v1/vault-role-grant-requests/:id/approve')
+  approveVaultRoleGrant(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.security.approveVaultRoleGrant(id, principal);
+  }
+
+  @Permissions('iam:user_role_mapping:write')
+  @Post('v1/vault-role-grant-requests/:id/cancel')
+  cancelVaultRoleGrant(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.security.cancelVaultRoleGrant(id, principal);
+  }
+
   // ── location_authority_master ─────────────────────────────────────────────
   @Permissions('iam:location_authority_master:read')
   @Get('v1/location-authorities')

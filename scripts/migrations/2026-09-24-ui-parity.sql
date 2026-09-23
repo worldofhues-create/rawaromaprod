@@ -66,3 +66,31 @@ CREATE TABLE IF NOT EXISTS packaging.packaging_qc (
   updated_by varchar(255)
 );
 CREATE INDEX IF NOT EXISTS packaging_qc_batch_idx ON packaging.packaging_qc (finished_good_batch_id);
+
+-- S2 security review item A — two-person control on assigning formulator/vault_approver.
+-- Finding: owner/admin could create a second user account and self-assign it a Vault-authority
+-- role (the old self-assignment check on iam.user_role_mapping only compared
+-- body.userId === principal.userId, never catching a DIFFERENT puppet account). A vault-
+-- authority createUserRole call now lands in iam.vault_role_grant_request as PENDING; the
+-- user_role_mapping row (the effective grant) is only inserted once a DIFFERENT owner/admin
+-- approves it — not the requester, not the target, and not a user the requester created. See
+-- packages/data-org/src/schema/security.ts (vaultRoleGrantRequest) and
+-- backend/cluster-org/src/security/security.service.ts.
+CREATE TABLE IF NOT EXISTS iam.vault_role_grant_request (
+  vault_role_grant_request_id uuid PRIMARY KEY DEFAULT uuidv7(),
+  user_id uuid REFERENCES iam.user_master (user_id),
+  role_id uuid REFERENCES iam.role_master (role_id),
+  grant_status varchar(30) NOT NULL DEFAULT 'PENDING',
+  expires_dt timestamptz NOT NULL,
+  decided_by uuid REFERENCES iam.user_master (user_id),
+  decided_dt timestamptz,
+  decision_reason text,
+  user_role_mapping_id uuid REFERENCES iam.user_role_mapping (user_role_mapping_id),
+  status varchar(30),
+  created_dt timestamptz NOT NULL DEFAULT now(),
+  updated_dt timestamptz NOT NULL DEFAULT now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+CREATE INDEX IF NOT EXISTS vault_role_grant_request_user_idx ON iam.vault_role_grant_request (user_id);
+CREATE INDEX IF NOT EXISTS vault_role_grant_request_status_idx ON iam.vault_role_grant_request (grant_status);

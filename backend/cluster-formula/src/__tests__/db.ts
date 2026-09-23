@@ -10,7 +10,11 @@
  * Per the parallel-lane rule (one agent = one worktree/branch/DB), this is lane U4's OWN
  * database — never `rawprod_rp_policy_test` (lane F8) or any other lane's throwaway DB.
  *
- *   FORMULA_TEST_DATABASE_URL=postgres://... (default: rawprod_u4_vault_test)
+ *   FORMULA_TEST_DATABASE_URL=postgres://... (default: TEST_DATABASE_URL if set, else
+ *   rawprod_u4_vault_test) — the C-item fix: previously an unset FORMULA_TEST_DATABASE_URL
+ *   silently fell back to the hardcoded rawprod_u4_vault_test default even when the caller
+ *   only set TEST_DATABASE_URL (e.g. per the S2 test-run instructions), pointing this harness
+ *   at a DIFFERENT database than the one actually being prepared/reused.
  */
 import { createRequire } from 'node:module';
 import postgres, { type Sql } from 'postgres';
@@ -25,7 +29,9 @@ const require = createRequire(import.meta.url);
 const { generateDrizzleJson, generateMigration } = require('drizzle-kit/api') as typeof import('drizzle-kit/api');
 
 export const TEST_DATABASE_URL =
-  process.env.FORMULA_TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_u4_vault_test';
+  process.env.FORMULA_TEST_DATABASE_URL ??
+  process.env.TEST_DATABASE_URL ??
+  'postgres://apple@localhost:5432/rawprod_u4_vault_test';
 
 let client: Sql | undefined;
 let ready: Promise<void> | undefined;

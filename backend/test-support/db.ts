@@ -16,6 +16,7 @@
  * advisory lock below gets its own key so it can't collide with another lane's concurrent test
  * run against a different DB on the same Postgres instance (commit 4e8622a's pattern).
  */
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -64,23 +65,40 @@ export async function ensureSchema(): Promise<void> {
       // lanes' keys (e.g. lane F7's r1b key 392847561).
       await sql`select pg_advisory_lock(819273645)`;
       try {
-        // R1B: skip re-applying schema.sql once some OTHER process has already fully applied
-        // it. Before this check, EVERY test-file process re-ran the whole script — harmless in
-        // principle (every statement is `IF NOT EXISTS`/idempotent), but each `ALTER TABLE ...
-        // ADD COLUMN IF NOT EXISTS` still takes an ACCESS EXCLUSIVE lock on that table to check,
-        // even when the column is already there. With dozens of test files starting up and
-        // racing this (only one applies at a time thanks to the advisory lock, but each of the
-        // REST still pays that lock cost serially, once each), a later process's ALTER could
-        // queue behind an already-running process's open transaction on the same table (e.g. a
-        // concurrency test's row lock) and hit a genuine Postgres deadlock — reproduced in this
-        // lane's own test suite once enough files/tests were added. `bridge.connector_config` is
-        // the LAST table schema.sql creates, and `sql.unsafe(ddl)`'s multi-statement string runs
-        // as one implicit transaction (Postgres's simple-query protocol), so its existence means
-        // the entire script already committed — safe to treat as a completion sentinel.
-        const [sentinel] = await sql<{ done: string | null }[]>`select to_regclass('bridge.connector_config') as done`;
-        if (!sentinel?.done) {
-          const ddl = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
+        // R1B (extended, C-item): skip re-applying schema.sql once some OTHER process has already
+        // applied THIS EXACT schema.sql content. Before the R1B fix, EVERY test-file process
+        // re-ran the whole script every time — harmless in principle (every statement is
+        // `IF NOT EXISTS`/idempotent), but each `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` still
+        // takes an ACCESS EXCLUSIVE lock on that table to check, even when the column is already
+        // there; with dozens of test files racing this, a later process's ALTER could queue
+        // behind an already-running process's open transaction on the same table and hit a
+        // genuine Postgres deadlock. R1B's fix was a single completion sentinel
+        // (`to_regclass('bridge.connector_config')`, the last table the script creates) — but on
+        // a REUSED database from an older checkout, that sentinel is already satisfied from a
+        // prior run, so a schema.sql that has since grown new tables/columns never gets applied
+        // at all (13 failures seen from exactly this — tables added after the sentinel table was
+        // introduced silently never reached a reused test DB). Track a content hash of
+        // schema.sql instead of one fixed table's existence: a DB last brought up to date by an
+        // OLDER schema.sql (different hash) always gets the (idempotent, safe-to-rerun) DDL
+        // reapplied, which creates whatever is new since; a DB already current for the exact
+        // content running now is skipped, preserving the original lock-contention fix.
+        const ddl = readFileSync(join(__dirname, 'schema.sql'), 'utf8');
+        const hash = createHash('sha256').update(ddl).digest('hex');
+        await sql.unsafe(
+          `create table if not exists public._test_schema_applied (
+             hash varchar(64) primary key,
+             applied_dt timestamptz not null default now()
+           )`,
+        );
+        const [applied] = await sql<{ hash: string }[]>`
+          select hash from public._test_schema_applied where hash = ${hash}
+        `;
+        if (!applied) {
           await sql.unsafe(ddl);
+          await sql`
+            insert into public._test_schema_applied (hash) values (${hash})
+            on conflict (hash) do nothing
+          `;
         }
       } finally {
         await sql`select pg_advisory_unlock(819273645)`;

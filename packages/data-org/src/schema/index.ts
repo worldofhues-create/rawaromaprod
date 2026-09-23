@@ -16,5 +16,6 @@ export {
   permissionMaster,
   rolePermissionMapping,
   userRoleMapping,
+  vaultRoleGrantRequest,
   locationAuthorityMaster,
 } from "./security.js";

@@ -1014,6 +1014,28 @@ create table if not exists iam.user_role_mapping (
 );
 create index if not exists user_role_mapping_user_idx on iam.user_role_mapping (user_id);
 
+-- S2 item A: two-person control on assigning formulator/vault_approver — see
+-- packages/data-org/src/schema/security.ts's vaultRoleGrantRequest and
+-- SecurityService.createUserRole / approveVaultRoleGrant / cancelVaultRoleGrantRequest.
+create table if not exists iam.vault_role_grant_request (
+  vault_role_grant_request_id uuid primary key default gen_random_uuid(),
+  user_id uuid references iam.user_master(user_id),
+  role_id uuid references iam.role_master(role_id),
+  grant_status varchar(30) not null default 'PENDING',
+  expires_dt timestamptz not null,
+  decided_by uuid references iam.user_master(user_id),
+  decided_dt timestamptz,
+  decision_reason text,
+  user_role_mapping_id uuid references iam.user_role_mapping(user_role_mapping_id),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create index if not exists vault_role_grant_request_user_idx on iam.vault_role_grant_request (user_id);
+create index if not exists vault_role_grant_request_status_idx on iam.vault_role_grant_request (grant_status);
+
 create table if not exists iam.location_authority_master (
   location_authority_id uuid primary key default gen_random_uuid(),
   location_id uuid,
