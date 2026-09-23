@@ -26,13 +26,25 @@ import { ensureSchema, procurementDb, testClient, principal, closeTestClient } f
 let svc: PoService;
 let editSvc: EditService;
 
-const CREATOR = '00000000-0000-7000-8000-000000000001';
+// P0 verification (two clean `pnpm test:db:setup && pnpm test` runs in a row) caught these as
+// FIXED ids: CREATOR previously hardcoded to '00000000-0000-7000-8000-000000000001' — the exact
+// same id backend/test-support/db.ts's principal() fixture defaults `userId` to. `test:db:setup`
+// only CREATEs the database if missing; it never truncates. A second clean `pnpm test` run
+// against that same already-populated database re-ran this file's `before()` with the SAME fixed
+// user_master.user_id, hitting `user_master_pkey` — 15/15 of this file's tests failed because the
+// whole `before()` hook threw before any test could run. Fixed by generating these per RUN
+// (randomUUID(), assigned once in `before()`, unique every process) instead of hardcoding them —
+// same pattern rfq-award-separation.test.ts already uses successfully. ON CONFLICT DO NOTHING is
+// added as a second, defense-in-depth layer (never masks a real dup — every id here is randomUUID()
+// generated fresh, so a hit would mean a genuine same-process double-insert, not one file re-seeding
+// a value some code elsewhere still expects to reuse).
+let CREATOR: string;
 const APPROVER_A = '00000000-0000-7000-8000-000000000002';
 const APPROVER_B = '00000000-0000-7000-8000-000000000003';
 
 // A second creator, in an organisation that has NO iam.approval_matrix row at all — the
 // "unconfigured" case §87 requires: never auto-approved just because a default is missing.
-const UNCONFIGURED_CREATOR = '00000000-0000-7000-8000-0000000000f1';
+let UNCONFIGURED_CREATOR: string;
 
 // The configured threshold for CREATOR's organisation (replaces the old hardcoded constant —
 // deliberately a different figure so a passing test proves the value is actually READ from
@@ -44,18 +56,24 @@ before(async () => {
   svc = new PoService(procurementDb());
   editSvc = new EditService(testClient());
 
+  CREATOR = randomUUID();
+  UNCONFIGURED_CREATOR = randomUUID();
+
   const sql = testClient();
   const configuredOrgId = randomUUID();
   const unconfiguredOrgId = randomUUID();
   await sql`insert into iam.org_master (organization_id, organization_name, status) values
     (${configuredOrgId}, 'RP-POLICY configured org', 'ACTIVE'),
-    (${unconfiguredOrgId}, 'RP-POLICY unconfigured org', 'ACTIVE')`;
+    (${unconfiguredOrgId}, 'RP-POLICY unconfigured org', 'ACTIVE')
+    on conflict (organization_id) do nothing`;
   await sql`insert into iam.user_master (user_id, organization_id, user_name, status) values
     (${CREATOR}, ${configuredOrgId}, 'creator', 'ACTIVE'),
-    (${UNCONFIGURED_CREATOR}, ${unconfiguredOrgId}, 'unconfigured-creator', 'ACTIVE')`;
+    (${UNCONFIGURED_CREATOR}, ${unconfiguredOrgId}, 'unconfigured-creator', 'ACTIVE')
+    on conflict (user_id) do nothing`;
   await sql`insert into iam.approval_matrix
       (organization_id, policy_type, threshold_amount, is_enabled, status)
-    values (${configuredOrgId}, 'PO_APPROVAL_THRESHOLD', ${CONFIGURED_THRESHOLD}, true, 'ACTIVE')`;
+    values (${configuredOrgId}, 'PO_APPROVAL_THRESHOLD', ${CONFIGURED_THRESHOLD}, true, 'ACTIVE')
+    on conflict (organization_id, policy_type) do nothing`;
   // unconfiguredOrgId deliberately gets NO approval_matrix row.
 });
 

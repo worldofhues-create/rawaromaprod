@@ -36,18 +36,29 @@ after(async () => {
   await closeTestClient();
 });
 
-/** Insert an org (+ optionally an approval_matrix row for RFQ_AWARD_SEPARATION) and a user in it. */
+/**
+ * Insert an org (+ optionally an approval_matrix row for RFQ_AWARD_SEPARATION) and a user in it.
+ * `orgId` is always a fresh randomUUID() (astronomically unlikely to collide even across repeat
+ * runs against a persisted, un-truncated test DB), but every insert still carries
+ * `on conflict ... do nothing` as defense-in-depth — the same belt-and-suspenders fix P0's
+ * duplicate-key report applied to po-approval-threshold.test.ts, whose FIXED (non-random) ids
+ * were the actual root cause there. `userId` is caller-supplied (each test's own randomUUID()),
+ * so it gets the same treatment.
+ */
 async function makeOrgUser(userId: string, isEnabled?: boolean): Promise<void> {
   const sql = testClient();
   const orgId = randomUUID();
   await sql`insert into iam.org_master (organization_id, organization_name, status)
-    values (${orgId}, ${'org-' + orgId.slice(0, 8)}, 'ACTIVE')`;
+    values (${orgId}, ${'org-' + orgId.slice(0, 8)}, 'ACTIVE')
+    on conflict (organization_id) do nothing`;
   await sql`insert into iam.user_master (user_id, organization_id, user_name, status)
-    values (${userId}, ${orgId}, 'user', 'ACTIVE')`;
+    values (${userId}, ${orgId}, 'user', 'ACTIVE')
+    on conflict (user_id) do nothing`;
   if (isEnabled !== undefined) {
     await sql`insert into iam.approval_matrix
         (organization_id, policy_type, is_enabled, status)
-      values (${orgId}, 'RFQ_AWARD_SEPARATION', ${isEnabled}, 'ACTIVE')`;
+      values (${orgId}, 'RFQ_AWARD_SEPARATION', ${isEnabled}, 'ACTIVE')
+      on conflict (organization_id, policy_type) do nothing`;
   }
 }
 
