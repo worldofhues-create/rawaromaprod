@@ -20,4 +20,5 @@ export {
   finishedGoodsBatchConsumption,
   finishedGoodReservation,
 } from "./batch.js";
+export { packagingQc } from "./qc.js";
 export { outbox, auditEvents } from "./crosscutting.js";

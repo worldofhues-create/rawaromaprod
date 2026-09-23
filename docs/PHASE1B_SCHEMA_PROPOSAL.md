@@ -1,10 +1,13 @@
 # Phase-1B Schema Proposal — missing tables found by lane F5 (RP-DEADTABLES)
 
-**Status: PROPOSED dictionary revision**, except `iam.approval_matrix` which is **ADOPTED** (see
-§0). Written by lane F8 (rp-policy), §87 "AUTONOMOUS DECISION DEFAULTS" item 4, of
-`ALEMBIC_RAWPROD_FULL_SYSTEM_PRODUCT_OWNER_MASTER_V3.md`: *"For each required missing capability:
-produce exact additive schema proposal; keep route honest/fail-closed until authoritative schema
-approval."*
+**Status: PROPOSED dictionary revision**, except `iam.approval_matrix` (**ADOPTED**, see §0) and
+`packaging.packaging_qc` (**ADOPTED** by lane B1, see §3 — live-testing found `GET /v1/alerts` and
+`GET /v1/fg-stock` 500ing on it). Written by lane F8 (rp-policy), §87 "AUTONOMOUS DECISION
+DEFAULTS" item 4, of `ALEMBIC_RAWPROD_FULL_SYSTEM_PRODUCT_OWNER_MASTER_V3.md`: *"For each required
+missing capability: produce exact additive schema proposal; keep route honest/fail-closed until
+authoritative schema approval."* Lane B1 also added §10, a COLUMN-level adoption
+(`procurement.purchase_order.replacement_of_po_id`) outside this document's original eleven —
+see §10 for why it wasn't (and couldn't have been) found by lane F5's table-only sweep.
 
 Lane F5 found eleven tables referenced by real backend code (raw SQL joins, inserts, or
 `edit.service.ts` field maps) that exist in **NEITHER** `docs/PHASE1A_SCHEMA_PLAN.md`'s table list
@@ -19,11 +22,12 @@ there even though they're the same defect).
 
 This document is the "exact additive schema proposal" §87 requires for **all eleven** — table
 shape, `docs/PHASE1A_SCHEMA_PLAN.md`'s table-map delta, and the drizzle + raw SQL each needs. It
-does **not** itself adopt ten of the eleven into `packages/data-*` (per this lane's scope: "Do NOT
-add them to packages/data-* yet"); a follow-up lane applies each entry here (add to the dictionary
-+ the matching `packages/data-<cluster>/src/schema` file, `pnpm db:push`, delete the
-`NotImplementedException` guard at each call site, and — for the two currently in `KNOWN_DEBT`
-that this covers — delete that entry once the fix lands).
+did **not** itself adopt ten of the eleven into `packages/data-*` at the time it was written (per
+lane F8's scope: "Do NOT add them to packages/data-* yet"); lane B1 later adopted one more
+(`packaging_qc`, §3), leaving nine still proposed-only. A follow-up lane applies each remaining
+entry here (add to the dictionary + the matching `packages/data-<cluster>/src/schema` file, `pnpm
+db:push`, delete the `NotImplementedException` guard at each call site, and delete the matching
+`KNOWN_DEBT` entry once the fix lands).
 
 Every table below follows the Phase-1A dictionary conventions (`docs/PHASE1A_SCHEMA_PLAN.md`
 "Conventions" + `docs/PHASE1A_DATA_DICTIONARY.md`'s header): `<entity>_id UUID DEFAULT uuidv7()`
@@ -221,30 +225,47 @@ as a concurrency-claim ledger, not a queryable business entity — no dictionary
 
 ---
 
-## §3 — PROPOSED: `packaging.packaging_qc`
+## §3 — ADOPTED (lane B1): `packaging.packaging_qc`
+
+**Status update (lane B1, RawProd live-testing sweep)**: adopted into the real schema source —
+`packages/data-packaging/src/schema/qc.ts`, re-exported from `packages/data-packaging/src/
+schema/index.ts` — exactly as proposed below, with one upgrade: `finished_good_batch_id` is now
+a REAL in-schema FK to `finished_good_batch_master` (the "add once confirmed" note below is now
+resolved — `finishedGoodBatchMaster.finishedGoodBatchId` was confirmed against `packages/
+data-packaging/src/schema/batch.ts`, same pattern as `finished_goods_batch_consumption` and
+`finished_good_reservation`, both of which already FK to it). Verified against a fresh `pnpm
+db:push` (Docker Postgres) and live end-to-end: `POST /v1/packaging-qc` with a FAIL check →
+`GET /v1/fg-stock` correctly zeroes that batch's `availableQty`, and `GET /v1/alerts` picks up
+the QC failure — the master directive's "QC outcome must automatically change inventory
+availability" (§28-§34), now proven against the real drizzle schema instead of only the
+hand-maintained `backend/test-support/schema.sql` test harness. Removed from
+`backend/test-support/schema-guard.test.ts`'s `KNOWN_DEBT`.
 
 **Referenced by**: `backend/api/src/packaging-qc/packaging-qc.service.ts` (dedicated CRUD route,
 real column list below) + read-only joins in `cluster-packaging/src/packaging-lookup.service.ts`,
 `cluster-packaging/src/reservation/reservation.service.ts`, `cluster-sales/src/dispatch/
 dispatch.service.ts`, `api/src/fg-stock/fg-stock.service.ts`, `api/src/dashboard/
-dashboard.service.ts` — six call sites across four clusters. **`KNOWN_DEBT`** entry.
+dashboard.service.ts` — six call sites across four clusters.
 
 ```ts
-// packages/data-packaging/src/schema/qc.ts (proposed)
+// packages/data-packaging/src/schema/qc.ts (as adopted — real FK, not a soft ref)
 import { index, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { packaging } from "./_schema.js";
+import { finishedGoodBatchMaster } from "./batch.js";
 
 export const packagingQc = packaging.table(
   "packaging_qc",
   {
     packagingQcId: dictPk("packaging_qc_id"),
-    finishedGoodBatchId: uuid("finished_good_batch_id"), // soft ref (in-schema; add real FK once finished_good_batch_master's exact column is confirmed)
+    finishedGoodBatchId: uuid("finished_good_batch_id").references(
+      () => finishedGoodBatchMaster.finishedGoodBatchId,
+    ),
     leakageCheck: varchar("leakage_check", { length: 30 }),
     labelCheck: varchar("label_check", { length: 30 }),
     cartonCheck: varchar("carton_check", { length: 30 }),
     overallResult: varchar("overall_result", { length: 30 }),
-    inspectedBy: uuid("inspected_by"),
+    inspectedBy: uuid("inspected_by"), // soft ref → iam.user_master
     inspectionDt: timestamp("inspection_dt", { withTimezone: true }),
     ...metaColumns(),
   },
@@ -253,9 +274,10 @@ export const packagingQc = packaging.table(
 ```
 
 ```sql
+-- equivalent DDL (what `pnpm db:push` generates against an EMPTY packaging schema)
 create table packaging.packaging_qc (
   packaging_qc_id uuid primary key default uuidv7(),
-  finished_good_batch_id uuid,
+  finished_good_batch_id uuid references packaging.finished_good_batch_master(finished_good_batch_id),
   leakage_check varchar(30),
   label_check varchar(30),
   carton_check varchar(30),
@@ -271,7 +293,16 @@ create table packaging.packaging_qc (
 create index packaging_qc_batch_idx on packaging.packaging_qc (finished_good_batch_id);
 ```
 
-`docs/PHASE1A_SCHEMA_PLAN.md` delta: `packaging` schema gains `PACKAGING_QC`.
+**Neon note**: `scripts/db-push.ts`'s `pushGroup()` skips a schema entirely once it has ANY
+tables (`populated.n > 0`) — it is a create-once provisioner, not an incremental migrator. On a
+fresh/empty database (this lane's Docker Postgres verification) that's a no-op distinction: the
+first `pnpm db:push` creates `packaging_qc` along with everything else in one pass. On the
+already-populated Neon `packaging` schema, `pnpm db:push` will SKIP this table silently — P0 (sole
+release/deploy authority) needs to apply the DDL block above by hand (or extend `db-push.ts` to
+diff per-table instead of per-schema) before this is live on prod. Same caveat applies to §10
+below.
+
+`docs/PHASE1A_SCHEMA_PLAN.md` delta: `packaging` schema gains `PACKAGING_QC` (recorded).
 
 ---
 
@@ -645,24 +676,78 @@ create index po_advance_payment_po_idx on procurement.po_advance_payment (purcha
 
 ---
 
+## §10 — ADOPTED (lane B1): `procurement.purchase_order.replacement_of_po_id`
+
+**Not a lane-F5 finding** — this is a COLUMN missing from an existing (already-real) table, which
+the table-only `schema-guard.test.ts` (§ "MECHANISM") could never have caught; live testing found
+it directly (`GET /v1/purchase-orders` 500ing "column po.replacement_of_po_id does not exist").
+Lane B1 extended `schema-guard.test.ts` with a second, column-level sweep (same heuristic:
+`alias.column` / `insert into schema.table (cols)` / `update schema.table set col =`, scoped per
+raw-SQL template-literal) precisely so this class of drift — table exists, column doesn't — is
+caught the same way from now on.
+
+**Origin**: commit `7ff3835` ("feat(FAIL-tail): replacement PO linked to original + settlement
+filter + vendor ledger") added the raw-SQL read/write side (`po.service.ts#createReplacementPo`,
+`procanalytics.service.ts#createReplacementPo` — the FAIL-03/04 "Generate replacement PO" action
+off a rejected/short/damaged GRN) but never added the column to `packages/data-procurement/src/
+schema/po.ts`. Not a lane dropping something that existed — it never existed in the drizzle
+source; `backend/test-support/schema.sql` (the hand-maintained node:test harness) already had it,
+which is why `pnpm test` stayed green while the real `pnpm db:push` schema silently lacked it.
+
+**Referenced by**: `backend/cluster-procurement/src/po/po.service.ts` (`listPurchaseOrders` — a
+self-join to show the original PO's number when the row is a replacement) and `backend/api/src/
+procanalytics/procanalytics.service.ts` (`createReplacementPo` — stamps it on INSERT).
+
+```ts
+// packages/data-procurement/src/schema/po.ts (as adopted — self-referencing FK)
+import { type AnyPgColumn, /* ... */ uuid } from "drizzle-orm/pg-core";
+// inside purchaseOrder's column list, after totalAmount:
+replacementOfPoId: uuid("replacement_of_po_id").references(
+  (): AnyPgColumn => purchaseOrder.purchaseOrderId,
+),
+```
+
+```sql
+-- equivalent DDL (what `pnpm db:push` generates against an EMPTY procurement schema)
+alter table procurement.purchase_order
+  add column replacement_of_po_id uuid references procurement.purchase_order(purchase_order_id);
+create index purchase_order_replacement_of_po_idx on procurement.purchase_order (replacement_of_po_id);
+```
+
+Verified live: `POST /v1/replacement-po` against a GRN with a rejected line → 201, correct
+`replacementOfPoId`; `GET /v1/purchase-orders` then shows `replacementOfPo` (the original PO's
+number) via the self-join — both against a fresh `pnpm db:push` schema, not just the test harness.
+
+**Neon note**: same caveat as §3 — `pnpm db:push` skips an already-populated `procurement` schema,
+so this column needs the `ALTER TABLE` above applied by hand to Neon (or an incremental-diff
+db-push) before it's live on prod.
+
+`docs/PHASE1A_SCHEMA_PLAN.md` delta: none (column addition to an existing dictionary table, not a
+new table — no table-map entry).
+
+---
+
 ## Summary table
 
 | Table | Schema | Status | `KNOWN_DEBT`? | Owner call sites |
 |---|---|---|---|---|
-| `approval_matrix` | iam | **ADOPTED** (this lane) | n/a (never listed) | PoService, RfqService (this lane) |
+| `approval_matrix` | iam | **ADOPTED** (lane F8) | n/a (never listed) | PoService, RfqService |
 | `login_history` | iam | proposed | yes | auth.service.ts, AuditService |
 | `material_issue_applied` | inventory | proposed (load-bearing) | yes | ConsumptionService, MixingService.abortSession |
-| `packaging_qc` | packaging | proposed | yes | PackagingQcService + 5 read call sites |
+| `packaging_qc` | packaging | **ADOPTED** (lane B1) | no longer listed | PackagingQcService + 5 read call sites |
 | `document_registry` | platform | proposed | yes | DocumentsService, edit.service.ts, EmailNotifierService |
 | `notification_log` | platform | proposed | yes | EmailNotifierService (primary notifier), dashboard, grn.service.ts |
 | `relay_cursor` / `relay_inbox` / `relay_package` | platform | proposed | no (string literals) | RelayService |
 | `vendor_negotiation` | procurement | proposed | no (string literals) | ProcAnalyticsService, edit.service.ts |
 | `vendor_dispatch` | procurement | proposed | no (string literals) | ProcAnalyticsService, edit.service.ts |
 | `po_advance_payment` | procurement | proposed | no (string literals) | ProcAnalyticsService, edit.service.ts |
+| `purchase_order.replacement_of_po_id` (column) | procurement | **ADOPTED** (lane B1) | n/a (column-level, see COLUMN_KNOWN_DEBT) | po.service.ts, procanalytics.service.ts |
 
 Adopting any PROPOSED entry: add it to `docs/PHASE1A_SCHEMA_PLAN.md`'s table map (owner-approved),
 add the drizzle file to the matching `packages/data-<cluster>/src/schema`, run `pnpm db:push`,
 delete the call site's `NotImplementedException`/refusal guard and restore its real logic, and —
-for the five currently in `backend/test-support/schema-guard.test.ts`'s `KNOWN_DEBT` — delete that
-entry (the guard's second test asserts no stale entries remain, so this is enforced, not just a
-reminder).
+for the four still in `backend/test-support/schema-guard.test.ts`'s `KNOWN_DEBT` (`login_history`,
+`material_issue_applied`, `document_registry`, `notification_log` — `packaging_qc` was adopted by
+lane B1 and removed) — delete that entry (the guard's second test asserts no stale entries remain,
+so this is enforced, not just a reminder). Lane B1 also added a COLUMN-level sweep + its own
+`COLUMN_KNOWN_DEBT` allowlist (currently empty) to the same test file, for drift like §10 above.
