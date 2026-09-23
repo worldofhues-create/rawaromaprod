@@ -64,6 +64,42 @@ export const userRoleMapping = iam.table(
   ],
 );
 
+/**
+ * VAULT_ROLE_GRANT_REQUEST — two-person control on assigning a Vault-authority role
+ * (formulator / vault_approver). Security review finding: owner/admin could create a second
+ * user account and self-assign it formulator/vault_approver — the old self-assignment check on
+ * user_role_mapping only compared `body.userId === principal.userId`, so a DIFFERENT (puppet)
+ * account sailed straight through. Now a vault-authority createUserRole call lands HERE as a
+ * PENDING row, not directly in user_role_mapping — the mapping only gets inserted (and takes
+ * effect) once a DIFFERENT owner/admin approves it (SecurityService.approveVaultRoleGrant):
+ * not the requester, not the target user, and not a user THE REQUESTER created (`user_master.
+ * created_by` — closes the puppet-account loophole). `created_by` (metaColumns) is the
+ * requester; `decided_by`/`decided_dt` is who approved/cancelled and when; `expires_dt` bounds
+ * how long a PENDING request stays actionable (72h — SecurityService.VAULT_GRANT_TTL_HOURS).
+ */
+export const vaultRoleGrantRequest = iam.table(
+  "vault_role_grant_request",
+  {
+    vaultRoleGrantRequestId: dictPk("vault_role_grant_request_id"),
+    userId: uuid("user_id").references(() => userMaster.userId),
+    roleId: uuid("role_id").references(() => roleMaster.roleId),
+    /** 'PENDING' | 'APPROVED' | 'CANCELLED' | 'EXPIRED' — the workflow state. Distinct from
+     * `status` (metaColumns' ACTIVE/INACTIVE record bookkeeping, set once and left alone). */
+    grantStatus: varchar("grant_status", { length: 30 }).notNull().default("PENDING"),
+    expiresDt: timestamp("expires_dt", { withTimezone: true }).notNull(),
+    decidedBy: uuid("decided_by").references(() => userMaster.userId),
+    decidedDt: timestamp("decided_dt", { withTimezone: true }),
+    decisionReason: text("decision_reason"),
+    /** Set once approved — the resulting effective user_role_mapping row. */
+    userRoleMappingId: uuid("user_role_mapping_id").references(() => userRoleMapping.userRoleMappingId),
+    ...metaColumns(),
+  },
+  (t) => [
+    index("vault_role_grant_request_user_idx").on(t.userId),
+    index("vault_role_grant_request_status_idx").on(t.grantStatus),
+  ],
+);
+
 /** LOCATION_AUTHORITY_MASTER — who has authority at a location (OWNER/APPROVER/INSPECTOR). */
 export const locationAuthorityMaster = iam.table(
   "location_authority_master",

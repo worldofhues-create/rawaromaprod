@@ -5,7 +5,7 @@
  * paginated (desc PK, limit+1). `passwordHash` is taken as-is for now (auth service later).
  */
 import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import {
   DomainError,
@@ -33,6 +33,7 @@ const {
   permissionMaster,
   rolePermissionMapping,
   userRoleMapping,
+  vaultRoleGrantRequest,
   locationAuthorityMaster,
 } = orgSchema;
 
@@ -57,6 +58,7 @@ type RoleRow = typeof roleMaster.$inferSelect;
 type PermissionRow = typeof permissionMaster.$inferSelect;
 type RolePermissionRow = typeof rolePermissionMapping.$inferSelect;
 type UserRoleRow = typeof userRoleMapping.$inferSelect;
+type VaultRoleGrantRequestRow = typeof vaultRoleGrantRequest.$inferSelect;
 type LocationAuthorityRow = typeof locationAuthorityMaster.$inferSelect;
 
 /**
@@ -88,6 +90,24 @@ const PLATFORMOPS_ALLOWED_ROLES = ['platform_super_admin'];
  * these two roles permanently unassignable by anyone; without this exception there would be
  * NO working path to ever create a formulator or vault_approver user. */
 const VAULT_AUTHORITY_ROLES = ['formulator', 'vault_approver'];
+
+/** How long a PENDING vault-role grant request stays approvable before it must be re-requested
+ * (S2 security review item A). */
+const VAULT_GRANT_TTL_HOURS = 72;
+
+const OWNER_ADMIN = ['owner', 'admin'];
+
+/**
+ * OPERATIONAL NOTE — single-admin tenants: approveVaultRoleGrant requires an owner/admin who is
+ * NOT the requester, NOT the target, and NOT an account the requester created. A tenant with
+ * only ONE owner/admin account therefore has NO WAY to ever assign formulator/vault_approver —
+ * by design, not a bug to route around. This is deliberate (a lone admin approving their own
+ * Vault-authority grant, even via a fresh puppet account, is exactly the escalation this control
+ * exists to stop) and there is NO bypass, override, or "break-glass" path in this service. A
+ * tenant that needs a formulator/vault_approver must first provision a genuinely independent
+ * second owner/admin account (a human RAC/tenant decision, not something this code should paper
+ * over) — document this requirement wherever tenant onboarding is described.
+ */
 
 @Injectable()
 export class SecurityService {
@@ -304,10 +324,17 @@ export class SecurityService {
   }
 
   // ── user_role_mapping ─────────────────────────────────────────────────────
+  /**
+   * Grant a role to a user — OR, for a Vault-authority role (formulator/vault_approver),
+   * open a PENDING two-person grant request instead (S2 security review item A). Returns a
+   * `UserRoleRow` for the ordinary path, or a `VaultRoleGrantRequestRow` (status PENDING, no
+   * effect on the target's permissions yet) for the vault-authority path — see
+   * approveVaultRoleGrant for the second half.
+   */
   async createUserRole(
     body: CreateUserRoleBody,
     principal: AuthPrincipal,
-  ): Promise<UserRoleRow> {
+  ): Promise<UserRoleRow | VaultRoleGrantRequestRow> {
     // Privilege-escalation guard (audit H-S1): you may only grant a role whose permission set is a
     // SUBSET of your own, and never a top-level admin role unless you already hold it. Without this,
     // any admin (who holds iam:user_role_mapping:write) could self-grant `owner` → formula:actual:read.
@@ -335,12 +362,12 @@ export class SecurityService {
       // for formulator/vault_approver — without this exception these two roles would be
       // permanently unassignable to anyone. Restricted to owner/admin (the only roles ALSO
       // holding `iam:user_role_mapping:write`, scripts/ra-roles.ts ROLE_GRANTERS) and NEVER
-      // to the granter themselves — a self-assigning owner/admin is exactly the runtime
+      // to the granter themselves — a self-requesting owner/admin is exactly the runtime
       // privilege escalation §107 exists to prevent.
-      if (!granterRoles.some((r) => ['owner', 'admin'].includes(r))) {
+      if (!granterRoles.some((r) => OWNER_ADMIN.includes(r))) {
         throw DomainError.forbidden(
           'AUTH_FORBIDDEN',
-          `Only owner/admin may assign the "${role.roleCode}" role.`,
+          `Only owner/admin may request the "${role.roleCode}" role.`,
         );
       }
       if (body.userId === principal.userId) {
@@ -349,25 +376,33 @@ export class SecurityService {
           `You cannot assign yourself the "${role.roleCode}" role — self-assignment of a Vault-authority role is always refused, regardless of your own role.`,
         );
       }
-    } else {
-      const rolePerms = (
-        await this.db
-          .select({ code: permissionMaster.permissionCode })
-          .from(rolePermissionMapping)
-          .innerJoin(
-            permissionMaster,
-            eq(permissionMaster.permissionId, rolePermissionMapping.permissionId),
-          )
-          .where(eq(rolePermissionMapping.roleId, body.roleId))
-      ).map((r) => r.code);
-      const held = new Set(principal.permissions ?? []);
-      const missing = rolePerms.filter((p): p is string => !!p && !held.has(p));
-      if (missing.length) {
-        throw DomainError.forbidden(
-          'AUTH_FORBIDDEN',
-          `You cannot grant a role carrying permissions you do not hold (e.g. ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}).`,
-        );
-      }
+      // security review item A: item 6's fix stopped a requester self-assigning a Vault-
+      // authority role to THEIR OWN account, but left a second hole open — an owner/admin could
+      // create a brand-new (puppet) user account and hand VAULT authority to that DIFFERENT
+      // account instead, still with no second person involved. Closing that requires the
+      // assignment to become a genuine two-person action: this call only opens a PENDING
+      // request; a DIFFERENT owner/admin (checked in approveVaultRoleGrant, including that they
+      // did not create the puppet account either) must approve it before it has any effect.
+      return this.requestVaultRoleGrant(body, role.roleCode ?? targetCode, principal);
+    }
+
+    const rolePerms = (
+      await this.db
+        .select({ code: permissionMaster.permissionCode })
+        .from(rolePermissionMapping)
+        .innerJoin(
+          permissionMaster,
+          eq(permissionMaster.permissionId, rolePermissionMapping.permissionId),
+        )
+        .where(eq(rolePermissionMapping.roleId, body.roleId))
+    ).map((r) => r.code);
+    const held = new Set(principal.permissions ?? []);
+    const missing = rolePerms.filter((p): p is string => !!p && !held.has(p));
+    if (missing.length) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        `You cannot grant a role carrying permissions you do not hold (e.g. ${missing.slice(0, 3).join(', ')}${missing.length > 3 ? '…' : ''}).`,
+      );
     }
 
     const actor = principal.userId;
@@ -381,17 +416,134 @@ export class SecurityService {
         updatedBy: actor,
       })
       .returning();
+    return ensure(rows[0]);
+  }
+
+  /**
+   * Open a PENDING vault-role grant request (S2 item A). Never touches user_role_mapping — the
+   * target's JWT permissions are completely unaffected until a different owner/admin approves.
+   */
+  private async requestVaultRoleGrant(
+    body: CreateUserRoleBody,
+    roleCode: string,
+    principal: AuthPrincipal,
+  ): Promise<VaultRoleGrantRequestRow> {
+    const actor = principal.userId;
+    const expiresDt = new Date(Date.now() + VAULT_GRANT_TTL_HOURS * 60 * 60 * 1000);
+    const rows = await this.db
+      .insert(vaultRoleGrantRequest)
+      .values({
+        userId: body.userId,
+        roleId: body.roleId,
+        grantStatus: 'PENDING',
+        expiresDt,
+        status: 'ACTIVE',
+        createdBy: actor,
+        updatedBy: actor,
+      })
+      .returning();
     const inserted = ensure(rows[0]);
-    if (isVaultAuthorityRole && this.auditSink) {
+    if (this.auditSink) {
+      await this.auditSink
+        .record({
+          actorId: actor,
+          action: 'security.vault_role.requested',
+          entityType: 'vault_role_grant_request',
+          entityId: inserted.vaultRoleGrantRequestId,
+          reason: `requested role "${roleCode}" for user ${body.userId} — pending a different owner/admin's approval`,
+          result: 'allow',
+        })
+        .catch(() => {});
+    }
+    return inserted;
+  }
+
+  /**
+   * Approve a PENDING vault-role grant request (S2 item A) — the second person in the
+   * two-person control. Only now does the mapping get inserted into user_role_mapping and take
+   * effect; the approver must be a DIFFERENT owner/admin: not the requester, not the target
+   * user, and not a puppet account the requester themselves created (`user_master.created_by`).
+   */
+  async approveVaultRoleGrant(requestId: string, principal: AuthPrincipal): Promise<UserRoleRow> {
+    const request = (
+      await this.db
+        .select()
+        .from(vaultRoleGrantRequest)
+        .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
+        .limit(1)
+    )[0];
+    if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
+    if (request.grantStatus !== 'PENDING') {
+      throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
+    }
+    if (request.expiresDt && request.expiresDt.getTime() < Date.now()) {
+      await this.expireVaultRoleGrant(request);
+      throw DomainError.conflict('This grant request has expired — ask the requester to open a new one.');
+    }
+
+    const approverRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
+    if (!approverRoles.some((r) => OWNER_ADMIN.includes(r))) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only owner/admin may approve a Vault-authority role grant.');
+    }
+    if (principal.userId === request.createdBy) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'You cannot approve your own Vault-authority role request — a different owner/admin must approve it.');
+    }
+    if (principal.userId === request.userId) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'The user the role is being granted to cannot approve their own grant.');
+    }
+    // Puppet-account close: an approver whose OWN account was created by the same requester is
+    // not a genuinely independent second person — see the note in createUserRole.
+    const approver = await this.getUserById(principal.userId);
+    if (approver?.createdBy && approver.createdBy === request.createdBy) {
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        'You cannot approve this grant — your account was created by the same person who requested it. A genuinely independent owner/admin must approve.',
+      );
+    }
+
+    const role = (
+      await this.db
+        .select({ roleCode: roleMaster.roleCode })
+        .from(roleMaster)
+        .where(eq(roleMaster.roleId, request.roleId!))
+        .limit(1)
+    )[0];
+
+    const actor = principal.userId;
+    const mappingRows = await this.db
+      .insert(userRoleMapping)
+      .values({
+        userId: request.userId,
+        roleId: request.roleId,
+        status: 'ACTIVE',
+        createdBy: request.createdBy,
+        updatedBy: actor,
+      })
+      .returning();
+    const mapping = ensure(mappingRows[0]);
+
+    await this.db
+      .update(vaultRoleGrantRequest)
+      .set({
+        grantStatus: 'APPROVED',
+        decidedBy: actor,
+        decidedDt: new Date(),
+        userRoleMappingId: mapping.userRoleMappingId,
+        updatedBy: actor,
+      })
+      .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId));
+
+    if (this.auditSink) {
       // Vault-authority role assignment is itself security-relevant enough to record on the
-      // tamper-evident chain (security review item 6), not just the ordinary app DB row.
+      // tamper-evident chain (security review item 6, extended by item A) — fires on ACTIVATION
+      // (this approval), not on the initial request.
       await this.auditSink
         .record({
           actorId: actor,
           action: 'security.vault_role.assigned',
           entityType: 'user_role_mapping',
-          entityId: inserted.userRoleMappingId,
-          reason: `granted role "${role.roleCode}" to user ${body.userId}`,
+          entityId: mapping.userRoleMappingId,
+          reason: `approved role "${role?.roleCode ?? request.roleId}" for user ${request.userId} (requested by ${request.createdBy})`,
           result: 'allow',
         })
         .catch(() => {
@@ -399,7 +551,85 @@ export class SecurityService {
           // write hiccup — same posture as the guard-layer sinks.
         });
     }
-    return inserted;
+    return mapping;
+  }
+
+  /** Requester-initiated cancel of their own still-PENDING request (S2 item A). */
+  async cancelVaultRoleGrant(requestId: string, principal: AuthPrincipal): Promise<{ vaultRoleGrantRequestId: string }> {
+    const request = (
+      await this.db
+        .select()
+        .from(vaultRoleGrantRequest)
+        .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId))
+        .limit(1)
+    )[0];
+    if (!request) throw DomainError.notFound(`vault_role_grant_request not found: ${requestId}`);
+    if (request.createdBy !== principal.userId) {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Only the requester may cancel this grant request.');
+    }
+    if (request.grantStatus !== 'PENDING') {
+      throw DomainError.conflict(`This grant request is already ${request.grantStatus?.toLowerCase()}.`);
+    }
+    const actor = principal.userId;
+    await this.db
+      .update(vaultRoleGrantRequest)
+      .set({ grantStatus: 'CANCELLED', decidedBy: actor, decidedDt: new Date(), updatedBy: actor })
+      .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, requestId));
+    if (this.auditSink) {
+      await this.auditSink
+        .record({
+          actorId: actor,
+          action: 'security.vault_role.cancelled',
+          entityType: 'vault_role_grant_request',
+          entityId: requestId,
+          reason: `requester cancelled the pending role request for user ${request.userId}`,
+          result: 'allow',
+        })
+        .catch(() => {});
+    }
+    return { vaultRoleGrantRequestId: requestId };
+  }
+
+  /** Mark a single expired request EXPIRED (idempotent — no-ops if already resolved). Called
+   * lazily from approveVaultRoleGrant; also exported for a future scheduled sweep. */
+  private async expireVaultRoleGrant(request: VaultRoleGrantRequestRow): Promise<void> {
+    await this.db
+      .update(vaultRoleGrantRequest)
+      .set({ grantStatus: 'EXPIRED', updatedBy: 'system' })
+      .where(and(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, request.vaultRoleGrantRequestId), eq(vaultRoleGrantRequest.grantStatus, 'PENDING')));
+    if (this.auditSink) {
+      await this.auditSink
+        .record({
+          actorId: null,
+          action: 'security.vault_role.expired',
+          entityType: 'vault_role_grant_request',
+          entityId: request.vaultRoleGrantRequestId,
+          reason: `pending role request for user ${request.userId} expired unapproved after ${VAULT_GRANT_TTL_HOURS}h`,
+          result: 'refuse',
+        })
+        .catch(() => {});
+    }
+  }
+
+  async listVaultRoleGrantRequests(query: ListQuery): Promise<Page<VaultRoleGrantRequestRow>> {
+    const rows = await this.db
+      .select()
+      .from(vaultRoleGrantRequest)
+      .where(
+        query.cursor ? lt(vaultRoleGrantRequest.vaultRoleGrantRequestId, query.cursor) : undefined,
+      )
+      .orderBy(desc(vaultRoleGrantRequest.vaultRoleGrantRequestId))
+      .limit(query.limit + 1);
+    return paginate(rows, query.limit, (r) => r.vaultRoleGrantRequestId);
+  }
+
+  async getVaultRoleGrantRequestById(id: string): Promise<VaultRoleGrantRequestRow | null> {
+    const rows = await this.db
+      .select()
+      .from(vaultRoleGrantRequest)
+      .where(eq(vaultRoleGrantRequest.vaultRoleGrantRequestId, id))
+      .limit(1);
+    return rows[0] ?? null;
   }
 
   /**
