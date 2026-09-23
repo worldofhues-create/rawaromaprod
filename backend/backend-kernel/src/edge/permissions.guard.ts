@@ -14,12 +14,14 @@ import {
   type ExecutionContext,
   Injectable,
   Inject,
+  Optional,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Permission } from '@core/contracts';
 import { META_PERMISSIONS } from '../decorators/metadata.keys.js';
 import { DomainError } from './domain-error.js';
 import type { RequestWithUser } from './principal.js';
+import { SECURITY_AUDIT_SINK, type SecurityAuditSink } from './security-audit-sink.js';
 
 /**
  * Permission-code patterns that never benefit from a role's blanket/implicit grant, no
@@ -34,10 +36,43 @@ function isNeverImplicit(permission: string): boolean {
   return NEVER_IMPLICIT_PATTERNS.some((re) => re.test(permission));
 }
 
+/**
+ * Permission-code patterns whose DENIAL is itself security-relevant enough to write to the
+ * tamper-evident audit chain (security review item 5) — vault plaintext, formula approval/
+ * lock/access-policy decisions. A superset of NEVER_IMPLICIT_PATTERNS (which only covers
+ * plaintext-read) because an approve/lock/access-policy attempt by an unauthorized caller is
+ * exactly the kind of probing attempt §109.8's "allow/refuse result" exists to surface. Kept
+ * narrow (not every ordinary 403 — e.g. a missing `procurement:*:read`) so the audit chain
+ * isn't flooded with routine, non-sensitive permission mistakes.
+ */
+const AUDITABLE_DENIAL_PATTERNS: RegExp[] = [
+  /^vault:/,
+  /^formula:actual:/,
+  /^formula:formula_approval:/,
+  /^formula:formula_access_policy:/,
+];
+
+function isAuditableDenial(permission: string): boolean {
+  return AUDITABLE_DENIAL_PATTERNS.some((re) => re.test(permission));
+}
+
 @Injectable()
 export class PermissionsGuard implements CanActivate {
-  constructor(@Inject(Reflector) private readonly reflector: Reflector) {}
+  constructor(
+    @Inject(Reflector) private readonly reflector: Reflector,
+    @Optional() @Inject(SECURITY_AUDIT_SINK) private readonly auditSink?: SecurityAuditSink,
+  ) {}
 
+  // Deliberately SYNCHRONOUS (not async) — every other caller of this guard's canActivate in
+  // the existing test suite (production-role.test.ts, platform-ops.test.ts,
+  // permissions-guard.test.ts, vault-rbac.test.ts, material-search.test.ts) asserts on it
+  // synchronously (`assert.equal(guard.canActivate(...), true)` /
+  // `assert.throws(() => guard.canActivate(...), ...)`). The audit write (item 5) is
+  // therefore fired-and-forgotten rather than awaited: it never delays or changes the 403,
+  // and a write failure is swallowed the same way an awaited one would be — this file only
+  // trades "audit row guaranteed to exist before the response is sent" for "guard stays
+  // synchronous", which the security review's requirement ("write an audit row") does not
+  // depend on.
   canActivate(context: ExecutionContext): boolean {
     const required = this.reflector.getAllAndOverride<Permission[]>(META_PERMISSIONS, [
       context.getHandler(),
@@ -61,6 +96,27 @@ export class PermissionsGuard implements CanActivate {
       return true;
     });
     if (missing.length > 0) {
+      const auditable = missing.filter(isAuditableDenial);
+      if (auditable.length > 0 && this.auditSink) {
+        // entityId is a real `uuid` column (packages/data-kernel/src/audit.ts) — a permission
+        // CODE is not one, so it goes in `reason` (free-text, non-hashed `after` jsonb)
+        // instead, same as every other human-readable audit annotation.
+        void this.auditSink
+          .record({
+            actorId: user.userId,
+            action: 'security.permission.denied',
+            entityType: 'permission',
+            entityId: null,
+            reason: `missing: ${auditable.join(', ')}`,
+            requestId: request.requestId ?? null,
+            ip: request.ip ?? null,
+            result: 'refuse',
+          })
+          .catch(() => {
+            // Never let an audit-write failure surface as anything other than the 403 that
+            // was already happening.
+          });
+      }
       throw DomainError.forbidden('AUTH_FORBIDDEN', `Missing permission(s): ${missing.join(', ')}`);
     }
     return true;

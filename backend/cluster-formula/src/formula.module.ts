@@ -11,7 +11,7 @@
  */
 import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import type { Sql } from 'postgres';
-import { ConfigService } from '@core/backend-kernel';
+import { ConfigService, SECURITY_AUDIT_SINK } from '@core/backend-kernel';
 import { ClusterMasterdataModule } from '@ra/cluster-masterdata';
 import { CatalogController } from './catalog/catalog.controller.js';
 import { CatalogService } from './catalog/catalog.service.js';
@@ -20,6 +20,7 @@ import { FormulasService } from './formulas/formulas.service.js';
 import { ApprovalsController } from './approvals/approvals.controller.js';
 import { ApprovalsService } from './approvals/approvals.service.js';
 import { VaultService } from './vault.service.js';
+import { VaultSecurityAuditSink } from './security-audit-sink.adapter.js';
 import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
 import { KMS_PORT } from './crypto/kms.port.js';
@@ -62,8 +63,10 @@ import {
     ApprovalsService,
     FormulaLookupService,
     { provide: FORMULA_LOOKUP, useExisting: FormulaLookupService },
+    VaultSecurityAuditSink,
+    { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
-  exports: [FORMULA_DB, FORMULA_LOOKUP],
+  exports: [FORMULA_DB, FORMULA_LOOKUP, SECURITY_AUDIT_SINK],
 })
 export class FormulaModule implements OnModuleDestroy {
   constructor(@Inject(FORMULA_PG_CLIENT) private readonly client: Sql) {}
