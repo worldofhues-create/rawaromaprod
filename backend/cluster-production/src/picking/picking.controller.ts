@@ -64,11 +64,13 @@ export class PickingController {
   }
 
   // §109.7 — the ONLY formula-derived read the factory floor gets: CODE + a per-batch
-  // quantity, never the recipe's real material_id or its raw percentage. Gated by the same
-  // ordinary production-order read permission as everything else on this order (production +
-  // compounding both hold it) — the masking guarantee comes from FORMULA_LOOKUP itself, not
-  // from restricting who may call this route.
-  @Permissions('production:production_order:read')
+  // quantity, never the recipe's real material_id (masking guarantee lives in
+  // FORMULA_LOOKUP). Security review item 4: gated on its OWN dedicated permission (NOT the
+  // ordinary production-order read every role on this order shares) — held only by
+  // production + compounding (scripts/ra-roles.ts MANUFACTURING_INSTRUCTION_ROLES; owner and
+  // filling explicitly excluded). The service additionally requires the order be in an
+  // active/released state and audits every resolution.
+  @Permissions('production:manufacturing_instruction:read')
   @Get('v1/production-orders/:id/manufacturing-instruction')
   resolveManufacturingInstruction(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.picking.resolveManufacturingInstruction(id, principal);
