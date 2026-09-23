@@ -12,7 +12,8 @@
  *      production QC result entry, CAPA) and on the Formula Vault boundary — those stay with the
  *      role that actually performs them (compounding / qc), per the masking model documented in
  *      ra-roles.ts;
- *   3. the two seed-time HARD INVARIANTS (only `owner` holds `formula:actual:read`; only
+ *   3. the two seed-time HARD INVARIANTS (only `formulator`/`vault_approver` hold
+ *      `formula:actual:read` — NOT `owner`, per §107's "no implicit vault plaintext"; only
  *      `owner`+`admin` may hold the role-grant permission) still hold for every role, including
  *      the new one;
  *   4. the two-console gate (auth.service.ts `FACTORY_ONLY_ROLES`) treats `production` as a
@@ -35,7 +36,8 @@ import { CapaController } from '../../../cluster-quality/src/capa/capa.controlle
 import { principal } from '../../../test-support/db.js';
 import {
   ROLES,
-  OWNER_ONLY_PERMISSION,
+  VAULT_PLAINTEXT_PERMISSION,
+  VAULT_PLAINTEXT_ROLES,
   ROLE_GRANT_PERMISSION,
   ROLE_GRANTERS,
 } from '../../../../scripts/ra-roles.js';
@@ -128,15 +130,21 @@ test('production role: never holds masterdata:material:reveal (stays alias-maske
 
 /* ── 3. seed-time hard invariants still hold for EVERY role including the new one ──────────── */
 
-test('seed invariant: only `owner` holds formula:actual:read (recheck with `production` in the catalog)', () => {
+test('seed invariant: only formulator/vault_approver hold formula:actual:read — owner included in the exclusion (§107, recheck with `production` in the catalog)', () => {
   for (const role of ROLES) {
     const granted = RA_PERMISSIONS.filter((p) => role.select(p));
-    if (role.code === 'owner') continue;
+    if (VAULT_PLAINTEXT_ROLES.includes(role.code)) continue;
     assert.ok(
-      !granted.includes(OWNER_ONLY_PERMISSION),
-      `role '${role.code}' must not hold ${OWNER_ONLY_PERMISSION}`,
+      !granted.includes(VAULT_PLAINTEXT_PERMISSION),
+      `role '${role.code}' must not hold ${VAULT_PLAINTEXT_PERMISSION} — Vault authority is a separate grant (§107)`,
     );
   }
+});
+
+test('seed invariant: `owner` specifically does NOT hold formula:actual:read (§107 — the directive change this lane makes)', () => {
+  const owner = ROLES.find((r) => r.code === 'owner');
+  assert.ok(owner);
+  assert.equal(owner!.select(VAULT_PLAINTEXT_PERMISSION), false);
 });
 
 test('seed invariant: role-granting stays owner+admin only (recheck with `production` in the catalog)', () => {
