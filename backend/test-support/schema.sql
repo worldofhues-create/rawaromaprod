@@ -13,6 +13,8 @@ create schema if not exists quality;
 create schema if not exists procurement;
 create schema if not exists masterdata;
 create schema if not exists bridge;
+-- RP-POLICY (lane F8): iam — org + user + the new approval_matrix policy table (§87).
+create schema if not exists iam;
 
 -- RP-PROC (lane F3): minimal masterdata.material — ProcAnalyticsService.rateHistory left-joins it
 -- to attach material names to rate-history rows (RP-PROC-007).
@@ -546,6 +548,25 @@ create table if not exists procurement.outbox (
   seq bigint generated always as identity
 );
 
+-- RP-POLICY (lane F8): procurement.audit_events — matches @core/data-kernel's auditTable()
+-- shape (packages/data-procurement/src/schema/crosscutting.ts). RfqService.selectQuotation
+-- writes one row here on every RFQ-award separation-of-duties override (§87).
+create table if not exists procurement.audit_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  before jsonb,
+  after jsonb,
+  request_id text,
+  ip text,
+  occurred_at timestamptz not null default now(),
+  chain_seq bigint,
+  prev_hash text,
+  row_hash text
+);
+
 -- production --------------------------------------------------------------
 create table if not exists production.oil_batch_master (
   oil_batch_id uuid primary key,
@@ -827,6 +848,52 @@ create table if not exists sales.outbox (
   published_at timestamptz,
   attempts integer not null default 0,
   seq bigint generated always as identity
+);
+
+-- iam (RP-POLICY, lane F8): org_master + user_master (minimal, matching packages/data-org/src/
+-- schema/{org,users}.ts) + the new approval_matrix policy table (matching packages/data-org/src/
+-- schema/policy.ts) — needed by PoService.approvePurchaseOrder / RfqService.selectQuotation to
+-- resolve the caller's/creator's organisation and its configured PO-threshold / RFQ-award-
+-- separation policy (§87). -----------------------------------------------------------------
+create table if not exists iam.org_master (
+  organization_id uuid primary key default gen_random_uuid(),
+  organization_code varchar(50),
+  organization_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists iam.user_master (
+  user_id uuid primary key default gen_random_uuid(),
+  organization_id uuid references iam.org_master(organization_id),
+  employee_code varchar(50),
+  user_name varchar(200),
+  email varchar(150),
+  mobile_number varchar(20),
+  password_hash varchar(255),
+  is_active boolean,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists iam.approval_matrix (
+  approval_matrix_id uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references iam.org_master(organization_id),
+  policy_type varchar(50) not null,
+  threshold_amount numeric(18,4),
+  is_enabled boolean,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  unique (organization_id, policy_type)
 );
 
 -- bridge (RP-EMIT, lane F6) --------------------------------------------------

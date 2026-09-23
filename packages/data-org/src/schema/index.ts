@@ -10,6 +10,7 @@ export {
   businessUnitMaster,
 } from "./org.js";
 export { userMaster } from "./users.js";
+export { approvalMatrix } from "./policy.js";
 export {
   roleMaster,
   permissionMaster,
