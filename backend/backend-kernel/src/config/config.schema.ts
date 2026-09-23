@@ -86,6 +86,16 @@ export const configSchema = z.object({
    */
   RELAY_SIGNING_KEY: z.string().optional(),
   RELAY_VERIFY_KEY: z.string().optional(),
+
+  /**
+   * Build identity for the running process — Platform Ops' "Deployment / build" screen
+   * (P0_UI_PARITY_PUBLIC_GREEN_ADDENDUM.md §6). Populated by the deploy platform at build/
+   * deploy time (e.g. a CI step exporting the commit it built, or Render's
+   * RENDER_GIT_COMMIT — read as a fallback at the call site, not hardcoded here). Both
+   * optional; unset reports null rather than a fabricated value — "no fake data" (§6/§13).
+   */
+  GIT_SHA: z.string().optional(),
+  BUILD_TIME: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

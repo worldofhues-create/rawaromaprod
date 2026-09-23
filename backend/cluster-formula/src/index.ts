@@ -9,6 +9,7 @@ export { FormulaModule } from './formula.module.js';
 export { FORMULA_DB, type FormulaDb } from './formula.tokens.js';
 export { formulaEvents } from './formula.events.js';
 export {
+  type CodedInstruction,
   type FloorIngredient,
   type FormulaLookup,
   type PickIngredient,

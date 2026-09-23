@@ -87,7 +87,9 @@ export class VaultService {
           .limit(1)
       )[0];
       if (!version) return null;
-      if (version.status !== 'APPROVED') {
+      // §109.8: APPROVED and LOCKED are both decryptable (LOCKED is APPROVED's further-frozen
+      // successor state, not a separate access tier — see ApprovalsService.lockVersion).
+      if (version.status !== 'APPROVED' && version.status !== 'LOCKED') {
         throw new ForbiddenException('formula version is not approved/locked — decryption denied');
       }
 

@@ -17,6 +17,7 @@ import { BadRequestException, Inject, Injectable, NotFoundException } from '@nes
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
+import { FORMULA_LOOKUP, type CodedInstruction, type FormulaLookup } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { paginate, type Page } from '../_helpers.js';
@@ -34,7 +35,10 @@ const {
 
 @Injectable()
 export class PickingService {
-  constructor(@Inject(PRODUCTION_DB) private readonly db: ProductionDb) {}
+  constructor(
+    @Inject(PRODUCTION_DB) private readonly db: ProductionDb,
+    @Inject(FORMULA_LOOKUP) private readonly formula: FormulaLookup,
+  ) {}
 
   /* ── material pick list (CRUD reads) ─────────────────────────────── */
 
@@ -140,6 +144,38 @@ export class PickingService {
         .where(and(eq(productionOrder.productionOrderId, orderId), eq(productionOrder.status, 'PLANNING')));
 
       return { pickList, itemCount: ingredients.length };
+    });
+  }
+
+  /**
+   * GET /v1/production-orders/:id/manufacturing-instruction — §109.7
+   * `VaultPort.resolveManufacturingInstruction(production_order, approved_formula_version,
+   * permitted_batch_quantity)`. `permitted_batch_quantity` is the order's own `order_qty`
+   * (the batch this order is authorized to produce) — never a caller-supplied number, so a
+   * caller can't inflate the resolved quantities beyond what the order actually permits.
+   * Returns null (→ empty body, not an error) if the order has no formula version linked
+   * yet; throws (403, also audited) if that version exists but isn't approved/locked yet.
+   */
+  async resolveManufacturingInstruction(
+    orderId: string,
+    principal: AuthPrincipal,
+  ): Promise<CodedInstruction[] | null> {
+    const order = (
+      await this.db
+        .select({
+          formulaVersionId: productionOrder.formulaVersionId,
+          orderQty: productionOrder.orderQty,
+        })
+        .from(productionOrder)
+        .where(eq(productionOrder.productionOrderId, orderId))
+        .limit(1)
+    )[0];
+    if (!order) throw new NotFoundException(`production_order not found: ${orderId}`);
+    if (!order.formulaVersionId) return null;
+
+    const permittedBatchQuantity = Number(order.orderQty ?? 0);
+    return this.formula.resolveManufacturingInstruction(order.formulaVersionId, permittedBatchQuantity, {
+      actorId: principal.userId,
     });
   }
 

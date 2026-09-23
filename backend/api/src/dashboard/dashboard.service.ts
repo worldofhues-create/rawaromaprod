@@ -331,16 +331,18 @@ export class DashboardService {
   /**
    * Reverse traceability (M10): finished-good batch → product → oil batch → production run →
    * materials → RM batch → GRN → vendor. Walks real FKs (FG → package_order → oil_batch →
-   * production_order → ingredients → rm_batch → grn → vendor). Reveals the recipe's sources, so
-   * it's owner-gated at the route; product/material identity still masked here as defence-in-depth.
+   * production_order → ingredients → rm_batch → grn → vendor). The route itself is
+   * unguarded (any authenticated caller may run a trace); THIS masking is the actual
+   * boundary. §107: no role gets product/material identity implicitly, `owner` included —
+   * `seeProduct`/`seeMaterial` are computed from the caller's REAL, explicitly-held
+   * permissions only, same rule permissions.guard.ts enforces for `formula:actual:read`
+   * itself. A caller lacking the permission gets the alias/'Protected ◆' masked view.
    */
   async traceFinishedGood(id: string, principal: AuthPrincipal) {
     const sql = this.sql;
-    const isOwner =
-      (principal.roles || []).includes('owner') || (principal.roles || []).includes('super_admin');
     const perms = new Set(principal.permissions || []);
-    const seeProduct = isOwner || perms.has('formula:actual:read');
-    const seeMaterial = isOwner || perms.has('masterdata:material:reveal');
+    const seeProduct = perms.has('formula:actual:read');
+    const seeMaterial = perms.has('masterdata:material:reveal');
 
     const head = (
       await sql`select fg.batch_number fgno, fg.package_order_id, po.oil_batch_id,

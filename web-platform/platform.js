@@ -6,12 +6,12 @@
  * at all — platform_super_admin's grant is `platform:flag:write` + `iam:user_master:read`
  * only, per scripts/ra-roles.ts).
  *
- * Three of the eight screens the addendum's §6 lists (tenant list, provider health,
- * deployment/build identity) have NO backing endpoint anywhere in this backend — confirmed
- * by reading backend/cluster-platform in full. Per "no fake data, no dead controls; hide
- * nothing as security — server must refuse too", they are wired as real nav items that
- * show an honest NotBuilt state naming exactly what's missing, not omitted silently and
- * not faked with placeholder numbers.
+ * Tenant list, provider health, deeper (outbox/worker-lag) diagnostics, and deployment/build
+ * identity are backed by `backend/api/src/platform-ops` (§6/§113 — `platformops:console:read`,
+ * platform_super_admin only, fail-closed for every other role). A caller who reaches this
+ * console without that permission (e.g. holding only `iam:user_master:read`) still sees an
+ * honest "unavailable — missing permission" card on those screens rather than a silent 403 or
+ * fabricated data; "no fake data, no dead controls" still holds.
  */
 (function () {
   'use strict';
@@ -152,7 +152,7 @@
       btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
       try {
         await login(email.value.trim(), pw.value);
-        if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read')) {
+        if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read') && !hasPerm('platformops:console:read')) {
           err.textContent = 'Signed in, but this account holds no Platform Operations permission. Contact an admin for the platform_super_admin role.';
           btn.disabled = false; btn.textContent = 'Sign in'; return;
         }
@@ -208,7 +208,7 @@
     root.appendChild(h('div', { class: 'app' }, [rail, main]));
   }
 
-  /* ── environment & diagnostics (real: GET /health) ─────────────────────────────────────── */
+  /* ── environment & diagnostics (real: GET /health + GET /v1/platform/health) ─────────────── */
   async function screenHealth() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('health', content);
@@ -222,12 +222,31 @@
         h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Checked ' + fmtDt(r.at) + '. Source: GET /health (liveness + dependency probe).']),
         h('div', { class: 'health-grid' }, tiles),
       ]);
-      var diagNote = h('div', { class: 'card notbuilt' }, [
-        h('h2', {}, ['Deeper diagnostics']),
-        h('p', {}, ['Only DB connectivity is currently exposed. Queue depth, outbox backlog, worker lag, and process memory/CPU are not (no metrics endpoint exists in backend/backend-kernel or backend/cluster-platform).']),
-        h('div', { class: 'needs' }, ['Needs: a metrics/diagnostics route (e.g. GET /health/deep) surfacing outbox lag, event-bus subscriber counts, and process resource usage.']),
-      ]);
-      content.innerHTML = ''; content.appendChild(card); content.appendChild(diagNote);
+      content.innerHTML = ''; content.appendChild(card);
+      if (!hasPerm('platformops:console:read')) {
+        content.appendChild(notBuilt('Deeper diagnostics unavailable', 'Your role does not hold platformops:console:read.'));
+        return;
+      }
+      try {
+        var deep = await api('/v1/platform/health');
+        var outboxRows = (deep.outbox || []).map(function (o) {
+          return h('tr', {}, [
+            h('td', { 'data-label': 'Schema' }, [o.schema]),
+            h('td', { 'data-label': 'Backlog' }, [h('span', { class: 'chip ' + (o.backlog > 0 ? 'a' : 'g') }, [String(o.backlog)])]),
+            h('td', { 'data-label': 'Oldest unpublished' }, [o.oldestUnpublishedSeconds != null ? (Math.round(o.oldestUnpublishedSeconds) + 's') : '—']),
+          ]);
+        });
+        var diagCard = h('div', { class: 'card' }, [
+          h('div', { class: 'card-hd' }, [h('h2', {}, ['Outbox backlog / worker lag'])]),
+          h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, [deep.note]),
+          outboxRows.length
+            ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Schema']), h('th', {}, ['Backlog']), h('th', {}, ['Oldest unpublished'])])]), h('tbody', {}, outboxRows)])
+            : h('div', { class: 'empty' }, [h('h3', {}, ['No outbox tables found'])]),
+        ]);
+        content.appendChild(diagCard);
+      } catch (e) {
+        content.appendChild(notBuilt('Deeper diagnostics could not be loaded', e.message));
+      }
     } catch (e) {
       content.innerHTML = ''; content.appendChild(notBuilt('Health check failed', e.message));
     }
@@ -301,26 +320,86 @@
     }
   }
 
-  function screenTenants() {
-    renderShell('tenants', notBuilt(
-      'Tenant list is not available',
-      'No tenant/org-list endpoint exists in this backend today. RawProd is currently a single manufacturing tenant (RAC/Raw Aroma Chem itself) with no multi-tenant catalogue table or route.',
-      'Needs: a tenant/org registry (table + GET /v1/platform/tenants route, platform:tenant:read-gated) once multi-tenant onboarding is real.',
-    ));
+  async function screenTenants() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('tenants', content);
+    if (!hasPerm('platformops:console:read')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Tenant list unavailable', 'Your role does not hold platformops:console:read.'));
+      return;
+    }
+    try {
+      var rows = await api('/v1/platform/tenants');
+      var trs = (rows || []).map(function (t) {
+        return h('tr', {}, [
+          h('td', { class: 'mono', 'data-label': 'Code' }, [t.organizationCode || '—']),
+          h('td', { 'data-label': 'Name' }, [t.organizationName || '—']),
+          h('td', { 'data-label': 'Status' }, [h('span', { class: 'chip ' + (t.status === 'ACTIVE' ? 'g' : 'a') }, [t.status || '—'])]),
+        ]);
+      });
+      var card = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Tenants / organizations'])]),
+        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['RawProd is currently single-tenant (RAC/Raw Aroma Chem itself) — this lists org_master rows (identity + status only, no address/financial fields) as the closest existing registry, not multi-tenant SaaS billing data.']),
+        trs.length
+          ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Code']), h('th', {}, ['Name']), h('th', {}, ['Status'])])]), h('tbody', {}, trs)])
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No organizations found'])]),
+      ]);
+      content.innerHTML = ''; content.appendChild(card);
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Tenant list could not be loaded', e.message));
+    }
   }
-  function screenProviders() {
-    renderShell('providers', notBuilt(
-      'Provider health is not available',
-      'No integration/provider-status endpoint exists. GET /health only reports this process’s own DB connectivity, not third-party providers (payment/SMS/email/storage, etc.).',
-      'Needs: each self-service integration (per the Shopify-style provider-connect model) to report a health/last-success status, aggregated behind a new GET /v1/platform/providers route.',
-    ));
+  async function screenProviders() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('providers', content);
+    if (!hasPerm('platformops:console:read')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Provider health unavailable', 'Your role does not hold platformops:console:read.'));
+      return;
+    }
+    try {
+      var rows = await api('/v1/platform/providers');
+      var trs = (rows || []).map(function (p) {
+        return h('tr', {}, [
+          h('td', { class: 'mono', 'data-label': 'Connector' }, [p.id]),
+          h('td', { 'data-label': 'Enabled' }, [h('span', { class: 'chip ' + (p.enabled ? 'g' : 'r') }, [p.enabled ? 'on' : 'off'])]),
+          h('td', { 'data-label': 'Webhook set' }, [p.webhookConfigured ? 'yes' : 'no']),
+          h('td', { 'data-label': 'Secret set' }, [p.secretConfigured ? 'yes' : 'no']),
+          h('td', { 'data-label': 'Configured' }, [fmtDt(p.configuredAt) + (p.configuredBy ? (' · ' + p.configuredBy) : '')]),
+        ]);
+      });
+      var card = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Provider / connector health'])]),
+        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Status only — never a secret. Source: bridge.connector_config (the ALEMBIC↔RawProd channel). No other self-service provider tables exist in this backend yet.']),
+        trs.length
+          ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Connector']), h('th', {}, ['Enabled']), h('th', {}, ['Webhook set']), h('th', {}, ['Secret set']), h('th', {}, ['Configured'])])]), h('tbody', {}, trs)])
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No connectors configured'])]),
+      ]);
+      content.innerHTML = ''; content.appendChild(card);
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Provider health could not be loaded', e.message));
+    }
   }
-  function screenDeploy() {
-    renderShell('deploy', notBuilt(
-      'Deployment / build identity is not available',
-      'No endpoint or env var exposes the running build’s git SHA, version, or deploy time anywhere in this backend (checked GET /health’s response shape and the whole repo for GIT_SHA/BUILD_SHA/APP_VERSION — none exist).',
-      'Needs: GET /health (or a new GET /version) to include a build identity field, populated at deploy time from the platform’s commit SHA (e.g. Render’s RENDER_GIT_COMMIT).',
-    ));
+  async function screenDeploy() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('deploy', content);
+    if (!hasPerm('platformops:console:read')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Build identity unavailable', 'Your role does not hold platformops:console:read.'));
+      return;
+    }
+    try {
+      var b = await api('/v1/platform/build');
+      var card = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Deployment / build identity'])]),
+        h('div', { class: 'health-grid' }, [
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Git SHA']), h('div', { class: 'v mono' }, [b.gitSha || 'not set'])]),
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Build time']), h('div', { class: 'v' }, [b.buildTime || 'not set'])]),
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Environment']), h('div', { class: 'v' }, [b.appEnv])]),
+        ]),
+        (!b.gitSha || !b.buildTime) ? h('p', { style: 'color:var(--ink-3);margin-top:10px' }, ['"not set" is honest, not a bug — GIT_SHA/BUILD_TIME are populated by the deploy platform (or fall back to RENDER_GIT_COMMIT); nothing here is fabricated.']) : null,
+      ]);
+      content.innerHTML = ''; content.appendChild(card);
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Build identity could not be loaded', e.message));
+    }
   }
 
   async function render() {

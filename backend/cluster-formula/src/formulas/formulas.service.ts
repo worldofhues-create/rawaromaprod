@@ -17,6 +17,7 @@ import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nest
 import { and, asc, desc, eq, lt } from 'drizzle-orm';
 import { type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
+import { MASTERDATA_LOOKUP, type MasterdataLookup, type MaterialRef } from '@ra/cluster-masterdata';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from '../formula.tokens.js';
 import { KMS_PORT, type KmsPort } from '../crypto/kms.port.js';
 import { newDek, seal } from '../crypto/vault-crypto.js';
@@ -55,11 +56,25 @@ export class FormulasService {
     @Inject(FORMULA_DB) private readonly db: FormulaDb,
     @Inject(KMS_PORT) private readonly kms: KmsPort,
     private readonly vault: VaultService,
+    @Inject(MASTERDATA_LOOKUP) private readonly masterdata: MasterdataLookup,
   ) {}
 
   /** Verify the tamper-evidence of the vault access-audit chain (owner-only). */
   verifyAuditChain() {
     return this.vault.verifyAuditChain();
+  }
+
+  /**
+   * GET /v1/vault/materials?q=... — the Vault draft editor's material PICKER. `vault.*`
+   * permission-gated (not the ordinary `masterdata:material:read`/`reveal`) so it's reachable
+   * by whoever holds Vault drafting authority regardless of what masterdata permissions they
+   * separately hold, and NOT reachable by an ordinary masterdata-reveal role that has no
+   * Vault grant at all. Minimal fields only — id/code/name, the same shape `findMaterial`
+   * already returns; no cost/vendor/QC/stock fields. Replaces the raw-UUID text field the
+   * seal-ingredient dialog used before this (web-vault/vault.js sealIngredientDialog).
+   */
+  async searchMaterials(query: string, limit: number): Promise<MaterialRef[]> {
+    return this.masterdata.searchMaterials(query, limit);
   }
 
   /* ── formula master (+ vault) ─────────────────────────────────────── */
@@ -257,6 +272,62 @@ export class FormulasService {
       .from(formulaIngredients)
       .where(eq(formulaIngredients.formulaVersionId, versionId))
       .orderBy(asc(formulaIngredients.sequenceNo));
+  }
+
+  /**
+   * POST /v1/formula-versions/:id/finalize — §109.8 DRAFT → VERSIONED. The author (or anyone
+   * holding `formula:formula_version:write`) closes off further ingredient edits on this
+   * version once its recipe is complete, ahead of formally submitting it for review. Requires
+   * at least one sealed ingredient (a formula with nothing sealed has nothing to finalize).
+   * Re-selects FOR UPDATE (same TOCTOU guard as lockDraftVersionTx) so a concurrent seal can't
+   * land after finalize flips the status.
+   */
+  async finalizeVersion(versionId: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const version = await this.lockDraftVersionTx(tx, versionId);
+
+      const sealed = await tx
+        .select({ id: formulaIngredients.formulaIngredientsId })
+        .from(formulaIngredients)
+        .where(eq(formulaIngredients.formulaVersionId, versionId))
+        .limit(1);
+      if (sealed.length === 0) {
+        throw new ForbiddenException(
+          'cannot finalize a formula version with no sealed ingredients',
+        );
+      }
+
+      const updated = (
+        await tx
+          .update(formulaVersion)
+          .set({ status: 'VERSIONED', updatedBy: principal.userId })
+          .where(eq(formulaVersion.formulaVersionId, versionId))
+          .returning()
+      )[0];
+      if (!updated) throw new Error('update failed: formula_version');
+
+      await tx.insert(formulaEventHist).values({
+        formulaEventHistId: uuidv7(),
+        formulaId: version.formulaId,
+        formulaVersionId: versionId,
+        eventType: 'VERSION_FINALIZED',
+        eventDt: new Date(),
+        performedBy: principal.userId,
+        remarks: null,
+        status: 'ACTIVE',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      });
+
+      await this.vault.writeAudit(tx, {
+        actorId: principal.userId,
+        action: 'formula.version.finalized',
+        entityType: 'formula_version',
+        entityId: versionId,
+      });
+
+      return updated;
+    });
   }
 
   /* ── stages + sealed stage ingredients ───────────────────────────── */

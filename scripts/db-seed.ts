@@ -25,6 +25,8 @@ import {
   ROLES,
   VAULT_PLAINTEXT_PERMISSION,
   VAULT_PLAINTEXT_ROLES,
+  PLATFORM_OPS_PERMISSION,
+  PLATFORM_OPS_ROLES,
   ROLE_GRANT_PERMISSION,
   ROLE_GRANTERS,
   CAPABILITY_PERMISSIONS,
@@ -72,6 +74,13 @@ async function grantRole(
   if (!VAULT_PLAINTEXT_ROLES.includes(role.code) && granted.some((p) => p.code === VAULT_PLAINTEXT_PERMISSION)) {
     throw new Error(
       `SECURITY: role '${role.code}' must not be granted ${VAULT_PLAINTEXT_PERMISSION} — only ${VAULT_PLAINTEXT_ROLES.join('/')} may hold Vault plaintext access (§107)`,
+    );
+  }
+  // HARD INVARIANT (§113): only platform_super_admin may hold the Platform Ops console
+  // permission — NOT owner (whose blanket grant excludes it explicitly) or any other role.
+  if (!PLATFORM_OPS_ROLES.includes(role.code) && granted.some((p) => p.code === PLATFORM_OPS_PERMISSION)) {
+    throw new Error(
+      `SECURITY: role '${role.code}' must not be granted ${PLATFORM_OPS_PERMISSION} — only ${PLATFORM_OPS_ROLES.join('/')} may hold Platform Ops access (§113)`,
     );
   }
   // HARD INVARIANT: only owner + admin may GRANT roles. "Only an admin can give the role."

@@ -26,6 +26,15 @@ export interface MasterdataLookup {
    * Returns a map keyed by material_id; a material with no alias is simply absent from the map.
    */
   findAliasesForMaterials(materialIds: string[]): Promise<Map<string, AliasRef>>;
+  /**
+   * Code/name substring search — id + code/name refs only (same minimal shape as
+   * `findMaterial`), capped at `limit`. Backs the Vault draft editor's material PICKER
+   * (`vault:material_search:read`, cluster-formula) so a formulator selects a material by
+   * name instead of typing a raw UUID; also usable by any future non-vault picker that only
+   * needs id+code+name (no cost/vendor/QC fields — those stay behind ordinary masterdata
+   * reads).
+   */
+  searchMaterials(query: string, limit: number): Promise<MaterialRef[]>;
 }
 
 /** DI token for `MasterdataLookup`. */

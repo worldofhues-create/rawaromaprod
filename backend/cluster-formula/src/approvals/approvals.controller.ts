@@ -17,12 +17,16 @@ import {
   createCopyRequest,
   decideCopyRequest,
   listQuery,
+  lockVersion,
   rejectVersion,
+  submitForReview,
   type ApproveVersion,
   type CreateCopyRequest,
   type DecideCopyRequest,
   type ListQuery,
+  type LockVersion,
   type RejectVersion,
+  type SubmitForReview,
 } from '../formula.dtos.js';
 
 @Controller()
@@ -35,6 +39,18 @@ export class ApprovalsController {
   @Get('v1/formula-approvals')
   listApprovals(@Query(new ZodValidationPipe(listQuery)) query: ListQuery) {
     return this.approvals.listApprovals(query);
+  }
+
+  // §109.8 DRAFT|VERSIONED → REVIEW. Author-side, same permission as drafting — no SoD (see
+  // ApprovalsService.submitForReview doc comment).
+  @Permissions('formula:formula_version:write')
+  @Post('v1/formula-versions/:id/submit-for-review')
+  submitForReview(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(submitForReview)) body: SubmitForReview,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.approvals.submitForReview(id, body, principal);
   }
 
   // §108 SoD (the version's author may not approve it) is enforced server-side in the
@@ -61,6 +77,18 @@ export class ApprovalsController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.approvals.rejectVersion(id, body, principal);
+  }
+
+  // §109.8 APPROVED → LOCKED. Same vault-authority gate as approve/reject.
+  @Permissions('formula:formula_approval:write')
+  @FreshAuth()
+  @Post('v1/formula-versions/:id/lock')
+  lockVersion(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(lockVersion)) body: LockVersion,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.approvals.lockVersion(id, body, principal);
   }
 
   /* ── copy requests ────────────────────────────────────────────────── */

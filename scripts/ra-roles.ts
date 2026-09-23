@@ -46,15 +46,33 @@ const REVEAL = 'masterdata:material:reveal';
  * Exported so scripts/db-seed.ts can assert the invariant. */
 export const VAULT_PLAINTEXT_PERMISSION = 'formula:actual:read';
 
+/** Platform Ops console read (§6/§113, this lane) — tenant/org list, environment/outbox
+ * health, provider status, build identity. Deliberately its OWN domain prefix
+ * (`platformops:`, not `platform:`) so it can never be swept in by an existing role's
+ * broader `startsWith('platform:')` grant (procurement/sales both read `platform:*`
+ * reference data — country/contact/document masters — and must NOT thereby gain Platform
+ * Ops access). Held ONLY by `platform_super_admin`, explicitly excluded below from
+ * `owner`'s otherwise-blanket grant — tenant authority and platform-operations authority
+ * are separate domains (same split §108 draws for Vault authority): owning the tenant does
+ * not mean owning the platform's own operational console. */
+export const PLATFORM_OPS_PERMISSION = 'platformops:console:read';
+
 export const ROLES: RoleDef[] = [
   {
     // Super Admin — full access EXCEPT the decrypted recipe (§107: no implicit vault
     // plaintext, even for the owner role — Vault authority is a separate grant, held only by
-    // `formulator`/`vault_approver` below). Can still grant roles, incl. the two Vault roles.
+    // `formulator`/`vault_approver` below), EXCEPT any OTHER `vault:*`-prefixed permission
+    // (same rule, generalized — the guard's own NEVER_IMPLICIT_PATTERNS treats the whole
+    // `vault:` prefix as never-implicit for the super_admin BYPASS; this mirrors that for
+    // owner's blanket SEED grant, so a future `vault:*` permission can't slip into owner's
+    // "everything" just because nobody remembered to list it here too), AND EXCEPT the
+    // Platform Ops console (§113: a separate operational authority from tenant ownership —
+    // see PLATFORM_OPS_PERMISSION's doc comment). Can still grant roles, incl. the two Vault
+    // roles.
     code: 'owner',
     name: 'Super Admin',
     view: 'superadmin',
-    select: (p) => p !== VAULT_PLAINTEXT_PERMISSION,
+    select: (p) => p !== VAULT_PLAINTEXT_PERMISSION && !p.startsWith('vault:') && p !== PLATFORM_OPS_PERMISSION,
     sampleEmail: 'owner@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_OWNER_PASSWORD',
   },
@@ -329,6 +347,7 @@ export const ROLES: RoleDef[] = [
       'formula:formula_event_hist:read',
       'formula:formula_copy_request:read',
       'formula:formula_copy_request:write',
+      'vault:material_search:read',
       VAULT_PLAINTEXT_PERMISSION,
     ),
     sampleEmail: 'formulator@rawaroma.local',
@@ -336,11 +355,11 @@ export const ROLES: RoleDef[] = [
   },
   {
     // Vault Approver — Vault authority, review side (§107). Reviews an authorized formula
-    // (plaintext, to actually review it), approves/rejects, and — in this codebase's current
-    // 4-state model (DRAFT/APPROVED/ARCHIVED/REJECTED) — "lock" IS approve (VaultService
-    // refuses to decrypt/edit anything not APPROVED) and "supersede" IS creating the next
-    // DRAFT version (formula:formula_version:write), so no separate lock/supersede
-    // permission exists yet to grant. No formula:formula_master/ingredients:write — cannot
+    // (plaintext, to actually review it) and drives the §109.8 lifecycle's decision half:
+    // approve/reject (DRAFT|VERSIONED|REVIEW → APPROVED/REJECTED) and lock (APPROVED →
+    // LOCKED), all under `formula:formula_approval:write`. Supersede is automatic — approving
+    // a formula's successor version flips its prior current version to SUPERSEDED, so it
+    // needs no permission of its own. No formula:formula_master/ingredients:write — cannot
     // author or edit a draft's contents (SoD complement of `formulator`).
     code: 'vault_approver',
     name: 'Vault Approver',
@@ -360,6 +379,7 @@ export const ROLES: RoleDef[] = [
       'formula:formula_event_hist:read',
       'formula:formula_copy_request:read',
       'formula:formula_copy_request:write',
+      'vault:material_search:read',
       VAULT_PLAINTEXT_PERMISSION,
     ),
     sampleEmail: 'vault.approver@rawaroma.local',
@@ -368,16 +388,19 @@ export const ROLES: RoleDef[] = [
   {
     // Platform Super Admin — platform operations only (§106 UI, this launch's Platform Ops
     // console): feature-flag kill-switches + support/audit tooling built from EXISTING
-    // platform-cluster endpoints. Deliberately NOT full tenant access: no formula:*, no
-    // iam:role_permission_mapping/user_role_mapping:write (cannot grant itself tenant roles —
-    // "Platform admin does not bypass tenant business/Vault authorization", §108), no
-    // masterdata:material:reveal. iam:user_master:read is the narrowest existing permission
-    // that gates GET /v1/login-history (support/audit tooling) — see web-platform's
-    // Not-Built note for what platform ops UI is intentionally NOT built for lack of a route.
+    // platform-cluster endpoints, plus (this lane, §6/§113) `platformops:console:read` —
+    // tenant/org list (identity+status only), db/outbox environment health, connector/
+    // provider status (never secrets), and build identity. Deliberately NOT full tenant
+    // access: no formula:*, no iam:role_permission_mapping/user_role_mapping:write (cannot
+    // grant itself tenant roles — "Platform admin does not bypass tenant business/Vault
+    // authorization", §108), no masterdata:material:reveal. iam:user_master:read is the
+    // narrowest existing permission that gates GET /v1/login-history (support/audit tooling)
+    // — see web-platform's Not-Built note for what platform ops UI is intentionally NOT
+    // built for lack of a route.
     code: 'platform_super_admin',
     name: 'Platform Super Admin',
     view: 'platform_ops',
-    select: oneOf('platform:flag:write', 'iam:user_master:read'),
+    select: oneOf('platform:flag:write', 'iam:user_master:read', PLATFORM_OPS_PERMISSION),
     sampleEmail: 'platform.admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PLATFORM_ADMIN_PASSWORD',
   },
@@ -387,6 +410,11 @@ export const ROLES: RoleDef[] = [
  * `owner` included (§107: "NO implicit formula plaintext. Vault authority is separately
  * granted."). */
 export const VAULT_PLAINTEXT_ROLES = ['formulator', 'vault_approver'];
+
+/** Roles allowed to hold PLATFORM_OPS_PERMISSION — everyone else is rejected by the seed,
+ * `owner` included (§113: Platform Ops is a separate operational authority from tenant
+ * ownership, same split as Vault authority above). */
+export const PLATFORM_OPS_ROLES = ['platform_super_admin'];
 
 /** The role-granting permission. Only owner + admin may hold it — asserted by the seed. */
 export const ROLE_GRANT_PERMISSION = 'iam:user_role_mapping:write';

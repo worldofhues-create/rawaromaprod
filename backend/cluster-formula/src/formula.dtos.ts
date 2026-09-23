@@ -14,6 +14,13 @@ export const listQuery = z.object({
 });
 export type ListQuery = z.infer<typeof listQuery>;
 
+/** GET /v1/vault/materials — the Vault draft editor's material picker (vault.* gated). */
+export const searchMaterialsQuery = z.object({
+  q: z.string().trim().min(1).max(200),
+  limit: z.coerce.number().int().min(1).max(50).default(20),
+});
+export type SearchMaterialsQuery = z.infer<typeof searchMaterialsQuery>;
+
 /* ── formula type master ──────────────────────────────────────────────── */
 
 export const createFormulaType = z.object({
@@ -112,6 +119,20 @@ export const rejectVersion = z.object({
   remarks: z.string().min(3, 'a rejection reason is required (min 3 characters)').max(2000),
 });
 export type RejectVersion = z.infer<typeof rejectVersion>;
+
+/* ── §109.8 lifecycle transitions (submit-for-review / lock / supersede) ───────────────── */
+
+/** POST .../submit-for-review — DRAFT|VERSIONED → REVIEW. */
+export const submitForReview = z.object({
+  remarks: z.string().max(2000).optional(),
+});
+export type SubmitForReview = z.infer<typeof submitForReview>;
+
+/** POST .../lock — APPROVED → LOCKED (the further, explicit freeze after approval). */
+export const lockVersion = z.object({
+  remarks: z.string().max(2000).optional(),
+});
+export type LockVersion = z.infer<typeof lockVersion>;
 
 /* ── copy request (flow bodies) ───────────────────────────────────────── */
 

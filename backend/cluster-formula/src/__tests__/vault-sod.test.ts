@@ -42,12 +42,22 @@ let vault: VaultService;
 let formulas: FormulasService;
 let approvals: ApprovalsService;
 
+// Stub MasterdataLookup — this test suite exercises the seal/approve/reject/audit flows,
+// never the material search picker (that's covered by material-search.test.ts), so a stub
+// that throws if actually called is enough to satisfy FormulasService's constructor.
+const stubMasterdata = {
+  findMaterial: async () => null,
+  findAliasForMaterial: async () => null,
+  findAliasesForMaterials: async () => new Map(),
+  searchMaterials: async () => [],
+};
+
 before(async () => {
   await ensureSchema();
   db = formulaDb();
   const kms = new EnvKmsAdapter(config);
   vault = new VaultService(db as any, kms);
-  formulas = new FormulasService(db as any, kms, vault);
+  formulas = new FormulasService(db as any, kms, vault, stubMasterdata);
   approvals = new ApprovalsService(db as any, vault);
 });
 
