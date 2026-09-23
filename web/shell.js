@@ -111,8 +111,7 @@
   var ROLES = {
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
-      ['runs', 'Master runs', 'layers', '/v1/production-orders'], ['formulas', 'Formula vault', 'lock', '/v1/formulas'],
-      ['fversions', 'Formula versions', 'layers', '/v1/formula-versions'],
+      ['runs', 'Master runs', 'layers', '/v1/production-orders'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
       ['mtypes', 'Material types', 'sliders', '/v1/material-types'], ['mcats', 'Categories', 'sliders', '/v1/material-categories'],
       ['msubcats', 'Sub-categories', 'sliders', '/v1/material-subcategories'], ['mgroups', 'Material groups', 'sliders', '/v1/material-groups'],
@@ -125,7 +124,7 @@
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
-      ['facaudit', 'Formula access', 'lock', '/v1/formula-access-audit'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'] ] },
+      ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
@@ -193,8 +192,6 @@
     '/v1/permissions': ['permissionCode', 'moduleName', 'permissionName', 'status'],
     '/v1/production-orders': ['productionOrderId', 'orderQty', 'formulaVersionId', 'actualStartDt', 'status'],
     '/v1/production-order-ingredients': ['aliasName', 'requiredQty', 'issuedQty', 'status'],
-    '/v1/formulas': ['formulaCode', 'formulaName', 'status'],
-    '/v1/formula-types': ['typeCode', 'typeName', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
     '/v1/rm-aliases': ['aliasName', 'aliasType', 'status'],
@@ -241,7 +238,6 @@
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
     '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'shortage', 'suggestedVendor'],
-    '/v1/formula-access-audit': ['occurredAt', 'action', 'actor', 'entityType'],
     '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
     '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
     '/v1/countries': ['countryCode', 'countryName', 'status'],
@@ -275,8 +271,7 @@
     '/v1/packaging-qc': ['overallResult', 'leakageCheck', 'labelCheck', 'cartonCheck', 'inspectionDt'],
     '/v1/notifications': ['eventType', 'subject', 'status', 'recipient', 'createdDt'],
     '/v1/dispatches': ['soNumber', 'customerName', 'dispatchDate', 'vehicleNumber', 'status'],
-    '/v1/dispatch-documents': ['documentType', 'documentNumber', 'soNumber', 'customerName', 'documentDate', 'amount', 'status'],
-    '/v1/formula-versions': ['versionNumber', 'formulaId', 'approvedDt', 'status']
+    '/v1/dispatch-documents': ['documentType', 'documentNumber', 'soNumber', 'customerName', 'documentDate', 'amount', 'status']
   };
   // Every role opens on a rich, DB-aggregated dashboard (endpoint sentinel '__dash__' → /v1/dashboard).
   Object.keys(ROLES).forEach(function (k) {
@@ -697,9 +692,6 @@
   // authoritatively; this just hides the button so the button isn't offered in the first place).
   function isCreator(r) { return !!(r && session && session.user && r.createdBy && r.createdBy === session.user.userId); }
   var ACTIONS = {
-    '/v1/formulas': [
-      { label: 'Attach IFRA cert', perm: 'platform:document_master:write', when: function () { return true; }, run: function (r) { openAttachIfra(r); } }
-    ],
     '/v1/reorder-suggestions': [
       { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, run: function (r) { openRaiseRequirement(r); } }
     ],
@@ -787,15 +779,16 @@
     '/v1/fg-reservations': [
       { label: 'Release', perm: 'packaging:finished_good_batch_master:write', tone: 'warn', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/fg-reservations/' + (r.finishedGoodReservationId != null ? r.finishedGoodReservationId : guessId(r)) + '/release'; }, body: {} }
     ],
-    '/v1/formula-versions': [
-      { label: 'Seal ingredients', perm: 'formula:formula_ingredients:write', when: function (r) { return UP(r.status) === 'DRAFT'; }, run: function (r) { openAddIngredients(r); } },
-      { label: 'Approve', perm: 'formula:formula_approval:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/formula-versions/' + r.formulaVersionId + '/approve'; }, body: { approvalLevel: 1 } }
-    ],
     '/v1/users': [
       { label: 'Assign role', perm: 'iam:user_role_mapping:write', when: function () { return true; }, run: function (r) { openAssignRole(r); } }
     ],
     '/v1/finished-good-batches': [
-      { label: 'Trace', perm: 'formula:actual:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
+      // §109.7: the backend trace route (v1/trace/finished-good/:id) self-masks — it no
+      // longer requires formula:actual:read (that would 403 every factory role, owner
+      // included, since only formulator/vault_approver hold it now). Gate the button on
+      // read-access to the FG resource itself; the server decides per-caller whether the
+      // product/material names come back real or masked (alias/'Protected ◆').
+      { label: 'Trace', perm: 'packaging:finished_good_batch_master:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
     ],
     '/v1/oil-batches': [
       // Guarded lifecycle (server enforces the state machine; these `when` guards are UX only).
@@ -893,8 +886,6 @@
       fields: [{ n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'SUBMITTED'] }] },
     '/v1/purchase-orders': { resource: 'purchase-orders', idKey: 'purchaseOrderId', perm: 'procurement:purchase_order:write', statusField: 'status', noDeactivate: true, editWhen: function (r) { return UP(r.status) === 'DRAFT'; }, title: 'Edit purchase order (draft)',
       fields: [{ n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'status', l: 'Status', t: 'select', en: ['DRAFT'] }] },
-    '/v1/formula-versions': { resource: 'formula-versions', idKey: 'formulaVersionId', perm: 'formula:formula_version:write', statusField: 'status', title: 'Edit formula version',
-      fields: [{ n: 'status', l: 'Status', t: 'select', en: ['DRAFT', 'APPROVED', 'ARCHIVED', 'REJECTED'] }] },
     '/v1/vendors': { resource: 'vendors', idKey: 'vendorId', perm: 'procurement:vendor_details:write', statusField: 'status', title: 'Edit vendor',
       fields: [{ n: 'vendorName', l: 'Vendor name' }, { n: 'paymentTerms', l: 'Payment terms' }, { n: 'gstin', l: 'GSTIN', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'panNumber', l: 'PAN', maxlen: 10, pat: '[A-Z]{5}[0-9]{4}[A-Z]', patMsg: 'PAN must be 10 characters, e.g. ABCDE1234F' }, { n: 'bankName', l: 'Bank name' }, { n: 'bankAccountNumber', l: 'Bank account no.', maxlen: 20, pat: '[0-9]{6,20}', patMsg: 'Account number must be 6–20 digits' }, { n: 'bankIfsc', l: 'IFSC', maxlen: 11, pat: '[A-Z]{4}0[A-Z0-9]{6}', patMsg: 'IFSC must be 11 characters, e.g. HDFC0001234' }, { n: 'contactEmail', l: 'Contact email', pat: '[^@ ]+@[^@ ]+[.][^@ ]+', patMsg: 'Enter a valid email' }, { n: 'contactPhone', l: 'Contact phone', pat: '[+]?[0-9][0-9 -]{6,18}', patMsg: 'Enter a valid phone number' }, { n: 'status', l: 'Status', t: 'select', en: ['ACTIVE', 'INACTIVE'] }] },
     '/v1/customers': { resource: 'customers', idKey: 'customerId', perm: 'sales:customer_master:write', statusField: 'status', title: 'Edit customer',
@@ -1284,14 +1275,6 @@
       { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
       { n: 'purchaseRequestId', l: 'From purchase request', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber', req: true },
       { n: 'rfqDate', l: 'RFQ date', t: 'date', req: true }, { n: 'submissionDeadline', l: 'Submission deadline', t: 'date' }
-    ] },
-    '/v1/formulas': { title: 'New formula', perm: 'formula:formula_master:write', fields: [
-      { n: 'formulaCode', l: 'Formula code', t: 'text', req: true }, { n: 'formulaName', l: 'Formula name', t: 'text', req: true },
-      { n: 'formulaTypeId', l: 'Type', t: 'select', fk: '/v1/formula-types', fv: 'formulaTypeId', fl: 'typeName' }
-    ] },
-    '/v1/formula-versions': { title: 'New formula version', perm: 'formula:formula_version:write', fields: [
-      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaName', req: true },
-      { n: 'versionNumber', l: 'Version number', t: 'number', req: true }
     ] },
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },
