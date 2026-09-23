@@ -30,13 +30,30 @@
  * -- an unguarded route -- and is exactly what
  * ops/scripts/access-catalog.mjs's RawProd controller scan (ALEMBIC repo,
  * PB-05/§112 UNMAPPED_MUTATING_API_ROUTES/UNMAPPED_READ_API_ROUTES) drives to
- * zero; its documented exemption table names the handful that are dynamic
+ * zero; its documented exemption table named the handful that are dynamic
  * per-:resource permissions instead, and THOSE five methods --
  * EditController.update, GeoController.createRegionType/createRegion/
  * updateRegion, OrgUnitsController.create/update, DispatchDocsController
  * .create, SearchController.search -- get their own negative cases below,
  * driving the SERVICE'S `ForbiddenException` directly, since no static
  * `@Permissions` decorator exists for the Reflector to read.
+ *
+ * Lane GUARD (security review) made `PermissionsGuard` FAIL CLOSED: "no `@Permissions` and no
+ * `@Public()`" used to mean "let it through" -- now it means DENIED, unless the route also
+ * carries `@SelfService()`, `@DynamicPermission(reason)`, or `@AnyAuthenticated(reason)` (see
+ * `permissions.guard.ts` and `route-inventory.test.ts`, which enumerates every real route and
+ * fails if one has no decision at all). The five methods above now carry `@DynamicPermission`
+ * explicitly instead of relying on the guard's old blanket pass-through -- their negative cases
+ * below are unaffected, since they were always driven at the SERVICE layer. A full re-scan (not
+ * just this file's controller list) found four more gaps RB's audit hadn't reached:
+ * `GeoController.listRegionTypes`/`listRegions` and `OrgUnitsController.list` were genuinely
+ * unchecked reads (any authenticated caller, no permission at all) and now require
+ * `platform:geo_location_master:read` / `iam:business_unit_master:read` respectively (both
+ * permission codes already existed in `ra-permissions.ts`, just never wired to these routes);
+ * `DashboardController.snapshot`/`alerts` are intentionally open to every authenticated caller
+ * (the service self-masks/role-filters instead of denying) and now carry `@AnyAuthenticated`;
+ * and `AuthController.me`/`logout` (both `cluster-identity` and `cluster-org`) act only on the
+ * caller's own session and now carry `@SelfService()`.
  *
  * "wrong tenant" is not a case here: `PermissionsGuard` is a role/permission
  * gate with no tenant concept of its own (RawProd is single-tenant per

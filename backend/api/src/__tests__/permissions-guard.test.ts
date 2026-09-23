@@ -11,6 +11,13 @@ import 'reflect-metadata';
 import { Reflector } from '@nestjs/core';
 import { PermissionsGuard } from '../../../backend-kernel/src/edge/permissions.guard.js';
 import { DomainError } from '../../../backend-kernel/src/edge/domain-error.js';
+import {
+  AnyAuthenticated,
+  DynamicPermission,
+  Permissions,
+  Public,
+  SelfService,
+} from '../../../backend-kernel/src/decorators/index.js';
 import { BatchController } from '../../../cluster-production/src/batch/batch.controller.js';
 import { ReservationController } from '../../../cluster-packaging/src/reservation/reservation.controller.js';
 import { DispatchController } from '../../../cluster-sales/src/dispatch/dispatch.controller.js';
@@ -69,4 +76,118 @@ test('permissions guard: an unauthenticated request (no principal) is rejected',
       return true;
     },
   );
+});
+
+/* ── FAIL CLOSED (security review) ───────────────────────────────────────
+ * The guard used to treat "no @Permissions" as "let it through." These prove the fixed
+ * behaviour directly against fake controllers carrying each marker (and none), independent of
+ * whatever real controllers exist today — route-inventory.test.ts is what proves every REAL
+ * route in the app actually carries one of these markers.
+ */
+
+class UnmarkedFixture {
+  unmarkedRoute() {
+    return null;
+  }
+}
+
+class PublicFixture {
+  @Public()
+  publicRoute() {
+    return null;
+  }
+}
+
+class SelfServiceFixture {
+  @SelfService()
+  selfRoute() {
+    return null;
+  }
+}
+
+class DynamicPermissionFixture {
+  @DynamicPermission('fixture: service checks this itself')
+  dynamicRoute() {
+    return null;
+  }
+}
+
+class AnyAuthenticatedFixture {
+  @AnyAuthenticated('fixture: self-masks instead of denying')
+  anyAuthRoute() {
+    return null;
+  }
+}
+
+class StaticPermissionFixture {
+  @Permissions('masterdata:material:read')
+  staticRoute() {
+    return null;
+  }
+}
+
+test('permissions guard (fail closed): a route with NO decorator at all is denied for an authenticated principal', () => {
+  const user = principal({ permissions: [] });
+  assert.throws(
+    () => guard.canActivate(fakeContext(UnmarkedFixture, 'unmarkedRoute', user)),
+    (err: unknown) => {
+      assert.ok(err instanceof DomainError, `expected a DomainError, got ${String(err)}`);
+      assert.equal((err as DomainError).status, 403, 'an unmarked route must 403, never pass through');
+      return true;
+    },
+  );
+});
+
+test('permissions guard (fail closed): a route with NO decorator at all is denied (401) with no principal either', () => {
+  assert.throws(
+    () => guard.canActivate(fakeContext(UnmarkedFixture, 'unmarkedRoute', undefined)),
+    (err: unknown) => {
+      assert.ok(err instanceof DomainError);
+      assert.equal((err as DomainError).status, 401);
+      return true;
+    },
+  );
+});
+
+test('permissions guard (fail closed): @Public() still bypasses everything, even with no principal at all', () => {
+  assert.equal(guard.canActivate(fakeContext(PublicFixture, 'publicRoute', undefined)), true);
+});
+
+test('permissions guard (fail closed): @SelfService() is accepted as the access decision for an authenticated principal holding no permissions', () => {
+  const user = principal({ permissions: [] });
+  assert.equal(guard.canActivate(fakeContext(SelfServiceFixture, 'selfRoute', user)), true);
+});
+
+test('permissions guard (fail closed): @SelfService() still requires authentication', () => {
+  assert.throws(
+    () => guard.canActivate(fakeContext(SelfServiceFixture, 'selfRoute', undefined)),
+    (err: unknown) => {
+      assert.ok(err instanceof DomainError);
+      assert.equal((err as DomainError).status, 401);
+      return true;
+    },
+  );
+});
+
+test('permissions guard (fail closed): @DynamicPermission(reason) is accepted as the access decision -- the SERVICE, not this guard, enforces the real permission', () => {
+  const user = principal({ permissions: [] });
+  assert.equal(guard.canActivate(fakeContext(DynamicPermissionFixture, 'dynamicRoute', user)), true);
+});
+
+test('permissions guard (fail closed): @AnyAuthenticated(reason) is accepted as the access decision for any authenticated principal', () => {
+  const user = principal({ permissions: [] });
+  assert.equal(guard.canActivate(fakeContext(AnyAuthenticatedFixture, 'anyAuthRoute', user)), true);
+});
+
+test('permissions guard (fail closed): a real @Permissions(...) route is unaffected by the fail-closed change', () => {
+  assert.throws(
+    () => guard.canActivate(fakeContext(StaticPermissionFixture, 'staticRoute', principal({ permissions: [] }))),
+    (err: unknown) => {
+      assert.ok(err instanceof DomainError);
+      assert.equal((err as DomainError).status, 403);
+      return true;
+    },
+  );
+  const allowed = principal({ permissions: ['masterdata:material:read'] });
+  assert.equal(guard.canActivate(fakeContext(StaticPermissionFixture, 'staticRoute', allowed)), true);
 });

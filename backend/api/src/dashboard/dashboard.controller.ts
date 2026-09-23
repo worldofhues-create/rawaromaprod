@@ -17,18 +17,20 @@
  * unchanged — this gate controls WHO may run a trace at all, not what a given caller sees.
  */
 import { Controller, Get, Param } from '@nestjs/common';
-import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { AnyAuthenticated, CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
 import { DashboardService } from './dashboard.service.js';
 
 @Controller()
 export class DashboardController {
   constructor(private readonly dashboard: DashboardService) {}
 
+  @AnyAuthenticated('every authenticated caller gets a dashboard; DashboardService.snapshot self-masks product identity/real material codes/spend by the caller\'s own permissions instead of denying access to the route')
   @Get('v1/dashboard')
   snapshot(@CurrentUser() principal: AuthPrincipal) {
     return this.dashboard.snapshot(principal);
   }
 
+  @AnyAuthenticated('every authenticated caller gets a response; DashboardService.alerts role-filters which alert cards are included instead of denying access to the route')
   @Get('v1/alerts')
   alerts(@CurrentUser() principal: AuthPrincipal) {
     return this.dashboard.alerts(principal);

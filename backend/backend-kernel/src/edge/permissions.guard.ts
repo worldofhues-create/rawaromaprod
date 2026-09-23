@@ -1,13 +1,32 @@
 /**
  * PermissionsGuard — RBAC enforcement. Reads `@Permissions('domain:resource:action', …)`
  * via the Reflector and checks the principal holds ALL of them (AND). Runs after
- * `JwtAuthGuard`, so `request.user` is present. `super_admin` short-circuits for ORDINARY
- * permissions (holds them implicitly) — but NEVER for a vault-sensitive permission
- * (§107/§108/§109: "super_admin/owner/admin get NO implicit vault plaintext"). A god-mode
- * role must still hold `formula:actual:read` (or any future `vault:*` permission)
- * EXPLICITLY, granted only to the roles Vault authority names for it (scripts/ra-roles.ts:
- * `formulator`, `vault_approver`) — fail closed. Portal gating is the JWT audience layer;
- * this is the role layer.
+ * `JwtAuthGuard`, so `request.user` is present (except `@Public()` routes, which this guard
+ * also short-circuits — see below). `super_admin` short-circuits for ORDINARY permissions
+ * (holds them implicitly) — but NEVER for a vault-sensitive permission (§107/§108/§109:
+ * "super_admin/owner/admin get NO implicit vault plaintext"). A god-mode role must still hold
+ * `formula:actual:read` (or any future `vault:*` permission) EXPLICITLY, granted only to the
+ * roles Vault authority names for it (scripts/ra-roles.ts: `formulator`, `vault_approver`) —
+ * fail closed. Portal gating is the JWT audience layer; this is the role layer.
+ *
+ * FAIL CLOSED (security review — this guard used to fail OPEN): a route carrying no
+ * `@Permissions(...)` used to be let through unconditionally, on the unstated assumption that
+ * "no decorator" meant "the author deliberately left this open." That assumption is exactly
+ * the bug — a route can end up undecorated by omission (forgetting the decorator) just as
+ * easily as by design, and this guard could not tell the two apart. Every route must now carry
+ * an EXPLICIT access decision, one of:
+ *
+ *   `@Permissions(...)`      a static permission list (the common case, checked below)
+ *   `@Public()`              no auth at all — checked first, short-circuits everything
+ *   `@SelfService()`         acts only on the caller's own identity/session
+ *   `@DynamicPermission(r)`  the SERVICE checks a per-resource permission the Reflector
+ *                            can't see statically, and throws `ForbiddenException` itself
+ *   `@AnyAuthenticated(r)`   deliberately open to every authenticated caller; the service
+ *                            self-masks/filters output instead of denying
+ *
+ * A route with NONE of these is denied — see `route-inventory.test.ts` for the startup check
+ * that enumerates every controller route and fails the build if one has no decision at all,
+ * and `permissions-guard.test.ts` for the guard-level proof that an unmarked route is denied.
  */
 import {
   type CanActivate,
@@ -18,7 +37,13 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import type { Permission } from '@core/contracts';
-import { META_PERMISSIONS } from '../decorators/metadata.keys.js';
+import {
+  META_ANY_AUTHENTICATED,
+  META_DYNAMIC_PERMISSION,
+  META_PERMISSIONS,
+  META_PUBLIC,
+  META_SELF_SERVICE,
+} from '../decorators/metadata.keys.js';
 import { DomainError } from './domain-error.js';
 import type { RequestWithUser } from './principal.js';
 import { SECURITY_AUDIT_SINK, type SecurityAuditSink } from './security-audit-sink.js';
@@ -74,14 +99,74 @@ export class PermissionsGuard implements CanActivate {
   // synchronous", which the security review's requirement ("write an audit row") does not
   // depend on.
   canActivate(context: ExecutionContext): boolean {
-    const required = this.reflector.getAllAndOverride<Permission[]>(META_PERMISSIONS, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (!required || required.length === 0) return true;
+    const handler = context.getHandler();
+    const klass = context.getClass();
+
+    // `@Public()` opts all the way out — no auth, no permission. Checked first so it never
+    // even looks at `request.user`, which `JwtAuthGuard` may not have populated for it.
+    const isPublic = this.reflector.getAllAndOverride<boolean>(META_PUBLIC, [handler, klass]);
+    if (isPublic) return true;
 
     const request = context.switchToHttp().getRequest<RequestWithUser>();
     const user = request.user;
+
+    const required = this.reflector.getAllAndOverride<Permission[]>(META_PERMISSIONS, [
+      handler,
+      klass,
+    ]);
+
+    if (!required || required.length === 0) {
+      // No static permission list. FAIL CLOSED unless the route explicitly documents why —
+      // one of the markers below — rather than treating the omission itself as consent.
+      const isSelfService = this.reflector.getAllAndOverride<boolean>(META_SELF_SERVICE, [
+        handler,
+        klass,
+      ]);
+      const dynamicReason = this.reflector.getAllAndOverride<string>(META_DYNAMIC_PERMISSION, [
+        handler,
+        klass,
+      ]);
+      const anyAuthReason = this.reflector.getAllAndOverride<string>(META_ANY_AUTHENTICATED, [
+        handler,
+        klass,
+      ]);
+      const hasDecision = isSelfService || Boolean(dynamicReason) || Boolean(anyAuthReason);
+
+      if (!user) {
+        throw DomainError.unauthorized('AUTH_TOKEN_INVALID', 'Authentication required');
+      }
+      if (hasDecision) return true;
+
+      // No decision at all — this is the bug class the fail-open guard used to hide. Deny, and
+      // always audit it (unlike the ordinary missing-permission case below, which is only
+      // audited for vault/formula-decision codes): a route reaching here means either a real
+      // attacker probing an endpoint, or a developer who forgot a decorator — either way, worth
+      // a permanent record rather than a silent 403.
+      if (this.auditSink) {
+        void this.auditSink
+          .record({
+            actorId: user.userId,
+            action: 'security.permission.no_decision',
+            entityType: 'permission',
+            entityId: null,
+            reason: `${klass?.name ?? 'UnknownController'}.${String(handler?.name ?? 'unknownHandler')} has no @Permissions/@Public/@SelfService/@DynamicPermission/@AnyAuthenticated`,
+            requestId: request.requestId ?? null,
+            ip: request.ip ?? null,
+            result: 'refuse',
+          })
+          .catch(() => {
+            // Same rule as every other audit write here: never let a logging failure change
+            // or delay the 403 that was already happening.
+          });
+      }
+      throw DomainError.forbidden(
+        'AUTH_FORBIDDEN',
+        `${klass?.name ?? 'This'}.${String(handler?.name ?? 'route')} has no access decision — `
+          + 'add @Permissions(...), @Public(), @SelfService(), @DynamicPermission(reason), or '
+          + '@AnyAuthenticated(reason).',
+      );
+    }
+
     if (!user) {
       throw DomainError.unauthorized('AUTH_TOKEN_INVALID', 'Authentication required');
     }

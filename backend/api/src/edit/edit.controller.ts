@@ -4,13 +4,14 @@
  * static @Permissions decorator (which can't vary by :resource) isn't used here.
  */
 import { Body, Controller, Param, Patch } from '@nestjs/common';
-import { CurrentUser, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, DynamicPermission, type AuthPrincipal } from '@core/backend-kernel';
 import { EditService } from './edit.service.js';
 
 @Controller()
 export class EditController {
   constructor(private readonly svc: EditService) {}
 
+  @DynamicPermission('REGISTRY[resource].perm checked in EditService.update before any read/write')
   @Patch('v1/masters/:resource/:id')
   update(
     @Param('resource') resource: string,
