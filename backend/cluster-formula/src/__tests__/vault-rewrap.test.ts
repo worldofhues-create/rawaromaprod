@@ -148,7 +148,7 @@ test('vault-rewrap: dry-run performs ZERO writes', async () => {
   const { formulaId } = await newApprovedFormula();
   const before_ = (await db.select().from(formulaVault).where(eq(formulaVault.formulaId, formulaId)))[0]!;
 
-  const report = await runRewrap({ db: db as any, sourceKms, targetKms, apply: false });
+  const report = await runRewrap({ db: db as any, sourceKms, targetKms, apply: false, formulaIds: [formulaId] });
   assert.ok(report.rewrapped >= 1);
   assert.equal(report.applied, false);
 
@@ -161,7 +161,7 @@ test('vault-rewrap: dry-run performs ZERO writes', async () => {
 test('vault-rewrap: APPLY rewraps encryption_key_ref/vault_location AND preserves the DEK — a pre-rewrap-sealed ingredient still decrypts correctly post-rewrap through the NEW adapter', async () => {
   const { formulaId, versionId, materialId, percentage } = await newApprovedFormula();
 
-  const report = await runRewrap({ db: db as any, sourceKms, targetKms, apply: true });
+  const report = await runRewrap({ db: db as any, sourceKms, targetKms, apply: true, formulaIds: [formulaId] });
   assert.equal(report.applied, true);
   assert.equal(report.failed, 0);
 
@@ -186,12 +186,12 @@ test('vault-rewrap: APPLY rewraps encryption_key_ref/vault_location AND preserve
 
 test('vault-rewrap: IDEMPOTENT — a second APPLY run rewraps nothing further for already-migrated rows', async () => {
   const { formulaId } = await newApprovedFormula();
-  const first = await runRewrap({ db: db as any, sourceKms, targetKms, apply: true });
+  const first = await runRewrap({ db: db as any, sourceKms, targetKms, apply: true, formulaIds: [formulaId] });
   assert.ok(first.rewrapped >= 1);
   const rowAfterFirst = (await db.select().from(formulaVault).where(eq(formulaVault.formulaId, formulaId)))[0]!;
   assert.ok(rowAfterFirst.encryptionKeyRef!.startsWith('aws-kms:'));
 
-  await runRewrap({ db: db as any, sourceKms, targetKms, apply: true });
+  await runRewrap({ db: db as any, sourceKms, targetKms, apply: true, formulaIds: [formulaId] });
   // NOTE: this shared `formula` schema/DB is used by every test FILE in this directory (one
   // throwaway DB for the whole `pnpm test` run — db.ts), and node's test runner can run test
   // FILES concurrently, so asserting a GLOBAL `second.rewrapped === 0` is racy: another file
@@ -214,8 +214,8 @@ test('vault-rewrap: IDEMPOTENT — a second APPLY run rewraps nothing further fo
 });
 
 test('vault-rewrap: appends a real audit row (action=vault.kms_rewrapped) for each APPLY rewrap', async () => {
-  await newApprovedFormula();
-  await runRewrap({ db: db as any, sourceKms, targetKms, apply: true });
+  const { formulaId } = await newApprovedFormula();
+  await runRewrap({ db: db as any, sourceKms, targetKms, apply: true, formulaIds: [formulaId] });
 
   const rows = await db
     .select()

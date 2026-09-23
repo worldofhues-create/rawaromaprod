@@ -42,7 +42,7 @@
  */
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
-import { eq } from 'drizzle-orm';
+import { eq, inArray } from 'drizzle-orm';
 import * as formulaSchema from '@ra/data-formula';
 import { ConfigService } from '../backend/backend-kernel/src/config/config.service.js';
 import { EnvKmsAdapter } from '../backend/cluster-formula/src/crypto/env-kms.adapter.js';
@@ -80,10 +80,14 @@ export async function runRewrap(opts: {
   sourceKms: KmsPort;
   targetKms: KmsPort;
   apply: boolean;
+  /** Restrict to these formulas (staged migration; also keeps parallel tests off each other's rows). */
+  formulaIds?: string[];
 }): Promise<RewrapReport> {
-  const { db, sourceKms, targetKms, apply } = opts;
+  const { db, sourceKms, targetKms, apply, formulaIds } = opts;
   const vault = new VaultService(db as never, targetKms);
-  const rows = await db.select().from(formulaVault);
+  const rows = formulaIds
+    ? await db.select().from(formulaVault).where(inArray(formulaVault.formulaId, formulaIds))
+    : await db.select().from(formulaVault);
 
   const report: RewrapReport = {
     totalRows: rows.length,
