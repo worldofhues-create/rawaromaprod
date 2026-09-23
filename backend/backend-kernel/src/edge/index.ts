@@ -3,6 +3,7 @@ export { JwtService, type AccessClaims, type RefreshClaims } from './jwt.service
 export { JwtModule } from './jwt.module.js';
 export { JwtAuthGuard } from './jwt-auth.guard.js';
 export { PermissionsGuard } from './permissions.guard.js';
+export { FreshAuthGuard } from './fresh-auth.guard.js';
 export { FlagGuard } from './flag.guard.js';
 export { RateLimitGuard } from './rate-limit.guard.js';
 export { ResponseEnvelopeInterceptor } from './response-envelope.interceptor.js';
