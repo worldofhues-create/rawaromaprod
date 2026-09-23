@@ -7,11 +7,14 @@
  * deliberately NOT a mock; the whole point of the concurrency tests is that a fake db can't lie
  * about lock contention the way a real one can't.
  *
- *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_rp_r1b_test (default)
+ *   TEST_DATABASE_URL=postgres://apple@localhost:5432/rawprod_rp_policy_test (default)
  *
- * R1B (lane F7): this is lane F7's OWN database (rp_r1b), never shared with lane F's
+ * F8 (lane rp-policy): this is lane F8's OWN database (rp_policy), never shared with lane F's
  * factory_sm, lane F2's factory_sm2, lane F3's rp_proc, lane F4's mixabort, lane F5's
- * rp_deadtables, lane F6's rp_emit, or any other lane's throwaway test DB.
+ * rp_deadtables, lane F6's rp_emit, lane F7's rp_r1b, or any other lane's throwaway test DB —
+ * per the parallel-lane rule, two lanes never share a test DB, and the schema-application
+ * advisory lock below gets its own key so it can't collide with another lane's concurrent test
+ * run against a different DB on the same Postgres instance (commit 4e8622a's pattern).
  */
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -25,12 +28,13 @@ import * as inventorySchema from '@ra/data-inventory';
 import * as qualitySchema from '@ra/data-quality';
 import * as procurementSchema from '@ra/data-procurement';
 import * as bridgeSchema from '@ra/data-bridge';
+import * as orgSchema from '@ra/data-org';
 import type { AuthPrincipal } from '../backend-kernel/src/edge/principal.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 export const TEST_DATABASE_URL =
-  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_rp_r1b_test';
+  process.env.TEST_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_rp_policy_test';
 
 let client: Sql | undefined;
 let ready: Promise<void> | undefined;
@@ -56,8 +60,9 @@ export async function ensureSchema(): Promise<void> {
   if (!ready) {
     ready = (async () => {
       const sql = testClient();
-      // Arbitrary fixed lock key for "the r1b (lane F7) test schema" — distinct from other lanes' keys.
-      await sql`select pg_advisory_lock(392847561)`;
+      // Arbitrary fixed lock key for "the rp-policy (lane F8) test schema" — distinct from other
+      // lanes' keys (e.g. lane F7's r1b key 392847561).
+      await sql`select pg_advisory_lock(819273645)`;
       try {
         // R1B: skip re-applying schema.sql once some OTHER process has already fully applied
         // it. Before this check, EVERY test-file process re-ran the whole script — harmless in
@@ -78,7 +83,7 @@ export async function ensureSchema(): Promise<void> {
           await sql.unsafe(ddl);
         }
       } finally {
-        await sql`select pg_advisory_unlock(392847561)`;
+        await sql`select pg_advisory_unlock(819273645)`;
       }
     })();
   }
@@ -113,6 +118,10 @@ export function bridgeDb(): PostgresJsDatabase<typeof bridgeSchema> {
   return drizzle(testClient(), { schema: bridgeSchema });
 }
 
+export function orgDb(): PostgresJsDatabase<typeof orgSchema> {
+  return drizzle(testClient(), { schema: orgSchema });
+}
+
 export {
   productionSchema,
   packagingSchema,
@@ -121,6 +130,7 @@ export {
   qualitySchema,
   procurementSchema,
   bridgeSchema,
+  orgSchema,
 };
 
 /** A minimal AuthPrincipal fixture. `roles`/`permissions` let a test exercise the RBAC guard too. */
