@@ -7,6 +7,12 @@
   // Render, so the backend host never appears in the network tab). Override with window.RA_API.
   var API = (typeof window.RA_API === 'string') ? window.RA_API
     : (/(localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+  // PB-04 / SB-02: where "Sign in via ALEMBIC" sends the browser — ALEMBIC's own console,
+  // which mints a short-lived signed assertion and returns here with it in the URL FRAGMENT
+  // (never a query string a server would log) at `#assertion=<token>`. Same deploy-time
+  // override convention as window.RA_API; unset renders an honest "not configured" notice
+  // rather than a guessed URL.
+  var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
 
   /* ---------------- encrypted tunnel (ECDH P-256 → AES-256-GCM, single /rpc) ---------------- */
   var AES = null, KID = null, hsP = null, session = null;
@@ -60,7 +66,7 @@
     }
     var inner = JSON.parse(await openCipher(outer.data.enc));
     // Access token expired mid-session (15-min TTL) → silently refresh once and retry, so the user isn't bounced.
-    if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login') {
+    if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login' && path !== '/auth/alembic-assertion') {
       var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
       if (rt) {
         var rr = await tunnel('/auth/refresh', { method: 'POST', body: { refreshToken: rt } }, true);
@@ -1967,35 +1973,36 @@
   window.addEventListener('resize', function () { if (st.role) { applyResponsive(); } });
 
   /* ---------------- login ---------------- */
-  // Login/session chrome — composed from ALEMBIC primitives (.card + .fld + .btn.p): ALEMBIC's own
-  // captured reference has no login screen to port 1:1 (ALEMBIC_DEV_AUTH=1 skips it in dev, and a
-  // real session absent renders StaffSignIn — see PORTING_GUIDE.md §Nav gating by permission), so
-  // per addendum §1 ("where ALEMBIC has no exact equivalent, compose from ALEMBIC primitives") this
-  // composes the shared card/field/button grammar rather than inventing a new visual style.
+  // PB-04 / SB-02: password sign-in is retired for launch (FINAL_OS §2.4/§9). The only online
+  // staff identity rail is ALEMBIC's — one email-OTP sign-in there, then "Open Factory" mints a
+  // short-lived signed assertion this console exchanges (see `loginWithAssertion`/`boot` below)
+  // for the same `{accessToken, refreshToken, user}` shape `/auth/login` used to mint, so
+  // `enterPortal` and everything downstream of it is unchanged. `backend/cluster-org/src/auth/
+  // auth.service.ts` refuses `/auth/login` unconditionally once APP_ENV=prod.
+  //
+  // Composed from ALEMBIC primitives (.card + .btn.p), same reasoning the original password
+  // screen's own comment gave: per addendum §1 ("where ALEMBIC has no exact equivalent, compose
+  // from ALEMBIC primitives") this uses the shared card/button grammar rather than a new style.
   function showLogin() {
     $('app').className = '';
     $('app').innerHTML =
       '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--s-base)">' +
-      '<form id="lf" class="card" style="width:100%;max-width:380px;padding:var(--s-open) var(--s-loose);text-align:center">' +
+      '<div class="card" style="width:100%;max-width:380px;padding:var(--s-open) var(--s-loose);text-align:center">' +
         '<div style="width:52px;height:52px;border-radius:var(--r-lg);background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;margin:0 auto var(--s-base)">' + icon('droplet', 22) + '</div>' +
         '<div style="font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.18em;color:var(--ink-3);font-weight:var(--w-med)">RAW AROMA CHEM</div>' +
         '<h1 style="font:var(--w-light) var(--t-fig)/var(--lh-fig) var(--font-ui);margin:6px 0 8px;letter-spacing:var(--ls-tight)">Production Portal</h1>' +
-        '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-base)">Sign in. Your role is assigned by an administrator — you see only what it allows.</p>' +
-        '<input id="le" class="fld" type="email" autocomplete="username" required placeholder="you@rawaroma.local" style="margin-bottom:var(--s-tight)">' +
-        '<input id="lp" class="fld" type="password" autocomplete="current-password" required placeholder="Password" style="margin-top:var(--s-tight)">' +
-        '<div id="lerr" style="min-height:18px;font:var(--w-med) var(--t-cap)/1.3 var(--font-ui);color:var(--red);text-align:left;margin:var(--s-tight) 0"></div>' +
-        '<button id="lb" type="submit" class="btn p" style="width:100%;justify-content:center;height:var(--s-open)">Enter portal &rarr;</button>' +
+        '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-base)">Sign in once on ALEMBIC, then choose "Open Factory" — no separate password. Your role is assigned by an administrator; you see only what it allows.</p>' +
+        '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p" style="width:100%;justify-content:center;height:var(--s-open);text-decoration:none' + (ALEMBIC_CONSOLE_URL ? '' : ';opacity:.5;pointer-events:none') + '">Sign in via ALEMBIC &rarr;</a>' +
+        '<div id="lerr" style="min-height:18px;font:var(--w-med) var(--t-cap)/1.3 var(--font-ui);color:var(--red);text-align:left;margin:var(--s-tight) 0">' + (ALEMBIC_CONSOLE_URL ? '' : 'This build has no ALEMBIC console configured (window.ALEMBIC_CONSOLE_URL is unset).') + '</div>' +
         '<div style="margin-top:var(--s-snug);font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.08em;color:var(--ink-3)">&#128274; END-TO-END ENCRYPTED CHANNEL</div>' +
-      '</form></div>';
-    $('lf').onsubmit = function (e) {
-      e.preventDefault(); var lb = $('lb'), le = $('lerr'); le.textContent = ''; lb.disabled = true; lb.textContent = 'Securing channel…';
-      tunnel('/auth/login', { method: 'POST', body: { identifier: $('le').value, password: $('lp').value } }).then(function (res) {
-        lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;';
-        var d = res.json && res.json.data;
-        if (res.status >= 400 || !d || !d.accessToken) { le.textContent = (res.json && res.json.error && res.json.error.message) || 'Invalid email or password.'; return; }
-        if (!enterPortal(d)) { le.textContent = 'No portal is assigned to your role yet.'; session = null; }
-      }).catch(function () { lb.disabled = false; lb.innerHTML = 'Enter portal &rarr;'; le.textContent = 'Cannot establish a secure connection.'; });
-    };
+      '</div></div>';
+  }
+
+  /** Exchange an ALEMBIC-signed assertion for a session, the same shape `/auth/login` used
+   *  to mint (`loginWithAssertion` on the RawProd backend derives roles/perms from ITS OWN
+   *  `iam.user_master`, never from the assertion — see that file's header). */
+  function loginWithAssertion(token) {
+    return tunnel('/auth/alembic-assertion', { method: 'POST', body: { assertion: token } });
   }
 
   // Establish the session from a login/refresh result, persist the refresh token (survives reloads),
@@ -2014,8 +2021,33 @@
     return true;
   }
 
+  // PB-04 / SB-02: a redirect back from ALEMBIC's "Open Factory" lands here with
+  // `#assertion=<token>` in the URL fragment (never a query string a server would log).
+  // Checked BEFORE any stored refresh token, so a fresh explicit sign-in always wins over a
+  // stale one — and the fragment is scrubbed with `history.replaceState` (fires no
+  // `hashchange`) before the exchange even starts, so a single-use token never lingers in the
+  // address bar for longer than it takes to read it.
+  function consumeAssertionFromHash() {
+    var m = /(?:^|[#&])assertion=([^&]+)/.exec(location.hash);
+    if (!m) return null;
+    var token = decodeURIComponent(m[1]);
+    history.replaceState(null, '', location.pathname + location.search);
+    return loginWithAssertion(token).then(function (res) {
+      var d = res.json && res.json.data;
+      if (res.status < 400 && d && d.accessToken && enterPortal(d)) return;
+      showLogin();
+      var le = $('lerr');
+      if (le) le.textContent = (res.json && res.json.error && res.json.error.message) || 'Could not complete sign-in from ALEMBIC.';
+    }).catch(function () {
+      showLogin();
+      var le = $('lerr'); if (le) le.textContent = 'Cannot establish a secure connection.';
+    });
+  }
+
   function boot() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
+    var assertionExchange = consumeAssertionFromHash();
+    if (assertionExchange) { assertionExchange.then(function () {}); return; }
     var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
     if (!rt) { showLogin(); return; }
     // Returning user — restore the session from the stored refresh token instead of forcing re-login.

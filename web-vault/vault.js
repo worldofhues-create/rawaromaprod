@@ -136,11 +136,16 @@
   function hasPerm(p) { return session.permissions.indexOf(p) >= 0; }
   function isFresh() { return session.token && (Date.now() / 1000 - session.iat) < (FRESH_WINDOW_S - 15); }
 
-  async function login(email, password) {
-    var data = await api('/auth/login', { method: 'POST', body: { identifier: email, password: password } });
+  /* PB-04 / SB-02: password sign-in is retired for launch (FINAL_OS §2.4/§9). ALEMBIC's
+   * email-OTP session is the only online staff identity rail; this exchanges a short-lived
+   * signed assertion (minted there, on "Open Vault") for a session here, the same shape
+   * `POST /auth/login` used to mint. `backend/cluster-org/src/auth/auth.service.ts` refuses
+   * `/auth/login` unconditionally once APP_ENV=prod. */
+  async function loginWithAssertion(assertion) {
+    var data = await api('/auth/alembic-assertion', { method: 'POST', body: { assertion: assertion } });
     session.token = data.accessToken;
     session.iat = Math.floor(Date.now() / 1000); // token was just minted — this IS its iat
-    session.email = (data.user && data.user.email) || email;
+    session.email = (data.user && data.user.email) || null;
     var me = await api('/me');
     session.userId = me.userId;
     session.roles = me.roles || [];
@@ -153,11 +158,77 @@
     render();
   }
 
+  /* Where "Open ALEMBIC" sends the browser to confirm a fresh code — same deploy-time
+   * convention as `VAULT_API`/`PLATFORM_API`. Unset is an honest "not configured", never a
+   * guessed URL. */
+  var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
+
+  /* Consumes `#assertion=...` left in the URL by an ALEMBIC redirect. `history.replaceState`
+   * does not fire `hashchange`, so this cannot loop back into itself — see the identical
+   * mechanism (and the fragment-not-query-string reasoning) in web-platform/platform.js. */
+  var consumingAssertion = false;
+  async function tryConsumeAssertion() {
+    var m = /(?:^|[#&])assertion=([^&]+)/.exec(location.hash);
+    if (!m || consumingAssertion) return false;
+    consumingAssertion = true;
+    var token = decodeURIComponent(m[1]);
+    // Scrub the fragment BEFORE the exchange, not after — a single-use token must not sit in
+    // the address bar even for the duration of one network round trip, and this also means a
+    // later `location.hash = '#/formulas'` below cannot be clobbered by a stale scrub.
+    history.replaceState(null, '', location.pathname + location.search);
+    try {
+      await loginWithAssertion(token);
+      if (!hasPerm('formula:actual:read') && !session.permissions.some(function (p) { return p.indexOf('formula:') === 0; }) && !hasPerm('platform:flag:write')) {
+        toast('Signed in, but this account holds no Vault permission. Contact an admin for a formulator/vault_approver role.', true);
+        logout();
+      } else {
+        location.hash = '#/formulas';
+      }
+    } catch (e) {
+      toast('Could not complete sign-in from ALEMBIC: ' + ((e instanceof VaultError) ? e.message : 'unknown error'), true);
+    }
+    consumingAssertion = false;
+    return true;
+  }
+
+  /** Offer to re-authenticate on ALEMBIC. Password re-entry is retired, so there is no way
+   *  to mint a fresh token IN PLACE any more — ALEMBIC is a separate, sole identity provider
+   *  (FINAL_OS §2.4/§9) and this console holds no credential of its own to re-present.
+   *
+   *  THE TRADE-OFF, WRITTEN DOWN rather than pretended away: the old inline password prompt
+   *  could retry the caller's pending action after re-auth, in place. A trip to ALEMBIC
+   *  cannot — this console keeps nothing in storage by design (§109.4, "short idle
+   *  session"), so returning from ALEMBIC is a NEW tab with a NEW session, not a resumed one.
+   *  `withFreshAuth` below ends this tab's session rather than leave it holding a stale
+   *  token, and the operator is told to repeat the action once signed in again — an honest
+   *  extra step, not a silent "resume" this app cannot actually do. */
+  function offerReauthViaAlembic() {
+    return new Promise(function (resolve) {
+      openDialog('Re-authenticate to continue', function (body, close) {
+        body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [
+          'This action requires a session issued within the last ' + Math.round(FRESH_WINDOW_S / 60)
+          + ' minutes. Password re-entry is retired for this console — confirm a fresh code on '
+          + 'ALEMBIC, then choose "Open Vault" there again.',
+        ]));
+        var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
+          h('button', { class: 'btn p', onclick: function () {
+            if (ALEMBIC_CONSOLE_URL) window.open(ALEMBIC_CONSOLE_URL, '_blank', 'noopener');
+            close(); resolve();
+          } }, ['Open ALEMBIC →']),
+          h('button', { class: 'btn', onclick: function () { close(); resolve(); } }, ['Cancel']),
+        ]);
+        body.appendChild(actions);
+        if (!ALEMBIC_CONSOLE_URL) {
+          body.appendChild(h('div', { class: 'err' }, ['This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).']));
+        }
+      });
+    });
+  }
+
   /** Run `fn` (an async function making one or more `api()` calls). If it fails with
-   * AUTH_STEP_UP_REQUIRED — or the client already knows the token is stale — prompt for the
-   * password once, re-login (which mints a fresh token/iat), then retry `fn` exactly once.
-   * This is §109.5's whole flow: "fresh authentication ... may reuse a freshly issued OTP/
-   * password at launch" — re-running the SAME login the caller already has, not a new factor. */
+   * AUTH_STEP_UP_REQUIRED — or the client already knows the token is stale — this console can
+   * no longer re-prove freshness itself (see `offerReauthViaAlembic`): it ends the session and
+   * refuses, naming the one door that remains. */
   async function withFreshAuth(fn) {
     if (isFresh()) {
       try { return await fn(); }
@@ -165,10 +236,9 @@
         if (!(e instanceof VaultError) || e.code !== 'AUTH_STEP_UP_REQUIRED') throw e;
       }
     }
-    var password = await promptReauth();
-    if (password == null) throw new VaultError('CANCELLED', 'Re-authentication cancelled.', 0);
-    await login(session.email, password);
-    return fn();
+    await offerReauthViaAlembic();
+    logout();
+    throw new VaultError('REAUTH_REQUIRED', 'Confirm a fresh code on ALEMBIC, then open Vault again from there.', 0);
   }
 
   /* ---------------------------------------------------------------------------------------
@@ -237,26 +307,6 @@
     });
   }
 
-  function promptReauth() {
-    return new Promise(function (resolve) {
-      openDialog('Re-authenticate to continue', function (body, close) {
-        var err = h('div', { class: 'err' });
-        var pw = h('input', { class: 'fld', type: 'password', autocomplete: 'current-password', placeholder: 'Password' });
-        body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' },
-          ['This action requires a session issued within the last ' + Math.round(FRESH_WINDOW_S / 60) + ' minutes. Re-enter your password for ' + session.email + '.']));
-        body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Password']), pw]));
-        body.appendChild(err);
-        var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
-          h('button', { class: 'btn p', onclick: function () { resolve(pw.value); close(); } }, ['Confirm']),
-          h('button', { class: 'btn', onclick: function () { resolve(null); close(); } }, ['Cancel']),
-        ]);
-        body.appendChild(actions);
-        pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') { resolve(pw.value); close(); } });
-        setTimeout(function () { pw.focus(); }, 0);
-      });
-    });
-  }
-
   function promptReason(label) {
     return new Promise(function (resolve) {
       openDialog(label || 'Access reason required', function (body, close) {
@@ -304,36 +354,29 @@
    * --------------------------------------------------------------------------------------- */
   var root = document.getElementById('root');
 
+  /* PB-04 / SB-02: no password form. The only door is ALEMBIC — a formulator/vault_approver
+   * (or an admin, per the eligibility gate) signs in there and clicks "Open Vault", which is
+   * itself gated behind a FRESH ALEMBIC step-up (see `rawprod-eligibility.ts` /
+   * `rawprod-assertion.ts` in that repository) — this console's own FreshAuth window then
+   * starts from that same moment. This screen renders only when there is no session AND no
+   * assertion in the URL to consume (`tryConsumeAssertion`, above). */
   function renderLogin() {
     root.innerHTML = '';
     var err = h('div', { class: 'err' });
-    var email = h('input', { class: 'fld', type: 'email', autocomplete: 'username', placeholder: 'you@rawaroma.local', style: 'width:100%' });
-    var pw = h('input', { class: 'fld', type: 'password', autocomplete: 'current-password', placeholder: 'Password', style: 'width:100%' });
-    var btn = h('button', { class: 'btn p', style: 'width:100%;justify-content:center' }, ['Sign in']);
-    async function submit() {
-      btn.disabled = true; btn.textContent = 'Signing in…'; err.textContent = '';
-      try {
-        await login(email.value.trim(), pw.value);
-        if (!hasPerm('formula:actual:read') && !session.permissions.some(function (p) { return p.indexOf('formula:') === 0; }) && !hasPerm('platform:flag:write')) {
-          err.textContent = 'Signed in, but this account holds no Vault permission. Contact an admin for a formulator/vault_approver role.';
-          btn.disabled = false; btn.textContent = 'Sign in';
-          return;
-        }
-        location.hash = '#/formulas';
-        render();
-      } catch (e) {
-        err.textContent = (e instanceof VaultError) ? e.message : 'Could not sign in.';
-        btn.disabled = false; btn.textContent = 'Sign in';
-      }
+    var goBtn = h('a', {
+      class: 'btn p', style: 'width:100%;justify-content:center;text-decoration:none',
+      href: ALEMBIC_CONSOLE_URL || '#',
+    }, ['Sign in via ALEMBIC →']);
+    if (!ALEMBIC_CONSOLE_URL) {
+      goBtn.setAttribute('aria-disabled', 'true');
+      goBtn.style.opacity = '0.5'; goBtn.style.pointerEvents = 'none';
+      err.textContent = 'This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).';
     }
-    btn.addEventListener('click', submit);
-    pw.addEventListener('keydown', function (e) { if (e.key === 'Enter') submit(); });
     var card = h('div', { class: 'login-card' }, [
       h('div', { class: 'mark' }, ['Formula Vault']),
       h('div', { class: 'sub' }, ['Raw Aroma Chem — secure formula access. Not part of the operator PWA; this session ends on reload.']),
-      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Email']), email]),
-      h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Password']), pw]),
-      btn, err,
+      h('p', { style: 'color:var(--ink-3)' }, ['Sign in on ALEMBIC, then choose "Open Vault" — one login, no separate password.']),
+      goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
   }
@@ -778,7 +821,11 @@
    * 6. bootstrap + route render
    * --------------------------------------------------------------------------------------- */
   async function render() {
-    if (!session.token) { renderLogin(); return; }
+    if (!session.token) {
+      if (await tryConsumeAssertion()) { render(); return; }
+      renderLogin();
+      return;
+    }
     var r = currentRoute();
     if (r.view === 'formula' && r.id) return screenFormula(r.id);
     if (r.view === 'version' && r.id) return screenVersion(r.id);

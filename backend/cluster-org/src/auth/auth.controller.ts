@@ -16,9 +16,11 @@ import {
   loginBody,
   refreshBody,
   setPasswordBody,
+  alembicAssertionBody,
   type LoginBody,
   type RefreshBody,
   type SetPasswordBody,
+  type AlembicAssertionBody,
 } from "./auth.dtos.js";
 
 @Controller()
@@ -39,6 +41,18 @@ export class AuthController {
     @Body(new ZodValidationPipe(refreshBody)) body: RefreshBody,
   ): Promise<LoginResult> {
     return this.auth.refresh(body.refreshToken);
+  }
+
+  /** PB-04 / SB-02 — the one-login identity bridge. ALEMBIC's console posts the
+   *  signed assertion here (never a redirect carrying it in a URL a server would
+   *  log — see that repository's `rawprod-assertion.ts` for why the browser lands
+   *  with it in a fragment instead, and this app's boot script for the exchange). */
+  @Public()
+  @Post("auth/alembic-assertion")
+  loginWithAssertion(
+    @Body(new ZodValidationPipe(alembicAssertionBody)) body: AlembicAssertionBody,
+  ): Promise<LoginResult> {
+    return this.auth.loginWithAssertion(body.assertion);
   }
 
   @Permissions("iam:user_master:write")
