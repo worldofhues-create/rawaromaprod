@@ -387,13 +387,20 @@
     { id: 'audit-mfg', label: 'Manufacturing audit', icon: 'activity', need: 'formula:actual:read' },
   ];
 
+  // Topbar + floating dock, rail off-canvas by default (ALEMBIC parity correction — see
+  // web/ui-contract/shell.css's header comment + ALEMBIC_GUIDE_CORRECTIONS.md). The dock carries
+  // the same NAV set as the rail so every route stays reachable with the rail collapsed; HOT picks
+  // which ones keep a labelled segment in the phone tab-bar variant (vault.css max-width:1024).
   function renderShell(activeView, contentEl) {
     root.innerHTML = '';
-    var navButtons = NAV.filter(function (n) { return !n.need || hasPerm(n.need); }).map(function (n) {
+    var visible = NAV.filter(function (n) { return !n.need || hasPerm(n.need); });
+    var HOT = {}; visible.slice(0, 4).forEach(function (n) { HOT[n.id] = 1; });
+    var navButtons = visible.map(function (n) {
       return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), onclick: function () { location.hash = '#/' + n.id; } },
         [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
     });
     var rail = h('nav', { class: 'rail', id: 'vault-rail' }, [
+      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.menu, 16)]),
       h('button', { class: 'rb' }, [h('div', {}, [h('div', { class: 'mark' }, ['Formula Vault']), h('div', { class: 'sub' }, ['SECURE ZONE'])])]),
       h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['VAULT']), h('div', {}, navButtons)]),
       h('div', { class: 'rme' }, [
@@ -409,9 +416,14 @@
       h('span', {}, ['— formula plaintext is logged on every reveal. Screenshots/exports are the account holder’s responsibility — this banner is a deterrent, not a technical control.']),
       h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()]),
     ]);
-    var toggle = h('button', { class: 'rail-toggle', 'aria-label': 'Toggle navigation', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.menu, 18)]);
-    var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [toggle, h('h1', {}, [NAV.filter(function (n) { return n.id === activeView; })[0] ? NAV.filter(function (n) { return n.id === activeView; })[0].label : 'Formula Vault'])]), h('div', { class: 'content' }, [contentEl])]);
-    root.appendChild(h('div', { class: 'app' }, [rail, main]));
+    var label = visible.filter(function (n) { return n.id === activeView; })[0] ? visible.filter(function (n) { return n.id === activeView; })[0].label : 'Formula Vault';
+    var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [h('h1', {}, [label])]), h('div', { class: 'content' }, [contentEl])]);
+    var dock = h('div', { class: 'qdock', role: 'navigation', 'aria-label': 'Sections' },
+      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.menu, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
+      .concat(visible.map(function (n) {
+        return h('button', { class: 'qb' + (n.id === activeView ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), title: n.label, 'aria-label': n.label, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon], 17), h('span', { class: 'nm' }, [n.label])]);
+      })));
+    root.appendChild(h('div', { class: 'app' }, [rail, main, dock]));
   }
 
   function skeletonCard() {

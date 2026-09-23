@@ -4,7 +4,7 @@
  * network-only and falls straight through, same principle as the factory PWA's sw.js but
  * simpler (this console has no offline-write workflow to support at all — it's read-mostly
  * platform telemetry, not factory operations). */
-const CACHE = 'platform-shell-v1';
+const CACHE = 'platform-shell-v2';
 const SHELL = ['/', '/index.html', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg'];
 
 self.addEventListener('install', (event) => {

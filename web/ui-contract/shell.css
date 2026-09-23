@@ -59,11 +59,24 @@ input,select,textarea{font-family:inherit;color:inherit}
 ::-webkit-scrollbar-thumb{background:var(--line-2);border:3px solid var(--bg);border-radius:var(--r-sm)}
 ::-webkit-scrollbar-track{background:transparent}
 
-/* ---------------- app shell: rail + main (PORTING_GUIDE.md §Shell) ---------------- */
-.app{width:100%;max-width:100%;min-height:100vh;display:grid;grid-template-columns:minmax(0,var(--ch-rail-width)) minmax(0,1fr);background:var(--bg)}
-@media (max-width:767px){ .app{display:block} }
+/* ---------------- app shell: topbar + floating dock, rail off-canvas (ALEMBIC parity) ----------
+ * CORRECTED from the original "rail + bar" reading of PORTING_GUIDE.md §Shell — see
+ * ALEMBIC_GUIDE_CORRECTIONS.md. The real, RENDERED ALEMBIC admin/agent/rac-app consoles (release/
+ * ui/reference/*.png, release/ui/evidence/alembic-{admin,agent,content-studio}/*.png) show a TOP
+ * BAR + a floating BOTTOM command dock with the left rail collapsed (width 0, inert) on first
+ * paint, at every width — 1440, 1024, 768, 375 alike. Source: apps/web/lib/console/admin-console.
+ * jsx "const [rail, setRail] = useState(false); // collapsed by default" + apps/web/app/console.
+ * css "Minimised = the rail folds away and the dock becomes the navigation" (body.rail-off). Below
+ * 1024 the dock itself becomes a full-width bottom tab bar (console.css "tablet and below → a
+ * five-segment tab bar, and the rail as a sheet"). RawProd's rail is kept (still the complete nav,
+ * reachable from the dock's first "Sections" pill) but is now off-canvas by default everywhere,
+ * not a permanently visible column. */
+.app{width:100%;max-width:100%;min-height:100vh;display:block;background:var(--bg)}
 
-.rail{background:var(--rail);color:#EDEDEA;display:flex;flex-direction:column;padding:var(--s-base) var(--s-snug) var(--s-snug);overflow-y:auto;overflow-x:hidden;position:sticky;top:0;height:100vh}
+.rail{background:var(--rail);color:#EDEDEA;display:flex;flex-direction:column;padding:var(--s-base) var(--s-snug) var(--s-snug);overflow-y:auto;overflow-x:hidden;
+  position:fixed;z-index:92;top:0;bottom:0;left:0;width:min(86vw,var(--ch-rail-width));
+  transform:translateX(-100%);transition:transform .28s cubic-bezier(.2,.9,.25,1);box-shadow:none}
+body.rail-open .rail{transform:translateX(0);box-shadow:26px 0 64px -16px rgba(10,10,10,.36)}
 .rail::-webkit-scrollbar{width:0}
 .rail-deep{display:flex;flex-direction:column;gap:var(--s-tight)}
 .rail-deep > div{display:flex;flex-direction:column;gap:2px}
@@ -71,14 +84,10 @@ input,select,textarea{font-family:inherit;color:inherit}
 .rb .m{width:30px;height:30px;border-radius:var(--r-sm);background:var(--accent);color:var(--rail);display:grid;place-items:center;font:var(--w-med) 10.5px/1 var(--font-ui);flex:0 0 auto}
 .rb .t{font:var(--w-med) 13px/1 var(--font-ui);white-space:nowrap;letter-spacing:.01em}
 .rb .t small{display:block;font:var(--w-reg) 9.5px/1 var(--font-ui);color:#87877F;margin-top:4px;letter-spacing:var(--ls-wide)}
-.rail-min{display:none;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--r-sm);color:#BDBDB6}
+/* Always the close control now the rail is off-canvas at every width (ALEMBIC's ".rail-min"
+   "Minimise navigation" — it only ever closes; the dock's "Sections" pill is what opens it). */
+.rail-min{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--r-sm);color:#BDBDB6}
 .rail-min:hover{background:var(--rail-2);color:#fff}
-@media (max-width:767px){ .rail-min{display:flex} }
-/* Mobile nav toggle: lives in the topbar (not inside .rail, which is off-canvas until opened) and
-   the scrim behind the open drawer. Neither is an ALEMBIC-cited class; both are RawProd's own,
-   composed from ALEMBIC primitives (.xp icon button; addendum §1 "compose from primitives"). */
-.bar-burger{display:none}
-@media (max-width:767px){ .bar-burger{display:grid} }
 .rail-scrim{display:none;position:fixed;inset:0;background:rgba(20,20,19,.4);z-index:70}
 .rail-scrim.show{display:block}
 .rs{font:var(--w-reg) 8.5px/1 var(--font-ui);letter-spacing:.18em;color:#6E6E66;padding:var(--s-snug) var(--s-tight) 6px;text-transform:uppercase}
@@ -99,18 +108,57 @@ input,select,textarea{font-family:inherit;color:inherit}
 .rme #ra-logout:hover{background:color-mix(in srgb,var(--rail-2) 85%,#000)}
 
 /* Main column */
-.main{display:flex;flex-direction:column;min-width:0}
+.main{display:flex;flex-direction:column;min-width:0;width:100%}
 .bar{height:var(--ch-topbar-admin);flex:0 0 auto;display:flex;align-items:center;gap:var(--s-tight);padding:0 var(--s-base);background:transparent;flex-wrap:wrap}
 .bar-brand{font:var(--w-reg) var(--t-cap)/1 var(--font-ui);letter-spacing:.02em;color:var(--ink-3);white-space:nowrap}
 .bar-brand i{font-style:normal;margin:0 6px;opacity:.55}
 .bar h1{font:var(--w-med) var(--t-h1)/1 var(--font-ui);margin:0;white-space:nowrap;flex:0 0 auto}
 .bar .crumb{font:var(--w-med) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);white-space:nowrap}
-.content{flex:1;padding:var(--s-tight) var(--s-snug) var(--s-open);min-height:0}
+/* Bottom padding reserved on every width for the floating/tab-bar dock below (18px floating pill
+   at >=1024, a docked full-width tab bar under 1024 — see .qdock) so the last row of a table or
+   card never sits under it. */
+.content{flex:1;padding:var(--s-tight) var(--s-snug) calc(var(--s-open) + 74px);min-height:0}
 @media (max-width:1023px){
   .bar{flex-wrap:wrap;row-gap:var(--s-tight);height:auto;padding:var(--s-snug)}
 }
 @media (max-width:767px){
-  .content{padding:var(--s-snug) var(--s-snug) calc(var(--s-open) + 56px)}
+  .content{padding:var(--s-snug) var(--s-snug) calc(var(--s-open) + 74px)}
+}
+
+/* ---------------- quick-access dock (floating bottom pill / phone tab bar) — ALEMBIC parity ----
+ * Ported from apps/web/app/console.css's .qdock/.qb (>=1024: a centred floating icon pill, the
+ * rail's replacement while it's collapsed) and its "tablet and below → a five-segment tab bar"
+ * block (<1024: a docked full-width bar). `data-nav` on each `.qb` reuses the exact wiring
+ * wireShell() already binds on `.ri` (web/shell.js), so no separate click handling is needed here.
+ */
+.qdock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:520;
+  display:flex;align-items:center;gap:2px;padding:5px;border-radius:var(--r-pill);
+  width:max-content;max-width:calc(100vw - 24px);overflow-x:auto;
+  background:var(--rail);box-shadow:0 14px 34px -14px rgba(20,20,19,.4),0 2px 6px -2px rgba(20,20,19,.24)}
+.qdock::-webkit-scrollbar{display:none}
+.qdock .qb{width:40px;height:40px;flex:0 0 auto;border-radius:14px;border:0;cursor:pointer;position:relative;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  color:#EDEDEA;background:transparent;transition:background .18s,color .18s}
+.qdock .qb .nm{display:none}
+.qdock .qb:hover{background:var(--rail-2);color:#fff}
+.qdock .qb.on{background:var(--accent);color:var(--rail)}
+.qdock .sep{width:1px;height:22px;background:rgba(255,255,255,.16);margin:0 4px;flex:0 0 auto}
+@media (pointer:coarse){ .qdock .qb{min-height:var(--ch-touch-floor-coarse-pointer,44px);min-width:var(--ch-touch-floor-coarse-pointer,44px)} }
+
+@media (max-width:1023px){
+  /* Docked full-width tab bar, not a floating pill — same regime the rail's own off-canvas sheet
+     uses below 1024. Only the "hot" segments (Sections + the role's first few destinations, see
+     shell.js DOCK_HOT) render here, each labelled; everything else is one tap into Sections away. */
+  .qdock{left:0;right:0;bottom:0;transform:none;width:100%;max-width:none;border-radius:0;
+    justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
+    box-shadow:0 -2px 12px -4px rgba(20,20,19,.28);overflow-x:visible}
+  /* Only the labelled ".hot" segments (Sections + up to 4 destinations) show as tab-bar stops;
+     everything else stays reachable through Sections rather than squeezing in as an unlabelled,
+     ellipsised sliver — the exact defect ALEMBIC's own console.css comments record and rule out
+     ("15 flex:1 segments on a 390px phone: 26px each, labels ellipsised to 'Sett…'"). */
+  .qdock .qb:not(.hot){display:none}
+  .qdock .qb{flex:1 1 0;width:auto;height:52px;border-radius:var(--r-sm)}
+  .qdock .qb .nm{display:block;font:var(--w-med) 10px/1 var(--font-ui);white-space:nowrap}
 }
 
 /* ---------------- workspace switcher (permission-driven, one PWA, no second login) ------------- */

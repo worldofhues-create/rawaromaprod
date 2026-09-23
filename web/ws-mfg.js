@@ -23,8 +23,22 @@
  * touch-target floor under `@media (pointer:coarse)` — Addendum §10 — so no per-dialog
  * touch-target CSS is needed. */
 'use strict';
-  // Shared dialog chrome for this module's three modals.
-  function openSheet(title, bodyHtml, maxWidth) {
+  // Shared dialog chrome for this module's three modals. NAMED openMfgSheet, NOT openSheet: every
+  // script here loads as a plain classic <script> in ONE shared global scope (no module, no IIFE —
+  // see index.html's own comment on the load order), so a same-named top-level function in a later
+  // <script> silently OVERWRITES an earlier one's global binding. shell.js's openSheet(o) (object:
+  // {id,tag,style,cls,title,body}) and this module's original 3-positional-arg openSheet(title,
+  // bodyHtml, maxWidth) were exactly that collision: ws-mfg.js loads AFTER shell.js in index.html,
+  // so ITS declaration won globally, and every shell.js call site — raConfirm, openEdit, openCreate
+  // (this is what broke "Bins → + New": CREATE['/v1/bins'] is correct, but by the time a click ran,
+  // window.openSheet was ws-mfg's version) — landed its {..., title: cfg.title, body} object into
+  // this function's `title` PARAMETER as a whole object (renders "[object Object]" wherever `title`
+  // is interpolated as a string) with `bodyHtml` left unpassed (renders the literal text "undefined"
+  // where `bodyHtml` is concatenated into the sheet body). Renamed rather than reconciled: the two
+  // signatures genuinely differ (this one is a simple title+bodyHtml+maxWidth convenience the three
+  // call sites below use; shell.js's carries id/tag/style/cls for real forms), so a shared name was
+  // never correct — it happened to work only by nobody having loaded ws-mfg.js's *last* until now.
+  function openMfgSheet(title, bodyHtml, maxWidth) {
     var scrim = document.createElement('div'); scrim.className = 'xp-scrim open';
     var sheet = document.createElement('div'); sheet.className = 'xp-sheet open';
     sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-modal', 'true'); sheet.setAttribute('aria-label', title);
@@ -71,7 +85,7 @@
           // Irreversible-action language up front (Addendum §10) — no separate hidden reason.
           '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);text-align:center">Dispatching commits stock and cannot be undone from this screen.</div>'
         : '<div class="empty"><h3>Nothing to dispatch yet</h3><p>No finished-good stock is available to dispatch. Produce or release stock first, then try again.</p></div>');
-    var d = openSheet('Dispatch order', '<form id="ra-dform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>');
+    var d = openMfgSheet('Dispatch order', '<form id="ra-dform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>');
     if (!batches.length) return;
     function syncHint() { var b = byId[$('ra-dfg').value]; if (b) { $('ra-dhint').textContent = 'Available in this batch: ' + b.availableQty; $('ra-dq').setAttribute('max', b.availableQty); } }
     $('ra-dfg').onchange = syncHint; syncHint();
@@ -117,7 +131,7 @@
       '<input id="ra-qrcode" class="fld" readonly value="' + escHtml(code) + '" style="text-align:center;font-family:var(--font-mono);font-weight:800;letter-spacing:.03em;font-size:16px" aria-label="Scannable code (also selectable for a keyboard-wedge scanner)">' +
       '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">' + escHtml(sub) + '</div>' +
       '<button type="button" id="ra-qrprint" class="btn p" style="justify-content:center">Print label</button></div>';
-    var d = openSheet(title, body, '330px');
+    var d = openMfgSheet(title, body, '330px');
     var svgEl = d.sheet.querySelector('#ra-qrbox svg'); if (svgEl) { svgEl.style.width = '100%'; svgEl.style.height = '100%'; svgEl.style.display = 'block'; }
     $('ra-qrprint').onclick = function () { printQrLabel(title, code, svg, sub); };
   }
@@ -148,7 +162,7 @@
       '<button type="button" id="ra-qadd" class="btn sm" style="align-self:flex-start">+ Add parameter</button>' +
       '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
       '<button type="submit" id="ra-qsave" class="btn p" style="width:100%;justify-content:center">Save results</button>';
-    var d = openSheet('Record QC results', '<form id="ra-qform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>', '640px');
+    var d = openMfgSheet('Record QC results', '<form id="ra-qform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>', '640px');
     var linesEl = d.sheet.querySelector('#ra-qlines');
     function paramOptions() { return '<option value="">Parameter…</option>' + params.map(function (p) { var v = p.qcParameterId != null ? p.qcParameterId : guessId(p); return v ? '<option value="' + v + '">' + (p.parameterName || p.parameterCode || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
     function addLine() {
