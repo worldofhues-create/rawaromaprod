@@ -1,15 +1,23 @@
 /**
- * RP-FAC2 — purchase-order approval-threshold second level (PoService.approvePurchaseOrder,
- * backend/cluster-procurement/src/po/po.service.ts, §28). Below PO_APPROVAL_THRESHOLD_AMOUNT one
- * approval is enough (unchanged); at/above it, a SECOND, DIFFERENT approver is required before the
- * PO reaches APPROVED — the first approval only reaches PENDING_L2_APPROVAL. Covers: below-
- * threshold happy path (one approval suffices), above-threshold requires two approvals, the same
- * approver cannot give both, the creator can never approve (segregation of duties, either level),
- * invalid transitions (approving twice, issuing before APPROVED), and duplicate/concurrent
- * approval on the same PO. Also covers the generic-editor status bypass being closed.
+ * RP-FAC2 / §87 (lane F8, rp-policy) — purchase-order approval-threshold second level
+ * (PoService.approvePurchaseOrder, backend/cluster-procurement/src/po/po.service.ts). The
+ * threshold is now CONFIGURABLE per organisation via iam.approval_matrix (policy_type =
+ * PO_APPROVAL_THRESHOLD), resolved from the PO creator's iam.user_master.organization_id — the
+ * hardcoded ₹5,00,000 default (RP-FAC2/§28) is gone. Below a CONFIGURED threshold one approval is
+ * enough; at/above it, a SECOND, DIFFERENT approver is required before the PO reaches APPROVED —
+ * the first approval only reaches PENDING_L2_APPROVAL. When NO threshold is configured for the
+ * organisation, the current single-approval path applies regardless of amount (never a silent
+ * auto-approve — a real, non-creator approver is still always required). Covers: configured
+ * below-threshold happy path, configured above-threshold requires two approvals, unconfigured
+ * organisation (large PO still only needs one approval, never auto-approved to a phantom
+ * threshold), the same approver cannot give both, the creator can never approve (segregation of
+ * duties, either level), invalid transitions (approving twice, issuing before APPROVED), and
+ * duplicate/concurrent approval on the same PO. Also covers the generic-editor status bypass
+ * being closed.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { PoService } from '../../../cluster-procurement/src/po/po.service.js';
 import { EditService } from '../edit/edit.service.js';
@@ -22,10 +30,33 @@ const CREATOR = '00000000-0000-7000-8000-000000000001';
 const APPROVER_A = '00000000-0000-7000-8000-000000000002';
 const APPROVER_B = '00000000-0000-7000-8000-000000000003';
 
+// A second creator, in an organisation that has NO iam.approval_matrix row at all — the
+// "unconfigured" case §87 requires: never auto-approved just because a default is missing.
+const UNCONFIGURED_CREATOR = '00000000-0000-7000-8000-0000000000f1';
+
+// The configured threshold for CREATOR's organisation (replaces the old hardcoded constant —
+// deliberately a different figure so a passing test proves the value is actually READ from
+// iam.approval_matrix, not coincidentally matching some remaining hardcoded default).
+const CONFIGURED_THRESHOLD = 450000;
+
 before(async () => {
   await ensureSchema();
   svc = new PoService(procurementDb());
   editSvc = new EditService(testClient());
+
+  const sql = testClient();
+  const configuredOrgId = randomUUID();
+  const unconfiguredOrgId = randomUUID();
+  await sql`insert into iam.org_master (organization_id, organization_name, status) values
+    (${configuredOrgId}, 'RP-POLICY configured org', 'ACTIVE'),
+    (${unconfiguredOrgId}, 'RP-POLICY unconfigured org', 'ACTIVE')`;
+  await sql`insert into iam.user_master (user_id, organization_id, user_name, status) values
+    (${CREATOR}, ${configuredOrgId}, 'creator', 'ACTIVE'),
+    (${UNCONFIGURED_CREATOR}, ${unconfiguredOrgId}, 'unconfigured-creator', 'ACTIVE')`;
+  await sql`insert into iam.approval_matrix
+      (organization_id, policy_type, threshold_amount, is_enabled, status)
+    values (${configuredOrgId}, 'PO_APPROVAL_THRESHOLD', ${CONFIGURED_THRESHOLD}, true, 'ACTIVE')`;
+  // unconfiguredOrgId deliberately gets NO approval_matrix row.
 });
 
 after(async () => {
@@ -69,6 +100,51 @@ test('po approval: above threshold, a SECOND different approver reaches APPROVED
   await svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER_A }));
   const { purchaseOrder } = await svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER_B }));
   assert.equal(purchaseOrder.status, 'APPROVED');
+});
+
+test('po approval: below the CONFIGURED threshold, one approval is enough (proves the figure is actually read from iam.approval_matrix)', async () => {
+  const id = await freshPo(CONFIGURED_THRESHOLD - 1, { createdBy: CREATOR });
+  const { purchaseOrder, requiresSecondLevelApproval } = await svc.approvePurchaseOrder(
+    id,
+    {},
+    principal({ userId: APPROVER_A }),
+  );
+  assert.equal(requiresSecondLevelApproval, false);
+  assert.equal(purchaseOrder.status, 'APPROVED');
+});
+
+test('po approval: at the CONFIGURED threshold exactly, a second approval is required', async () => {
+  const id = await freshPo(CONFIGURED_THRESHOLD, { createdBy: CREATOR });
+  const { requiresSecondLevelApproval } = await svc.approvePurchaseOrder(
+    id,
+    {},
+    principal({ userId: APPROVER_A }),
+  );
+  assert.equal(requiresSecondLevelApproval, true);
+});
+
+test('po approval: §87 unconfigured organisation — a large PO still needs only ONE approval, never auto-approved to a phantom threshold', async () => {
+  // UNCONFIGURED_CREATOR's organisation has NO iam.approval_matrix row. A PO far larger than the
+  // old hardcoded ₹5,00,000 default (and larger than the OTHER org's configured threshold) must
+  // still be approvable by a single authorized, non-creator approver — the "current authorized
+  // approval path" §87 requires when no threshold is configured. It must NOT get stuck demanding
+  // a second approver that no policy asked for, and it must NOT skip approval altogether.
+  const id = await freshPo(10_000_000, { createdBy: UNCONFIGURED_CREATOR });
+  const { purchaseOrder, requiresSecondLevelApproval } = await svc.approvePurchaseOrder(
+    id,
+    {},
+    principal({ userId: APPROVER_A }),
+  );
+  assert.equal(requiresSecondLevelApproval, false);
+  assert.equal(purchaseOrder.status, 'APPROVED');
+});
+
+test('po approval: §87 unconfigured organisation — the creator STILL cannot approve their own PO (unconfigured never weakens segregation of duties)', async () => {
+  const id = await freshPo(10_000_000, { createdBy: UNCONFIGURED_CREATOR });
+  await assert.rejects(
+    () => svc.approvePurchaseOrder(id, {}, principal({ userId: UNCONFIGURED_CREATOR })),
+    ForbiddenException,
+  );
 });
 
 test('po approval: the SAME approver cannot give both levels (segregation of duties)', async () => {

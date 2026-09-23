@@ -49,12 +49,26 @@ const {
   rfqVendorMappings,
 } = procurementSchema;
 
-// RP-FAC2 (§28 approval-threshold follow-up): a PO above this amount needs a SECOND, distinct
-// approval before it is truly APPROVED — a single approver's sign-off only moves it to
-// PENDING_L2_APPROVAL. Below the threshold, one approval is enough (unchanged behaviour). The
-// figure itself is a system default pending an owner-configured per-tenant threshold table (not
-// yet modelled) — kept as one named constant so it's a single edit away from being data-driven.
-const PO_APPROVAL_THRESHOLD_AMOUNT = 500000;
+/** The drizzle transaction handle for this cluster's schema (used by the in-tx helpers). */
+type Tx = Parameters<Parameters<ProcurementDb['transaction']>[0]>[0];
+
+// §87 (AUTONOMOUS DECISION DEFAULTS — lane F8/rp-policy): a PO at/above the organisation's
+// CONFIGURED threshold needs a SECOND, distinct approval before it is truly APPROVED — a single
+// approver's sign-off only moves it to PENDING_L2_APPROVAL. Below the threshold, one approval is
+// enough (unchanged behaviour). The threshold is read per-organisation from
+// iam.approval_matrix (policy_type = 'PO_APPROVAL_THRESHOLD'), resolving the organisation via
+// the PO creator's iam.user_master row. Replaces the previously hardcoded ₹5,00,000
+// PO_APPROVAL_THRESHOLD_AMOUNT (RP-FAC2/§28), which the owner explicitly said not to keep as a
+// silent business-policy default (§87 "Purchase-order approvals").
+//
+// When NO threshold is configured for the organisation (no iam.approval_matrix row, or the
+// organisation can't be resolved), the CURRENT authorized approval path applies: a single,
+// non-creator approval is sufficient — exactly the behaviour that existed before the RP-FAC2
+// second-level-approval feature was added for ALL purchase orders regardless of amount. This is
+// never a silent auto-approve: an authorized approver distinct from the creator is still always
+// required (see the segregation-of-duties check below); the missing default only means the EXTRA
+// second-approver requirement is not layered on top.
+const PO_APPROVAL_POLICY_TYPE = 'PO_APPROVAL_THRESHOLD';
 
 @Injectable()
 export class PoService {
@@ -406,12 +420,55 @@ export class PoService {
   /* ── FLOW: PO approve → APPROVED (+ approval-threshold second level) ─── */
 
   /**
-   * POST /v1/purchase-orders/:id/approve. Below PO_APPROVAL_THRESHOLD_AMOUNT, one approval is
-   * enough: DRAFT/PENDING → APPROVED. At or above it, the FIRST approval only reaches
-   * PENDING_L2_APPROVAL; a SECOND approval — by someone other than the creator AND other than the
-   * first approver — is required to actually reach APPROVED. Both the PO row update and the
-   * status pre-check run as a compare-and-swap (`WHERE status = :current`) so two concurrent
-   * approve calls can't both register.
+   * Resolve the CONFIGURED PO-approval second-level threshold for the organisation that owns
+   * `po` (via the PO creator's iam.user_master.organization_id → iam.approval_matrix, policy_type
+   * = PO_APPROVAL_THRESHOLD). Cross-schema read via raw SQL over the same procurement-cluster
+   * client/transaction — the established pattern for the few legitimate cross-cluster joins in
+   * this service (e.g. listPurchaseOrderItems' `left join masterdata.material` above); the
+   * underlying Postgres connection is shared, only the drizzle TYPING is cluster-scoped.
+   * Returns null when unconfigured (no organisation resolvable, or no matching policy row) —
+   * callers must treat null as "no second-level requirement", never as zero/infinity.
+   */
+  private async poApprovalThreshold(
+    tx: Tx,
+    createdBy: string | null,
+  ): Promise<number | null> {
+    if (!createdBy) return null;
+    let organizationId: string | null = null;
+    try {
+      const orgRows = (await tx.execute(sql`
+        select u.organization_id as "organizationId"
+          from iam.user_master u
+         where u.user_id = ${createdBy}::uuid
+         limit 1`)) as unknown as Array<{ organizationId: string | null }>;
+      organizationId = orgRows[0]?.organizationId ?? null;
+    } catch {
+      // createdBy wasn't a valid uuid, or the user row doesn't exist — treat as unresolvable,
+      // never as a reason to throw (approval must never hard-fail just because the threshold
+      // lookup couldn't resolve an organisation).
+      return null;
+    }
+    if (!organizationId) return null;
+
+    const policyRows = (await tx.execute(sql`
+      select threshold_amount as "thresholdAmount"
+        from iam.approval_matrix
+       where organization_id = ${organizationId}
+         and policy_type = ${PO_APPROVAL_POLICY_TYPE}
+         and coalesce(is_enabled, true) = true
+       limit 1`)) as unknown as Array<{ thresholdAmount: string | null }>;
+    const threshold = policyRows[0]?.thresholdAmount;
+    return threshold != null ? Number(threshold) : null;
+  }
+
+  /**
+   * POST /v1/purchase-orders/:id/approve. Below the organisation's CONFIGURED second-level
+   * threshold (or when none is configured), one approval is enough: DRAFT/PENDING → APPROVED. At
+   * or above a configured threshold, the FIRST approval only reaches PENDING_L2_APPROVAL; a
+   * SECOND approval — by someone other than the creator AND other than the first approver — is
+   * required to actually reach APPROVED. Both the PO row update and the status pre-check run as a
+   * compare-and-swap (`WHERE status = :current`) so two concurrent approve calls can't both
+   * register.
    */
   async approvePurchaseOrder(
     id: string,
@@ -444,7 +501,9 @@ export class PoService {
         );
       }
 
-      const overThreshold = Number(po.totalAmount ?? 0) >= PO_APPROVAL_THRESHOLD_AMOUNT;
+      const configuredThreshold = await this.poApprovalThreshold(tx, po.createdBy ?? null);
+      const overThreshold =
+        configuredThreshold != null && Number(po.totalAmount ?? 0) >= configuredThreshold;
       const needsSecondLevel = overThreshold && current !== 'PENDING_L2_APPROVAL';
 
       if (current === 'PENDING_L2_APPROVAL') {
