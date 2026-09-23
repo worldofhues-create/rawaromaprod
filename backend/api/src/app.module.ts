@@ -53,6 +53,7 @@ import { OrgUnitsModule } from './orgunits/orgunits.module.js';
 import { DispatchDocsModule } from './dispatchdocs/dispatchdocs.module.js';
 import { RelayModule } from './relay/relay.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
+import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
 
 @Module({
   imports: [
@@ -85,6 +86,7 @@ import { BridgeModule } from './bridge/bridge.module.js';
     DispatchDocsModule,
     RelayModule,
     BridgeModule,
+    PlatformOpsModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up
