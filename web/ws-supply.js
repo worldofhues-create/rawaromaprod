@@ -1,26 +1,35 @@
 /* RAW AROMA — ws-supply module: Procurement, Receiving, Warehouse view renderers/specials.
- * Depends on globals defined in shell.js (loaded first): tunnel, $, fStyle, toast, UOM,
- * setTheme, loadView, guessId. Mechanical extract from app.js — no behaviour change. */
+ * Depends on globals defined in shell.js (loaded first): tunnel, $, toast, UOM, setTheme,
+ * loadView, guessId, escHtml. U2: openRaiseRequirement's dialog markup ported to
+ * ui-contract/shell.css .xp-scrim/.xp-sheet (PORTING_GUIDE.md "Dialog") — was a bespoke
+ * position:fixed overlay from the app.js mechanical extract; same fields/endpoint/behaviour. */
 'use strict';
   // reorder → raise requirement: a confirmation dialog (editable qty/priority/date), not a one-click.
   // Vendor is NOT chosen here — that happens later at RFQ/quotation/PO (per the procurement flow).
+  // Markup: ui-contract/shell.css .xp-scrim/.xp-sheet (PORTING_GUIDE.md "Dialog (true modal)") —
+  // was a bespoke position:fixed overlay; converted in place, same fields/endpoint/behaviour.
+  function fLabel(text, req) { return '<span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">' + text + (req ? ' <span style="color:var(--red)">*</span>' : '') + '</span>'; }
   function openRaiseRequirement(row) {
     var mat = row.materialCode || row.materialName || 'material';
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;z-index:250;background:rgba(0,0,0,.45);display:flex;align-items:center;justify-content:center;padding:20px';
-    ov.innerHTML = '<form id="ra-rform" style="width:100%;max-width:400px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-xl);box-shadow:var(--rai);padding:24px 26px">' +
-      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:4px"><div style="font-weight:800;font-size:17px;flex:1">Raise requirement</div><button type="button" id="ra-rclose" style="border:none;background:var(--well);box-shadow:var(--ins-sm);color:var(--t2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;font-size:17px">&times;</button></div>' +
-      '<div style="font-size:12.5px;color:var(--t3);margin-bottom:16px">' + mat + ' · available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin-bottom:6px">Order quantity <span style="color:var(--red)">*</span></label><input id="ra-rq" type="number" value="' + row.shortage + '" style="' + fStyle() + '">' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Unit</label><select id="ra-ru" style="' + fStyle() + '"><option value="">Unit…</option>' + Object.keys(UOM).map(function (id) { return '<option value="' + id + '">' + UOM[id] + '</option>'; }).join('') + '</select>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Priority</label><select id="ra-rp" style="' + fStyle() + '"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select>' +
-      '<label style="display:block;font-size:12px;font-weight:700;color:var(--t2);margin:12px 0 6px">Required by <span style="color:var(--red)">*</span></label><input id="ra-rd" type="date" style="' + fStyle() + '">' +
-      '<div id="ra-rerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600;margin:8px 0 10px"></div>' +
-      '<button type="submit" id="ra-rsave" style="width:100%;padding:13px;border:none;border-radius:var(--r-md);background:var(--accent);color:#fff;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit;box-shadow:var(--rai-sm)">Raise requirement</button>' +
-      '<div style="font-size:11px;color:var(--t3);text-align:center;margin-top:10px">Vendor is chosen later at RFQ / quotation / PO.</div></form>';
-    document.body.appendChild(ov); setTheme();
-    function close() { if (ov.parentNode) ov.remove(); }
-    $('ra-rclose').onclick = close; ov.addEventListener('click', function (e) { if (e.target === ov) close(); });
+    var scrim = document.createElement('div');
+    scrim.className = 'xp-scrim open'; scrim.id = 'ra-rscrim';
+    scrim.innerHTML = '<form id="ra-rform" class="xp-sheet" style="max-width:400px" role="dialog" aria-modal="true" aria-label="Raise requirement">' +
+      '<div class="xp-sheet-hd"><h2>Raise requirement</h2><button type="button" class="xp" id="ra-rclose" aria-label="Close">&times;</button></div>' +
+      '<div class="xp-sheet-bd">' +
+      '<div style="font-size:12.5px;color:var(--ink-2)">' + escHtml(mat) + ' &middot; available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
+      '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Order quantity', true) + '<input id="ra-rq" class="fld" type="number" inputmode="decimal" value="' + row.shortage + '"></label>' +
+      '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Unit') + '<select id="ra-ru" class="fld"><option value="">Unit…</option>' + Object.keys(UOM).map(function (id) { return '<option value="' + id + '">' + UOM[id] + '</option>'; }).join('') + '</select></label>' +
+      '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Priority') + '<select id="ra-rp" class="fld"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></label>' +
+      '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Required by', true) + '<input id="ra-rd" class="fld" type="date"></label>' +
+      '<div id="ra-rerr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+      '<button type="submit" class="btn p" id="ra-rsave" style="width:100%;justify-content:center;height:40px">Raise requirement</button>' +
+      '<div style="font-size:11px;color:var(--ink-3);text-align:center">Vendor is chosen later at RFQ / quotation / PO.</div>' +
+      '</div></form>';
+    document.body.appendChild(scrim); setTheme();
+    function close() { if (scrim.parentNode) scrim.remove(); document.removeEventListener('keydown', onKey); }
+    function onKey(e) { if (e.key === 'Escape') close(); }
+    document.addEventListener('keydown', onKey);
+    $('ra-rclose').onclick = close; scrim.addEventListener('click', function (e) { if (e.target === scrim) close(); });
     $('ra-rform').onsubmit = function (e) {
       e.preventDefault(); var qty = Number($('ra-rq').value); if (!(qty > 0)) { $('ra-rerr').textContent = 'Enter a quantity.'; return; }
       var d = $('ra-rd').value; if (!d) { $('ra-rerr').textContent = 'A "Required by" date is required.'; return; }
