@@ -380,7 +380,8 @@
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6.4 9.4a5.6 5.6 0 1 1 11.2 0c0 4.6 1.9 5.6 1.9 5.6H4.5s1.9-1 1.9-5.6"/><path d="M10.2 18.4a1.9 1.9 0 0 0 3.6 0"/></svg>',
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>',
-    arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
+    arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l1.7 6 5.9.7-4.4 4 1.3 5.8L12 15.9 7.5 18.9l1.3-5.8-4.4-4 5.9-.7z"/></svg>'
   };
   window.RA_CI = CI; // ws-*.js dialogs use the same close glyph
   // BrandMark — the lockup, one builder so it can't drift.
@@ -423,7 +424,7 @@
     setTimeout(function () { el.setAttribute('data-settling', ''); el.removeAttribute('data-enter'); }, 20);
     setTimeout(function () { el.removeAttribute('data-settling'); }, 460);
   }
-  // Command palette (dock ⌘K): every destination this role holds, filterable, Enter to go.
+  // Go-to palette (⌘/): every destination this role holds, filterable, Enter to go.
   function openPalette() {
     if ($('ra-cmdk')) { closePalette(); return; }
     var R = ROLES[st.role]; if (!R) return;
@@ -464,6 +465,58 @@
     shell();
   }
 
+  /* ---------------- Ask Aria (UX-E) ----------------
+   * The panel is ALEMBIC's own (ui-contract/aria-panel.js, AlembicAria.mount — the vanilla port of
+   * AriaPanel, same DOM/classes/states), opened from the top bar's "Ask Aria" and the dock's
+   * "Ask Aria · ⌘K", exactly as ALEMBIC Admin/Agent open it.
+   *
+   * WHERE THE ANSWERS COME FROM — the documented choice (coordinator brief, UX-C). Aria answers
+   * through ALEMBIC's POST /api/v1/copilot/ask, which needs an ALEMBIC staff session. This console
+   * holds a RawProd session only (the identity bridge hands ALEMBIC's assertion to RawProd, never
+   * the other way), its CSP is connect-src 'self', and no RawProd vhost proxies to ALEMBIC — there
+   * is no /main/ route in infra/aws/nginx. A cross-origin call would therefore be refused on every
+   * deployment, and a proxy would still arrive without ALEMBIC credentials. So the panel opens in
+   * an honest "Aria answers in ALEMBIC" state: every question gets that one plain answer, shown as
+   * a refusal (never as a fact), and nothing is invented locally. Wiring a real answer path needs
+   * a server-side RawProd→ALEMBIC copilot bridge with its own auth — backend work, not UI. */
+  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var _aria = null;
+  function ariaContext() {
+    var R = ROLES[st.role]; var it = R && R.nav.filter(function (n) { return n[0] === st.nav; })[0];
+    return 'Factory · ' + (it ? it[1] : 'Dashboard');
+  }
+  // Fetched the first time Aria opens, as ALEMBIC's AriaCoPilot lazy-loads its panel: nothing of
+  // it is on first paint, and index.html keeps loading only the split modules (ui-parity-check §18).
+  var _ariaLoading = null;
+  function loadAria() {
+    if (typeof AlembicAria !== 'undefined') return Promise.resolve();
+    if (_ariaLoading) return _ariaLoading;
+    _ariaLoading = new Promise(function (ok, no) {
+      var sc = document.createElement('script'); sc.src = '/ui-contract/aria-panel.js';
+      sc.onload = ok; sc.onerror = function () { _ariaLoading = null; no(new Error('aria')); };
+      document.head.appendChild(sc);
+    });
+    return _ariaLoading;
+  }
+  function ariaPanel() {
+    if (_aria) return _aria;
+    _aria = AlembicAria.mount({
+      context: ariaContext(),
+      prompts: ['Where can I ask Aria?'],
+      ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: ARIA_HERE, cited: [] }); },
+      parent: document.body,
+    });
+    // The panel's fixed greeting promises answers from orders, stock and enquiries; here it says
+    // where Aria answers instead. Re-applied whenever the panel repaints its empty state.
+    var fix = function () { var p = _aria.element.querySelector('.aria-empty > p'); if (p && p.textContent !== ARIA_HERE) p.textContent = ARIA_HERE; };
+    new MutationObserver(fix).observe(_aria.element, { childList: true, subtree: true }); fix();
+    return _aria;
+  }
+  function toggleAria() {
+    loadAria().then(function () { var a = ariaPanel(); a.setContext(ariaContext()); a.toggle(); })
+      .catch(function () { toast('Aria didn\'t load. Try again.', 'bad'); });
+  }
+
   /* ---------------- render: shell + data view ---------------- */
   // The reference Admin/Agent shell, 1:1: a rail (collapsed by default — body.rail-off — so the
   // floating dock is the navigation), a top bar (platform brand, page title, page actions), the
@@ -484,7 +537,7 @@
       return '<button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
         icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>';
     }).join('');
-    var HOT = {}; R.nav.slice(0, 4).forEach(function (n) { HOT[n[0]] = 1; });
+    var HOT = {}; R.nav.slice(0, 3).forEach(function (n) { HOT[n[0]] = 1; });
     var dockHtml =
       '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
       '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="Show navigation" aria-pressed="false">' + CI.menu + '<span class="kb">Sections<span class="kc"> · ⌘\\</span></span></button>' +
@@ -496,7 +549,7 @@
           icon(n[2], 17) + '<span class="kb">' + n[1] + (i < 9 ? '<span class="kc"> · ⌘' + (i + 1) + '</span>' : '') + '</span></button>';
       }).join('') +
       '<span class="sep"></span>' +
-      '<button type="button" class="qb" id="ra-cmdk-open" aria-label="Command palette">' + CI.cmd + '<span class="kb">Command<span class="kc"> · ⌘K</span></span></button>';
+      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Aria">' + CI.cmd + '<span class="kb">Ask Aria<span class="kc"> · ⌘K</span></span></button>';
     // Workspace switcher: multi-role staff switch workspaces with no second login (addendum
     // §5/§8) — a RawProd composition in the top bar next to the page title.
     var roles = (session && session.availableRoles) || [st.role];
@@ -525,6 +578,7 @@
           '<h1 id="ra-title">' + R.label + '</h1>' +
           '<span style="flex:1"></span>' +
           switcher +
+          '<button type="button" class="gbtn acc" id="ra-aria" aria-label="Ask Aria">' + CI.spark + ' Ask Aria</button>' +
           '<div style="position:relative">' +
             '<button type="button" id="ra-bell" class="gbtn" title="Alerts" aria-label="Alerts">' + CI.bell +
               '<span id="ra-bell-badge" class="t-num" style="display:none"></span></button>' +
@@ -2040,7 +2094,7 @@
     var home = function () { navTo(ROLES[st.role].nav[0][0]); };
     if ($('ra-home')) $('ra-home').onclick = home;
     if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
-    $('ra-logout').onclick = function () { session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    $('ra-logout').onclick = function () { if (_aria) { _aria.destroy(); _aria = null; } session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
@@ -2050,17 +2104,22 @@
     var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
     var handle = $('ra-dock-handle'); if (handle) handle.onclick = function () { document.body.classList.remove('dock-away'); };
-    var cmdk = $('ra-cmdk-open'); if (cmdk) cmdk.onclick = openPalette;
+    if ($('ra-aria')) $('ra-aria').onclick = toggleAria;
+    if ($('ra-aria-dock')) $('ra-aria-dock').onclick = toggleAria;
+    if (_aria) { _aria.setContext(ariaContext()); }
     applyResponsive();
     applyNetBanner();
   }
   if (!window.__raRailKeyWired) {
     window.__raRailKeyWired = true;
-    // QuickDock keys, as the reference: ⌘K palette, ⌘\ rail, ⌘1–9 destinations; Escape closes.
+    // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
+    // go-to palette; Escape closes.
     document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && _aria && _aria.isOpen()) { _aria.close(); return; }
       if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); return; }
       if (!st.role || !(e.metaKey || e.ctrlKey)) return;
-      if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openPalette(); return; }
+      if (e.key === 'k' || e.key === 'K') { e.preventDefault(); toggleAria(); return; }
+      if (e.key === '/') { e.preventDefault(); openPalette(); return; }
       if (e.key === '\\') { e.preventDefault(); st.drawer = !st.drawer; applyResponsive(); return; }
       var i = parseInt(e.key, 10), R = ROLES[st.role];
       if (i >= 1 && i <= 9 && R && R.nav[i - 1]) { e.preventDefault(); navTo(R.nav[i - 1][0]); }

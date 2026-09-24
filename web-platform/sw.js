@@ -4,9 +4,9 @@
  * network-only and falls straight through, same principle as the factory PWA's sw.js but
  * simpler (this console has no offline-write workflow to support at all — it's read-mostly
  * platform telemetry, not factory operations). */
-const CACHE = 'platform-shell-v9'; // v9: reference shell (rac-console.css) + UX-D welcome, logo and icons
+const CACHE = 'platform-shell-v10'; // v10: reference shell, UX-D welcome/logo/icons, UX-E Aria panel
 const SHELL = [
-  '/', '/index.html', '/rac-console.css', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest',
+  '/', '/index.html', '/rac-console.css', '/aria-panel.css', '/aria-panel.js', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest',
   // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
   '/rac-preload.js', '/logo/brand.css',
   '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',

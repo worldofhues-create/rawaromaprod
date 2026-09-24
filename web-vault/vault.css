@@ -87,7 +87,7 @@ label.field textarea{min-height:64px;padding:var(--s-tight) 10px;border-radius:6
 .cmdk li button .sc{margin-left:auto;font:var(--w-reg) var(--t-micro)/1 var(--mono);color:var(--ink-3)}
 
 /* ── secure zone (§109.4 — the one allowed departure from the reference) ─────────────────── */
-.secure-banner{display:flex;align-items:center;gap:var(--s-tight);flex-wrap:wrap;background:var(--rail);color:#EDEDEA;padding:var(--s-tight) var(--s-base);margin:12px 12px 0;border-radius:var(--r-pill);font:var(--w-med) var(--t-cap)/1.3 var(--ui);letter-spacing:.02em}
+.secure-banner{display:flex;align-items:center;gap:var(--s-tight);flex-wrap:wrap;background:var(--rail);color:#EDEDEA;padding:var(--s-tight) var(--s-base);margin:12px 12px 0;border-radius:var(--r-lg);font:var(--w-med) var(--t-cap)/1.3 var(--ui);letter-spacing:.02em}
 .secure-banner .dot{width:7px;height:7px;border-radius:var(--r-pill);background:var(--accent);flex:none}
 .secure-banner .who-when{margin-left:auto;color:#BDBDB6;font:var(--w-reg) var(--t-cap)/1.3 var(--mono)}
 .reveal-panel{border:2px solid var(--red);border-radius:var(--r-md);padding:var(--s-snug);background:rgba(138,90,76,.06);margin-top:var(--s-snug)}

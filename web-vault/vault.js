@@ -471,6 +471,7 @@
     collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13.5 6.5 8 12l5.5 5.5"/><path d="M19 5v14"/></svg>',
     cmd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 6.6a2.6 2.6 0 1 0-2.6 2.6H9V6.6zM15 6.6a2.6 2.6 0 1 1 2.6 2.6H15V6.6zM9 17.4a2.6 2.6 0 1 1-2.6-2.6H9v2.6zM15 17.4a2.6 2.6 0 1 0 2.6-2.6H15v2.6z"/><rect x="9" y="9.2" width="6" height="5.6"/></svg>',
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l1.7 6 5.9.7-4.4 4 1.3 5.8L12 15.9 7.5 18.9l1.3-5.8-4.4-4 5.9-.7z"/></svg>',
   };
   function raw(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
   // BrandMark — the RAW logo (UX-D, release/ui/BRAND_ASSETS.md): reversed art on the ink rail.
@@ -493,17 +494,50 @@
   function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === '#/' + id) { render(); return; } location.hash = '#/' + id; }
   function visibleNav() { return NAV.filter(function (n) { return !n.need || hasPerm(n.need); }); }
   window.addEventListener('resize', applyRail);
-  // QuickDock keys, as the reference: ⌘K palette, ⌘\ rail, ⌘1–9 destinations; Escape closes.
+  /* ---- Ask Aria (UX-E): ALEMBIC's own panel (aria-panel.js, AlembicAria.mount), fetched the first
+   * time it opens and opened from the top bar and the dock's "Ask Aria · ⌘K", as in ALEMBIC.
+   * Answers: ALEMBIC's /api/v1/copilot/ask needs an ALEMBIC staff session, this console holds a
+   * RawProd one, its CSP is connect-src 'self' and no RawProd vhost proxies to ALEMBIC — so the
+   * panel opens in an honest "Aria answers in ALEMBIC" state and invents nothing (same choice and
+   * reasoning as web/shell.js's Ask Aria block). */
+  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var ariaApi = null, ariaLoading = null, ariaCtx = 'Vault';
+  function loadAria() {
+    if (typeof AlembicAria !== 'undefined') return Promise.resolve();
+    if (ariaLoading) return ariaLoading;
+    ariaLoading = new Promise(function (ok, no) {
+      var sc = document.createElement('script'); sc.src = '/aria-panel.js';
+      sc.onload = ok; sc.onerror = function () { ariaLoading = null; no(new Error('aria')); };
+      document.head.appendChild(sc);
+    });
+    return ariaLoading;
+  }
+  function toggleAria() {
+    loadAria().then(function () {
+      if (!ariaApi) {
+        ariaApi = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Aria?'], parent: document.body,
+          ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: ARIA_HERE, cited: [] }); } });
+        var fix = function () { var p = ariaApi.element.querySelector('.aria-empty > p'); if (p && p.textContent !== ARIA_HERE) p.textContent = ARIA_HERE; };
+        new MutationObserver(fix).observe(ariaApi.element, { childList: true, subtree: true }); fix();
+      }
+      ariaApi.setContext(ariaCtx); ariaApi.toggle();
+    }).catch(function () { toast('Aria didn\'t load. Try again.', true); });
+  }
+  // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
+  // go-to palette; Escape closes.
   document.addEventListener('keydown', function (e) {
     if (!session.token) return;
+    if (e.key === 'Escape' && ariaApi && ariaApi.isOpen()) { ariaApi.close(); return; }
     if (e.key === 'Escape' && railOpen) { setRail(false); return; }
     if (!(e.metaKey || e.ctrlKey)) return;
-    if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openPalette(); return; }
+    if (e.key === 'k' || e.key === 'K') { e.preventDefault(); toggleAria(); return; }
+    if (e.key === '/') { e.preventDefault(); openPalette(); return; }
     if (e.key === '\\') { e.preventDefault(); setRail(!railOpen); return; }
     var i = parseInt(e.key, 10), v = visibleNav();
     if (i >= 1 && i <= 9 && v[i - 1]) { e.preventDefault(); go(v[i - 1].id); }
   });
   function closePalette() { var w = document.getElementById('pv-cmdk'); if (w) w.remove(); }
+  // Go-to palette (⌘/): every destination this role holds, filterable, Enter to go.
   function openPalette() {
     if (document.getElementById('pv-cmdk')) { closePalette(); return; }
     var v = visibleNav(), idx = 0, rows = [];
@@ -547,7 +581,7 @@
   function renderShell(activeView, contentEl) {
     root.innerHTML = '';
     var visible = visibleNav();
-    var HOT = {}; visible.slice(0, 4).forEach(function (n) { HOT[n.id] = 1; });
+    var HOT = {}; visible.slice(0, 3).forEach(function (n) { HOT[n.id] = 1; });
     var navButtons = visible.map(function (n) {
       return h('button', { type: 'button', class: 'ri' + (n.id === activeView ? ' on' : ''), 'aria-current': n.id === activeView ? 'page' : null,
          onclick: function () { go(n.id); } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
@@ -560,15 +594,17 @@
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
         h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:auto', onclick: openVaultHowTo, 'aria-label': 'Help', title: 'Help' }, [icon(ICONS.help, 13)]),
-        h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:0', onclick: function () { railOpen = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
+        h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:0', onclick: function () { railOpen = false; if (ariaApi) { ariaApi.destroy(); ariaApi = null; } document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
       ]),
     ]);
     var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
+    ariaCtx = 'Vault · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [
       h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),
       h('h1', {}, [label]),
       
       h('span', { style: 'flex:1' }),
+      h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
     ]);
     var view = h('section', { class: 'pageview' }, [contentEl]);
     var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()])]), bar, h('div', { class: 'content' }, [view])]);
@@ -582,7 +618,7 @@
         return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), 'aria-label': n.label, 'aria-pressed': String(on), onclick: function () { go(n.id); } },
           [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, i < 9 ? h('span', { class: 'kc' }, [' · ⌘' + (i + 1)]) : null])]);
       }))
-      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb', 'aria-label': 'Command palette', onclick: openPalette }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Command', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
+      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Aria', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
     var handle = h('button', { type: 'button', class: 'dock-handle', 'aria-label': 'Show quick access dock', onclick: function () { document.body.classList.remove('dock-away'); } }, [h('i')]);
     root.appendChild(h('div', { class: 'app' }, [rail, h('div', { class: 'rail-scrim', onclick: function () { setRail(false); } }), main, handle, dock]));
     applyRail();

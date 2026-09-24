@@ -5,10 +5,10 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v88'; // v88: reference shell (rac-console.css) + UX-D welcome, logo and icons
+const CACHE = 'ra-shell-v89'; // v89: reference shell, UX-D welcome/logo/icons, UX-E Aria panel
 const SHELL = [
   '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
-  '/qrcode.js', '/manifest.webmanifest',
+  '/qrcode.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',
   // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
   '/rac-preload.js', '/logo/brand.css',
   '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',
