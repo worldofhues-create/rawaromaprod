@@ -520,7 +520,7 @@
       '<div class="main">' +
         '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline. Showing the last data loaded; changes won\'t save until you reconnect.</span></div>' +
         '<div class="bar">' +
-          '<span class="bar-brand">Alembic<i>·</i>Factory</span>' +
+          '<span class="bar-brand">Alembic<i>·</i>RawAromaChem</span>' +
           '<h1 id="ra-title">' + R.label + '</h1>' +
           '<span style="flex:1"></span>' +
           switcher +

@@ -165,8 +165,8 @@
     closeDialog();
     var scrim = h('div', { class: 'xp-scrim open', onclick: closeDialog });
     var body = h('div', { class: 'xp-sheet-bd' });
-    var sheet = h('div', { class: 'xp-sheet open', role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
-      [h('div', { class: 'xp-sheet-hd' }, [h('h2', {}, [title]), h('button', { class: 'xp', 'aria-label': 'Close', onclick: closeDialog }, ['×'])]), body]);
+    var sheet = h('div', { class: 'glass glass-deep xp-sheet open', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: 'max-width:520px' },
+      [h('div', { class: 'xp-sheet-hd' }, [h('h2', { class: 't-h1' }, [title]), h('button', { class: 'xp', 'aria-label': 'Close', onclick: closeDialog }, [raw(CI.x)])]), body]);
     sheet.addEventListener('click', function (e) { e.stopPropagation(); });
     dialogRoot = h('div', {}, [scrim, sheet]);
     document.body.appendChild(dialogRoot);
@@ -220,42 +220,139 @@
     { id: 'tutorial', label: 'Tutorials', icon: 'clipboard' },
   ];
 
-  // Topbar + floating dock, rail off-canvas by default (ALEMBIC parity correction — see
-  // web/ui-contract/shell.css's header comment + ALEMBIC_GUIDE_CORRECTIONS.md). The dock carries
-  // the same NAV set as the rail so every route stays reachable with the rail collapsed; HOT picks
-  // which ones keep a labelled segment in the phone tab-bar variant (platform.css max-width:1024).
+  /* ---- reference shell kit — vanilla port of rac-console.jsx (BrandMark, rail toggle, QuickDock,
+   * ExpandSheet markup, usePageEnter), the same markup web/shell.js renders; this console shares
+   * no code with it, so the kit is repeated here. Styling is rac-console.css, vendored verbatim. */
+  var CI = {
+    menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
+    collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13.5 6.5 8 12l5.5 5.5"/><path d="M19 5v14"/></svg>',
+    cmd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 6.6a2.6 2.6 0 1 0-2.6 2.6H9V6.6zM15 6.6a2.6 2.6 0 1 1 2.6 2.6H15V6.6zM9 17.4a2.6 2.6 0 1 1-2.6-2.6H9v2.6zM15 17.4a2.6 2.6 0 1 0 2.6-2.6H15v2.6z"/><rect x="9" y="9.2" width="6" height="5.6"/></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+  };
+  function raw(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
+  // BrandMark — the "RAC" tile until UX-D publishes the cropped logo (release/ui/BRAND_ASSETS.md).
+  function brandMark(sub, onInk) {
+    return raw('<span class="brandmark' + (onInk ? ' on-ink' : '') + '"><span class="bm" aria-hidden="true">RAC</span><span class="bt">Alembic<small>' + sub + '</small></span></span>');
+  }
+  // Rail state, as the reference's useRailToggle: collapsed by default (body.rail-off, the dock is
+  // the navigation); on a phone the rail opens as a drawer (body.rail-open).
+  var railOpen = false, prevView = null;
+  function applyRail() {
+    var phone = window.innerWidth <= 1023;
+    document.body.classList.toggle('rail-off', !!session.token && !phone && !railOpen);
+    document.body.classList.toggle('rail-open', !!session.token && phone && railOpen);
+    var r = document.getElementById('pv-rail');
+    if (r) { if (railOpen) { r.removeAttribute('inert'); r.removeAttribute('aria-hidden'); } else { r.setAttribute('inert', ''); r.setAttribute('aria-hidden', 'true'); } }
+    var t = document.getElementById('pv-dock-toggle');
+    if (t) { t.setAttribute('aria-pressed', String(railOpen)); t.setAttribute('aria-label', railOpen ? 'Hide navigation' : 'Show navigation'); }
+  }
+  function setRail(v) { railOpen = v; applyRail(); }
+  function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === '#/' + id) { render(); return; } location.hash = '#/' + id; }
+  function visibleNav() { return NAV.filter(function (n) { return !n.need || hasPerm(n.need); }); }
+  window.addEventListener('resize', applyRail);
+  // QuickDock keys, as the reference: ⌘K palette, ⌘\ rail, ⌘1–9 destinations; Escape closes.
+  document.addEventListener('keydown', function (e) {
+    if (!session.token) return;
+    if (e.key === 'Escape' && railOpen) { setRail(false); return; }
+    if (!(e.metaKey || e.ctrlKey)) return;
+    if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openPalette(); return; }
+    if (e.key === '\\') { e.preventDefault(); setRail(!railOpen); return; }
+    var i = parseInt(e.key, 10), v = visibleNav();
+    if (i >= 1 && i <= 9 && v[i - 1]) { e.preventDefault(); go(v[i - 1].id); }
+  });
+  function closePalette() { var w = document.getElementById('pv-cmdk'); if (w) w.remove(); }
+  function openPalette() {
+    if (document.getElementById('pv-cmdk')) { closePalette(); return; }
+    var v = visibleNav(), idx = 0, rows = [];
+    var q = h('input', { type: 'text', placeholder: 'Go to…', 'aria-label': 'Go to', autocomplete: 'off' });
+    var list = h('ul', { role: 'listbox' });
+    var wrap = h('div', { id: 'pv-cmdk' }, [h('div', { class: 'xp-scrim open', onclick: closePalette }),
+      h('div', { class: 'glass glass-deep cmdk', role: 'dialog', 'aria-modal': 'true', 'aria-label': 'Go to' }, [q, list])]);
+    function paint() {
+      var t = q.value.trim().toLowerCase();
+      rows = v.filter(function (n) { return !t || n.label.toLowerCase().indexOf(t) >= 0; });
+      if (idx >= rows.length) idx = 0;
+      list.innerHTML = '';
+      rows.forEach(function (n, i) {
+        list.appendChild(h('li', {}, [h('button', { type: 'button', class: i === idx ? 'on' : '', onclick: function () { closePalette(); go(n.id); } },
+          [icon(ICONS[n.icon], 15), n.label, h('span', { class: 'sc' }, ['⌘' + (v.indexOf(n) + 1)])])]));
+      });
+    }
+    q.addEventListener('input', function () { idx = 0; paint(); });
+    q.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(rows.length - 1, idx + 1); paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); paint(); }
+      else if (e.key === 'Enter' && rows[idx]) { e.preventDefault(); closePalette(); go(rows[idx].id); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+    });
+    document.body.appendChild(wrap); paint(); q.focus();
+  }
+  // Dock retract (reference QuickDock): with the desktop rail open the dock steps aside at rest
+  // and returns near the bottom edge; with the rail folded rac-console.css pins it.
+  var awayT = null;
+  document.addEventListener('mousemove', function (e) {
+    if (!session.token) return;
+    if (e.clientY > window.innerHeight - 64) { clearTimeout(awayT); document.body.classList.remove('dock-away'); }
+    else if (railOpen && window.innerWidth > 1023 && !document.body.classList.contains('dock-away')) {
+      clearTimeout(awayT); awayT = setTimeout(function () { if (railOpen) document.body.classList.add('dock-away'); }, 2400);
+    }
+  }, { passive: true });
+
+  // The reference Admin/Agent shell, 1:1: rail · top bar (platform brand, page title) · region ·
+  // floating glass dock (brand tile, rail toggle, destinations with ⌘1–9, command palette). Below
+  // 1024 the dock is the reference tab bar, keeping the first destinations (HOT) plus Sections.
   function renderShell(activeView, contentEl) {
     root.innerHTML = '';
-    var visible = NAV.filter(function (n) { return !n.need || hasPerm(n.need); });
+    var visible = visibleNav();
     var HOT = {}; visible.slice(0, 4).forEach(function (n) { HOT[n.id] = 1; });
     var navButtons = visible.map(function (n) {
-      // data-tutorial-target="platform-nav-<id>" (G4): the one dedicated attribute the tutorial
-      // runner's target steps use to locate this real nav button.
-      return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), 'data-tutorial-target': 'platform-nav-' + n.id, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
+      return h('button', { type: 'button', class: 'ri' + (n.id === activeView ? ' on' : ''), 'aria-current': n.id === activeView ? 'page' : null,
+        'data-tutorial-target': 'platform-nav-' + n.id, onclick: function () { go(n.id); } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
     });
-    var rail = h('nav', { class: 'rail' }, [
-      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.panel, 16)]),
-      h('button', { class: 'rb', 'aria-label': 'Platform, Raw Aroma Chem', onclick: function () { location.hash = '#/health'; } }, [h('span', { class: 'm', 'aria-hidden': 'true' }, ['RAC']), h('span', { class: 't' }, ['Platform', h('small', {}, ['Raw Aroma Chem'])])]),
-      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['Operations']), h('div', {}, navButtons)]),
+    var rail = h('nav', { class: 'rail', id: 'pv-rail', 'aria-label': 'Platform navigation' }, [
+      h('button', { type: 'button', class: 'rail-min', 'aria-label': 'Minimise navigation', onclick: function () { setRail(false); } }, [raw(CI.collapse)]),
+      h('button', { type: 'button', class: 'rb', style: 'padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [brandMark('Platform', true)]),
+      h('div', { class: 'rail-deep' }, [h('div', {}, [h('div', { class: 'rs' }, ['OPERATIONS'])].concat(navButtons))]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
-        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 14)]),
+        
+        h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:auto', onclick: function () { railOpen = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
       ]),
     ]);
-    var banner = h('div', { class: 'platform-banner' }, [
-      h('span', { class: 'dot' }), h('span', {}, ['Internal']),
-      h('span', { class: 'who-when' }, [session.email]),
-    ]);
     var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
-    var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [h('h1', {}, [label])]), h('div', { class: 'content' }, [contentEl])]);
-    var dock = h('div', { class: 'qdock', role: 'navigation', 'aria-label': 'Sections' },
-      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.panel, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
-      .concat(visible.map(function (n) {
-        return h('button', { class: 'qb' + (n.id === activeView ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), title: n.label, 'aria-label': n.label, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon], 17), h('span', { class: 'nm' }, [n.label])]);
-      })));
-    root.appendChild(h('div', { class: 'app' }, [rail, main, dock]));
+    var bar = h('div', { class: 'bar' }, [
+      h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),
+      h('h1', {}, [label]),
+      h('span', { class: 'chip n' }, ['Internal']),
+      h('span', { style: 'flex:1' }),
+    ]);
+    var view = h('section', { class: 'pageview' }, [contentEl]);
+    var main = h('div', { class: 'main' }, [ bar, h('div', { class: 'content' }, [view])]);
+    var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
+      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [raw('<span class="bm" aria-hidden="true">RAC</span>')]),
+       h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'Show navigation', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
+         [raw(CI.menu), h('span', { class: 'kb' }, ['Sections', h('span', { class: 'kc' }, [' · ⌘\\'])])]),
+       h('span', { class: 'sep' })]
+      .concat(visible.map(function (n, i) {
+        var on = n.id === activeView;
+        return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), 'aria-label': n.label, 'aria-pressed': String(on), onclick: function () { go(n.id); } },
+          [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, i < 9 ? h('span', { class: 'kc' }, [' · ⌘' + (i + 1)]) : null])]);
+      }))
+      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb', 'aria-label': 'Command palette', onclick: openPalette }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Command', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
+    var handle = h('button', { type: 'button', class: 'dock-handle', 'aria-label': 'Show quick access dock', onclick: function () { document.body.classList.remove('dock-away'); } }, [h('i')]);
+    root.appendChild(h('div', { class: 'app' }, [rail, h('div', { class: 'rail-scrim', onclick: function () { setRail(false); } }), main, handle, dock]));
+    applyRail();
+    // usePageEnter — the resting state is correct; the offset is an attribute removed on a timer.
+    var order = visible.map(function (n) { return n.id; }), a = order.indexOf(prevView), b = order.indexOf(activeView);
+    if (a >= 0 && b >= 0 && a !== b) {
+      view.setAttribute('data-enter', b > a ? 'r' : 'l');
+      setTimeout(function () { view.setAttribute('data-settling', ''); view.removeAttribute('data-enter'); }, 20);
+      setTimeout(function () { view.removeAttribute('data-settling'); }, 460);
+    }
+    prevView = activeView;
   }
+
 
   /* ── environment & diagnostics (real: GET /health + GET /v1/platform/health) ─────────────── */
   async function screenHealth() {

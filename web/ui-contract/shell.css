@@ -68,9 +68,14 @@
  * acceptance.spec.ts measures under a fine pointer at 768/375). */
 @media (pointer:coarse){ .btn,.ri,.pg button,.tab,.xp,.gbtn,.qdock .qb{min-height:var(--ch-touch-floor-coarse-pointer)} .xp{min-width:var(--ch-touch-floor-coarse-pointer)} }
 @media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }
+/* One blanket motion collapse — ALEMBIC apps/web/app/reduced-motion.css, verbatim in effect:
+ * animations land on their end frame, transitions are removed (not shortened — Gecko keeps
+ * sub-µs transitions "running" and pins the refresh driver). */
 @media (prefers-reduced-motion: reduce){
-  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;transition:none !important}
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;animation-delay:0s !important;transition:none !important;scroll-behavior:auto !important}
 }
+/* iOS zooms any input under 16px on focus (APPLE_PASS_SYSTEM.md §5, coarse pointer). */
+@media (pointer:coarse){ input,select,textarea{font-size:16px !important} }
 
 /* dock: the brand tile is a real button (home); shortcut hints hide where the dock is a tab bar */
 .qdock .qd-brand{background:none;border:0;padding:0 10px 0 4px;cursor:pointer}

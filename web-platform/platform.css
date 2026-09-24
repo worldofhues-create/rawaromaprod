@@ -1,181 +1,92 @@
-/* platform.css — Platform Operations console styling.
- * Built on alembic-tokens.css (vendored verbatim from release/ui/ALEMBIC_TOKENS.css,
- * contract_hash c04b07230f2c3135a705b53bcfb646e73195309074b7a53cf2ba3eb8744caaf2,
- * baseline_sha 44dec2d) and release/ui/PORTING_GUIDE.md's component recipes — the SAME
- * class shapes as web-vault/vault.css and every other ALEMBIC-shell console (§6 of the
- * addendum: "Platform Operations must use the SAME ALEMBIC visual shell... must NOT look
- * like a developer debug panel"). Deliberately near-identical to vault.css's component
- * layer for that reason; the .platform-banner is this console's one allowed departure
- * (an internal-only badge, not a secure-zone claim). No dark mode (per U0's contract). */
+/* platform.css — Platform Operations layer over the reference console design.
+ * Load order (index.html): fonts → rac-console.css (the reference Admin/Agent design layer,
+ * vendored verbatim; identical copy in web/ui-contract/ and web-vault/) → alembic-tokens.css
+ * (the ALEMBIC contract, wins on shared custom properties) → this file. The shell is the
+ * reference's, 1:1; this file carries the same corrections as web/ui-contract/shell.css plus
+ * this console's own pieces (health tiles). */
 
-* { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; min-height: 100%; }
-body {
-  background: var(--bg);
-  color: var(--ink);
-  font: var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);
-  -webkit-font-smoothing: antialiased;
+/* ── reference corrections (same as web/ui-contract/shell.css) ─────────────────────────────── */
+.rs,.ri .ct,.rme .who small,.brandmark.on-ink .bt small{color:#BDBDB6}
+.bar-brand i{color:var(--ink-3);opacity:1}
+.rail{position:relative}
+@media (max-width:1023px){
+  .qdock .qb:not(.hot){display:none !important}
+  .qdock .dk-navtoggle{display:flex !important}
+  body.rail-open .rail{display:flex !important;position:fixed;z-index:560;top:0;bottom:0;left:0;
+    width:min(86vw,var(--ch-rail-width));margin:0;border-radius:0 26px 26px 0;visibility:visible;pointer-events:auto;
+    box-shadow:26px 0 64px -16px rgba(10,10,10,.36)}
+  body.rail-open .rail-scrim{display:block}
+  body.rail-off .qdock .qb .kb .kc,body .qdock .qb .kb .kc{display:none !important}
 }
-h1, h2, h3, p { margin: 0; }
-button, input, select, textarea { font-family: inherit; color: inherit; }
-::-webkit-scrollbar { width: 9px; height: 9px; }
-::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: var(--r-pill); }
-::-webkit-scrollbar-track { background: transparent; }
-
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
-}
-
-/* Topbar + floating dock, rail off-canvas by default at every width — ALEMBIC parity correction,
- * see web/ui-contract/shell.css's header comment + ALEMBIC_GUIDE_CORRECTIONS.md. The rail is kept
- * (still the complete nav) but is never the permanently-visible column PORTING_GUIDE.md §Shell's
- * literal "rail + bar" reading produced; `.qdock` (below) is the default way to navigate. */
-.app { display: block; min-height: 100vh; }
-.rail { position: fixed; inset: 0 auto 0 0; z-index: 92; width: min(86vw, var(--ch-rail-width)); transform: translateX(-100%); transition: transform .28s cubic-bezier(.2,.9,.25,1); }
-.rail.open { transform: translateX(0); box-shadow: 26px 0 64px -16px rgba(10,10,10,.36); }
-.rail { background: var(--rail); color: #EDEDEA; display: flex; flex-direction: column; padding: var(--s-base) var(--s-snug) var(--s-snug); overflow-y: auto; }
-.rb { display: flex; align-items: center; gap: var(--s-tight); background: none; border: none; color: inherit; cursor: pointer; padding: var(--s-hair) var(--s-tight) var(--s-base); text-align: left; min-width: 0; width: 100%; }
-.rail-deep { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--s-tight); }
-.rs { font: var(--w-med) var(--t-micro)/1 var(--font-ui); letter-spacing: var(--ls-wide); text-transform: uppercase; color: #BDBDB6; padding: 0 var(--s-tight) var(--s-tight); }
-.ri { display: flex; align-items: center; gap: var(--s-tight); width: 100%; height: var(--ch-rail-item); padding: 0 var(--s-tight); border-radius: var(--r-sm); background: none; border: none; color: #BDBDB6; cursor: pointer; font: var(--w-reg) var(--t-cap)/1 var(--font-ui); letter-spacing: var(--ls-flat); text-align: left; transition: background .15s, color .15s; }
-.ri:hover { background: var(--rail-2); color: #fff; }
-.ri.on { background: var(--accent); color: var(--rail); }
-.ri .ic { flex: none; width: var(--ic-default); height: var(--ic-default); }
-.ri .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.rme { margin-top: auto; display: flex; align-items: center; gap: var(--s-tight); padding: var(--s-snug) var(--s-tight) var(--s-hair); border-top: 1px solid var(--rail-2); }
-.av { width: 30px; height: 30px; border-radius: var(--r-pill); background: var(--accent); color: var(--rail); display: grid; place-items: center; font: var(--w-med) var(--t-micro)/1 var(--font-ui); flex: none; }
-.who { font: var(--w-reg) var(--t-cap)/1.25 var(--font-ui); color: #EDEDEA; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-
-.main { display: flex; flex-direction: column; min-width: 0; width: 100%; }
-.bar { height: var(--ch-topbar-admin); flex: none; display: flex; align-items: center; gap: var(--s-tight); padding: 0 var(--s-base); background: transparent; }
-.bar h1 { font: var(--w-med) var(--t-h1)/1 var(--font-ui); letter-spacing: var(--ls-flat); }
-/* Always the CLOSE control now the rail is off-canvas everywhere (ALEMBIC's rail-min semantics —
-   opening it is the dock's job, below). */
-.rail-toggle { display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: var(--r-sm); background: none; border: none; color: #BDBDB6; cursor: pointer; }
-.content { flex: 1; padding: var(--s-tight) var(--s-snug) calc(var(--s-open) + 74px); }
-
-/* ---------------- quick-access dock — same primitive as web/ui-contract/shell.css's .qdock ------ */
-.qdock{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:520;
-  display:flex;align-items:center;gap:2px;padding:5px;border-radius:var(--r-pill);
-  width:max-content;max-width:calc(100vw - 24px);overflow-x:auto;
-  background:var(--rail);box-shadow:0 14px 34px -14px rgba(20,20,19,.4),0 2px 6px -2px rgba(20,20,19,.24)}
-.qdock::-webkit-scrollbar{display:none}
-.qdock .qb{width:40px;height:40px;flex:0 0 auto;border-radius:14px;border:0;cursor:pointer;position:relative;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
-  color:#EDEDEA;background:transparent;transition:background .18s,color .18s}
-.qdock .qb .nm{display:none}
-.qdock .qb:hover{background:var(--rail-2)}
-.qdock .qb.on{background:var(--accent);color:var(--rail)}
-.qdock .sep{width:1px;height:22px;background:rgba(255,255,255,.16);margin:0 4px;flex:0 0 auto}
-@media (max-width:1024px){
-  .qdock{left:0;right:0;bottom:0;transform:none;width:100%;max-width:none;border-radius:0;
-    justify-content:space-around;padding:6px 4px calc(6px + env(safe-area-inset-bottom,0px));
-    box-shadow:0 -2px 12px -4px rgba(20,20,19,.28);overflow-x:visible}
-  .qdock .qb:not(.hot){display:none}
-  .qdock .qb{flex:1 1 0;width:auto;height:52px;border-radius:var(--r-sm)}
-  .qdock .qb .nm{display:block;font:var(--w-med) var(--t-micro)/1 var(--font-ui);white-space:nowrap}
-}
-
-.platform-banner { display: flex; align-items: center; gap: var(--s-tight); flex-wrap: wrap; background: var(--rail); color: #EDEDEA; padding: var(--s-tight) var(--s-base); font: var(--w-med) var(--t-cap)/1.3 var(--font-ui); letter-spacing: .02em; }
-.platform-banner .dot { width: 7px; height: 7px; border-radius: var(--r-pill); background: var(--accent); flex: none; }
-.platform-banner .who-when { margin-left: auto; color: #BDBDB6; font: var(--w-reg) var(--t-cap)/1.3 var(--font-mono); }
-
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r-xl); padding: var(--pad-card-top) var(--pad-card) var(--pad-card-btm); margin-bottom: var(--s-base); }
-.card-hd { display: flex; align-items: center; gap: var(--s-snug); flex-wrap: wrap; margin-bottom: var(--s-snug); }
-.card-hd h2 { font: var(--w-reg) var(--t-h2)/var(--lh-h2) var(--font-ui); letter-spacing: var(--ls-tight); }
-.card-hd .n { font: var(--w-reg) var(--t-cap)/1 var(--font-ui); color: var(--ink-3); }
-.card-hd .spacer { flex: 1; }
-
-table { width: 100%; border-collapse: collapse; font: var(--w-reg) var(--t-body)/1.3 var(--font-ui); }
-thead th { position: sticky; top: 0; background: var(--panel); z-index: 1; text-align: left; font: var(--w-med) var(--t-cap)/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); padding: var(--s-snug); border-bottom: 1px solid var(--line); white-space: nowrap; }
-th.r, td.r { text-align: right; }
-tbody td { padding: var(--s-snug); border-bottom: 1px solid var(--line); vertical-align: middle; }
-tbody tr:hover { background: var(--panel-2); }
-td.mono, .mono { font-family: var(--font-mono); font-size: var(--t-cap); }
-
-.fld { height: var(--ch-field-shared); padding: 0 var(--s-snug); border-radius: var(--r-sm); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: var(--w-med) var(--t-body)/1 var(--font-ui); outline: none; }
-*:focus-visible { outline: 2px solid var(--blue); outline-offset: 1px; }
-.fld:focus-visible { border-color: var(--blue); }
-.fld::placeholder { color: var(--ink-3); }
-label.field { display: flex; flex-direction: column; gap: 5px; margin-bottom: var(--s-snug); }
-label.field textarea { min-height: 64px; padding: var(--s-tight) var(--s-snug); border-radius: var(--r-sm); border: 1px solid var(--line-2); resize: vertical; font: inherit; }
-label.field > span.lbl { font: var(--w-med) var(--t-cap)/1 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
-
-.btn { height: var(--ch-button-default); padding: 0 var(--s-snug); border-radius: var(--r-md); border: 1px solid var(--line-2); background: var(--panel); color: var(--ink); font: var(--w-med) var(--t-cap)/1 var(--font-ui); cursor: pointer; width: max-content; display: inline-flex; align-items: center; gap: var(--s-tight); white-space: nowrap; min-height: var(--ch-touch-floor-mouse); transition: background .15s, border-color .15s; }
-.btn:hover { background: var(--panel-2); border-color: var(--ink-3); }
-.btn.sm { height: var(--ch-button-sm); padding: 0 10px; border-radius: var(--r-sm); font-size: var(--t-cap); }
-.btn.p { background: var(--accent); border-color: var(--accent); color: var(--ink); }
-.btn.p:hover { background: #DFE850; border-color: #DFE850; }
-.btn.g { background: var(--green); border-color: var(--green); color: #fff; }
-.btn.r { background: var(--red); border-color: var(--red); color: #fff; }
-.btn:disabled { opacity: .55; cursor: not-allowed; }
-@media (pointer: coarse) { .btn, .ri, .qdock .qb { min-height: var(--ch-touch-floor-coarse-pointer); } }
-
-.chip { display: inline-flex; align-items: center; gap: 4px; padding: 5px 9px; border-radius: var(--r-sm); font: var(--w-med) var(--t-micro)/1 var(--font-ui); letter-spacing: .04em; white-space: nowrap; background: var(--panel-2); color: var(--ink-2); border: 1px solid var(--line); }
-.chip.n { background: var(--panel-2); color: var(--ink-2); border-color: var(--line-2); }
-.chip.b { background: rgba(90,90,102,.1); color: var(--blue); border-color: rgba(90,90,102,.2); }
-.chip.g { background: rgba(92,104,41,.1); color: var(--green); border-color: rgba(92,104,41,.2); }
-.chip.a { background: rgba(110,95,15,.12); color: var(--amber); border-color: rgba(110,95,15,.22); }
-.chip.r { background: rgba(138,90,76,.1); color: var(--red); border-color: rgba(138,90,76,.2); }
-.chip.k { background: var(--accent); color: var(--ink); border-color: var(--accent); }
-
-.xp-scrim { position: fixed; inset: 0; background: rgba(20,20,19,.45); z-index: 250; display: none; }
-.xp-scrim.open { display: block; }
-.xp-sheet { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(480px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow-y: auto; background: var(--panel); border-radius: var(--r-xl); box-shadow: 0 14px 34px -14px rgba(20,20,19,.16), 0 40px 90px -50px rgba(20,20,19,.22); z-index: 251; display: none; }
-.xp-sheet.open { display: block; }
-.xp-sheet-hd { display: flex; align-items: center; gap: var(--s-tight); padding: var(--pad-card-top) var(--pad-card) var(--s-snug); }
-.xp-sheet-hd h2 { font: var(--w-med) var(--t-h1)/1 var(--font-ui); flex: 1; }
-.xp { border: none; background: var(--panel-2); color: var(--ink-2); width: 32px; height: 32px; border-radius: var(--r-sm); cursor: pointer; display: grid; place-items: center; font: var(--w-reg) var(--t-h2)/1 var(--font-ui); }
-.xp:hover { background: var(--panel-3); color: var(--ink); }
-.xp-sheet-bd { padding: 0 var(--pad-card) var(--pad-card-btm); }
-
-.empty { padding: var(--s-loose) var(--s-base); text-align: center; color: var(--ink-2); }
-.empty h3 { font: var(--w-med) var(--t-h3)/1.3 var(--font-ui); color: var(--ink); margin-bottom: var(--s-tight); }
-.notbuilt { padding: var(--pad-card-top) var(--pad-card) var(--pad-card-btm); max-width: 640px; }
-.notbuilt h2 { font: var(--w-med) var(--t-h2)/var(--lh-h2) var(--font-ui); margin-bottom: var(--s-tight); }
-.notbuilt p { color: var(--ink-2); }
-.notbuilt .needs { margin-top: var(--s-tight); padding: var(--s-tight) var(--s-snug); background: var(--panel-2); border-radius: var(--r-sm); font: var(--w-reg) var(--t-cap)/1.4 var(--font-mono); color: var(--ink-2); }
-.skl { display: inline-block; height: 14px; width: 120px; border-radius: var(--r-sm); background: linear-gradient(90deg, var(--panel-2) 25%, var(--panel-3) 37%, var(--panel-2) 63%); background-size: 400% 100%; animation: sklSlide 1.4s ease infinite; }
-@keyframes sklSlide { 0% { background-position: 100% 50%; } 100% { background-position: 0 50%; } }
-.toast { position: fixed; top: var(--s-base); left: 50%; transform: translateX(-50%); z-index: 300; display: inline-flex; align-items: center; gap: 8px; padding: var(--s-snug) var(--s-base); border-radius: var(--r-md); background: var(--ink); color: #fff; font: var(--w-med) var(--t-body)/1 var(--font-ui); box-shadow: 0 18px 44px -14px rgba(0,0,0,.5); }
-.toast .d { width: 7px; height: 7px; border-radius: var(--r-pill); background: currentColor; flex: 0 0 auto; }
-.toast.bad { background: var(--red); }
-
-.login-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: var(--rail); padding: var(--s-base); }
-.login-card { width: min(380px, 100%); background: var(--panel); border-radius: var(--r-xl); padding: var(--pad-region) var(--pad-card); }
-.login-card .mark { font: var(--w-med) var(--t-fig-sm)/var(--lh-fig-sm) var(--font-ui); letter-spacing: var(--ls-tight); color: var(--ink); margin: 0 0 var(--s-tight); }
-.login-card .sub { font: var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui); color: var(--ink-3); margin: 0 0 var(--s-base); }
-.login-card .btn { width: 100%; justify-content: center; min-height: var(--ch-touch-floor-coarse-pointer); font-size: var(--t-body); text-decoration: none; }
-.login-card .btn[aria-disabled="true"] { opacity: .5; pointer-events: none; }
-.login-card .err { margin-top: var(--s-snug); font: var(--w-reg) var(--t-cap)/var(--lh-cap) var(--font-ui); color: var(--red); }
-.login-card .err:empty { display: none; }
-
-.health-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: var(--s-snug); }
-.health-tile { border: 1px solid var(--line); border-radius: var(--r-md); padding: var(--s-snug); }
-.health-tile .k { font: var(--w-reg) var(--t-micro)/1 var(--font-ui); letter-spacing: var(--ls-wide); text-transform: uppercase; color: var(--ink-3); margin-bottom: 4px; }
-.health-tile .v { font: var(--w-med) var(--t-h2)/1 var(--font-ui); }
-
-@media (max-width: 768px) {
-  .content { padding: var(--s-snug) var(--s-snug) calc(var(--s-open) + 74px); }
-  .card { padding: var(--s-snug); }
-  table, thead, tbody, tr { display: block; width: 100%; }
-  thead { display: none; }
-  tbody tr { border-bottom: 1px solid var(--line); padding: var(--s-tight) 0; }
-  tbody td { display: flex; justify-content: space-between; gap: var(--s-tight); border-bottom: none; padding: 2px 0; }
-  tbody td::before { content: attr(data-label); font-weight: var(--w-med); color: var(--ink-3); }
-}
-@media (max-width: 375px) { .xp-sheet { width: calc(100vw - 16px); } }
-
-/* 44px touch floor below 900px — same rule as web/ui-contract/shell.css (lane UI6). */
+.rail-scrim{display:none;position:fixed;inset:0;z-index:555;background:rgba(20,20,19,.34)}
+.qdock .qd-brand{background:none;border:0;padding:0 10px 0 4px;cursor:pointer}
+@media (pointer:coarse){ .btn,.ri,.pg button,.xp,.gbtn,.qdock .qb{min-height:var(--ch-touch-floor-coarse-pointer)} .xp{min-width:var(--ch-touch-floor-coarse-pointer)} input,select,textarea{font-size:16px !important} }
 @media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;animation-delay:0s !important;transition:none !important;scroll-behavior:auto !important}
+}
 
-/* Brand lockup — the same tile + wordmark as web/ui-contract/shell.css (.rb .m / .rb .t). */
-.rb .m { width: 30px; height: 30px; border-radius: var(--r-sm); background: linear-gradient(150deg, var(--accent), #C3CE3A); color: #2A2E08; display: grid; place-items: center; font: var(--w-med) var(--t-micro)/1 var(--font-ui); letter-spacing: .04em; flex: 0 0 auto; }
-.rb .t { display: flex; flex-direction: column; gap: 4px; font: var(--w-med) var(--t-body)/1 var(--font-ui); color: #EDEDEA; white-space: nowrap; letter-spacing: .01em; }
-.rb .t small { display: block; font: var(--w-reg) var(--t-micro)/1 var(--font-ui); color: #BDBDB6; letter-spacing: .1em; text-transform: uppercase; }
-.rme .btn { width: 30px; height: 30px; min-height: 30px; padding: 0; justify-content: center; border: none; border-radius: var(--r-sm); background: var(--rail-2); color: #EDEDEA; }
-.rme .btn:hover { background: color-mix(in srgb, var(--rail-2) 85%, #000); }
-.card-note { color: var(--ink-3); margin: 0 0 var(--s-snug); }
-.err { color: var(--red); font: var(--w-reg) var(--t-cap)/var(--lh-cap) var(--font-ui); }
-@media (pointer: coarse) { .rme .btn { width: var(--ch-touch-floor-coarse-pointer); height: var(--ch-touch-floor-coarse-pointer); min-height: var(--ch-touch-floor-coarse-pointer); } }
-.xp-sheet-bd .sub { font: var(--w-med) var(--t-cap)/1.3 var(--font-ui); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); }
+/* ── cards: the reference .card is an unpadded glass panel whose .card-hd and table cells carry
+ *    the 30px gutter; everything else a screen puts in a card sits on that same gutter. ───── */
+.card{margin-bottom:var(--gr-gap);padding-bottom:var(--pad-card-btm)}
+.card > :not(.card-hd):not(table):not(.empty){margin-left:var(--pad-card);margin-right:var(--pad-card)}
+.card > table{min-width:0}
+.card-hd{align-items:center}
+.card-hd .spacer{flex:1}
+th.r,td.r{text-align:right}
+td.mono,.mono{font-family:var(--mono);font-size:var(--t-cap)}
+.card-note{color:var(--ink-3);margin:0 var(--pad-card) var(--s-snug)}
+.err{color:var(--red);font:var(--w-reg) var(--t-cap)/var(--lh-cap) var(--ui)}
+.skl{display:block;height:14px;width:120px;margin:var(--pad-card-top) var(--pad-card) 0}
+.notbuilt{padding:var(--pad-card-top) var(--pad-card) var(--pad-card-btm);max-width:640px}
+.notbuilt > *{margin-left:0 !important;margin-right:0 !important}
+.notbuilt h2{font:var(--w-med) var(--t-h2)/var(--lh-h2) var(--ui);margin:0 0 var(--s-tight)}
+.notbuilt p{font:var(--w-reg) var(--t-body)/var(--lh-body) var(--ui);color:var(--ink-2);margin:0}
+.notbuilt .needs{margin-top:var(--s-tight);padding:var(--s-tight) var(--s-snug);background:var(--panel-2);border-radius:var(--r-sm);font:var(--w-reg) var(--t-cap)/1.4 var(--mono);color:var(--ink-2)}
+
+/* ── forms inside the reference sheet ─────────────────────────────────────────────────────── */
+.xp-sheet .xp-sheet-hd h2{flex:1;min-width:0}
+.xp-sheet-bd .sub{font:var(--w-med) var(--t-cap)/1.3 var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+label.field{display:flex;flex-direction:column;gap:5px;margin-bottom:var(--s-snug)}
+label.field > span.lbl{font:var(--w-med) var(--t-cap)/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+label.field textarea{min-height:64px;padding:var(--s-tight) 10px;border-radius:6px;border:1px solid var(--line-2);resize:vertical;font:inherit;background:var(--panel)}
+.fld::placeholder{color:var(--ink-3)}
+@media (max-width:767px){ .xp-sheet{width:100vw;max-width:100vw;height:100dvh;max-height:100dvh;border-radius:0;padding:var(--s-base)} }
+
+/* ── toast tones on the reference's dark pill ─────────────────────────────────────────────── */
+.toast.bad .d{background:#9A6A5C}
+
+/* ── phone tables: rows become label/value stacks ─────────────────────────────────────────── */
+@media (max-width:767px){
+  .card table,.card thead,.card tbody,.card tr{display:block;width:100%}
+  body .card > table{min-width:0 !important}
+  .card thead{display:none}
+  .card tbody tr{border-bottom:1px solid var(--line);padding:var(--s-tight) var(--pad-card)}
+  .card tbody td{display:flex;justify-content:space-between;gap:var(--s-tight);border-bottom:none;padding:2px 0}
+  .card tbody td::before{content:attr(data-label);font-weight:var(--w-med);color:var(--ink-3)}
+}
+
+/* ── sign-in (UX-C): the one sign-in card of all three RawProd consoles ──────────────────── */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--rail);padding:var(--s-base)}
+.login-card{width:min(380px,100%);background:var(--panel);border-radius:var(--r-xl);padding:var(--pad-region) var(--pad-card)}
+.login-card .mark{font:var(--w-med) var(--t-fig-sm)/var(--lh-fig-sm) var(--ui);letter-spacing:var(--ls-tight);color:var(--ink);margin:0 0 var(--s-tight)}
+.login-card .sub{font:var(--w-reg) var(--t-body)/var(--lh-body) var(--ui);color:var(--ink-3);margin:0 0 var(--s-base)}
+.login-card .btn{width:100%;justify-content:center;min-height:var(--ch-touch-floor-coarse-pointer);font-size:var(--t-body);text-decoration:none}
+.login-card .btn[aria-disabled="true"]{opacity:.5;pointer-events:none}
+.login-card .err{margin-top:var(--s-snug)}
+.login-card .err:empty{display:none}
+
+/* ── command palette (dock ⌘K) ────────────────────────────────────────────────────────────── */
+.cmdk{position:fixed;z-index:620;left:50%;top:14vh;transform:translateX(-50%);width:min(560px,calc(100vw - 32px));display:flex;flex-direction:column;padding:var(--s-snug)}
+.cmdk input{height:44px;border:0;outline:none;border-radius:var(--r-md);padding:0 var(--s-snug);background:rgba(255,255,255,.8);box-shadow:0 0 0 .5px var(--gl-hair);font:var(--w-reg) var(--t-h3)/1 var(--ui);color:var(--ink)}
+.cmdk ul{list-style:none;margin:var(--s-tight) 0 0;padding:0;max-height:50vh;overflow-y:auto}
+.cmdk li button{width:100%;display:flex;align-items:center;gap:var(--s-snug);padding:10px 12px;border-radius:10px;font:var(--w-reg) var(--t-body)/1.2 var(--ui);color:var(--ink);text-align:left}
+.cmdk li button svg{width:15px;height:15px;color:var(--ink-3)}
+.cmdk li button.on,.cmdk li button:hover{background:var(--accent-soft)}
+.cmdk li button .sc{margin-left:auto;font:var(--w-reg) var(--t-micro)/1 var(--mono);color:var(--ink-3)}
+
+/* ── health tiles ─────────────────────────────────────────────────────────────────────────── */
+.health-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:var(--s-snug)}
+.health-tile{border-radius:var(--r-md);padding:var(--s-snug);background:rgba(255,255,255,.66);box-shadow:0 0 0 .5px var(--gl-hair)}
+.health-tile .k{font:var(--w-med) var(--t-micro)/1 var(--ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3);margin-bottom:6px}
+.health-tile .v{font:var(--w-light) var(--t-fig-sm)/1 var(--ui)}
