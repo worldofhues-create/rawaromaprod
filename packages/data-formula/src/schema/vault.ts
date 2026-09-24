@@ -22,7 +22,8 @@ export const formulaVault = formula.table(
     formulaVaultId: dictPk("formula_vault_id"),
     formulaId: uuid("formula_id").references(() => formulaMaster.formulaId),
     encryptionKeyRef: varchar("encryption_key_ref", { length: 255 }),
-    vaultLocation: varchar("vault_location", { length: 255 }),
+    // text, not varchar(255): stores JSON.stringify(<KMS envelope>), which exceeds 255 chars.
+    vaultLocation: text("vault_location"),
     ...metaColumns(),
   },
   (t) => [index("formula_vault_formula_idx").on(t.formulaId)],

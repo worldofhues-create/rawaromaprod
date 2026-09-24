@@ -257,6 +257,17 @@ export interface VaultSeedSummary {
  * demo-seed.test.ts) don't need to change shape. */
 export type DemoSeedSummary = FactorySeedSummary & VaultSeedSummary;
 
+/** Never log a connection string's password (release-convergence fix, rc .4). */
+export function redactDbUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    if (u.password) u.password = '***';
+    return u.toString();
+  } catch {
+    return url.replace(/:\/\/([^:@/]+):[^@]*@/, '://$1:***@');
+  }
+}
+
 let out: (msg: string) => void = (msg) => console.log(msg);
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -348,7 +359,7 @@ export async function runDemoSeedVault(opts: DemoSeedOptions = {}): Promise<Vaul
 
   const formulaSql = postgres(formulaDatabaseUrl, { max: 5, prepare: false });
   try {
-    out(`ALEMBIC OS Demo Factory (vault phase) — sealing formulas against ${formulaDatabaseUrl}`);
+    out(`ALEMBIC OS Demo Factory (vault phase) — sealing formulas against ${redactDbUrl(formulaDatabaseUrl)}`);
 
     const formulaDb = dbFor(formulaSql, formulaSchema);
     const kms = resolveSeedKmsAdapter(new ConfigService(process.env), opts.kmsClient);
@@ -425,7 +436,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
   const tutorialSql = postgres(databaseUrl, { max: 2, prepare: false });
 
   try {
-    out(`ALEMBIC OS Demo Factory (factory phase) — seeding against ${databaseUrl}`);
+    out(`ALEMBIC OS Demo Factory (factory phase) — seeding against ${redactDbUrl(databaseUrl)}`);
 
     // ── schema-scoped drizzle handles (mirrors backend/test-support/db.ts) ──
     const orgDb = dbFor(sql, orgSchema);
