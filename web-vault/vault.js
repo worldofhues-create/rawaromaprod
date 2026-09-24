@@ -135,7 +135,7 @@
       if (!envelope || !envelope.data || !envelope.data.enc) {
         // Transient failure (cold start / dropped connection) — reset and let the caller retry.
         aesKey = null; handshakePromise = null;
-        throw new VaultError('NETWORK', 'Could not reach the secure channel. Try again.', 0);
+        throw new VaultError('NETWORK', 'Can\'t connect. Try again.', 0);
       }
       var inner = JSON.parse(await open(envelope.data.enc));
       var body = inner.body ? JSON.parse(inner.body) : null;
@@ -217,13 +217,13 @@
     try {
       await loginWithAssertion(token);
       if (!hasPerm('formula:actual:read') && !session.permissions.some(function (p) { return p.indexOf('formula:') === 0; }) && !hasPerm('platform:flag:write')) {
-        toast('Signed in, but this account holds no Vault permission. Contact an admin for a formulator/vault_approver role.', true);
+        toast('This account has no Vault access. Ask an admin for a formulator or approver role.', true);
         logout();
       } else {
         location.hash = '#/formulas';
       }
     } catch (e) {
-      toast('Could not complete sign-in from ALEMBIC: ' + ((e instanceof VaultError) ? e.message : 'unknown error'), true);
+      toast('Sign-in didn\'t complete. ' + ((e instanceof VaultError) ? e.message : 'Try again.'), true);
     }
     consumingAssertion = false;
     return true;
@@ -242,11 +242,9 @@
    *  extra step, not a silent "resume" this app cannot actually do. */
   function offerReauthViaAlembic() {
     return new Promise(function (resolve) {
-      openDialog('Re-authenticate to continue', function (body, close) {
+      openDialog('Confirm it\'s you', function (body, close) {
         body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [
-          'This action requires a session issued within the last ' + Math.round(FRESH_WINDOW_S / 60)
-          + ' minutes. Password re-entry is retired for this console — confirm a fresh code on '
-          + 'ALEMBIC, then choose "Open Vault" there again.',
+          'Confirm a new code on ALEMBIC, then open Vault again.',
         ]));
         var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
           h('button', { class: 'btn p', onclick: function () {
@@ -257,7 +255,7 @@
         ]);
         body.appendChild(actions);
         if (!ALEMBIC_CONSOLE_URL) {
-          body.appendChild(h('div', { class: 'err' }, ['This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).']));
+          body.appendChild(h('div', { class: 'err' }, ['Sign-in isn\'t set up for this build.']));
         }
       });
     });
@@ -276,7 +274,7 @@
     }
     await offerReauthViaAlembic();
     logout();
-    throw new VaultError('REAUTH_REQUIRED', 'Confirm a fresh code on ALEMBIC, then open Vault again from there.', 0);
+    throw new VaultError('REAUTH_REQUIRED', 'Confirm a new code on ALEMBIC, then open Vault again.', 0);
   }
 
   /* ---------------------------------------------------------------------------------------
@@ -314,6 +312,7 @@
     activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
     logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
     menu: 'M3 6h18M3 12h18M3 18h18',
+    panel: 'M4 4h16v16H4zM10 4v16',
     alert: 'M12 9v4M12 17h.01M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z',
     plus: 'M12 5v14M5 12h14',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5M12 17h.01',
@@ -348,14 +347,14 @@
 
   function promptReason(label) {
     return new Promise(function (resolve) {
-      openDialog(label || 'Access reason required', function (body, close) {
+      openDialog(label || 'Reason required', function (body, close) {
         var err = h('div', { class: 'err' });
-        var reason = h('textarea', { placeholder: 'e.g. QA investigation — batch mismatch report #4471' });
+        var reason = h('textarea', { placeholder: 'e.g. QA investigation, batch mismatch' });
         body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' },
-          ['This decrypt is recorded on the access-audit trail with your name, this reason, and the time.']));
-        body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason (min 3 characters)']), reason]));
+          ['Your name, reason and the time are logged.']));
+        body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason']), reason]));
         body.appendChild(err);
-        var submit = h('button', { class: 'btn r' }, ['Reveal plaintext']);
+        var submit = h('button', { class: 'btn r' }, ['Reveal']);
         submit.addEventListener('click', function () {
           if (reason.value.trim().length < 3) { err.textContent = 'A reason is required.'; return; }
           resolve(reason.value.trim()); close();
@@ -390,41 +389,29 @@
    * --------------------------------------------------------------------------------------- */
   function howToSection(title, lines) {
     return h('div', { style: 'margin-bottom:16px' }, [
-      h('h3', { style: 'margin:0 0 6px;font-size:13.5px' }, [title]),
+      h('h3', { style: 'margin:0 0 6px;font:var(--w-med) var(--t-h3)/1.3 var(--font-ui)' }, [title]),
       h('div', { style: 'display:flex;flex-direction:column;gap:6px' },
-        lines.map(function (line) { return h('p', { style: 'margin:0;color:var(--ink-2);font-size:13px;line-height:1.5' }, [line]); })),
+        lines.map(function (line) { return h('p', { style: 'margin:0;color:var(--ink-2);font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui)' }, [line]); })),
     ]);
   }
   function openVaultHowTo() {
-    openDialog('How to use the Formula Vault', function (body) {
-      body.appendChild(howToSection('What this console is', [
-        'A separate, non-installable console for Formula Vault access only — it shares no code, ' +
-          'storage, or session with the factory portal. Reloading this page ends your session by ' +
-          'design; sign in again from ALEMBIC’s "Open Vault" link.',
-        'You only ever see what your own role and per-formula access grant — a formulator sees the ' +
-          'formulas they authored or were granted; a vault approver sees what is submitted for review.',
+    openDialog('Help', function (body) {
+      body.appendChild(howToSection('Sessions', [
+        'Vault is separate from Factory. Reloading ends your session; open Vault from ALEMBIC to sign in again.',
+        'You see only the formulas your role and grants allow.',
       ]));
-      body.appendChild(howToSection('Formulas', [
-        'The Formulas screen lists formulas you can see, each with its versions and lifecycle ' +
-          'status (DRAFT → VERSIONED → REVIEW → APPROVED → LOCKED, or REJECTED/ARCHIVED/SUPERSEDED).',
-        'Open a formula to see its versions, ingredients, and history. Ingredient percentages and ' +
-          'other protected content stay hidden until you explicitly reveal them.',
+      body.appendChild(howToSection('Versions', [
+        'Draft → Versioned → Review → Approved → Locked. Rejected, archived and superseded versions stay read-only.',
       ]));
-      body.appendChild(howToSection('Revealing plaintext', [
-        'Revealing a formula’s real ingredients/percentages always asks for a reason first. Every ' +
-          'reveal — who, why, and when — is written to the access-audit trail; that record cannot be ' +
-          'edited or deleted from here.',
-        'Screenshots or exports of revealed content are the account holder’s own responsibility — ' +
-          'the secure-zone banner is a deterrent, not a technical control.',
+      body.appendChild(howToSection('Reveals', [
+        'Revealing a formula asks for a reason. Who, why and when are logged and can\'t be edited.',
+        'You are responsible for any screenshot or copy of revealed content.',
       ]));
-      body.appendChild(howToSection('Approvals (vault approver)', [
-        'A submitted version can be approved, rejected, or (once approved) locked. A formula’s own ' +
-          'author cannot approve or reject their own submission — this is enforced by the backend, ' +
-          'not just hidden here.',
+      body.appendChild(howToSection('Approvals', [
+        'Approvers can approve, reject or lock a submitted version. Authors can\'t approve their own work.',
       ]));
-      body.appendChild(howToSection('Audit screens', [
-        'Access audit and Manufacturing audit (where your role holds formula:actual:read) show the ' +
-          'trail of who revealed what, and where a coded/masked manufacturing instruction was resolved.',
+      body.appendChild(howToSection('Audit', [
+        'Access audit lists every reveal and decision. Production audit lists coded instructions resolved for the floor.',
       ]));
     });
   }
@@ -451,22 +438,19 @@
    * `rawprod-assertion.ts` in that repository) — this console's own FreshAuth window then
    * starts from that same moment. This screen renders only when there is no session AND no
    * assertion in the URL to consume (`tryConsumeAssertion`, above). */
+  // UX-C: the one sign-in card all three RawProd consoles share (web/shell.js showLogin,
+  // web-platform/platform.js renderLogin) — console name, one line, one button.
   function renderLogin() {
     root.innerHTML = '';
-    var err = h('div', { class: 'err' });
-    var goBtn = h('a', {
-      class: 'btn p', style: 'width:100%;justify-content:center;text-decoration:none',
-      href: ALEMBIC_CONSOLE_URL || '#',
-    }, ['Sign in via ALEMBIC →']);
+    var err = h('div', { class: 'err', role: 'alert' });
+    var goBtn = h('a', { class: 'btn p', href: ALEMBIC_CONSOLE_URL || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
-      goBtn.style.opacity = '0.5'; goBtn.style.pointerEvents = 'none';
-      err.textContent = 'This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).';
+      err.textContent = 'Sign-in isn\'t set up for this build.';
     }
     var card = h('div', { class: 'login-card' }, [
-      h('div', { class: 'mark' }, ['Formula Vault']),
-      h('div', { class: 'sub' }, ['Raw Aroma Chem — secure formula access. Not part of the operator PWA; this session ends on reload.']),
-      h('p', { style: 'color:var(--ink-3)' }, ['Sign in on ALEMBIC, then choose "Open Vault" — one login, no separate password.']),
+      h('h1', { class: 'mark' }, ['Vault']),
+      h('p', { class: 'sub' }, ['Raw Aroma Chem formula access.']),
       goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
@@ -475,7 +459,7 @@
   var NAV = [
     { id: 'formulas', label: 'Formulas', icon: 'lock', need: null },
     { id: 'audit-access', label: 'Access audit', icon: 'clipboard', need: 'formula:actual:read' },
-    { id: 'audit-mfg', label: 'Manufacturing audit', icon: 'activity', need: 'formula:actual:read' },
+    { id: 'audit-mfg', label: 'Production audit', icon: 'activity', need: 'formula:actual:read' },
   ];
 
   // Topbar + floating dock, rail off-canvas by default (ALEMBIC parity correction — see
@@ -491,27 +475,27 @@
         [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
     });
     var rail = h('nav', { class: 'rail', id: 'vault-rail' }, [
-      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.menu, 16)]),
-      h('button', { class: 'rb' }, [h('div', {}, [h('div', { class: 'mark' }, ['Formula Vault']), h('div', { class: 'sub' }, ['SECURE ZONE'])])]),
-      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['VAULT']), h('div', {}, navButtons)]),
+      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.panel, 16)]),
+      h('button', { class: 'rb', 'aria-label': 'Vault, Raw Aroma Chem', onclick: function () { location.hash = '#/formulas'; } }, [h('span', { class: 'm', 'aria-hidden': 'true' }, ['RAC']), h('span', { class: 't' }, ['Vault', h('small', {}, ['Raw Aroma Chem'])])]),
+      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['Formulas']), h('div', {}, navButtons)]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
-        h('button', { class: 'btn sm', onclick: openVaultHowTo, 'aria-label': 'How to use the Vault', title: 'How to use the Vault' }, [icon(ICONS.help, 14)]),
-        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
+        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: openVaultHowTo, 'aria-label': 'Help', title: 'Help' }, [icon(ICONS.help, 14)]),
+        h('button', { class: 'btn sm', onclick: logout, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 14)]),
       ]),
     ]);
+    // §109.4 secure-zone banner: kept (the one allowed security-context departure), shortened to
+    // what the viewer needs — reveals are logged, and whose session this is.
     var banner = h('div', { class: 'secure-banner' }, [
       h('span', { class: 'dot' }),
-      h('span', {}, ['FORMULA VAULT']),
-      h('span', { class: 'vault-mark' }, ['SECURE ZONE']),
-      h('span', {}, ['— formula plaintext is logged on every reveal. Screenshots/exports are the account holder’s responsibility — this banner is a deterrent, not a technical control.']),
+      h('span', {}, ['Secure zone · every reveal is logged']),
       h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()]),
     ]);
-    var label = visible.filter(function (n) { return n.id === activeView; })[0] ? visible.filter(function (n) { return n.id === activeView; })[0].label : 'Formula Vault';
+    var label = visible.filter(function (n) { return n.id === activeView; })[0] ? visible.filter(function (n) { return n.id === activeView; })[0].label : 'Vault';
     var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [h('h1', {}, [label])]), h('div', { class: 'content' }, [contentEl])]);
     var dock = h('div', { class: 'qdock', role: 'navigation', 'aria-label': 'Sections' },
-      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.menu, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
+      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.panel, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
       .concat(visible.map(function (n) {
         return h('button', { class: 'qb' + (n.id === activeView ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), title: n.label, 'aria-label': n.label, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon], 17), h('span', { class: 'nm' }, [n.label])]);
       })));
@@ -542,7 +526,7 @@
       });
       var table = rows.length
         ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Code']), h('th', {}, ['Name']), h('th', {}, ['Status'])])]), h('tbody', {}, rows)])
-        : h('div', { class: 'empty' }, [h('h3', {}, ['No formulas yet']), h('p', {}, [canCreate ? 'Create the first one below.' : 'Ask a formulator to create one.'])]);
+        : h('div', { class: 'empty' }, [h('h3', {}, ['No formulas yet']), h('p', {}, [canCreate ? 'Create one to get started.' : 'A formulator can create one.'])]);
       var card = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Formulas']), h('span', { class: 'n' }, [(page.items || []).length + ' shown']), h('span', { class: 'spacer' }),
           canCreate ? h('button', { class: 'btn p', onclick: newFormulaDialog }, [icon(ICONS.plus, 14), 'New formula']) : null]),
@@ -551,7 +535,7 @@
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
       content.innerHTML = '';
-      content.appendChild(notBuilt('Formulas could not be loaded', e.message));
+      content.appendChild(notBuilt('Formulas didn\'t load', e.message));
     }
   }
 
@@ -565,10 +549,10 @@
       body.appendChild(err);
       var submit = h('button', { class: 'btn p' }, ['Create']);
       submit.addEventListener('click', async function () {
-        if (!code.value.trim() || !name.value.trim()) { err.textContent = 'Both fields are required.'; return; }
+        if (!code.value.trim() || !name.value.trim()) { err.textContent = 'Enter a code and a name.'; return; }
         try {
           var f = await api('/v1/formulas', { method: 'POST', body: { formulaCode: code.value.trim(), formulaName: name.value.trim() } });
-          close(); toast('Formula created.'); location.hash = '#/formula/' + f.formulaId; render();
+          close(); toast('Formula created'); location.hash = '#/formula/' + f.formulaId; render();
         } catch (e) { err.textContent = e.message; }
       });
       body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
@@ -596,7 +580,7 @@
       });
       var versionsCard = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Version history']), h('span', { class: 'spacer' }),
-          canDraft ? h('button', { class: 'btn p sm', onclick: function () { createVersion(formulaId, maxVersion + 1); } }, ['+ New draft version (v' + (maxVersion + 1) + ')']) : null]),
+          canDraft ? h('button', { class: 'btn p sm', onclick: function () { createVersion(formulaId, maxVersion + 1); } }, ['New version']) : null]),
         rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Version']), h('th', {}, ['Status']), h('th', {}, ['Approved'])])]), h('tbody', {}, rows)])
           : h('div', { class: 'empty' }, [h('h3', {}, ['No versions yet'])]),
       ]);
@@ -609,14 +593,14 @@
       var wrap = h('div', {}, [metaCard, versionsCard, await accessPolicyPanel(formulaId)]);
       content.innerHTML = ''; content.appendChild(wrap);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('This formula could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Formula didn\'t load', e.message));
     }
   }
 
   async function createVersion(formulaId, versionNumber) {
     try {
       var v = await api('/v1/formula-versions', { method: 'POST', body: { formulaId: formulaId, versionNumber: versionNumber } });
-      toast('Draft version v' + versionNumber + ' created.');
+      toast('Version v' + versionNumber + ' created');
       location.hash = '#/version/' + v.formulaVersionId; render();
     } catch (e) { toast(e.message, true); }
   }
@@ -635,18 +619,18 @@
       });
       body.appendChild(rows.length
         ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['User']), h('th', {}, ['Role']), h('th', {}, ['Level'])])]), h('tbody', {}, rows)])
-        : h('div', { class: 'empty' }, [h('h3', {}, ['No extra grants']), h('p', {}, ['Only the formula owner can currently read its plaintext.'])]));
+        : h('div', { class: 'empty' }, [h('h3', {}, ['No grants']), h('p', {}, ['Only the owner can read this formula.'])]));
       if (hasPerm('formula:formula_access_policy:write')) {
         var uid = h('input', { class: 'fld', placeholder: 'User UUID', style: 'flex:1' });
         var add = h('button', { class: 'btn sm', onclick: async function () {
           if (!uid.value.trim()) return;
-          try { await api('/v1/formula-access-policies', { method: 'POST', body: { formulaId: formulaId, userId: uid.value.trim() } }); toast('Access granted.'); location.hash = location.hash; render(); }
+          try { await api('/v1/formula-access-policies', { method: 'POST', body: { formulaId: formulaId, userId: uid.value.trim() } }); toast('Access granted'); location.hash = location.hash; render(); }
           catch (e) { toast(e.message, true); }
         } }, ['Grant']);
         body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:10px' }, [uid, add]));
       }
     } catch (e) {
-      body.appendChild(h('p', { style: 'color:var(--ink-3)' }, ['Access grants unavailable: ' + e.message]));
+      body.appendChild(h('p', { class: 'card-note' }, ['Grants unavailable. ' + e.message]));
     }
     return h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Access grants'])]), body]);
   }
@@ -662,8 +646,8 @@
 
       var header = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Version v' + version.versionNumber]), statusChip(version.status)]),
-        h('p', { class: 'mono', style: 'color:var(--ink-3)' }, ['formula_version_id: ' + version.formulaVersionId]),
-        h('p', { style: 'color:var(--ink-3)' }, ['Structure: ' + (ingredients || []).length + ' ingredient(s) sealed (real material/percentage never shown here — only the audited /actual read decrypts them).']),
+        h('p', { class: 'mono', style: 'color:var(--ink-3)' }, [version.formulaVersionId]),
+        h('p', { style: 'color:var(--ink-3)' }, [(ingredients || []).length + ' sealed ingredient' + ((ingredients || []).length === 1 ? '' : 's')]),
       ]);
 
       var PRE_DECISION = ['DRAFT', 'VERSIONED', 'REVIEW'];
@@ -673,14 +657,14 @@
       if (version.status === 'DRAFT' && hasPerm('formula:formula_ingredients:write')) {
         actions.appendChild(h('button', { class: 'btn', onclick: function () { sealIngredientDialog(versionId); } }, ['Seal ingredient']));
       } else if (hasPerm('formula:formula_ingredients:write') && version.status !== 'DRAFT') {
-        reasons.push('Sealing ingredients is only possible while the version is DRAFT — this version is ' + version.status + '.');
+        reasons.push('Ingredients can only be sealed while the version is a draft.');
       }
 
       if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_version:write')) {
         if (version.status === 'DRAFT') {
-          var finalizeBtn = h('button', { class: 'btn', onclick: function () { finalize(versionId); } }, ['Finalize (→ VERSIONED)']);
+          var finalizeBtn = h('button', { class: 'btn', onclick: function () { finalize(versionId); } }, ['Finalize']);
           if (!(ingredients || []).length) {
-            finalizeBtn.disabled = true; finalizeBtn.title = 'Seal at least one ingredient before finalizing.';
+            finalizeBtn.disabled = true; finalizeBtn.title = 'Seal an ingredient first.';
           }
           actions.appendChild(finalizeBtn);
         }
@@ -690,7 +674,7 @@
       if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_approval:write')) {
         var approveBtn = h('button', { class: 'btn g', onclick: function () { decide(versionId, 'approve'); } }, ['Approve']);
         if (isAuthor) {
-          approveBtn.disabled = true; approveBtn.title = 'You authored this draft — segregation of duties requires a different reviewer to approve it (§108).';
+          approveBtn.disabled = true; approveBtn.title = 'You wrote this version, so someone else must approve it.';
         }
         actions.appendChild(approveBtn);
         actions.appendChild(h('button', { class: 'btn r', onclick: function () { decide(versionId, 'reject'); } }, ['Reject']));
@@ -698,35 +682,35 @@
 
       if (version.status === 'APPROVED' || version.status === 'LOCKED') {
         if (hasPerm('formula:actual:read')) {
-          actions.appendChild(h('button', { class: 'btn r', onclick: function () { revealPlaintext(versionId, content); } }, ['Reveal plaintext']));
+          actions.appendChild(h('button', { class: 'btn r', onclick: function () { revealPlaintext(versionId, content); } }, ['Reveal formula']));
         }
         if (hasPerm('formula:formula_version:write')) {
-          actions.appendChild(h('button', { class: 'btn', onclick: function () { createVersion(version.formulaId, (version.versionNumber || 0) + 1); } }, ['Create successor version (supersede)']));
+          actions.appendChild(h('button', { class: 'btn', onclick: function () { createVersion(version.formulaId, (version.versionNumber || 0) + 1); } }, ['New version']));
         }
       }
       if (version.status === 'APPROVED' && hasPerm('formula:formula_approval:write')) {
         actions.appendChild(h('button', { class: 'btn g', onclick: function () { lockVersion(versionId); } }, ['Lock']));
       } else if (version.status === 'LOCKED') {
-        reasons.push('This version is LOCKED — the final freeze after approval. A recipe change requires a new successor version, which supersedes this one automatically once approved.');
+        reasons.push('Locked. To change the recipe, create a new version.');
       }
       if (version.status === 'SUPERSEDED') {
-        reasons.push('This version was SUPERSEDED' + (version.supersededByVersionId ? (' by formula_version_id ' + version.supersededByVersionId) : '') + ' — no longer the current version. It stays here as a read-only record.');
+        reasons.push('Superseded by a newer version. Read-only.');
       }
       if (version.status === 'REJECTED') {
-        reasons.push('This version was REJECTED. It cannot be resurrected — create a new version to try again.');
+        reasons.push('Rejected. Create a new version to try again.');
       }
 
       var actionsCard = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Actions'])]),
         actions.children.length ? actions : null,
-        reasons.length ? h('div', { style: 'color:var(--ink-3);font-size:12.5px;margin-top:' + (actions.children.length ? '10px' : '0') }, reasons.map(function (r) { return h('p', {}, [r]); })) : null,
-        (!actions.children.length && !reasons.length) ? h('p', { style: 'color:var(--ink-3)' }, ['No actions available for your role at this stage.']) : null,
+        reasons.length ? h('div', { style: 'color:var(--ink-3);font:var(--w-reg) var(--t-cap)/var(--lh-cap) var(--font-ui);margin-top:' + (actions.children.length ? '10px' : '0') }, reasons.map(function (r) { return h('p', {}, [r]); })) : null,
+        (!actions.children.length && !reasons.length) ? h('p', { style: 'color:var(--ink-3)' }, ['Nothing to do here for your role.']) : null,
       ]);
 
       async function finalize(id) {
         try {
           await api('/v1/formula-versions/' + encodeURIComponent(id) + '/finalize', { method: 'POST' });
-          toast('Version finalized (VERSIONED).');
+          toast('Version finalized');
           location.hash = location.hash; render();
         } catch (e) { toast(e.message, true); }
       }
@@ -734,18 +718,18 @@
       async function submitForReview(id) {
         try {
           await api('/v1/formula-versions/' + encodeURIComponent(id) + '/submit-for-review', { method: 'POST', body: {} });
-          toast('Submitted for review.');
+          toast('Submitted for review');
           location.hash = location.hash; render();
         } catch (e) { toast(e.message, true); }
       }
 
       async function lockVersion(id) {
-        if (!window.confirm('Lock this version? This is the final freeze after approval — a recipe change after this requires a new successor version.')) return;
+        if (!window.confirm('Lock this version? Changes after this need a new version.')) return;
         try {
           await withFreshAuth(function () {
             return api('/v1/formula-versions/' + encodeURIComponent(id) + '/lock', { method: 'POST', body: {} });
           });
-          toast('Version locked.');
+          toast('Version locked');
           location.hash = location.hash; render();
         } catch (e) { toast(e.message, true); }
       }
@@ -754,7 +738,7 @@
         // Gather remarks BEFORE the fresh-auth check — withFreshAuth's callback can run
         // twice (once optimistically, once after re-auth on a race), and window.prompt()
         // must only ever ask the user once.
-        var remarks = window.prompt(kind === 'approve' ? 'Approval remarks (optional):' : 'Rejection reason (required, min 3 chars):');
+        var remarks = window.prompt(kind === 'approve' ? 'Remarks (optional):' : 'Reason for rejecting (required):');
         if (remarks === null) return; // cancelled
         remarks = remarks.trim();
         if (kind === 'reject' && remarks.length < 3) { toast('A rejection reason is required.', true); return; }
@@ -762,7 +746,7 @@
           await withFreshAuth(function () {
             return api('/v1/formula-versions/' + encodeURIComponent(id) + '/' + kind, { method: 'POST', body: kind === 'approve' ? { remarks: remarks || undefined } : { remarks: remarks } });
           });
-          toast(kind === 'approve' ? 'Version approved.' : 'Version rejected.');
+          toast(kind === 'approve' ? 'Version approved' : 'Version rejected');
           location.hash = location.hash; render();
         } catch (e) { toast(e.message, true); }
       }
@@ -770,7 +754,7 @@
       var wrap = h('div', {}, [header, actionsCard]);
       content.innerHTML = ''; content.appendChild(wrap);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('This version could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Version didn\'t load', e.message));
     }
   }
 
@@ -780,9 +764,9 @@
   // "Material UUID" text field.
   function materialPicker(onChange) {
     var selected = null;
-    var searchInput = h('input', { class: 'fld', style: 'width:100%', placeholder: 'Search material by code or name…', autocomplete: 'off' });
+    var searchInput = h('input', { class: 'fld', style: 'width:100%', placeholder: 'Search materials', autocomplete: 'off' });
     var results = h('select', { class: 'fld', style: 'width:100%;margin-top:6px', size: '5' });
-    var picked = h('div', { style: 'font-size:12px;color:var(--ink-2);margin-top:6px;min-height:16px' }, ['No material selected.']);
+    var picked = h('div', { style: 'font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);color:var(--ink-2);margin-top:6px;min-height:16px' }, ['None selected']);
     var timer = null;
     function renderResults(mats) {
       results.innerHTML = '';
@@ -817,25 +801,25 @@
   }
 
   function sealIngredientDialog(versionId) {
-    openDialog('Seal ingredient into the vault', function (body, close) {
+    openDialog('Seal ingredient', function (body, close) {
       var err = h('div', { class: 'err' });
       var picker = materialPicker();
       var pct = h('input', { class: 'fld', style: 'width:100%', type: 'number', step: '0.01', placeholder: 'Percentage' });
       var seq = h('input', { class: 'fld', style: 'width:100%', type: 'number', placeholder: 'Sequence (optional)' });
-      body.appendChild(h('p', { style: 'color:var(--ink-2);margin-bottom:10px' }, ['The material id + percentage are encrypted before they ever leave this request — they are never stored or shown as plaintext again outside an audited reveal.']));
+      body.appendChild(h('p', { style: 'color:var(--ink-2);margin-bottom:10px' }, ['Stored encrypted. Shown again only in a logged reveal.']));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Material']), picker.el]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Percentage']), pct]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Sequence']), seq]));
       body.appendChild(err);
-      var submit = h('button', { class: 'btn p' }, ['Seal into vault']);
+      var submit = h('button', { class: 'btn p' }, ['Seal']);
       submit.addEventListener('click', async function () {
         var mat = picker.get();
-        if (!mat || !pct.value) { err.textContent = 'A material (search and select one) and a percentage are required.'; return; }
+        if (!mat || !pct.value) { err.textContent = 'Pick a material and enter a percentage.'; return; }
         try {
           var ing = { materialId: mat.materialId, percentage: Number(pct.value) };
           if (seq.value) ing.sequenceNo = Number(seq.value);
           await api('/v1/formula-versions/' + encodeURIComponent(versionId) + '/ingredients', { method: 'POST', body: { ingredients: [ing] } });
-          close(); toast('Ingredient sealed.'); location.hash = location.hash; render();
+          close(); toast('Ingredient sealed'); location.hash = location.hash; render();
         } catch (e) { err.textContent = e.message; }
       });
       body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
@@ -844,7 +828,7 @@
 
   async function revealPlaintext(versionId, contentEl) {
     var reason;
-    try { reason = await promptReason('Reveal formula plaintext'); } catch (e) { return; }
+    try { reason = await promptReason('Reveal formula'); } catch (e) { return; }
     if (!reason) return;
     try {
       var result = await withFreshAuth(function () {
@@ -856,8 +840,8 @@
         return h('tr', {}, [h('td', { class: 'mono' }, [i.materialId]), h('td', { class: 'r' }, [String(i.percentage) + '%']), h('td', {}, [String(i.sequenceNo != null ? i.sequenceNo : '—')])]);
       });
       var panel = h('div', { class: 'reveal-panel' }, [
-        h('div', { class: 'hd' }, [icon(ICONS.alert, 14), 'DECRYPTED — logged with your reason']),
-        h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Material UUID']), h('th', { class: 'r' }, ['%']), h('th', {}, ['Seq'])])]), h('tbody', {}, rows)]),
+        h('div', { class: 'hd' }, [icon(ICONS.alert, 14), 'Revealed · logged with your reason']),
+        h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Material']), h('th', { class: 'r' }, ['%']), h('th', {}, ['Seq'])])]), h('tbody', {}, rows)]),
         h('button', { class: 'btn sm', style: 'margin-top:10px', onclick: function () { panel.remove(); } }, ['Hide']),
       ]);
       contentEl.appendChild(panel);
@@ -875,7 +859,7 @@
   var MFG_PREFIXES = ['formula.floor.read', 'formula.picklist.read', 'formula.manufacturing_instruction.resolve'];
 
   function auditTable(rows) {
-    if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['No rows']), h('p', {}, ['Nothing recorded yet.'])]);
+    if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['Nothing recorded yet'])]);
     var trs = rows.map(function (r) {
       var resultChip = h('span', { class: 'chip ' + (r.result === 'refuse' ? 'r' : 'g') }, [r.result || 'allow']);
       return h('tr', {}, [
@@ -899,7 +883,7 @@
     renderShell(kind === 'mfg' ? 'audit-mfg' : 'audit-access', content);
     if (!hasPerm('formula:actual:read')) {
       content.innerHTML = '';
-      content.appendChild(notBuilt('Access audit unavailable', 'Your role does not hold formula:actual:read — the same Vault-authority permission that gates plaintext reads also gates the audit trail over them.'));
+      content.appendChild(notBuilt('Audit unavailable', 'Your role doesn\'t include this.'));
       return;
     }
     try {
@@ -907,17 +891,17 @@
       var prefixes = kind === 'mfg' ? MFG_PREFIXES : HUMAN_PREFIXES;
       var rows = (page.items || []).filter(function (r) { return prefixes.some(function (p) { return r.action && r.action.indexOf(p) === 0; }); });
       var verify = h('button', { class: 'btn sm', onclick: async function () {
-        try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Chain verified: ' + v.rows + ' rows, no tampering detected.') : ('CHAIN BROKEN at seq ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
+        try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Verified · ' + v.rows + ' rows intact') : ('Broken at row ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
         catch (e) { toast(e.message, true); }
-      } }, ['Verify chain integrity']);
+      } }, ['Verify']);
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Manufacturing-resolution audit' : 'Access audit']), h('span', { class: 'n' }, [rows.length + ' of ' + (page.items || []).length + ' rows']), h('span', { class: 'spacer' }), verify]),
-        kind === 'mfg' ? h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Server-resolved coded/masked instructions handed to Production (§109.7) — no plaintext ever left the backend for these rows.']) : null,
+        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [rows.length + ' rows']), h('span', { class: 'spacer' }), verify]),
+        kind === 'mfg' ? h('p', { class: 'card-note' }, ['Coded instructions resolved for production. No formula left the server.']) : null,
         auditTable(rows),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Audit trail could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Audit didn\'t load', e.message));
     }
   }
 

@@ -54,7 +54,7 @@
     if (session.token) payload.token = session.token;
     var res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
     var envelope = await res.json();
-    if (!envelope || !envelope.data || !envelope.data.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Could not reach the backend. Try again.', 0); }
+    if (!envelope || !envelope.data || !envelope.data.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Can\'t connect. Try again.', 0); }
     var inner = JSON.parse(await open(envelope.data.enc));
     var body = inner.body ? JSON.parse(inner.body) : null;
     return { status: inner.status, json: body };
@@ -115,11 +115,11 @@
     try {
       await loginWithAssertion(token);
       if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read') && !hasPerm('platformops:console:read')) {
-        toast('Signed in, but this account holds no Platform Operations permission. Contact an admin for the platform_super_admin role.', true);
+        toast('This account has no Platform access. Ask an admin for the platform role.', true);
         logout();
       }
     } catch (e) {
-      toast('Could not complete sign-in from ALEMBIC: ' + ((e instanceof PlatformError) ? e.message : 'unknown error'), true);
+      toast('Sign-in didn\'t complete. ' + ((e instanceof PlatformError) ? e.message : 'Try again.'), true);
     }
     consumingAssertion = false;
     return true;
@@ -156,6 +156,7 @@
     tag: 'M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7 7h.01',
     logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
     menu: 'M3 6h18M3 12h18M3 18h18',
+    panel: 'M4 4h16v16H4zM10 4v16',
   };
   function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); setTimeout(function () { t.remove(); }, 3400); }
   var dialogRoot = null;
@@ -187,34 +188,31 @@
    * signs in there (email OTP) and clicks "Open Platform", which lands here with an
    * assertion this console exchanges automatically (see `tryConsumeAssertion` above). This
    * screen renders only when there is no session AND no assertion in the URL to consume. */
+  // UX-C: the one sign-in card all three RawProd consoles share (web/shell.js showLogin,
+  // web-vault/vault.js renderLogin) — console name, one line, one button.
   function renderLogin() {
     root.innerHTML = '';
-    var err = h('div', { class: 'err' });
-    var goBtn = h('a', {
-      class: 'btn p', style: 'width:100%;justify-content:center;text-decoration:none',
-      href: ALEMBIC_CONSOLE_URL || '#',
-    }, ['Sign in via ALEMBIC →']);
+    var err = h('div', { class: 'err', role: 'alert' });
+    var goBtn = h('a', { class: 'btn p', href: ALEMBIC_CONSOLE_URL || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
-      goBtn.style.opacity = '0.5'; goBtn.style.pointerEvents = 'none';
-      err.textContent = 'This build has no ALEMBIC console configured (ALEMBIC_CONSOLE_URL is unset).';
+      err.textContent = 'Sign-in isn\'t set up for this build.';
     }
     var card = h('div', { class: 'login-card' }, [
-      h('div', { class: 'mark' }, ['Platform Operations']),
-      h('div', { class: 'sub' }, ['Raw Aroma Chem — internal only. Never shows tenant business data or Formula Vault plaintext.']),
-      h('p', { style: 'color:var(--ink-3)' }, ['Sign in on ALEMBIC, then choose "Open Platform" — one login, no separate password.']),
+      h('h1', { class: 'mark' }, ['Platform']),
+      h('p', { class: 'sub' }, ['Raw Aroma Chem platform operations.']),
       goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
   }
 
   var NAV = [
-    { id: 'health', label: 'Environment & diagnostics', icon: 'activity' },
+    { id: 'health', label: 'Health', icon: 'activity' },
     { id: 'flags', label: 'Feature flags', icon: 'sliders', need: 'platform:flag:write' },
-    { id: 'tenants', label: 'Tenant list', icon: 'building' },
-    { id: 'providers', label: 'Provider health', icon: 'activity' },
-    { id: 'deploy', label: 'Deployment / build', icon: 'tag' },
-    { id: 'support', label: 'Audit & support', icon: 'clipboard' },
+    { id: 'tenants', label: 'Tenants', icon: 'building' },
+    { id: 'providers', label: 'Providers', icon: 'activity' },
+    { id: 'deploy', label: 'Build', icon: 'tag' },
+    { id: 'support', label: 'Login history', icon: 'clipboard' },
     // G4: in-app tutorial. No `need` — screenTutorial() itself decides which lessons (if any)
     // the signed-in session may see (same fine-grained per-permission gate as web/tutorial.js);
     // an account with zero visible lessons still gets an honest empty state, same as every other
@@ -236,24 +234,23 @@
       return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), 'data-tutorial-target': 'platform-nav-' + n.id, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
     });
     var rail = h('nav', { class: 'rail' }, [
-      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.menu, 16)]),
-      h('button', { class: 'rb' }, [h('div', {}, [h('div', { class: 'mark' }, ['Platform Ops']), h('div', { class: 'sub' }, ['INTERNAL ONLY'])])]),
-      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['OPERATIONS']), h('div', {}, navButtons)]),
+      h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.panel, 16)]),
+      h('button', { class: 'rb', 'aria-label': 'Platform, Raw Aroma Chem', onclick: function () { location.hash = '#/health'; } }, [h('span', { class: 'm', 'aria-hidden': 'true' }, ['RAC']), h('span', { class: 't' }, ['Platform', h('small', {}, ['Raw Aroma Chem'])])]),
+      h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['Operations']), h('div', {}, navButtons)]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
-        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
+        h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 14)]),
       ]),
     ]);
     var banner = h('div', { class: 'platform-banner' }, [
-      h('span', { class: 'dot' }), h('span', {}, ['PLATFORM OPERATIONS']), h('span', { class: 'vault-mark' }, ['INTERNAL']),
-      h('span', {}, ['— no tenant business data or Formula Vault plaintext is ever available in this console.']),
-      h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()]),
+      h('span', { class: 'dot' }), h('span', {}, ['Internal']),
+      h('span', { class: 'who-when' }, [session.email]),
     ]);
-    var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform Operations';
+    var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
     var main = h('div', { class: 'main' }, [banner, h('div', { class: 'bar' }, [h('h1', {}, [label])]), h('div', { class: 'content' }, [contentEl])]);
     var dock = h('div', { class: 'qdock', role: 'navigation', 'aria-label': 'Sections' },
-      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.menu, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
+      [h('button', { class: 'qb dock-toggle hot', 'aria-label': 'Show navigation', title: 'Sections', onclick: function () { rail.classList.toggle('open'); } }, [icon(ICONS.panel, 17), h('span', { class: 'nm' }, ['Sections'])]), h('span', { class: 'sep' })]
       .concat(visible.map(function (n) {
         return h('button', { class: 'qb' + (n.id === activeView ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), title: n.label, 'aria-label': n.label, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon], 17), h('span', { class: 'nm' }, [n.label])]);
       })));
@@ -270,13 +267,12 @@
         return h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, [k]), h('div', { class: 'v' }, [h('span', { class: 'chip ' + (r.deps[k] === 'up' ? 'g' : 'r') }, [r.deps[k]])])]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Environment health']), h('span', { class: 'chip ' + (r.status === 'ok' ? 'g' : 'a') }, [r.status])]),
-        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Checked ' + fmtDt(r.at) + '. Source: GET /health (liveness + dependency probe).']),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Services']), r.status ? h('span', { class: 'chip ' + (r.status === 'ok' ? 'g' : 'a') }, [r.status]) : null, r.at ? h('span', { class: 'n' }, ['Checked ' + fmtDt(r.at)]) : null]),
         h('div', { class: 'health-grid' }, tiles),
       ]);
       content.innerHTML = ''; content.appendChild(card);
       if (!hasPerm('platformops:console:read')) {
-        content.appendChild(notBuilt('Deeper diagnostics unavailable', 'Your role does not hold platformops:console:read.'));
+        content.appendChild(notBuilt('Diagnostics unavailable', 'Your role doesn\'t include this.'));
         return;
       }
       try {
@@ -289,15 +285,14 @@
           ]);
         });
         var diagCard = h('div', { class: 'card' }, [
-          h('div', { class: 'card-hd' }, [h('h2', {}, ['Outbox backlog / worker lag'])]),
-          h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, [deep.note]),
+          h('div', { class: 'card-hd' }, [h('h2', {}, ['Outbox'])]),
           outboxRows.length
             ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Schema']), h('th', {}, ['Backlog']), h('th', {}, ['Oldest unpublished'])])]), h('tbody', {}, outboxRows)])
             : h('div', { class: 'empty' }, [h('h3', {}, ['No outbox tables found'])]),
         ]);
         content.appendChild(diagCard);
       } catch (e) {
-        content.appendChild(notBuilt('Deeper diagnostics could not be loaded', e.message));
+        content.appendChild(notBuilt('Diagnostics didn\'t load', e.message));
       }
     } catch (e) {
       content.innerHTML = ''; content.appendChild(notBuilt('Health check failed', e.message));
@@ -309,7 +304,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('flags', content);
     if (!hasPerm('platform:flag:write')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags unavailable', 'Your role does not hold platform:flag:write.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags unavailable', 'Your role doesn\'t include this.'));
       return;
     }
     try {
@@ -322,12 +317,12 @@
         ]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Feature flags']), h('span', { class: 'n' }, ['snapshot v' + snap.version])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Feature flags']), h('span', { class: 'n' }, ['Version ' + snap.version])]),
         rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Key']), h('th', {}, ['State']), h('th', {}, ['Action'])])]), h('tbody', {}, rows)]) : h('div', { class: 'empty' }, [h('h3', {}, ['No flags registered'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags didn\'t load', e.message));
     }
   }
   function toggleFlagDialog(flag) {
@@ -336,17 +331,17 @@
       var env = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'staging' }, ['staging']), h('option', { value: 'prod' }, ['prod'])]);
       var state = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'on' }, ['on']), h('option', { value: 'degraded' }, ['degraded']), h('option', { value: 'off' }, ['off'])]);
       state.value = flag.state;
-      var reason = h('textarea', { placeholder: 'Mandatory — written to flag_audit' });
+      var reason = h('textarea', { placeholder: 'Why this change?' });
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Environment']), env]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['New state']), state]));
-      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason (min 3 chars, mandatory)']), reason]));
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason']), reason]));
       body.appendChild(err);
       var submit = h('button', { class: 'btn p', 'data-tutorial-target': 'platform-flag-save' }, ['Save']);
       submit.addEventListener('click', async function () {
         if (reason.value.trim().length < 3) { err.textContent = 'A reason is required.'; return; }
         try {
           await api('/v1/admin/flags/' + encodeURIComponent(flag.key), { method: 'PUT', body: { env: env.value, state: state.value, reason: reason.value.trim() } });
-          close(); toast('Flag updated.'); location.hash = location.hash; render();
+          close(); toast('Flag updated'); location.hash = location.hash; render();
         } catch (e) { err.textContent = e.message; }
       });
       body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
@@ -365,9 +360,8 @@
     } catch (e) {
       content.innerHTML = '';
       content.appendChild(notBuilt(
-        'Login history is not available',
-        (e instanceof PlatformError ? e.message : 'The backend reports this feature is not implemented.'),
-        'Needs: iam.login_history added to the Phase-1A Data Dictionary + @core/data-iam or @ra/data-org schema (backend/api/src/audit/audit.service.ts already documents this exact gap).',
+        'Login history unavailable',
+        (e instanceof PlatformError ? e.message : 'Not available yet.'),
       ));
     }
   }
@@ -376,7 +370,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('tenants', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Tenant list unavailable', 'Your role does not hold platformops:console:read.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Tenants unavailable', 'Your role doesn\'t include this.'));
       return;
     }
     try {
@@ -389,22 +383,21 @@
         ]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Tenants / organizations'])]),
-        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['RawProd is currently single-tenant (RAC/Raw Aroma Chem itself) — this lists org_master rows (identity + status only, no address/financial fields) as the closest existing registry, not multi-tenant SaaS billing data.']),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Organizations'])]),
         trs.length
           ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Code']), h('th', {}, ['Name']), h('th', {}, ['Status'])])]), h('tbody', {}, trs)])
           : h('div', { class: 'empty' }, [h('h3', {}, ['No organizations found'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Tenant list could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Tenants didn\'t load', e.message));
     }
   }
   async function screenProviders() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('providers', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Provider health unavailable', 'Your role does not hold platformops:console:read.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Providers unavailable', 'Your role doesn\'t include this.'));
       return;
     }
     try {
@@ -419,38 +412,36 @@
         ]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Provider / connector health'])]),
-        h('p', { style: 'color:var(--ink-3);margin-bottom:12px' }, ['Status only — never a secret. Source: bridge.connector_config (the ALEMBIC↔RawProd channel). No other self-service provider tables exist in this backend yet.']),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Connectors'])]),
         trs.length
           ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Connector']), h('th', {}, ['Enabled']), h('th', {}, ['Webhook set']), h('th', {}, ['Secret set']), h('th', {}, ['Configured'])])]), h('tbody', {}, trs)])
           : h('div', { class: 'empty' }, [h('h3', {}, ['No connectors configured'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Provider health could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Providers didn\'t load', e.message));
     }
   }
   async function screenDeploy() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('deploy', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Build identity unavailable', 'Your role does not hold platformops:console:read.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Build unavailable', 'Your role doesn\'t include this.'));
       return;
     }
     try {
       var b = await api('/v1/platform/build');
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Deployment / build identity'])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Build'])]),
         h('div', { class: 'health-grid' }, [
           h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Git SHA']), h('div', { class: 'v mono' }, [b.gitSha || 'not set'])]),
           h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Build time']), h('div', { class: 'v' }, [b.buildTime || 'not set'])]),
           h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Environment']), h('div', { class: 'v' }, [b.appEnv])]),
         ]),
-        (!b.gitSha || !b.buildTime) ? h('p', { style: 'color:var(--ink-3);margin-top:10px' }, ['"not set" is honest, not a bug — GIT_SHA/BUILD_TIME are populated by the deploy platform (or fall back to RENDER_GIT_COMMIT); nothing here is fabricated.']) : null,
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Build identity could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Build didn\'t load', e.message));
     }
   }
 
@@ -547,11 +538,11 @@
       body.appendChild(h('div', { class: 'sub', style: 'margin-bottom:8px' }, ['Step ' + (idx + 1) + ' of ' + lesson.steps.length]));
       body.appendChild(h('p', { style: 'color:var(--ink-2)' }, [step.body]));
       if (step.kind === 'action' && step.safety === 'confirm-required') {
-        body.appendChild(h('p', { style: 'color:var(--red);font-size:12.5px' }, ['This action cannot be undone — the dialog it opens will ask you to confirm it before it happens.']));
+        body.appendChild(h('p', { class: 'err' }, ['This can\'t be undone. You\'ll be asked to confirm first.']));
       }
       var verifyNote = null;
       if (step.kind === 'verify') {
-        verifyNote = h('div', { class: 'sub' }, ['Watching for the change…']);
+        verifyNote = h('div', { class: 'sub' }, ['Waiting for the change…']);
         body.appendChild(verifyNote);
       }
       var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
@@ -566,7 +557,7 @@
           close();
           tutorialPost(lesson.id, { type: 'advance', tutorialVersion: lesson.version }).then(function (row) {
             tutorialUpsertProgress(row);
-            if (row.status === 'completed') { tutorialClearHighlight(); toast(lesson.title + ' — tutorial complete.'); return; }
+            if (row.status === 'completed') { tutorialClearHighlight(); toast('Tutorial complete'); return; }
             tutorialOpenRunner(lesson, row);
           }).catch(function (e) { toast(e.message, true); });
         } }, [idx + 1 >= lesson.steps.length ? 'Finish' : 'Next']));
@@ -574,12 +565,12 @@
       body.appendChild(actions);
       if (step.kind === 'verify') {
         _tutRunnerStop = tutorialPollVerify(step.check, function (passed) {
-          if (!passed) { if (verifyNote) verifyNote.textContent = 'Still waiting — you can keep going, or close and resume later from Tutorials.'; return; }
-          if (verifyNote) verifyNote.textContent = 'Confirmed.';
+          if (!passed) { if (verifyNote) verifyNote.textContent = 'Still waiting. Close and resume any time from Tutorials.'; return; }
+          if (verifyNote) verifyNote.textContent = 'Done';
           tutorialPost(lesson.id, { type: 'advance', tutorialVersion: lesson.version }).then(function (row) {
             tutorialUpsertProgress(row);
             close(); tutorialClearHighlight();
-            if (row.status === 'completed') { toast(lesson.title + ' — tutorial complete.'); return; }
+            if (row.status === 'completed') { toast('Tutorial complete'); return; }
             tutorialOpenRunner(lesson, row);
           }).catch(function (e) { toast(e.message, true); });
         });
@@ -596,13 +587,13 @@
       tutorialLessons = await api('/v1/tutorial/lessons');
       tutorialProgress = await api('/v1/tutorial/progress');
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Tutorials could not be loaded', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Tutorials didn\'t load', e.message));
       return;
     }
     content.innerHTML = '';
     var lessons = tutorialVisibleLessons();
     if (!lessons.length) {
-      content.appendChild(notBuilt('No tutorials available', 'Your account holds no permission any Platform Operations tutorial needs.'));
+      content.appendChild(notBuilt('No tutorials yet', 'None match your role.'));
     } else {
       lessons.forEach(function (l) {
         var prog = tutorialProgressFor(l.id);
@@ -610,23 +601,23 @@
         var label = status === 'completed' ? 'Replay' : (status === 'in_progress' ? 'Resume' : 'Start');
         content.appendChild(h('div', { class: 'card' }, [
           h('div', { class: 'card-hd' }, [h('h2', {}, [l.title]), h('span', { class: 'chip ' + (status === 'completed' ? 'g' : status === 'in_progress' ? 'b' : 'n') }, [status.replace(/_/g, ' ')])]),
-          h('p', { style: 'color:var(--ink-3);margin:0 0 12px' }, [l.summary]),
+          h('p', { class: 'card-note' }, [l.summary]),
           h('button', { class: 'btn p', onclick: function () { tutorialStartOrResume(l); } }, [label]),
         ]));
       });
     }
     content.appendChild(h('div', { class: 'card' }, [
       h('button', { class: 'btn', style: 'color:var(--red)', onclick: function () {
-        openDialog('Reset all tutorial progress?', function (body, close) {
-          body.appendChild(h('p', { style: 'color:var(--ink-2)' }, ['This clears your tutorial progress across every workspace and cannot be undone.']));
+        openDialog('Reset progress?', function (body, close) {
+          body.appendChild(h('p', { style: 'color:var(--ink-2)' }, ['Clears your tutorial progress in every workspace. This can\'t be undone.']));
           body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
             h('button', { class: 'btn', onclick: close }, ['Cancel']),
             h('button', { class: 'btn p', onclick: function () {
-              api('/v1/tutorial/reset', { method: 'POST' }).then(function () { close(); toast('Tutorial progress reset.'); tutorialProgress = []; screenTutorial(); }).catch(function (e) { toast(e.message, true); });
-            } }, ['Reset all']),
+              api('/v1/tutorial/reset', { method: 'POST' }).then(function () { close(); toast('Progress reset'); tutorialProgress = []; screenTutorial(); }).catch(function (e) { toast(e.message, true); });
+            } }, ['Reset']),
           ]));
         });
-      } }, ['Reset all my tutorial progress']),
+      } }, ['Reset progress']),
     ]));
   }
 

@@ -1,7 +1,7 @@
 {
-  "name": "Raw Aroma Chem · Production Portal",
-  "short_name": "Raw Aroma",
-  "description": "Formula-protected manufacturing portal — each role sees only what it's allowed to know.",
+  "name": "Factory · Raw Aroma Chem",
+  "short_name": "Factory",
+  "description": "Raw Aroma Chem production.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

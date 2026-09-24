@@ -165,12 +165,12 @@
   }
   function tutorialStepBody(lesson, step, idx, total) {
     var safetyNote = (step.kind === 'action' && step.safety === 'confirm-required')
-      ? '<div style="font-size:12px;color:var(--red);font-weight:600;margin-bottom:10px">This action cannot be undone — the app itself will ask you to confirm it before it happens.</div>' : '';
+      ? '<div style="font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red);margin-bottom:var(--s-snug)">This can\'t be undone. You\'ll be asked to confirm first.</div>' : '';
     var verifyNote = step.kind === 'verify'
-      ? '<div id="ra-tut-verify" style="font-size:12.5px;color:var(--ink-3);display:flex;align-items:center;gap:8px;margin-bottom:6px"><span style="width:7px;height:7px;border-radius:50%;background:var(--accent);display:inline-block;flex:none"></span>Watching for the change…</div>'
+      ? '<div id="ra-tut-verify" style="font:var(--w-reg) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--ink-3);display:flex;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-tight)"><span style="width:7px;height:7px;border-radius:var(--r-pill);background:var(--accent-ink);display:inline-block;flex:none"></span>Waiting for the change…</div>'
       : '';
-    return '<div style="font:700 10.5px/1 var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3);margin-bottom:8px">Step ' + (idx + 1) + ' of ' + total + '</div>' +
-      '<p style="font-size:13.5px;color:var(--ink-2);line-height:1.5;margin-bottom:14px">' + escHtml(step.body) + '</p>' +
+    return '<div class="sect" style="margin-bottom:var(--s-tight)">Step ' + (idx + 1) + ' of ' + total + '</div>' +
+      '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-2);margin:0 0 var(--s-snug)">' + escHtml(step.body) + '</p>' +
       safetyNote + verifyNote +
       '<div style="display:flex;gap:8px;margin-top:6px">' +
         '<button type="button" class="btn" id="ra-tut-close" style="flex:1;justify-content:center">Close</button>' +
@@ -181,12 +181,12 @@
     var btn = _tutRunner && _tutRunner.m && _tutRunner.m.sheet.querySelector('#ra-tut-next');
     if (btn) { btn.disabled = true; btn.textContent = '…'; }
     tutorialPost(lesson.id, lesson.track, { type: 'advance', tutorialVersion: lesson.version }).then(function (res) {
-      if (res.status === 409) { toast('This tutorial changed — restarting from the beginning.', 'bad'); tutorialRestart(lesson); return; }
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Could not save your progress.', 'bad'); if (btn) { btn.disabled = false; btn.textContent = 'Next'; } return; }
+      if (res.status === 409) { toast('This tutorial changed. Starting over.', 'bad'); tutorialRestart(lesson); return; }
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Progress didn\'t save.', 'bad'); if (btn) { btn.disabled = false; btn.textContent = 'Next'; } return; }
       var row = res.json.data; tutorialUpsertProgressCache(row);
-      if (row.status === 'completed') { tutorialCloseRunner(false); toast(lesson.title + ' — tutorial complete ✓', 'good'); return; }
+      if (row.status === 'completed') { tutorialCloseRunner(false); toast('Tutorial complete', 'good'); return; }
       tutorialOpenRunner(lesson, row);
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); if (btn) { btn.disabled = false; btn.textContent = 'Next'; } });
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); if (btn) { btn.disabled = false; btn.textContent = 'Next'; } });
   }
   function tutorialOpenRunner(lesson, progressRow) {
     if (_tutRunner) { if (_tutRunner.stopPoll) _tutRunner.stopPoll(); if (_tutRunner.m && _tutRunner.m.close) _tutRunner.m.close(); }
@@ -204,24 +204,24 @@
       _tutRunner.stopPoll = tutorialPollVerify(step.check, function (passed) {
         if (!_tutRunner || _tutRunner.lesson !== lesson) return; // runner was closed/replaced meanwhile
         var noteEl = m.sheet.querySelector('#ra-tut-verify');
-        if (passed) { if (noteEl) noteEl.innerHTML = '<span style="color:var(--green)">Confirmed ✓</span>'; tutorialAdvance(lesson); }
-        else if (noteEl) { noteEl.innerHTML = 'Still waiting — you can keep going in the app, or close and resume later from Tutorials.'; }
+        if (passed) { if (noteEl) noteEl.innerHTML = '<span style="color:var(--green)">Done</span>'; tutorialAdvance(lesson); }
+        else if (noteEl) { noteEl.innerHTML = 'Still waiting. Close and resume any time from Tutorials.'; }
       });
     }
   }
   function tutorialStartOrResume(lesson) {
     tutorialPost(lesson.id, lesson.track, { type: 'start' }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Could not start this tutorial.', 'bad'); return; }
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Tutorial didn\'t start.', 'bad'); return; }
       var row = res.json.data; tutorialUpsertProgressCache(row);
       tutorialOpenRunner(lesson, row);
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   function tutorialRestart(lesson) {
     tutorialPost(lesson.id, lesson.track, { type: 'restart' }).then(function (res) {
-      if (res.status >= 400) { toast('Could not restart this tutorial.', 'bad'); return; }
+      if (res.status >= 400) { toast('Tutorial didn\'t restart.', 'bad'); return; }
       var row = res.json.data; tutorialUpsertProgressCache(row);
       tutorialOpenRunner(lesson, row);
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
 
   /* ---------------- WelcomePanel-equivalent: auto-offer once per track, on first login ---------------- */
@@ -238,7 +238,7 @@
       for (var i = 0; i < lessons.length; i++) { if (!tutorialProgressFor(lessons[i].id, track)) { candidate = lessons[i]; break; } }
       if (!candidate) return;
       var m = openSheet({ id: 'ra-tut-welcome', tag: 'div', style: 'max-width:380px', title: 'New here?', body:
-        '<p style="font-size:13.5px;color:var(--ink-2);line-height:1.5;margin-bottom:14px">' + escHtml(candidate.summary) + '</p>' +
+        '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-2);margin:0 0 var(--s-snug)">' + escHtml(candidate.summary) + '</p>' +
         '<div style="display:flex;gap:8px">' +
           '<button type="button" class="btn" id="ra-tut-later" style="flex:1;justify-content:center">Maybe later</button>' +
           '<button type="button" class="btn p" id="ra-tut-start-welcome" style="flex:1;justify-content:center">Take the tour</button>' +
@@ -254,8 +254,8 @@
   /* ---------------- library / progress panel (Workspace.jsx-equivalent) ---------------- */
   function loadTutorialView() {
     var V = $('ra-view');
-    if (V) V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING TUTORIALS…</div>';
-    Promise.all([tutorialFetchLessons(), tutorialFetchProgress()]).then(function () { tutorialRenderLibrary(); }).catch(function () { if (V) V.innerHTML = errBox('Could not load tutorials.'); });
+    if (V) V.innerHTML = '<div class="loading">Loading…</div>';
+    Promise.all([tutorialFetchLessons(), tutorialFetchProgress()]).then(function () { tutorialRenderLibrary(); }).catch(function () { if (V) V.innerHTML = errBox('Tutorials didn\'t load. Try again.'); });
   }
   function tutorialStatusChip(status) {
     var tone = status === 'completed' ? 'g' : (status === 'in_progress' ? 'b' : (status === 'dismissed' ? 'n' : 'n'));
@@ -271,13 +271,12 @@
       var status = prog ? prog.status : 'not_started';
       var stepNote = (prog && prog.status === 'in_progress') ? (' · step ' + (prog.stepIndex + 1) + ' of ' + prog.totalSteps) : '';
       var btnLabel = status === 'completed' ? 'Replay' : (status === 'in_progress' ? 'Resume' : 'Start');
-      return '<div class="card" style="margin-bottom:12px"><div class="card-hd"><h2>' + escHtml(l.title) + '</h2>' + tutorialStatusChip(status) + '<span class="n">' + stepNote + '</span></div>' +
-        '<div class="card-bd"><p style="font-size:13px;color:var(--ink-3);margin:0 0 12px">' + escHtml(l.summary) + '</p>' +
+      return '<div class="card" style="margin-bottom:var(--s-snug)"><div class="card-hd"><h2>' + escHtml(l.title) + '</h2>' + tutorialStatusChip(status) + '<span class="n">' + stepNote + '</span></div>' +
+        '<div class="card-bd"><p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-snug)">' + escHtml(l.summary) + '</p>' +
         '<button type="button" class="btn p" data-tut-start="' + escHtml(l.id) + '">' + btnLabel + '</button></div></div>';
     }).join('');
-    V.innerHTML = (lessons.length ? cards : '<div class="card empty"><h3>No tutorials yet for this workspace</h3><p>Tutorials appear here as they are added for the permissions your role holds.</p></div>') +
-      '<div class="card" style="margin-top:4px"><div class="card-bd"><button type="button" class="btn" id="ra-tut-reset-all" style="color:var(--red)">Reset all my tutorial progress</button>' +
-      '<div style="font-size:11.5px;color:var(--ink-3);margin-top:6px">Clears progress across every workspace for your account only. This cannot be undone.</div></div></div>';
+    V.innerHTML = (lessons.length ? cards : '<div class="card empty"><h3>No tutorials yet</h3></div>') +
+      '<div class="card" style="margin-top:var(--s-tight)"><div class="card-bd" style="padding-top:var(--pad-card-top)"><button type="button" class="btn" id="ra-tut-reset-all" style="color:var(--red)">Reset progress</button></div></div>';
     [].forEach.call(V.querySelectorAll('[data-tut-start]'), function (b) {
       b.onclick = function () {
         var id = b.getAttribute('data-tut-start');
@@ -289,13 +288,13 @@
     });
     var resetBtn = $('ra-tut-reset-all');
     if (resetBtn) resetBtn.onclick = function () {
-      raConfirm('Reset ALL your tutorial progress, across every workspace? This cannot be undone.', function () {
+      raConfirm('Reset your tutorial progress in every workspace? This can\'t be undone.', function () {
         tunnel('/v1/tutorial/reset', { method: 'POST' }).then(function (res) {
-          if (res.status >= 400) { toast('Could not reset tutorial progress.', 'bad'); return; }
-          toast('Tutorial progress reset ✓', 'good');
+          if (res.status >= 400) { toast('Progress didn\'t reset.', 'bad'); return; }
+          toast('Progress reset', 'good');
           TSTORE.progress = [];
           tutorialFetchProgress().then(tutorialRenderLibrary);
-        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
       }, { tone: 'bad', confirmLabel: 'Reset all' });
     };
   }

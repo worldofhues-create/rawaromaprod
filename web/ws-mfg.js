@@ -61,14 +61,14 @@
   // always requires a plain-language reason, which the server audits (origin=MANUAL_CONTINUITY
   // on the row + a bridge.outbox event toward ALEMBIC — see OrdersService.confirmSalesOrder).
   function confirmSalesOrderManual(row) {
-    var reason = window.prompt('Reason for confirming ' + (row.soNumber || 'this sales order') + ' manually, outside the ALEMBIC bridge (required — audited):');
+    var reason = window.prompt('Reason for confirming ' + (row.soNumber || 'this sales order') + ' manually (required, audited):');
     if (reason === null) return; // cancelled
     reason = reason.trim();
-    if (!reason) { toast('A reason is required for this break-glass action.', 'bad'); return; }
+    if (!reason) { toast('A reason is required.', 'bad'); return; }
     tunnel('/v1/sales-orders/' + row.salesOrderId + '/confirm', { method: 'POST', body: { reason: reason } }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Confirm failed (' + res.status + ')'), 'bad'); return; }
-      toast('Confirmed ✓ (manual continuity, audited)', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      toast('Order confirmed', 'good'); loadView();
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   // Dispatch a confirmed sales order: pick an FG batch that actually has stock (FEFO, avail > 0)
   // and a real quantity. The server re-checks available (produced − reserved − already dispatched)
@@ -76,7 +76,7 @@
   async function openDispatch(row) {
     var res0;
     try { res0 = await tunnel('/v1/fg-stock?onlyAvailable=1&limit=100'); }
-    catch (e) { toast('Could not reach the secure channel', 'bad'); return; }
+    catch (e) { toast('Can\'t connect. Try again.', 'bad'); return; }
     // A server error is not "no stock" — the original code let `(res0.json && res0.json.data) ||
     // []` fold a failed fetch's `data: null` into the same empty array as a genuine zero-stock
     // result, so a 500 silently looked identical to "nothing to dispatch yet" (a fake empty state
@@ -90,17 +90,17 @@
     var opts = batches.map(function (b) {
       return '<option value="' + b.finishedGoodBatchId + '">' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + (b.skuCode ? ' · ' + b.skuCode : '') + ' · avail ' + b.availableQty + '</option>';
     }).join('');
-    var body = '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);margin-bottom:2px">' + escHtml(row.soNumber || 'Sales order') + ' → ship finished goods. Only batches with available stock are listed.</div>' +
+    var body = '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);margin-bottom:2px">' + escHtml(row.soNumber || 'Sales order') + '</div>' +
       (batches.length
-        ? '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Finished-good batch *</span><select id="ra-dfg" class="fld">' + opts + '</select></label>' +
-          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Dispatch qty *</span><input id="ra-dq" type="number" min="1" value="1" class="fld"><span id="ra-dhint" style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)"></span></label>' +
-          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Vehicle number</span><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" class="fld"></label>' +
-          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Dispatch date</span><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" class="fld"></label>' +
-          '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+        ? '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Finished-good batch *</span><select id="ra-dfg" class="fld">' + opts + '</select></label>' +
+          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Dispatch qty *</span><input id="ra-dq" type="number" min="1" value="1" class="fld"><span id="ra-dhint" style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)"></span></label>' +
+          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Vehicle number</span><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" class="fld"></label>' +
+          '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)">Dispatch date</span><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" class="fld"></label>' +
+          '<div id="ra-derr" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
           '<button type="submit" id="ra-dsave" data-tutorial-target="dispatch-submit" class="btn p" style="width:100%;justify-content:center">Dispatch</button>' +
           // Irreversible-action language up front (Addendum §10) — no separate hidden reason.
-          '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);text-align:center">Dispatching commits stock and cannot be undone from this screen.</div>'
-        : '<div class="empty"><h3>Nothing to dispatch yet</h3><p>No finished-good stock is available to dispatch. Produce or release stock first, then try again.</p></div>');
+          '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);text-align:center">Dispatch can\'t be undone.</div>'
+        : '<div class="empty"><h3>Nothing to dispatch</h3><p>No finished-good stock is available.</p></div>');
     var d = openMfgSheet('Dispatch order', '<form id="ra-dform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>');
     if (!batches.length) return;
     function syncHint() { var b = byId[$('ra-dfg').value]; if (b) { $('ra-dhint').textContent = 'Available in this batch: ' + b.availableQty; $('ra-dq').setAttribute('max', b.availableQty); } }
@@ -116,8 +116,8 @@
       var save = $('ra-dsave'); save.disabled = true; save.textContent = 'Dispatching…';
       tunnel('/v1/dispatches', { method: 'POST', body: body }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        d.close(); toast('Dispatched ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = 'Could not reach the secure channel.'; });
+        d.close(); toast('Dispatched', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
   // delivery confirmation — the last flow stage (dispatch → delivered).
@@ -125,8 +125,8 @@
     var id = row.dispatchId != null ? row.dispatchId : guessId(row);
     tunnel('/v1/masters/dispatches/' + id, { method: 'PATCH', body: { status: 'DELIVERED' } }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-      toast('Marked delivered ✓', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      toast('Marked delivered', 'good'); loadView();
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   // Build a scannable QR (byte mode, ECC-M) as an inline SVG using the vendored qrcode generator.
   function qrSvg(text, cell) {
@@ -141,10 +141,10 @@
   // scanner's keyboard-wedge input can land on/select, right below the QR it re-encodes.
   function openQrLabel(title, code, payload, sub) {
     var svg = qrSvg(payload, 6);
-    if (!svg) { toast('QR generator not loaded — hard-refresh the page.', 'bad'); return; }
+    if (!svg) { toast('QR code didn\'t load. Reload the page.', 'bad'); return; }
     var body = '<div style="text-align:center;display:flex;flex-direction:column;gap:10px">' +
       '<div style="width:220px;height:220px;margin:0 auto;background:#fff;border-radius:var(--r-md);padding:12px;box-sizing:border-box;box-shadow:0 0 0 1px var(--line) inset"><div id="ra-qrbox" style="width:100%;height:100%">' + svg + '</div></div>' +
-      '<input id="ra-qrcode" class="fld" readonly value="' + escHtml(code) + '" style="text-align:center;font-family:var(--font-mono);font-weight:800;letter-spacing:.03em;font-size:16px" aria-label="Scannable code (also selectable for a keyboard-wedge scanner)">' +
+      '<input id="ra-qrcode" class="fld" readonly value="' + escHtml(code) + '" style="text-align:center;font:var(--w-med) var(--t-h2)/1 var(--font-mono);letter-spacing:.03em" aria-label="Code">' +
       '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">' + escHtml(sub) + '</div>' +
       '<button type="button" id="ra-qrprint" class="btn p" style="justify-content:center">Print label</button></div>';
     var d = openMfgSheet(title, body, '330px');
@@ -153,7 +153,7 @@
   }
   function printQrLabel(title, code, svg, sub) {
     var w = window.open('', '_blank', 'width=420,height=580');
-    if (!w) { toast('Allow pop-ups to print the QR label (the preview above is still scannable).', 'warn'); return; }
+    if (!w) { toast('Allow pop-ups to print.', 'warn'); return; }
     var esc = function (s) { return String(s == null ? '' : s).replace(/[&<>]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : '&gt;'; }); };
     w.document.write('<!doctype html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title>' +
       '<style>body{font-family:system-ui,-apple-system,sans-serif;text-align:center;padding:26px;margin:0;color:#141413}' +
@@ -162,7 +162,7 @@
       '.sub{color:#66665E;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#66665E}' +
       '@media print{@page{margin:8mm}}</style></head><body>' +
       '<div class="qr">' + svg + '</div><div class="code">' + esc(code) + '</div><div class="sub">' + esc(sub) + '</div>' +
-      '<div class="brand">RAW AROMACHEM</div>' +
+      '<div class="brand">RAW AROMA CHEM</div>' +
       '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},180);};</scr' + 'ipt>' +
       '</body></html>');
     w.document.close();
@@ -173,10 +173,10 @@
   function openRecordQc(inspection) {
     var iid = inspection.qcInspectionId != null ? inspection.qcInspectionId : guessId(inspection);
     var params = [];
-    var body = '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">Physical (color/odor/clarity) → text · Technical (density/solubility…) → value. Each line marked Pass/Fail.</div>' +
+    var body = '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">Enter a value or an observation for each parameter.</div>' +
       '<div id="ra-qlines" style="display:flex;flex-direction:column;gap:8px"></div>' +
       '<button type="button" id="ra-qadd" class="btn sm" style="align-self:flex-start">+ Add parameter</button>' +
-      '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
+      '<div id="ra-qerr" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
       '<button type="submit" id="ra-qsave" data-tutorial-target="qc-record-results-submit" class="btn p" style="width:100%;justify-content:center">Save results</button>';
     var d = openMfgSheet('Record QC results', '<form id="ra-qform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>', '640px');
     var linesEl = d.sheet.querySelector('#ra-qlines');
@@ -212,7 +212,7 @@
       var save = $('ra-qsave'); save.disabled = true; save.textContent = 'Saving…';
       tunnel('/v1/qc-inspections/' + iid + '/results', { method: 'POST', body: { results: results } }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
-        d.close(); toast('QC results recorded ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Could not reach the secure channel.'; });
+        d.close(); toast('QC results saved', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
