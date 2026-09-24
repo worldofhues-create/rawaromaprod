@@ -126,6 +126,18 @@ export function isAllowlistedWebhookHost(url: URL, allowed: ReadonlySet<string>)
   return allowed.has(url.host.toLowerCase());
 }
 
+/** Reads `BRIDGE_WEBHOOK_ALLOWED_HOSTS` off `process.env` WITHOUT this package depending on
+ *  `@types/node` — `packages/contracts` is imported by `web/feature-auth` too, whose tsconfig
+ *  carries no Node lib/types, and a direct `process.env` reference here type-checked fine for
+ *  THIS package but broke THAT one's build (an ambient `process` it never declared). `globalThis`
+ *  is always resolvable and untyped, so the cast below names only the one shape this file reads;
+ *  runtime behaviour in the one place this ever actually executes (backend/api, on Node) is
+ *  unchanged — `globalThis.process` IS `process` there. */
+function readAllowedHostsEnv(): string | undefined {
+  return (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env?.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+}
+
 const safeWebhookUrl = z
   .string()
   .min(1)
@@ -141,7 +153,7 @@ const safeWebhookUrl = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "webhookUrl must use https://" });
     }
     if (isUnsafeWebhookHost(url.hostname)) {
-      const allowed = parseAllowedWebhookHosts(process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS);
+      const allowed = parseAllowedWebhookHosts(readAllowedHostsEnv());
       if (!isAllowlistedWebhookHost(url, allowed)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
