@@ -4,8 +4,17 @@
  * network-only and falls straight through, same principle as the factory PWA's sw.js but
  * simpler (this console has no offline-write workflow to support at all — it's read-mostly
  * platform telemetry, not factory operations). */
-const CACHE = 'platform-shell-v2';
-const SHELL = ['/', '/index.html', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg'];
+const CACHE = 'platform-shell-v5';
+const SHELL = [
+  '/', '/index.html', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg',
+  // Vendored fonts (no longer fetched from fonts.googleapis.com/fonts.gstatic.com — see index.html).
+  '/fonts/outfit.css', '/fonts/jetbrains-mono.css',
+  '/fonts/outfit-300-latin.woff2', '/fonts/outfit-300-latin-ext.woff2',
+  '/fonts/outfit-400-latin.woff2', '/fonts/outfit-400-latin-ext.woff2',
+  '/fonts/outfit-500-latin.woff2', '/fonts/outfit-500-latin-ext.woff2',
+  '/fonts/jetbrains-mono-400-latin.woff2', '/fonts/jetbrains-mono-400-latin-ext.woff2',
+  '/fonts/jetbrains-mono-500-latin.woff2', '/fonts/jetbrains-mono-500-latin-ext.woff2',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
