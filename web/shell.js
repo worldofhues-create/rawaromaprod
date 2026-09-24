@@ -366,87 +366,181 @@
     return keys.slice(0, 6);
   }
 
+  /* ---------------- reference shell kit (vanilla port of rac-console.jsx) ----------------
+   * The Admin/Agent reference (rawprod-lanes/reference/admin/d6c51180.javascript, rac-console.jsx)
+   * defines the shell as React components: BrandMark, QuickDock, GCard, ExpandSheet, the rail
+   * toggle and usePageEnter. This console is plain classic scripts, so each is ported as a string
+   * builder or a small wiring function with the same class names and the same behaviour; the
+   * styling is rac-console.css itself (vendored verbatim, web/ui-contract/rac-console.css). */
+  var CI = { // the reference's CIcon glyphs used by the chrome (16px grid, 1.6–1.9 stroke)
+    menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
+    collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13.5 6.5 8 12l5.5 5.5"/><path d="M19 5v14"/></svg>',
+    cmd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 6.6a2.6 2.6 0 1 0-2.6 2.6H9V6.6zM15 6.6a2.6 2.6 0 1 1 2.6 2.6H15V6.6zM9 17.4a2.6 2.6 0 1 1-2.6-2.6H9v2.6zM15 17.4a2.6 2.6 0 1 0 2.6-2.6H15v2.6z"/><rect x="9" y="9.2" width="6" height="5.6"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6.4 9.4a5.6 5.6 0 1 1 11.2 0c0 4.6 1.9 5.6 1.9 5.6H4.5s1.9-1 1.9-5.6"/><path d="M10.2 18.4a1.9 1.9 0 0 0 3.6 0"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>',
+    arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
+  };
+  window.RA_CI = CI; // ws-*.js dialogs use the same close glyph
+  // BrandMark — the lockup, one builder so it can't drift. The tile is the reference's "RAC"
+  // monogram until UX-D publishes the cropped logo (release/ui/BRAND_ASSETS.md).
+  function brandMark(sub, onInk, compact) {
+    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '"><span class="bm" aria-hidden="true">RAC</span>' +
+      (compact ? '' : '<span class="bt">Alembic' + (sub ? '<small>' + sub + '</small>' : '') + '</span>') + '</span>';
+  }
+  // GCard — one card shell so every panel is the same shape: glass, lift, title + caption, the
+  // top-right expand affordance, body, optional foot. `span`/`rows` are the 12-col grid classes.
+  var _gcSeq = 0, _gcBodies = {};
+  function gCard(o) {
+    var id = 'gc' + (_gcSeq++);
+    _gcBodies[id] = { title: o.title || '', meta: o.meta || '', body: o.detail || o.body };
+    var tone = o.tone === 'accent' ? ' glass-accent' : '';
+    return '<div class="glass lift gcard ' + (o.span || 'c4') + ' ' + (o.rows || 'r1') + tone + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + '>' +
+      ((o.title || o.expand !== false) ? '<div class="gcard-hd"><div class="ttl">' +
+        (o.title ? '<h3 class="t-h2">' + o.title + '</h3>' : '') + (o.meta ? '<p class="t-cap">' + o.meta + '</p>' : '') + '</div>' +
+        (o.expand === false ? '' : '<button type="button" class="xp" data-expand="' + id + '" aria-label="Expand ' + escHtml(o.title || 'panel') + '">' + CI.expand + '</button>') +
+      '</div>' : '') +
+      '<div class="gcard-bd' + (o.top ? ' top' : '') + '">' + o.body + '</div>' +
+      (o.foot ? '<div class="gcard-ft">' + o.foot + '</div>' : '') + '</div>';
+  }
+  // ExpandSheet — what the expand affordance opens: the same card, at reading size, in the
+  // reference's glass sheet (openSheet below carries the focus trap / Escape / restore).
+  function wireExpand(root) {
+    [].forEach.call((root || document).querySelectorAll('[data-expand]'), function (b) {
+      b.onclick = function () {
+        var d = _gcBodies[b.getAttribute('data-expand')]; if (!d) return;
+        openSheet({ tag: 'div', title: d.title, meta: d.meta, cls: 'xp-wide', body: '<div class="stack-base">' + d.body + '</div>' });
+      };
+    });
+  }
+  // usePageEnter — route entrance: the resting state is correct and the offset is an additive
+  // attribute removed on a timer, so a stalled timeline degrades to no motion.
+  function pageEnter(el, dir) {
+    if (!el || !dir) return;
+    el.setAttribute('data-enter', dir);
+    setTimeout(function () { el.setAttribute('data-settling', ''); el.removeAttribute('data-enter'); }, 20);
+    setTimeout(function () { el.removeAttribute('data-settling'); }, 460);
+  }
+  // Command palette (dock ⌘K): every destination this role holds, filterable, Enter to go.
+  function openPalette() {
+    if ($('ra-cmdk')) { closePalette(); return; }
+    var R = ROLES[st.role]; if (!R) return;
+    var wrap = document.createElement('div'); wrap.id = 'ra-cmdk';
+    wrap.innerHTML = '<div class="xp-scrim open" data-cmdk-x></div>' +
+      '<div class="glass glass-deep cmdk" role="dialog" aria-modal="true" aria-label="Go to">' +
+        '<input id="ra-cmdk-q" type="text" placeholder="Go to…" aria-label="Go to" autocomplete="off">' +
+        '<ul id="ra-cmdk-l" role="listbox"></ul></div>';
+    document.body.appendChild(wrap);
+    var q = $('ra-cmdk-q'), list = $('ra-cmdk-l'), idx = 0, rows = [];
+    function paint() {
+      var t = q.value.trim().toLowerCase();
+      rows = R.nav.filter(function (n) { return !t || n[1].toLowerCase().indexOf(t) >= 0; });
+      if (idx >= rows.length) idx = 0;
+      list.innerHTML = rows.map(function (n, i) {
+        return '<li><button type="button" data-go="' + n[0] + '" class="' + (i === idx ? 'on' : '') + '">' + icon(n[2], 15) + n[1] +
+          (R.nav.indexOf(n) < 9 ? '<span class="sc">⌘' + (R.nav.indexOf(n) + 1) + '</span>' : '') + '</button></li>';
+      }).join('') || '<li class="loading" style="padding:var(--s-base)">No match</li>';
+      [].forEach.call(list.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { go(b.getAttribute('data-go')); }; });
+    }
+    function go(k) { closePalette(); navTo(k); }
+    q.oninput = function () { idx = 0; paint(); };
+    q.onkeydown = function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(rows.length - 1, idx + 1); paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); paint(); }
+      else if (e.key === 'Enter' && rows[idx]) { e.preventDefault(); go(rows[idx][0]); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+    };
+    wrap.querySelector('[data-cmdk-x]').onclick = closePalette;
+    paint(); q.focus();
+  }
+  function closePalette() { var w = $('ra-cmdk'); if (w) w.remove(); }
+  function navTo(k) {
+    var R = ROLES[st.role]; if (!R || !R.nav.some(function (n) { return n[0] === k; })) return;
+    if (st.nav === k) return;
+    st.nav = k; st.search = '';
+    if (window.innerWidth <= 1023) st.drawer = false;
+    shell();
+  }
+
   /* ---------------- render: shell + data view ---------------- */
-  // Shell chrome, corrected to ALEMBIC's ACTUAL rendered grammar — a top bar + a floating/docked
-  // bottom command dock, with the rail off-canvas by DEFAULT at every width (see shell.css's own
-  // header comment + ALEMBIC_GUIDE_CORRECTIONS.md; not the permanently-visible rail column the
-  // original PORTING_GUIDE.md §Shell reading produced). Nav items are NOT filtered client-side
-  // beyond "what this session's permission-driven ROLES entry contains" — same rule ALEMBIC's own
-  // guide states (server enforces per-action authorization; the rail/dock just reflect what the
-  // signed-in session's role set was granted). The dock (`.qdock`) carries the SAME `R.nav` set as
-  // the rail — `data-nav` on its buttons reuses wireShell()'s existing `[data-nav]` click wiring —
-  // so every route the rail could reach, the dock can too; `HOT` just picks which ones keep a
-  // labelled segment in the phone tab-bar variant (shell.css `@media (max-width:1023px)`).
+  // The reference Admin/Agent shell, 1:1: a rail (collapsed by default — body.rail-off — so the
+  // floating dock is the navigation), a top bar (platform brand, page title, page actions), the
+  // region, the floating glass dock (brand tile, rail toggle, destinations with ⌘1–9, command
+  // palette). Nav items are NOT filtered client-side beyond "what this session's permission-driven
+  // ROLES entry contains" — the server enforces per-action authorization. The dock carries the
+  // SAME `R.nav` set as the rail; below 1024 it becomes the reference's tab bar, keeping the
+  // first destinations (HOT) plus "Sections", which opens the rail as a drawer.
   function shell() {
     $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
+    var prevIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st._prevNav);
+    var curIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st.nav);
     var navHtml = R.nav.map(function (n) {
       var on = st.nav === n[0];
       // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
-      // target/action steps use to locate this real nav button (web/tutorial.js) — mirrors
-      // ALEMBIC's own one-attribute convention (data-tutorial-target). Inert otherwise.
+      // target/action steps use to locate this real nav button (web/tutorial.js).
       return '<button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
-        '<span class="ic">' + icon(n[2], 14) + '</span><span class="nm">' + n[1] + '</span></button>';
+        icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>';
     }).join('');
-    // The four destinations kept as labelled segments in the phone tab bar (ALEMBIC's DOCK_HOT —
-    // admin-console.jsx: "the five destinations an owner actually reaches for" / "dashboard is the
-    // landing screen..."). Every role's dashboard is first in R.nav (unshift, above), so this is
-    // "dashboard + the role's own top three" rather than a hand-curated list per role.
     var HOT = {}; R.nav.slice(0, 4).forEach(function (n) { HOT[n[0]] = 1; });
     var dockHtml =
-      '<button id="ra-dock-toggle" class="qb dock-toggle hot" aria-label="Show navigation" title="Sections">' +
-        icon('panel', 17) + '<span class="nm">Sections</span></button><span class="sep"></span>' +
-      R.nav.map(function (n) {
+      '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><span class="bm" aria-hidden="true">RAC</span></button>' +
+      '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="Show navigation" aria-pressed="false">' + CI.menu + '<span class="kb">Sections<span class="kc"> · ⌘\\</span></span></button>' +
+      '<span class="sep"></span>' +
+      R.nav.map(function (n, i) {
         var on = st.nav === n[0];
-        return '<button data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
-          ' title="' + n[1] + '" aria-label="' + n[1] + '"' + (on ? ' aria-current="page"' : '') + '>' +
-          icon(n[2], 17) + '<span class="nm">' + n[1] + '</span></button>';
-      }).join('');
-    // Workspace switcher: multi-role staff get a <select> in the topbar and switch with no second
-    // login (addendum §5/§8) — st.role changes, ROLES[newRole] re-renders the same shell. ALEMBIC
-    // has no directly-cited equivalent chrome (rac-console.jsx's consoles are one role each); this
-    // stays a RawProd composition from ALEMBIC primitives, in the topbar next to the section title.
+        return '<button type="button" data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
+          ' aria-label="' + n[1] + '" aria-pressed="' + on + '"' + (on ? ' aria-current="page"' : '') + '>' +
+          icon(n[2], 17) + '<span class="kb">' + n[1] + (i < 9 ? '<span class="kc"> · ⌘' + (i + 1) + '</span>' : '') + '</span></button>';
+      }).join('') +
+      '<span class="sep"></span>' +
+      '<button type="button" class="qb" id="ra-cmdk-open" aria-label="Command palette">' + CI.cmd + '<span class="kb">Command<span class="kc"> · ⌘K</span></span></button>';
+    // Workspace switcher: multi-role staff switch workspaces with no second login (addendum
+    // §5/§8) — a RawProd composition in the top bar next to the page title.
     var roles = (session && session.availableRoles) || [st.role];
     var switcher = roles.length > 1 ? (
-      '<div class="wsw" title="Switch workspace"><select id="ra-wsw">' +
+      '<div class="wsw" title="Switch workspace"><select id="ra-wsw" aria-label="Workspace">' +
         roles.map(function (r) { return '<option value="' + r + '"' + (r === st.role ? ' selected' : '') + '>' + (ROLES[r] ? ROLES[r].label : r) + '</option>'; }).join('') +
       '</select></div>'
     ) : '';
     $('app').innerHTML =
-      '<nav class="rail" id="ra-side">' +
-        '<button class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + icon('panel', 16) + '</button>' +
-        '<button class="rb" aria-label="Factory, Raw Aroma Chem">' +
-          '<span class="m" aria-hidden="true">RAC</span>' +
-          '<span class="t">Factory<small>Raw Aroma Chem</small></span></button>' +
+      '<nav class="rail" id="ra-side" aria-label="Factory navigation">' +
+        '<button type="button" class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + CI.collapse + '</button>' +
+        '<button type="button" class="rb" id="ra-home" style="padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%" aria-label="Dashboard">' +
+          brandMark('Factory', true) + '</button>' +
         '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div>' + navHtml + '</div></div>' +
         '<div class="rme">' +
           '<span class="av">' + initials + '</span>' +
           '<span class="who">' + R.user + '<small>' + R.label + '</small></span>' +
-          '<button id="ra-logout" title="Sign out" aria-label="Sign out">' + icon('logout', 14) + '</button>' +
+          '<button type="button" class="rail-min" id="ra-logout" title="Sign out" aria-label="Sign out" style="position:static;margin-left:auto">' + icon('logout', 13) + '</button>' +
         '</div>' +
       '</nav>' +
       '<div id="ra-drawer-bg" class="rail-scrim"></div>' +
       '<div class="main">' +
         '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline. Showing the last data loaded; changes won\'t save until you reconnect.</span></div>' +
         '<div class="bar">' +
-          '<span class="bar-brand">' + R.label + '</span>' +
+          '<span class="bar-brand">Alembic<i>·</i>Factory</span>' +
           '<h1 id="ra-title">' + R.label + '</h1>' +
+          '<span style="flex:1"></span>' +
           switcher +
           '<div style="position:relative">' +
-            '<button id="ra-bell" class="xp" title="Alerts" aria-label="Alerts" style="position:relative">' + icon('bell', 14) +
-              '<span id="ra-bell-badge" class="chip r" style="display:none;position:absolute;top:-8px;right:-8px;min-width:16px;height:16px;padding:0 3px;justify-content:center"></span></button>' +
-            '<div id="ra-bell-pop" class="card" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div class="loading" style="padding:var(--s-snug)">Loading…</div></div>' +
+            '<button type="button" id="ra-bell" class="gbtn" title="Alerts" aria-label="Alerts">' + CI.bell +
+              '<span id="ra-bell-badge" class="t-num" style="display:none"></span></button>' +
+            '<div id="ra-bell-pop" class="glass glass-deep" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div class="loading" style="padding:var(--s-snug)">Loading…</div></div>' +
           '</div>' +
         '</div>' +
-        '<div class="content"><section id="ra-view"></section></div>' +
+        '<div class="content"><section class="pageview" id="ra-view"></section></div>' +
       '</div>' +
-      '<div class="qdock" id="ra-dock" role="navigation" aria-label="Sections">' + dockHtml + '</div>';
+      '<button type="button" class="dock-handle" id="ra-dock-handle" aria-label="Show quick access dock"><i></i></button>' +
+      '<div class="glass glass-deep qdock" id="ra-dock" role="toolbar" aria-label="Quick access">' + dockHtml + '</div>';
     wireShell();
+    if (prevIdx >= 0 && curIdx >= 0 && prevIdx !== curIdx) pageEnter($('ra-view'), curIdx > prevIdx ? 'r' : 'l');
+    st._prevNav = st.nav;
     loadView();
     loadAlerts();
     // G4: WelcomePanel-equivalent — offer the current workspace's tutorial once, only when no
-    // progress row of any status exists yet for it (see web/tutorial.js). Defensive `typeof`
-    // for the same reason as loadTutorialView above.
+    // progress row of any status exists yet for it (see web/tutorial.js).
     if (typeof tutorialMaybeShowWelcome === 'function') tutorialMaybeShowWelcome();
   }
 
@@ -468,7 +562,6 @@
   // U3b: real ALEMBIC GCard (console.css:172-196, "Uniform card grid") — a .gwrap 12-col grid
   // row of .gcard.glass surfaces. `span` is one of the c3.._c12 utility classes (shell.css "U3b"
   // block); omit it for a plain, non-grid-item card (e.g. a single zone tile inside .gwrap-auto).
-  function gcard(inner, span) { return '<div class="gcard glass' + (span ? ' ' + span : '') + '"><div class="gcard-bd">' + inner + '</div></div>'; }
   function relTime(ts) {
     if (!ts) return ''; var t = Date.parse(String(ts).replace(' ', 'T')); if (isNaN(t)) return '';
     var s = Math.max(1, Math.round((Date.now() - t) / 1000));
@@ -504,7 +597,7 @@
   // What it added — the gauge — now sits beside the role's activity panel instead.
   function gaugeCard(p, role) {
     var g = gaugeFor(p, role), gc = g[0] >= 70 ? 'var(--accent)' : (g[0] >= 40 ? 'var(--amber)' : 'var(--red)');
-    return '<div class="card c4"><div class="card-hd"><h2>' + g[1] + '</h2></div><div class="card-bd">' + ring(g[0], g[0] + '%', '', gc) + '</div></div>';
+    return gCard({ title: g[1], span: 'c4', body: '<div style="margin:auto 0">' + ring(g[0], g[0] + '%', '', gc) + '</div>' });
   }
   // Side panel — donut / bars / feed / pipeline, real data.
   function sideDonut(p) {
@@ -548,7 +641,7 @@
       compounding: ['Mixing room', 'Latest first', sideFeed(p.feed)],
       sales: ['Dispatch activity', 'Latest first', sideFeed(p.feed)]
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
-    return '<div class="card"><div class="card-hd"><h2>' + spec[0] + '</h2><span class="n">' + spec[1] + '</span></div><div class="card-bd">' + spec[2] + '</div></div>';
+    return gCard({ title: spec[0], meta: spec[1], span: role === 'superadmin' ? 'c4' : 'c8', top: true, body: '<div>' + spec[2] + '</div>' });
   }
   // Super-Admin chain of custody — the 24-step flow grouped into 10 stages, with the formula-vault
   // masking boundary in its true position (after Formula Selection). Flex layout (no absolute
@@ -587,15 +680,13 @@
       '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);margin-top:var(--s-hair)">' + sub + '</div></div>' +
       '<span style="font:var(--w-reg) var(--t-micro)/1 var(--font-mono);flex:none">' + fv.count + ' formulas</span></div>';
     function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:var(--s-tight);margin:var(--s-tight) 0"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);color:' + col + ';letter-spacing:var(--ls-wide);text-transform:uppercase;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--line)"></div></div>'; }
-    return '<div class="card"><div class="card-hd"><h2>Chain of custody</h2><span class="n">Stock planning to delivery</span>' +
-      '<span class="chip ' + (rev ? 'k' : 'n') + '" style="margin-left:auto">' + (rev ? 'Identity visible' : 'Anonymised') + '</span></div>' +
-      '<div class="card-bd">' +
+    return gCard({ title: 'Chain of custody', meta: 'Stock planning to delivery · ' + (rev ? 'identity visible' : 'anonymised'), span: 'c12', top: true, body: '<div>' +
       divider('Identity visible', 'var(--ink-3)') +
       flowRow(FLOW_PRE, p, 1, false) +
       ARROW_D + vault + ARROW_D +
       divider('Aliases only', 'var(--ink-3)') +
       flowRow(FLOW_POST, p, 7, true) +
-      '</div></div>';
+      '</div>' });
   }
   function runsTable(p) {
     // U3b: real Data table grammar (shell.css thead th/tbody td) inside .card-bd; .tscroll lets a
@@ -609,7 +700,7 @@
         '<td>' + r.target + '</td>' +
         '<td>' + fmt('status', r.status) + '</td></tr>';
     }).join('');
-    return '<div class="card"><div class="card-hd"><h2>Master runs</h2></div><div class="card-bd tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+    return gCard({ title: 'Master runs', meta: p.runs.length + ' runs', span: 'c8', top: true, body: '<div class="tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' });
   }
   // Warehouse floor zone map — real zones + rack counts + batch occupancy.
   function warehouseMap(p) {
@@ -618,23 +709,21 @@
     var zones = p.zones.map(function (z) {
       var capCol = z.capPct >= 85 ? 'var(--red)' : (z.capPct >= 65 ? 'var(--amber)' : 'var(--accent)');
       var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--panel-3)') + '"></i>'; }
-      return gcard(
-        '<div style="display:flex;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-hair)"><i class="sw-dot" style="width:10px;height:10px;border-radius:var(--r-sm);background:' + clsCol(z.cls) + '"></i><div style="font:var(--w-med) var(--t-h3)/1.2 var(--font-ui);flex:1">' + z.name + '</div>' + (z.code === 'Z4' ? '<span class="chip r">Flammable</span>' : '') + '</div>' +
-        '<div style="font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);color:var(--ink-3);margin-bottom:var(--s-snug)">' + z.racks + ' racks · ' + z.batches + ' batches</div>' +
-        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:var(--s-snug)" aria-hidden="true">' + cells + '</div>' +
-        '<div class="kv" style="border:0;padding:0 0 var(--s-tight)"><span class="k">Capacity used</span><span class="v" style="color:' + (capCol === 'var(--accent)' ? 'var(--ink)' : capCol) + '">' + z.capPct + '%</span></div>' +
-        '<div class="meter"><i style="width:' + z.capPct + '%;background:' + capCol + '"></i></div>'
-      );
+      return gCard({ span: 'c4', title: z.name, meta: z.racks + ' racks · ' + z.batches + ' batches', body:
+        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px" aria-hidden="true">' + cells + '</div>' +
+        '<div class="kv" style="border:0;padding:0"><span class="k">Capacity used</span><span class="v" style="color:' + (capCol === 'var(--accent)' ? 'var(--ink)' : capCol) + '">' + z.capPct + '%</span></div>' +
+        '<div class="meter"><i style="width:' + z.capPct + '%;background:' + capCol + '"></i></div>' +
+        (z.code === 'Z4' ? '<span class="chip r" style="align-self:flex-start">Flammable</span>' : '')
+      });
     }).join('');
     // UX-C: the "Storage workload" bar chart beside this card was pseudo-random bars under a fixed
     // 06:00/12:00/18:00 axis — no hourly data exists behind it — so it is gone; the floor summary
     // (real counts) now spans the row.
-    var floorSummary = '<div class="card c12"><div class="card-hd"><h2>Floor summary</h2></div><div class="card-bd">' +
+    var floorSummary = gCard({ title: 'Floor summary', span: 'c12', top: true, body: '<div>' +
       [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Racks', p.counts.racks]].map(function (r) {
         return '<div class="kv"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>';
-      }).join('') + '</div></div>';
-    return '<div class="gwrap-auto" style="margin-bottom:var(--s-base)">' + zones + '</div>' +
-      '<div class="gwrap">' + floorSummary + '</div>';
+      }).join('') + '</div>' });
+    return '<div class="gwrap">' + zones + '</div><div class="gwrap">' + floorSummary + '</div>';
   }
   // Per-role KPI set (4 cards) computed from the real counts payload.
   function kpiSet(p, role) {
@@ -663,7 +752,7 @@
     if (!p) { V.innerHTML = errBox('The dashboard came back empty.'); return; }
     st.dash = p;
     var role = st.role, kset = kpiSet(p, role);
-    var kpis = '<div class="stats" style="margin-bottom:var(--s-base)">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
+    var kpis = '<div class="stats">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
     // "My work" — the role's actionable queue at the top of the home (tap a tile to jump to the screen that resolves it)
     var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.json && ar.json.data; } catch (e) {}
     var html = myWorkPanel(ad) + kpis;
@@ -672,14 +761,15 @@
     } else if (role === 'superadmin') {
       // U3b: .gwrap c8/c4 (shell.css "U3b" block) — real GCard grid row, collapsing to one
       // card per row at <=1023 on its own; no data-grid/applyDashCols.
-      html += '<div style="margin-bottom:var(--s-base)">' + flowGraph(p) + '</div>' +
-        '<div class="gwrap"><div class="c8">' + runsTable(p) + '</div><div class="c4">' + sidePanel(p, role) + '</div></div>';
+      html += '<div class="gwrap">' + flowGraph(p) + '</div>' +
+        '<div class="gwrap">' + runsTable(p) + sidePanel(p, role) + '</div>';
     } else {
-      html += '<div class="gwrap"><div class="c8">' + sidePanel(p, role) + '</div>' + gaugeCard(p, role) + '</div>';
+      html += '<div class="gwrap">' + sidePanel(p, role) + gaugeCard(p, role) + '</div>';
     }
     V.innerHTML = html;
+    wireExpand(V);
     [].forEach.call(document.querySelectorAll('#ra-view [data-work-nav]'), function (el) {
-      el.onclick = function () { st.nav = el.getAttribute('data-work-nav'); st.search = ''; shell(); };
+      el.onclick = function () { navTo(el.getAttribute('data-work-nav')); };
     });
   }
   // The role's actionable queue: clickable tiles from the role-filtered alerts.
@@ -700,7 +790,7 @@
     // U3b: real .card/.card-hd/.card-bd grammar for the outer panel; the hover feedback on a
     // clickable tile moves from inline onmouseover/onmouseout box-shadow swaps (the legacy
     // --ins-sm/--rai-sm shim) to a plain CSS rule on [data-work-nav] (shell.css "U3b" block).
-    return '<div class="card" style="margin-bottom:var(--s-base)"><div class="card-hd"><h2>My work</h2></div><div class="card-bd">' + inner + '</div></div>';
+    return '<div class="gwrap strip" style="margin-bottom:var(--gr-gap)">' + gCard({ title: 'My work', meta: alerts.length ? alerts.length + ' queues need action' : '', span: 'c12', expand: false, body: inner }) + '</div>';
   }
   /* ---------------- flow actions: existing POST routes wired to per-row buttons ---------------- */
   // The role must hold the permission (owner/super_admin hold all) AND the row must be in the
@@ -948,9 +1038,11 @@
     scrim.className = 'xp-scrim open'; if (o.scrimId) scrim.id = o.scrimId;
     var titleId = 'ra-sheet-t' + (_sheetSeq++);
     var tag = o.tag || 'div';
-    scrim.innerHTML = '<' + tag + (o.id ? ' id="' + o.id + '"' : '') + ' class="xp-sheet' + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + ' role="dialog" aria-modal="true" aria-labelledby="' + titleId + '">' +
-      '<div class="xp-sheet-hd"><h2 id="' + titleId + '">' + o.title + '</h2><button type="button" class="xp" data-sheet-x aria-label="Close">&times;</button></div>' +
-      '<div class="xp-sheet-bd">' + o.body + '</div>' +
+    // Reference ExpandSheet markup: a glass-deep sheet (display gated on .open only), a t-h1 title
+    // with an optional t-cap line, and the reference's × control.
+    scrim.innerHTML = '<' + tag + (o.id ? ' id="' + o.id + '"' : '') + ' class="glass glass-deep xp-sheet open' + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + ' role="dialog" aria-modal="true" aria-labelledby="' + titleId + '">' +
+      '<div class="xp-sheet-hd"><div style="flex:1;min-width:0"><h2 class="t-h1" id="' + titleId + '">' + o.title + '</h2>' + (o.meta ? '<p class="t-cap" style="margin-top:6px">' + o.meta + '</p>' : '') + '</div><button type="button" class="xp" data-sheet-x aria-label="Close">' + CI.x + '</button></div>' +
+      '<div class="xp-sheet-bd form">' + o.body + '</div>' +
     '</' + tag + '>';
     document.body.appendChild(scrim); setTheme();
     var sheet = scrim.firstElementChild;
@@ -1923,7 +2015,7 @@
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
       var d = res.json && res.json.data; if (!d) return;
-      var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
+      var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'inline'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
       pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div class="sect" style="padding:var(--s-tight) var(--s-tight) var(--s-snug)">Alerts</div>' + d.alerts.map(function (a) {
         var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent-ink)');
@@ -1943,38 +2035,61 @@
     shell();
   }
   function wireShell() {
-    [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
-    $('ra-logout').onclick = function () { session = null; st.role = null; try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { navTo(b.getAttribute('data-nav')); }; });
+    var home = function () { navTo(ROLES[st.role].nav[0][0]); };
+    if ($('ra-home')) $('ra-home').onclick = home;
+    if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
+    $('ra-logout').onclick = function () { session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
-    // .rail-min (ALEMBIC's own primitive) sits INSIDE .rail, so — now the rail is off-canvas at
-    // every width, not just mobile — it only ever CLOSES the sheet; the dock's "Sections" pill
-    // (#ra-dock-toggle, always visible in .qdock) is the one control that OPENS it, at any width.
+    // The rail's own .rail-min only closes it; the dock's toggle opens and closes it (desktop:
+    // body.rail-off folds the grid track; phone: body.rail-open slides it in as a drawer).
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = false; applyResponsive(); };
     var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
+    var handle = $('ra-dock-handle'); if (handle) handle.onclick = function () { document.body.classList.remove('dock-away'); };
+    var cmdk = $('ra-cmdk-open'); if (cmdk) cmdk.onclick = openPalette;
     applyResponsive();
     applyNetBanner();
   }
   if (!window.__raRailKeyWired) {
     window.__raRailKeyWired = true;
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); } });
+    // QuickDock keys, as the reference: ⌘K palette, ⌘\ rail, ⌘1–9 destinations; Escape closes.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); return; }
+      if (!st.role || !(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'k' || e.key === 'K') { e.preventDefault(); openPalette(); return; }
+      if (e.key === '\\') { e.preventDefault(); st.drawer = !st.drawer; applyResponsive(); return; }
+      var i = parseInt(e.key, 10), R = ROLES[st.role];
+      if (i >= 1 && i <= 9 && R && R.nav[i - 1]) { e.preventDefault(); navTo(R.nav[i - 1][0]); }
+    });
+    // Dock retract (reference QuickDock): while the desktop rail is open the dock steps out of the
+    // way at rest and returns when the pointer nears the bottom edge. With the rail folded the dock
+    // IS the navigation, so rac-console.css pins it (body.rail-off .qdock).
+    var awayT = null;
+    document.addEventListener('mousemove', function (e) {
+      if (!st.role) return;
+      if (e.clientY > window.innerHeight - 64) { clearTimeout(awayT); document.body.classList.remove('dock-away'); }
+      else if (!document.body.classList.contains('dock-away') && st.drawer && window.innerWidth > 1023) {
+        clearTimeout(awayT); awayT = setTimeout(function () { if (st.drawer) document.body.classList.add('dock-away'); }, 2400);
+      }
+    }, { passive: true });
   }
-  // The rail is an off-canvas sheet at EVERY width now (ALEMBIC parity — see shell.css's header
-  // comment): `body.rail-open` slides it in over the content, `#ra-drawer-bg` dims behind it, and
-  // `inert`/`aria-hidden` keep it out of the tab order and off-screen-reader while shut — the same
-  // pairing ALEMBIC's own ConsoleHost.jsx uses for its rail (`inert={rail?undefined:''} aria-hidden=
-  // {rail?undefined:'true'}`). CSS (not inline styles) owns position/transform at every breakpoint.
+  // Rail state, as the reference's useRailToggle: desktop folds the grid track (body.rail-off,
+  // the default), phone opens an off-canvas drawer (body.rail-open). `inert`/`aria-hidden` keep a
+  // closed rail out of the tab order and off the screen reader.
   function applyResponsive() {
-    var open = !!st.drawer;
-    document.body.classList.toggle('rail-open', open);
-    var bg = $('ra-drawer-bg'); if (bg) bg.classList.toggle('show', open);
+    var open = !!st.drawer, phone = window.innerWidth <= 1023;
+    document.body.classList.toggle('rail-off', !phone && !open);
+    document.body.classList.toggle('rail-open', phone && open);
+    if (!open) document.body.classList.remove('dock-away');
     var side = $('ra-side');
     if (side) {
       if (open) { side.removeAttribute('inert'); side.removeAttribute('aria-hidden'); }
       else { side.setAttribute('inert', ''); side.setAttribute('aria-hidden', 'true'); }
     }
+    var t = $('ra-dock-toggle'); if (t) { t.setAttribute('aria-pressed', String(open)); t.setAttribute('aria-label', open ? 'Hide navigation' : 'Show navigation'); }
   }
   // Truthful offline/degraded banner (addendum §13): says exactly what it is — the last data
   // loaded — and never implies anything typed while offline is queued for later replay, because

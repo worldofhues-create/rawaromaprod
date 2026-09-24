@@ -40,12 +40,12 @@
   // never correct — it happened to work only by nobody having loaded ws-mfg.js's *last* until now.
   function openMfgSheet(title, bodyHtml, maxWidth) {
     var scrim = document.createElement('div'); scrim.className = 'xp-scrim open';
-    var sheet = document.createElement('div'); sheet.className = 'xp-sheet open';
+    var sheet = document.createElement('div'); sheet.className = 'glass glass-deep xp-sheet open';
     sheet.setAttribute('role', 'dialog'); sheet.setAttribute('aria-modal', 'true'); sheet.setAttribute('aria-label', title);
     if (maxWidth) sheet.style.maxWidth = maxWidth;
-    sheet.innerHTML = '<div class="xp-sheet-hd"><h2>' + escHtml(title) + '</h2>' +
-      '<button type="button" class="xp" aria-label="Close">&times;</button></div>' +
-      '<div class="xp-sheet-bd">' + bodyHtml + '</div>';
+    sheet.innerHTML = '<div class="xp-sheet-hd"><h2 class="t-h1" style="flex:1;min-width:0">' + escHtml(title) + '</h2>' +
+      '<button type="button" class="xp" aria-label="Close">' + window.RA_CI.x + '</button></div>' +
+      '<div class="xp-sheet-bd form">' + bodyHtml + '</div>';
     scrim.appendChild(sheet); document.body.appendChild(scrim); setTheme();
     function close() { document.removeEventListener('keydown', onKey); if (scrim.parentNode) scrim.remove(); }
     function onKey(e) { if (e.key === 'Escape') close(); }

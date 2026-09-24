@@ -7,20 +7,17 @@
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#EDEDEB">
   <link rel="icon" href="/icon.svg">
-  <!-- ALEMBIC visual contract, vendored verbatim (web/ui-contract/CONTRACT_HASH pins the version
-       U0 generated it from). Do not hand-edit alembic-tokens.css — regenerate + re-vendor instead. -->
+  <!-- Reference console design layer (rac-console.css, vendored verbatim from the owner reference)
+       then the ALEMBIC visual contract (web/ui-contract/CONTRACT_HASH pins its version; do not
+       hand-edit alembic-tokens.css — regenerate + re-vendor instead), then the Factory layer. -->
   <link rel="stylesheet" href="/ui-contract/fonts/outfit.css">
   <link rel="stylesheet" href="/ui-contract/fonts/jetbrains-mono.css">
+  <link rel="stylesheet" href="/ui-contract/rac-console.css">
   <link rel="stylesheet" href="/ui-contract/alembic-tokens.css">
   <link rel="stylesheet" href="/ui-contract/shell.css">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { min-height: 100%; }
-    body { background: var(--bg); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
-  </style>
 </head>
 <body>
-  <div id="app" class="app"></div>
+  <div class="stage" id="root"><div id="app" class="app"></div></div>
   <script src="/qrcode.js"></script>
   <!-- Split from the former monolithic app.js (mechanical, no behaviour change) so parallel
        UI-parity lanes stop colliding. Plain classic scripts (no bundler): shell.js declares the

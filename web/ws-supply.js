@@ -13,9 +13,9 @@
     var mat = row.materialCode || row.materialName || 'material';
     var scrim = document.createElement('div');
     scrim.className = 'xp-scrim open'; scrim.id = 'ra-rscrim';
-    scrim.innerHTML = '<form id="ra-rform" class="xp-sheet" style="max-width:400px" role="dialog" aria-modal="true" aria-label="Raise requirement">' +
-      '<div class="xp-sheet-hd"><h2>Raise requirement</h2><button type="button" class="xp" id="ra-rclose" aria-label="Close">&times;</button></div>' +
-      '<div class="xp-sheet-bd">' +
+    scrim.innerHTML = '<form id="ra-rform" class="glass glass-deep xp-sheet open" style="max-width:400px" role="dialog" aria-modal="true" aria-label="Raise requirement">' +
+      '<div class="xp-sheet-hd"><h2 class="t-h1" style="flex:1;min-width:0">Raise requirement</h2><button type="button" class="xp" id="ra-rclose" aria-label="Close">' + window.RA_CI.x + '</button></div>' +
+      '<div class="xp-sheet-bd form">' +
       '<div style="font:var(--w-reg) var(--t-body)/1.3 var(--font-ui);color:var(--ink-2)">' + escHtml(mat) + ' &middot; available ' + row.available + ', reorder level ' + row.reorderLevel + '</div>' +
       '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Order quantity', true) + '<input id="ra-rq" class="fld" type="number" inputmode="decimal" value="' + row.shortage + '"></label>' +
       '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Unit') + '<select id="ra-ru" class="fld"><option value="">Unit…</option>' + Object.keys(UOM).map(function (id) { return '<option value="' + id + '">' + UOM[id] + '</option>'; }).join('') + '</select></label>' +
