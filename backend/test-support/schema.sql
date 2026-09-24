@@ -1161,3 +1161,141 @@ create table if not exists bridge.facts_nonce (
   expires_at timestamptz not null,
   created_at timestamptz not null default now()
 );
+
+-- RP-F2 (lane F2, G3 factory automation) ------------------------------------
+-- automation.* — idempotency ledger + decision log + dead-letter queue every automation rule
+-- (backend/api/src/automation/*) runs through. See scripts/migrations/0020_adhoc_g3_automation.sql.
+create schema if not exists automation;
+create schema if not exists platform;
+
+create table if not exists automation.applied (
+  rule_code varchar(64) not null,
+  dedupe_key varchar(255) not null,
+  status varchar(16) not null default 'PENDING',
+  attempts integer not null default 0,
+  last_error text,
+  applied_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  primary key (rule_code, dedupe_key)
+);
+
+create table if not exists automation.decision_log (
+  decision_log_id uuid primary key default gen_random_uuid(),
+  rule_code varchar(64) not null,
+  dedupe_key varchar(255) not null,
+  event_type text,
+  aggregate_id uuid,
+  decision varchar(16) not null,
+  reason text,
+  inputs jsonb,
+  outputs jsonb,
+  created_dt timestamptz not null default now()
+);
+
+create table if not exists automation.dead_letter (
+  dead_letter_id uuid primary key default gen_random_uuid(),
+  rule_code varchar(64) not null,
+  dedupe_key varchar(255) not null,
+  event_type text,
+  payload jsonb,
+  error text,
+  attempts integer not null default 0,
+  first_failed_dt timestamptz not null default now(),
+  last_failed_dt timestamptz not null default now(),
+  unique (rule_code, dedupe_key)
+);
+
+-- procurement.stock_requirement / stock_req_items — Phase-1A dictionary tables (requirement.ts)
+-- never previously added to this test harness.
+create table if not exists procurement.stock_requirement (
+  stock_requirement_id uuid primary key default gen_random_uuid(),
+  location_id uuid,
+  material_id uuid,
+  required_qty numeric(18,4),
+  uom_id uuid,
+  required_by_date date,
+  requirement_source varchar(255),
+  priority varchar(255),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.stock_req_items (
+  stock_req_item_id uuid primary key default gen_random_uuid(),
+  stock_requirement_id uuid references procurement.stock_requirement(stock_requirement_id),
+  material_id uuid,
+  required_qty numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.vendor_rm_mapping (
+  vendor_rm_mapping_id uuid primary key default gen_random_uuid(),
+  vendor_id uuid references procurement.vendor_details(vendor_id),
+  material_id uuid,
+  is_preferred boolean,
+  lead_time_days integer,
+  min_order_qty numeric(18,3),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+create table if not exists procurement.vendor_credit_reason_master (
+  vendor_credit_reason_id uuid primary key default gen_random_uuid(),
+  reason_code varchar(50),
+  reason_description text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+-- IncomingQcOutcomeService upserts the fixed 'QC_REJECTION' reason via
+-- `on conflict (reason_code)` — the unique index IS the conflict target Postgres needs.
+create unique index if not exists vendor_credit_reason_master_code_uq
+  on procurement.vendor_credit_reason_master (reason_code);
+
+create table if not exists procurement.vendor_credit_note (
+  vendor_credit_note_id uuid primary key default gen_random_uuid(),
+  vendor_id uuid references procurement.vendor_details(vendor_id),
+  grn_id uuid,
+  vendor_credit_reason_id uuid references procurement.vendor_credit_reason_master(vendor_credit_reason_id),
+  credit_note_number varchar(50),
+  credit_note_date date,
+  amount numeric(18,4),
+  currency_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists vendor_credit_note_number_uq
+  on procurement.vendor_credit_note (credit_note_number);
+
+-- platform.notification_log — the EXISTING alerts mechanism (email-notifier.service.ts already
+-- writes here); the alerts rule reuses it rather than inventing a second one.
+create table if not exists platform.notification_log (
+  notification_log_id uuid primary key default gen_random_uuid(),
+  event_id uuid unique,
+  event_type text,
+  channel text,
+  recipient text,
+  subject text,
+  body text,
+  status text,
+  error text,
+  attempts integer not null default 0,
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now()
+);

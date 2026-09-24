@@ -32,6 +32,7 @@ import { outbox as salesOutbox } from '@ra/data-sales';
 import { NotifyModule } from './notify/notify.module.js';
 import { ConsumptionModule } from './consumption/consumption.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
+import { AutomationModule } from './automation/automation.module.js';
 
 @Module({
   imports: [
@@ -65,6 +66,7 @@ import { BridgeModule } from './bridge/bridge.module.js';
     NotifyModule,
     ConsumptionModule,
     BridgeModule,
+    AutomationModule,
   ],
 })
 export class WorkerModule {}
