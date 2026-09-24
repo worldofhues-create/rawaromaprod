@@ -129,6 +129,9 @@ CREATE TABLE IF NOT EXISTS "sales"."sales_order" (
 	"delivery_location_id" uuid,
 	"currency_id" uuid,
 	"total_amount" numeric(18, 4),
+	"origin" varchar(30),
+	"alembic_ref" uuid,
+	"continuity_reason" text,
 	"status" varchar(30),
 	"created_dt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_dt" timestamp with time zone DEFAULT now() NOT NULL,
@@ -142,6 +145,9 @@ ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "order_date" date;
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "delivery_location_id" uuid;
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "currency_id" uuid;
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "total_amount" numeric(18, 4);
+ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "origin" varchar(30);
+ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "alembic_ref" uuid;
+ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "continuity_reason" text;
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "status" varchar(30);
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "created_dt" timestamp with time zone DEFAULT now() NOT NULL;
 ALTER TABLE "sales"."sales_order" ADD COLUMN IF NOT EXISTS "updated_dt" timestamp with time zone DEFAULT now() NOT NULL;
@@ -223,6 +229,7 @@ CREATE INDEX IF NOT EXISTS "outbox_unpublished_idx" ON "sales"."outbox" USING bt
 CREATE INDEX IF NOT EXISTS "outbox_aggregate_idx" ON "sales"."outbox" USING btree ("aggregate_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "sales_order_so_number_uq" ON "sales"."sales_order" USING btree ("so_number");
 CREATE INDEX IF NOT EXISTS "sales_order_customer_idx" ON "sales"."sales_order" USING btree ("customer_id");
+CREATE INDEX IF NOT EXISTS "sales_order_alembic_ref_idx" ON "sales"."sales_order" USING btree ("alembic_ref");
 CREATE INDEX IF NOT EXISTS "sales_order_items_order_idx" ON "sales"."sales_order_items" USING btree ("sales_order_id");
 CREATE INDEX IF NOT EXISTS "sales_order_items_sku_idx" ON "sales"."sales_order_items" USING btree ("product_sku_id");
 CREATE UNIQUE INDEX IF NOT EXISTS "transporter_master_code_uq" ON "sales"."transporter_master" USING btree ("transporter_code");

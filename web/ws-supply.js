@@ -50,3 +50,32 @@
       toast('Replacement PO ' + (d && d.poNumber ? d.poNumber : '') + ' created ✓ (linked to original)', 'good'); loadView();
     }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
   }
+  // G2/V4 §113: a PO beyond DRAFT can't have its items/fields edited directly (409 server-side)
+  // — Amend raises a new DRAFT revision linked to this one via replacement_of_po_id, which then
+  // needs re-approval per the existing thresholds. Carries the original's lines/fields forward
+  // unchanged (server-side default); this dialog only collects the required reason.
+  function amendPurchaseOrder(row) {
+    var reason = window.prompt('Reason for amending ' + (row.poNumber || 'this purchase order') + ' (creates a new DRAFT revision linked to the original; required):');
+    if (reason === null) return; // cancelled
+    reason = reason.trim();
+    if (!reason) { toast('A reason is required to amend a purchase order.', 'bad'); return; }
+    tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/amend', { method: 'POST', body: { reason: reason } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Amend failed (' + res.status + ')'), 'bad'); return; }
+      var d = res.json && res.json.data;
+      var poNo = d && d.purchaseOrder && d.purchaseOrder.poNumber;
+      toast('Amendment' + (poNo ? ' ' + poNo : '') + ' created ✓ — DRAFT, needs re-approval', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
+  // G2/V4 §113: cancel requires a reason (audited on the row + a vendor-notification event) and
+  // is refused server-side once a goods receipt already exists against the PO.
+  function cancelPurchaseOrderFlow(row) {
+    var reason = window.prompt('Reason for cancelling ' + (row.poNumber || 'this purchase order') + ' (required — notifies the vendor):');
+    if (reason === null) return; // cancelled
+    reason = reason.trim();
+    if (!reason) { toast('A reason is required to cancel a purchase order.', 'bad'); return; }
+    if (!window.confirm('Cancel ' + (row.poNumber || 'this purchase order') + '? This cannot be undone from here.')) return;
+    tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/cancel', { method: 'POST', body: { reason: reason } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Cancel failed (' + res.status + ')'), 'bad'); return; }
+      toast('Purchase order cancelled ✓', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }

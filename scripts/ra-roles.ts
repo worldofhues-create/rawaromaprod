@@ -113,6 +113,17 @@ export const PLATFORM_OPS_PERMISSION = 'platformops:console:read';
 export const MANUFACTURING_INSTRUCTION_PERMISSION = 'production:manufacturing_instruction:read';
 export const MANUFACTURING_INSTRUCTION_ROLES = ['production', 'compounding'];
 
+/** G1/PB-08 (FINAL_OS §2.3/§41, ledger PB-08) — RawProd must not be an independent commercial-
+ * order writer. Sales orders should originate from the ALEMBIC bridge; POST /v1/sales-orders,
+ * its /:id/confirm, and POST /v1/sales-order-items (OrdersController) are now a break-glass
+ * MANUAL CONTINUITY path, gated on this permission instead of the ordinary
+ * `sales:sales_order(_items):write`. Held ONLY by owner/admin — deliberately EXCLUDED from
+ * `sales`'s otherwise-blanket `startsWith('sales:')` grant below (same shape as
+ * PLATFORM_OPS_PERMISSION/MANUFACTURING_INSTRUCTION_PERMISSION: a narrow permission that must
+ * not be swept in by a broader prefix grant), and never held by any other factory role. */
+export const MANUAL_CONTINUITY_PERMISSION = 'sales:manual_continuity:write';
+export const MANUAL_CONTINUITY_ROLES = ['owner', 'admin'];
+
 export const ROLES: RoleDef[] = [
   {
     // Super Admin — full access EXCEPT the decrypted recipe (§107: no implicit vault
@@ -156,7 +167,12 @@ export const ROLES: RoleDef[] = [
     code: 'admin',
     name: 'Admin',
     view: 'admin',
-    select: anyOf(startsWith('iam:'), oneOf('packaging:finished_good_batch_master:read')),
+    // G1/PB-08: admin is one of the two roles allowed to hold the sales manual-continuity
+    // break-glass permission (owner is the other, via its blanket grant below).
+    select: anyOf(
+      startsWith('iam:'),
+      oneOf('packaging:finished_good_batch_master:read', MANUAL_CONTINUITY_PERMISSION),
+    ),
     sampleEmail: 'admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_ADMIN_PASSWORD',
   },
@@ -383,8 +399,12 @@ export const ROLES: RoleDef[] = [
     code: 'sales',
     name: 'Sales & Dispatch',
     view: 'sales',
+    // G1/PB-08: `sales:manual_continuity:write` is deliberately carved OUT of the blanket
+    // `startsWith('sales:')` grant below — this role creates/confirms sales orders through the
+    // ordinary sales_order(_items):write permission only; the break-glass continuity path is
+    // owner/admin-only (MANUAL_CONTINUITY_ROLES).
     select: anyOf(
-      startsWith('sales:'),
+      (p) => p.startsWith('sales:') && p !== MANUAL_CONTINUITY_PERMISSION,
       oneOf(
         'packaging:finished_good_batch_master:read',
         'packaging:product_master:read',

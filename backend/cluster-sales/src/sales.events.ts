@@ -25,4 +25,13 @@ export const salesEvents = {
     'sales.dispatch.created',
     z.object({ dispatchId: uuid, salesOrderId: uuid }),
   ),
+  // G1/PB-08 — internal (sales.outbox) record of a break-glass manual-continuity action,
+  // alongside (not instead of) the ALEMBIC-bound bridge.outbox event emitBridgeManualEvent
+  // writes in the same transaction. Kept distinct from orderCreated/orderConfirmed above (which
+  // fire for every order, bridge-originated or not) so an ordinary downstream consumer of THIS
+  // cluster's outbox can tell a manual-continuity action apart without inspecting `origin`.
+  manualContinuity: defineEvent(
+    'sales.order.manual_continuity',
+    z.object({ salesOrderId: uuid, action: z.enum(['created', 'confirmed', 'item_added']), reason: z.string() }),
+  ),
 } as const;

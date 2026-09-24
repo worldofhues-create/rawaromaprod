@@ -519,6 +519,7 @@ create table if not exists procurement.purchase_order (
   currency_id uuid,
   total_amount numeric(18,2),
   replacement_of_po_id uuid,
+  cancellation_reason text,
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
@@ -884,6 +885,27 @@ create table if not exists sales.sales_order (
   delivery_location_id uuid,
   currency_id uuid,
   total_amount numeric(18,4),
+  origin varchar(30),
+  alembic_ref uuid,
+  continuity_reason text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- G1/PB-08: sales_order_items — was missing from this hand-maintained slice (no prior test
+-- exercised OrdersService.createSalesOrder's header+lines transaction directly). Column-matched
+-- to packages/data-sales/src/schema/orders.ts's salesOrderItems.
+create table if not exists sales.sales_order_items (
+  sales_order_item_id uuid primary key default gen_random_uuid(),
+  sales_order_id uuid references sales.sales_order(sales_order_id),
+  product_sku_id uuid,
+  ordered_qty numeric(18,4),
+  uom_id uuid,
+  rate numeric(18,4),
+  amount numeric(18,4),
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),

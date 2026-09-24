@@ -25,11 +25,13 @@ import {
   procurementSchema,
   type ProcurementDb,
 } from '../cluster-procurement.tokens.js';
-import { poIssued } from '../cluster-procurement.events.js';
+import { poIssued, poAmended, poCancelled } from '../cluster-procurement.events.js';
 import type { Page, ListQuery } from '../cluster-procurement.dtos.js';
 import type {
   AcknowledgePurchaseOrder,
+  AmendPurchaseOrder,
   ApprovePurchaseOrder,
+  CancelPurchaseOrder,
   CreatePoApprovalOrder,
   CreatePurchaseOrder,
   CreatePurchaseOrderItem,
@@ -73,6 +75,14 @@ const PO_APPROVAL_POLICY_TYPE = 'PO_APPROVAL_THRESHOLD';
 @Injectable()
 export class PoService {
   constructor(@Inject(PROCUREMENT_DB) private readonly db: ProcurementDb) {}
+
+  /** Line amount = explicit amount, else qty × rate; never NaN (PROC-19: raw Number(it.amount)
+   *  is NaN when the form only sends qty + rate, corrupting total_amount on a UI-created PO).
+   *  Shared by createPurchaseOrder and amendPurchaseOrder (same total-computation rule). */
+  private lineAmount(it: PurchaseOrderItemInput): number {
+    const amt = it.amount != null ? Number(it.amount) : Number(it.orderedQty ?? 0) * Number(it.rate ?? 0);
+    return Number.isFinite(amt) ? amt : 0;
+  }
 
   /* ── purchase_order — create from a quotation, total = Σ(amount) ─────── */
 
@@ -179,14 +189,7 @@ export class PoService {
         }));
       }
 
-      // Line amount = explicit amount, else qty × rate; never NaN (PROC-19: the total previously
-      // did raw Number(it.amount) which is NaN when the form only sends qty + rate, corrupting
-      // total_amount on every UI-created PO).
-      const lineAmount = (it: PurchaseOrderItemInput): number => {
-        const amt = it.amount != null ? Number(it.amount) : Number(it.orderedQty ?? 0) * Number(it.rate ?? 0);
-        return Number.isFinite(amt) ? amt : 0;
-      };
-      const total = items.reduce((sum, it) => sum + lineAmount(it), 0);
+      const total = items.reduce((sum, it) => sum + this.lineAmount(it), 0);
 
       const poId = uuidv7();
       const po = ensure(
@@ -224,7 +227,7 @@ export class PoService {
                 orderedQty: it.orderedQty != null ? String(it.orderedQty) : null,
                 uomId: it.uomId ?? null,
                 rate: it.rate != null ? String(it.rate) : null,
-                amount: String(lineAmount(it)),
+                amount: String(this.lineAmount(it)),
                 status: 'ACTIVE',
                 createdBy: principal.userId,
                 updatedBy: principal.userId,
@@ -272,7 +275,28 @@ export class PoService {
 
   /* ── purchase_order_items ───────────────────────────────────────────── */
 
+  /**
+   * G2/V4 §113: adding a line to a PO that has moved beyond DRAFT is refused (409) — the
+   * document has already been approved/issued/acknowledged against its current lines; changing
+   * it now needs a new revision (POST /v1/purchase-orders/:id/amend), not a silent extra line.
+   */
   async createPurchaseOrderItem(body: CreatePurchaseOrderItem, principal: AuthPrincipal) {
+    if (body.purchaseOrderId) {
+      const parent = (
+        await this.db
+          .select({ status: purchaseOrder.status })
+          .from(purchaseOrder)
+          .where(eq(purchaseOrder.purchaseOrderId, body.purchaseOrderId))
+          .limit(1)
+      )[0];
+      if (!parent) throw new NotFoundException(`purchase_order not found: ${body.purchaseOrderId}`);
+      const status = String(parent.status ?? '').toUpperCase();
+      if (status !== 'DRAFT') {
+        throw new ConflictException(
+          `Purchase order ${body.purchaseOrderId} is ${status || '(none)'} — only a DRAFT purchase order can have items added. Amend it instead (POST /v1/purchase-orders/${body.purchaseOrderId}/amend) to change a non-DRAFT order.`,
+        );
+      }
+    }
     return ensure(
       (
         await this.db
@@ -669,6 +693,188 @@ export class PoService {
       );
 
       return { purchaseOrder: updated, ack };
+    });
+  }
+
+  /* ── FLOW: PO amend → new DRAFT revision linked to the original ─────── */
+
+  /**
+   * POST /v1/purchase-orders/:id/amend (G2/V4 §113). A PO that has moved beyond DRAFT cannot
+   * have its items/fields edited directly (createPurchaseOrderItem above, EditService's
+   * `purchase-orders` registry entry both refuse with 409) — this is the real path for that
+   * change: a fresh DRAFT revision, carrying the original's vendor/quotation/PR links and
+   * (unless overridden in `body`) its header fields + line items forward, linked back to the
+   * original via `replacement_of_po_id`. The ORIGINAL is frozen to `AMENDED` (compare-and-swap,
+   * so a concurrent amend/cancel on the same PO can't both win) so it can no longer be
+   * approved/issued/acknowledged/amended/cancelled itself — the new revision is the one that
+   * goes through approve → issue → acknowledge again, reusing `approvePurchaseOrder`'s existing
+   * threshold logic unchanged ("re-approval per existing thresholds").
+   */
+  async amendPurchaseOrder(id: string, body: AmendPurchaseOrder, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const original = (
+        await tx.select().from(purchaseOrder).where(eq(purchaseOrder.purchaseOrderId, id)).limit(1)
+      )[0];
+      if (!original) throw new NotFoundException(`purchase_order not found: ${id}`);
+
+      const current = String(original.status ?? '').toUpperCase();
+      if (current === 'DRAFT') {
+        throw new ConflictException(
+          `Purchase order ${id} is still DRAFT — edit it directly (PATCH /v1/masters/purchase-orders/${id} or the item endpoints); amendment is for a purchase order that has already moved beyond DRAFT.`,
+        );
+      }
+      if (current === 'CANCELLED' || current === 'AMENDED') {
+        throw new ConflictException(`Purchase order ${id} is ${current} and cannot be amended.`);
+      }
+
+      const existingItems = await tx
+        .select()
+        .from(purchaseOrderItems)
+        .where(eq(purchaseOrderItems.purchaseOrderId, id));
+      const sourceItems: PurchaseOrderItemInput[] =
+        body.items && body.items.length
+          ? body.items
+          : existingItems.map((it) => ({
+              materialId: it.materialId,
+              orderedQty: it.orderedQty,
+              uomId: it.uomId,
+              rate: it.rate,
+              amount: it.amount,
+            }));
+      if (!sourceItems.length) {
+        throw new ConflictException(`Purchase order ${id} has no line items to carry into an amendment.`);
+      }
+
+      const total = sourceItems.reduce((sum, it) => sum + this.lineAmount(it), 0);
+      const newId = uuidv7();
+      const newPo = ensure(
+        (
+          await tx
+            .insert(purchaseOrder)
+            .values({
+              purchaseOrderId: newId,
+              poNumber: (original.poNumber || 'PO') + '-AMD-' + String(Date.now()).slice(-5),
+              vendorId: original.vendorId,
+              quotationId: original.quotationId,
+              purchaseRequestId: original.purchaseRequestId,
+              orderDate: body.orderDate ?? original.orderDate,
+              deliveryLocationId: body.deliveryLocationId ?? original.deliveryLocationId,
+              currencyId: body.currencyId ?? original.currencyId,
+              totalAmount: String(total),
+              replacementOfPoId: id,
+              status: 'DRAFT',
+              createdBy: principal.userId,
+              updatedBy: principal.userId,
+            })
+            .returning()
+        )[0],
+      );
+
+      const insertedItems: (typeof purchaseOrderItems.$inferSelect)[] = [];
+      for (const it of sourceItems) {
+        insertedItems.push(
+          ensure(
+            (
+              await tx
+                .insert(purchaseOrderItems)
+                .values({
+                  purchaseOrderItemId: uuidv7(),
+                  purchaseOrderId: newId,
+                  materialId: it.materialId ?? null,
+                  orderedQty: it.orderedQty != null ? String(it.orderedQty) : null,
+                  uomId: it.uomId ?? null,
+                  rate: it.rate != null ? String(it.rate) : null,
+                  amount: String(this.lineAmount(it)),
+                  status: 'ACTIVE',
+                  createdBy: principal.userId,
+                  updatedBy: principal.userId,
+                })
+                .returning()
+            )[0],
+          ),
+        );
+      }
+
+      // Freeze the original under a compare-and-swap (mirrors approvePurchaseOrder/
+      // issuePurchaseOrder's own concurrency guard) so a second concurrent amend/cancel call
+      // on the same PO can't both succeed.
+      const frozenOriginal = (
+        await tx
+          .update(purchaseOrder)
+          .set({ status: 'AMENDED', updatedBy: principal.userId })
+          .where(and(eq(purchaseOrder.purchaseOrderId, id), eq(purchaseOrder.status, current)))
+          .returning()
+      )[0];
+      if (!frozenOriginal) {
+        throw new ConflictException(`Purchase order ${id} was moved off ${current} by a concurrent request; refusing this stale amendment.`);
+      }
+
+      await recordOutbox(
+        tx,
+        outbox,
+        poAmended,
+        { purchaseOrderId: newId, replacesPurchaseOrderId: id, vendorId: original.vendorId ?? null },
+        newId,
+      );
+
+      return { purchaseOrder: newPo, items: insertedItems, amendedFrom: id, requiresReapproval: true };
+    });
+  }
+
+  /* ── FLOW: PO cancel → CANCELLED (reason, audit, vendor notification) ── */
+
+  /**
+   * POST /v1/purchase-orders/:id/cancel (G2/V4 §113). Requires a reason (audited: stamped on
+   * the row's `cancellation_reason` AND carried in the `procurement.po.cancelled` outbox event
+   * a vendor-notification consumer reacts to). "Releases commitments": procurement has no
+   * separate stock-reservation ledger tied to a PO the way sales does for inventory — the real,
+   * checkable commitment here is physical receipt, so cancellation is refused once ANY goods
+   * receipt already exists against the PO (cancelling then would orphan received stock; raise a
+   * return/credit note against it instead). Absent a GRN, cancelling releases the PO's
+   * outstanding demand on the vendor — which the notification event communicates.
+   */
+  async cancelPurchaseOrder(id: string, body: CancelPurchaseOrder, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const po = (
+        await tx.select().from(purchaseOrder).where(eq(purchaseOrder.purchaseOrderId, id)).limit(1)
+      )[0];
+      if (!po) throw new NotFoundException(`purchase_order not found: ${id}`);
+
+      const current = String(po.status ?? '').toUpperCase();
+      if (current === 'CANCELLED') {
+        throw new ConflictException(`Purchase order ${id} is already cancelled.`);
+      }
+      if (current === 'AMENDED') {
+        throw new ConflictException(`Purchase order ${id} was superseded by an amendment and cannot be cancelled directly; act on the current revision instead.`);
+      }
+
+      const grns = (await tx.execute(
+        sql`select 1 from inventory.grn_master where purchase_order_id = ${id} limit 1`,
+      )) as unknown as unknown[];
+      if (grns.length > 0) {
+        throw new ConflictException(`Purchase order ${id} already has a goods receipt recorded against it and cannot be cancelled — raise a return/credit note instead.`);
+      }
+
+      const updated = (
+        await tx
+          .update(purchaseOrder)
+          .set({ status: 'CANCELLED', cancellationReason: body.reason, updatedBy: principal.userId })
+          .where(and(eq(purchaseOrder.purchaseOrderId, id), eq(purchaseOrder.status, current)))
+          .returning()
+      )[0];
+      if (!updated) {
+        throw new ConflictException(`Purchase order ${id} was moved off ${current} by a concurrent request; refusing this stale cancellation.`);
+      }
+
+      await recordOutbox(
+        tx,
+        outbox,
+        poCancelled,
+        { purchaseOrderId: id, vendorId: po.vendorId ?? null, reason: body.reason, cancelledBy: principal.userId },
+        id,
+      );
+
+      return updated;
     });
   }
 }

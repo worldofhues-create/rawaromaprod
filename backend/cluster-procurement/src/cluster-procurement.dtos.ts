@@ -262,6 +262,31 @@ export const acknowledgePurchaseOrder = z.object({
 });
 export type AcknowledgePurchaseOrder = z.infer<typeof acknowledgePurchaseOrder>;
 
+/**
+ * POST /v1/purchase-orders/:id/amend (G2/V4 §113) — a non-DRAFT PO cannot have its items/fields
+ * edited directly (409); this creates a new DRAFT revision instead, linked to the original via
+ * `replacement_of_po_id`, that must go through the ordinary approve/issue/acknowledge flow
+ * again (re-approval per the existing thresholds — PoService.approvePurchaseOrder is reused
+ * unchanged). `items`/header fields are optional — omitted ones carry the original's values
+ * forward unchanged; supplying `items` REPLACES the line set (same "client-supplied lines win"
+ * shape as createPurchaseOrder's quotation-backed path).
+ */
+export const amendPurchaseOrder = z.object({
+  reason: z.string().trim().min(1),
+  items: z.array(purchaseOrderItemInput).optional(),
+  orderDate: z.string().nullish(),
+  deliveryLocationId: z.string().uuid().nullish(),
+  currencyId: z.string().uuid().nullish(),
+});
+export type AmendPurchaseOrder = z.infer<typeof amendPurchaseOrder>;
+
+/** POST /v1/purchase-orders/:id/cancel (G2/V4 §113) — reason required (audited + carried in the
+ *  vendor-notification event); refused once a goods receipt exists against the PO. */
+export const cancelPurchaseOrder = z.object({
+  reason: z.string().trim().min(1),
+});
+export type CancelPurchaseOrder = z.infer<typeof cancelPurchaseOrder>;
+
 /* ── vendor credit ────────────────────────────────────────────────────── */
 
 export const createVendorCreditReason = z.object({

@@ -46,6 +46,16 @@ export const salesOrderItemInput = z.object({
 });
 export type SalesOrderItemInput = z.infer<typeof salesOrderItemInput>;
 
+/**
+ * G1/PB-08 (FINAL_OS §2.3/§41): RawProd must not be an independent commercial-order writer.
+ * createSalesOrder/confirmSalesOrder/createSalesOrderItem are now a break-glass continuity
+ * path (`sales:manual_continuity:write`, owner/admin only) — every call requires a non-empty
+ * `reason`, which is audited (stamped on the row + emitted toward ALEMBIC via the bridge
+ * outbox) rather than accepted and discarded.
+ */
+export const manualContinuityReason = z.object({ reason: z.string().trim().min(1) });
+export type ManualContinuityReason = z.infer<typeof manualContinuityReason>;
+
 /** Flow body for POST /v1/sales-orders — header + lines, in one transaction. */
 export const createSalesOrder = z.object({
   soNumber: z.string().nullish(),
@@ -54,6 +64,7 @@ export const createSalesOrder = z.object({
   deliveryLocationId: z.string().uuid().optional(),
   currencyId: z.string().uuid().optional(),
   items: z.array(salesOrderItemInput).min(1),
+  reason: z.string().trim().min(1),
 });
 export type CreateSalesOrder = z.infer<typeof createSalesOrder>;
 
@@ -65,6 +76,7 @@ export const createSalesOrderItem = z.object({
   uomId: z.string().uuid().optional(),
   rate: z.number().optional(),
   amount: z.number().optional(),
+  reason: z.string().trim().min(1),
 });
 export type CreateSalesOrderItem = z.infer<typeof createSalesOrderItem>;
 

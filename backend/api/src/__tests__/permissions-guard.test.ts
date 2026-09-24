@@ -21,6 +21,8 @@ import {
 import { BatchController } from '../../../cluster-production/src/batch/batch.controller.js';
 import { ReservationController } from '../../../cluster-packaging/src/reservation/reservation.controller.js';
 import { DispatchController } from '../../../cluster-sales/src/dispatch/dispatch.controller.js';
+import { OrdersController as SalesOrdersController } from '../../../cluster-sales/src/orders/orders.controller.js';
+import { PoController } from '../../../cluster-procurement/src/po/po.controller.js';
 import { PackagingQcController } from '../packaging-qc/packaging-qc.controller.js';
 import { principal } from '../../../test-support/db.js';
 
@@ -41,6 +43,16 @@ const cases: Array<[Function, string, ReturnType<typeof principal>]> = [
   [ReservationController, 'create', principal({ permissions: [] })],
   [DispatchController, 'createDispatch', principal({ permissions: [] })],
   [PackagingQcController, 'create', principal({ permissions: [] })],
+  // G1/PB-08: a caller holding the ORDINARY sales_order(_items):write permission (e.g. the
+  // `sales` role) must still be denied the break-glass manual-continuity routes — proves the
+  // controller-level permission swap, independent of the ra-roles catalog invariant test.
+  [SalesOrdersController, 'createSalesOrder', principal({ permissions: ['sales:sales_order:write'] })],
+  [SalesOrdersController, 'confirmSalesOrder', principal({ permissions: ['sales:sales_order:write'] })],
+  [SalesOrdersController, 'createSalesOrderItem', principal({ permissions: ['sales:sales_order_items:write'] })],
+  // G2/V4 §113: amend/cancel are new routes on the existing permission — same coverage shape as
+  // the other cases here (a principal with no permissions at all).
+  [PoController, 'amendPurchaseOrder', principal({ permissions: [] })],
+  [PoController, 'cancelPurchaseOrder', principal({ permissions: [] })],
 ];
 
 for (const [Controller, method, user] of cases) {

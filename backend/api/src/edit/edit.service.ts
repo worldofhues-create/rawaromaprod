@@ -6,7 +6,7 @@
  * (pk, created_*, password_hash, foreign flow state) can be touched. Deactivate is just a PATCH
  * of status→INACTIVE (or is_active→false for users). Perm is checked against the caller's token.
  */
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, NotImplementedException } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 
@@ -19,6 +19,13 @@ interface ResourceCfg {
   cols: Record<string, string>;
   /** columns to coerce to boolean. */
   bool?: string[];
+  /**
+   * G2/V4 §113: when set, refuses (409) unless the row's `column` currently equals one of
+   * `allowed` — e.g. a purchase order's header fields may only be edited via this generic PATCH
+   * while still DRAFT; beyond DRAFT, PoService.amendPurchaseOrder (a new revision) is the real
+   * path, same as createPurchaseOrderItem's own DRAFT-only guard for line items.
+   */
+  statusGuard?: { column: string; allowed: string[] };
   /**
    * Lane F5 (RP-DEADTABLES): set when `schema.table` above does NOT exist in this table's owning
    * db:push source (each packages/data-<cluster>/src/schema directory, per
@@ -110,6 +117,9 @@ const REGISTRY: Record<string, ResourceCfg> = {
   'purchase-orders': {
     schema: 'procurement', table: 'purchase_order', pk: 'purchase_order_id', perm: 'procurement:purchase_order:write',
     cols: { orderDate: 'order_date' },
+    // G2/V4 §113: editing header fields is refused (409) once the PO is beyond DRAFT — use
+    // POST /v1/purchase-orders/:id/amend (a new revision) instead.
+    statusGuard: { column: 'status', allowed: ['DRAFT'] },
   },
   // RP-FAC: 'status' was removed from cols (audit H-C6 / registry RP-PROD-004 follow-up). The
   // generic editor was a live server-side bypass of OIL_TRANSITIONS (BatchService.transitionOilBatch)
@@ -188,6 +198,21 @@ export class EditService {
     if (cfg.unavailable) throw new NotImplementedException(cfg.unavailable);
     if (!(principal.permissions || []).includes(cfg.perm)) {
       throw new ForbiddenException(`Missing permission ${cfg.perm}`);
+    }
+    if (cfg.statusGuard) {
+      const guarded = (await this.sql`
+        select ${this.sql.unsafe(cfg.statusGuard.column)} as v
+          from ${this.sql.unsafe(`${cfg.schema}.${cfg.table}`)}
+         where ${this.sql.unsafe(cfg.pk)} = ${id}
+         limit 1`) as Array<{ v: string | null }>;
+      if (!guarded.length) throw new NotFoundException(`${resource} ${id} not found`);
+      const cur = String(guarded[0]!.v ?? '').toUpperCase();
+      const allowed = cfg.statusGuard.allowed.map((a) => a.toUpperCase());
+      if (!allowed.includes(cur)) {
+        throw new ConflictException(
+          `${resource} ${id} cannot be edited directly while its ${cfg.statusGuard.column} is ${cur || '(none)'} — only ${allowed.join('/')} may be edited this way.`,
+        );
+      }
     }
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body || {})) {

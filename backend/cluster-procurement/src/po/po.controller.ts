@@ -13,14 +13,18 @@ import {
 import { PoService } from './po.service.js';
 import {
   acknowledgePurchaseOrder,
+  amendPurchaseOrder,
   approvePurchaseOrder,
+  cancelPurchaseOrder,
   createPoApprovalOrder,
   createPurchaseOrder,
   createPurchaseOrderItem,
   createVendorPoAck,
   listQuery,
   type AcknowledgePurchaseOrder,
+  type AmendPurchaseOrder,
   type ApprovePurchaseOrder,
+  type CancelPurchaseOrder,
   type CreatePoApprovalOrder,
   type CreatePurchaseOrder,
   type CreatePurchaseOrderItem,
@@ -82,6 +86,29 @@ export class PoController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.pos.acknowledgePurchaseOrder(id, body, principal);
+  }
+
+  // G2/V4 §113 — new revision linked to the original; re-approval per existing thresholds.
+  @Permissions('procurement:purchase_order:write')
+  @Post('v1/purchase-orders/:id/amend')
+  amendPurchaseOrder(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(amendPurchaseOrder)) body: AmendPurchaseOrder,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.pos.amendPurchaseOrder(id, body, principal);
+  }
+
+  // G2/V4 §113 — reason required, audited, refused once a GRN exists; emits a vendor
+  // notification event.
+  @Permissions('procurement:purchase_order:write')
+  @Post('v1/purchase-orders/:id/cancel')
+  cancelPurchaseOrder(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(cancelPurchaseOrder)) body: CancelPurchaseOrder,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.pos.cancelPurchaseOrder(id, body, principal);
   }
 
   /* ── purchase_order_items ───────────────────────────────────────────── */

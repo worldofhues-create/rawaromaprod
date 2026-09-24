@@ -88,6 +88,7 @@ CREATE TABLE IF NOT EXISTS "procurement"."purchase_order" (
 	"currency_id" uuid,
 	"total_amount" numeric(18, 4),
 	"replacement_of_po_id" uuid,
+	"cancellation_reason" text,
 	"status" varchar(30),
 	"created_dt" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_dt" timestamp with time zone DEFAULT now() NOT NULL,
@@ -104,6 +105,7 @@ ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "delivery_lo
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "currency_id" uuid;
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "total_amount" numeric(18, 4);
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "replacement_of_po_id" uuid;
+ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "cancellation_reason" text;
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "status" varchar(30);
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "created_dt" timestamp with time zone DEFAULT now() NOT NULL;
 ALTER TABLE "procurement"."purchase_order" ADD COLUMN IF NOT EXISTS "updated_dt" timestamp with time zone DEFAULT now() NOT NULL;

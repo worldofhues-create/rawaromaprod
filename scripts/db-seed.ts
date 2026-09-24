@@ -35,6 +35,8 @@ import {
   VAULT_APPROVER_FORBIDDEN_PERMISSIONS,
   MANUFACTURING_INSTRUCTION_PERMISSION,
   MANUFACTURING_INSTRUCTION_ROLES,
+  MANUAL_CONTINUITY_PERMISSION,
+  MANUAL_CONTINUITY_ROLES,
   type RoleDef,
 } from './ra-roles.js';
 
@@ -131,6 +133,13 @@ async function grantRole(
   if (!MANUFACTURING_INSTRUCTION_ROLES.includes(role.code) && granted.some((p) => p.code === MANUFACTURING_INSTRUCTION_PERMISSION)) {
     throw new Error(
       `SECURITY: role '${role.code}' must not be granted ${MANUFACTURING_INSTRUCTION_PERMISSION} — only ${MANUFACTURING_INSTRUCTION_ROLES.join('/')} may hold it (§109.7)`,
+    );
+  }
+  // HARD INVARIANT (G1/PB-08, FINAL_OS §2.3/§41): the sales manual-continuity break-glass
+  // permission is held ONLY by owner/admin — no factory/sales role, ever.
+  if (!MANUAL_CONTINUITY_ROLES.includes(role.code) && granted.some((p) => p.code === MANUAL_CONTINUITY_PERMISSION)) {
+    throw new Error(
+      `SECURITY: role '${role.code}' must not be granted ${MANUAL_CONTINUITY_PERMISSION} — only ${MANUAL_CONTINUITY_ROLES.join('/')} may hold it (G1/PB-08)`,
     );
   }
   const mapped = await db
