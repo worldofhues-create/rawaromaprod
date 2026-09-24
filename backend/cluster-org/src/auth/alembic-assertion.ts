@@ -61,6 +61,10 @@ export interface AlembicAssertionClaims {
    *  actually PROVED (OIDC `auth_time` semantics), never when the assertion was minted. See
    *  `rawprod-assertion.ts`'s own claim doc for how ALEMBIC computes it. */
   readonly auth_time: number;
+  /** LANE D1 — which kind of ALEMBIC deployment minted this: `demo` or `production`.
+   *  Absent reads as `production` (an issuer from before the claim existed was a production
+   *  one). Must equal this deployment's own `RAWPROD_ENVIRONMENT` — see `expectedEnvironment`. */
+  readonly env: 'demo' | 'production';
   readonly iat: number;
   readonly exp: number;
   readonly jti: string;
@@ -76,7 +80,8 @@ export type AlembicAssertionRefusal =
   | 'WRONG_AUDIENCE'
   | 'WINDOW_TOO_LONG'
   | 'WRONG_TARGET'
-  | 'WRONG_TENANT';
+  | 'WRONG_TENANT'
+  | 'WRONG_ENVIRONMENT';
 
 export type AlembicAssertionResult =
   | { readonly ok: true; readonly claims: AlembicAssertionClaims }
@@ -113,8 +118,14 @@ export function verifyAlembicAssertion(opts: {
    *  default, same "boots without it" posture every other optional security config here
    *  takes). */
   readonly expectedTenantId?: string;
+  /** LANE D1 — THIS deployment's environment (`RAWPROD_ENVIRONMENT`). Absent means
+   *  `production`, so a caller that forgets it refuses every demo assertion rather than
+   *  accepting one. A demo ALEMBIC can never open a production RawProd console, and a
+   *  production ALEMBIC can never open a demo one. */
+  readonly expectedEnvironment?: 'demo' | 'production';
 }): AlembicAssertionResult {
   const { token, verifyKeyB64, issuer, audience, now, expectedTargets, expectedTenantId } = opts;
+  const expectedEnvironment = opts.expectedEnvironment ?? 'production';
   const nowSec = Math.floor(now.getTime() / 1000);
 
   const parts = token.split('.');
@@ -196,6 +207,17 @@ export function verifyAlembicAssertion(opts: {
       detail: `This deployment does not serve the "${p.target}" console.`,
     };
   }
+  // LANE D1: an unknown `env` value is malformed, not "production" — only absence defaults.
+  if (p.env !== undefined && p.env !== 'demo' && p.env !== 'production') {
+    return { ok: false, refusal: 'MALFORMED', detail: 'The assertion carries an unknown environment.' };
+  }
+  const env: 'demo' | 'production' = p.env === 'demo' ? 'demo' : 'production';
+  if (env !== expectedEnvironment) {
+    return {
+      ok: false, refusal: 'WRONG_ENVIRONMENT',
+      detail: `This is a ${expectedEnvironment} deployment; the assertion was minted by a ${env} one.`,
+    };
+  }
   if (expectedTenantId && (p.tenant_id !== expectedTenantId || p.org_id !== expectedTenantId)) {
     return {
       ok: false, refusal: 'WRONG_TENANT',
@@ -208,7 +230,7 @@ export function verifyAlembicAssertion(opts: {
     claims: {
       iss: p.iss, aud: p.aud, sub: p.sub, tenant_id: p.tenant_id, org_id: p.org_id,
       email: p.email, roles: p.roles, target: p.target, jti: p.jti, iat: p.iat, exp: p.exp,
-      auth_time: p.auth_time,
+      auth_time: p.auth_time, env,
     },
   };
 }

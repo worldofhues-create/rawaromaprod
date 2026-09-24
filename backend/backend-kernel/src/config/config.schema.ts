@@ -160,6 +160,15 @@ export const configSchema = z.object({
    * production config should set this to that tenant's id once it is provisioned).
    */
   ALEMBIC_ASSERTION_TENANT_ID: z.string().optional(),
+  /**
+   * LANE D1 — what this RawProd deployment IS: `production` (default; production never sets
+   * it) or `demo`, the separate showcase environment that runs the same release artifact
+   * against its own database. An ALEMBIC assertion is accepted only when its `env` claim
+   * equals this value, and the `showcase` role can hold a session only when this is `demo`.
+   * In a demo deployment `ALEMBIC_ASSERTION_TENANT_ID` names the demo ALEMBIC tenant, which
+   * is the demo tenant/org mapping. Nothing in a request can change it.
+   */
+  RAWPROD_ENVIRONMENT: z.enum(['production', 'demo']).default('production'),
 
   /**
    * PB-04 / SB-02 — password sign-in is RETIRED for launch (FINAL_OS §2.4/§9,
