@@ -86,6 +86,13 @@ export function isUnsafeWebhookHost(hostname: string): boolean {
   return classifyWebhookHost(hostname) !== "safe";
 }
 
+/** True for loopback only (127.0.0.0/8, ::1, localhost) — the one category where plain
+ *  http:// may be admitted, and only when also explicitly allow-listed. */
+export function isLoopbackWebhookHost(hostname: string): boolean {
+  const risk = classifyWebhookHost(hostname);
+  return risk === "loopback" || risk === "localhost_name";
+}
+
 /** True only for the link-local range (169.254.0.0/16 — which contains 169.254.169.254, the
  *  AWS/GCP/Azure instance-metadata address — and its IPv6 counterpart fe80::/10). Deliberately
  *  NEVER allow-listable: every other category this file refuses (loopback, RFC1918, localhost)
@@ -149,11 +156,20 @@ const safeWebhookUrl = z
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "webhookUrl must be a valid absolute URL" });
       return;
     }
-    if (url.protocol !== "https:") {
+    const allowed = parseAllowedWebhookHosts(readAllowedHostsEnv());
+    /* Plain http:// is admitted in exactly ONE case: a LOOPBACK host (127.0.0.0/8, ::1,
+     * localhost) that the operator has explicitly listed in BRIDGE_WEBHOOK_ALLOWED_HOSTS.
+     * Loopback traffic never leaves the machine, so TLS protects nothing there, and this is
+     * the only way a same-host pairing (local/CI, or both services behind one box's reverse
+     * proxy) can configure the reverse bridge direction at all — the lane/w1 allow-list
+     * alone could not, because this scheme check refused it first. RFC1918/public hosts
+     * still require https:// even when allow-listed: that traffic crosses a network. */
+    const loopbackAllowlisted = isLoopbackWebhookHost(url.hostname)
+      && isAllowlistedWebhookHost(url, allowed);
+    if (url.protocol !== "https:" && !(url.protocol === "http:" && loopbackAllowlisted)) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "webhookUrl must use https://" });
     }
     if (isUnsafeWebhookHost(url.hostname)) {
-      const allowed = parseAllowedWebhookHosts(readAllowedHostsEnv());
       if (!isAllowlistedWebhookHost(url, allowed)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
