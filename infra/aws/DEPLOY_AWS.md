@@ -101,7 +101,7 @@ diff, commit. `0014+` (the former `create-*.cjs` scripts' schema DDL) and
 |---|---|---|
 | `api.env` | `rawprod-api.service` | `DATABASE_URL` (rawprod_app role), `FORMULA_DATABASE_URL` (until PB-03 lands — see §6), `JWT_SECRET`, `CORS_ORIGINS=https://rawfactory.huecycle.in,https://rawplatform.huecycle.in`, `PORT=4100`, `NODE_ENV=production`, `APP_ENV=prod`, `RUN_WORKER_IN_PROCESS=true` |
 | `migrate.env` | `rawprod-migrate.service` | `DATABASE_URL` (rawprod_owner role, DDL), `SKIP_TARGETS=formula` |
-| `vault.env` | `vault-api.service` | `DATABASE_URL` (interim — see §6), `FORMULA_DATABASE_URL` (ra_vault role, vault-pg), `FORMULA_KEK` or a KMS adapter once PB-03 lands, `JWT_SECRET` (same signing key as `api.env` if callers must be recognised on both hosts), `PORT=4100` |
+| `vault.env` | `vault-api.service` | `DATABASE_URL` (interim — see §6), `FORMULA_DATABASE_URL` (ra_vault role, vault-pg), `FORMULA_KEK` or a KMS adapter once PB-03 lands, `JWT_SECRET` (P0 decision 2026-09-24: the SAME signing key as `api.env`, ALWAYS — rendered from the same `/rawaroma/rawprod/JWT_SECRET` SSM param, not a separate copy; vault-api verifies RawProd-issued JWTs, so a mismatched key would reject every caller), `PORT=4100` |
 | `vault-migrate.env` | `vault-migrate.service` | `FORMULA_DATABASE_URL` (ra_vault_owner role, vault-pg), `SKIP_TARGETS=main` — **no `DATABASE_URL`** |
 
 No GSTIN, no static tenant config, no credential ever lives in these files beyond the connection

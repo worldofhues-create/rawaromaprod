@@ -23,8 +23,13 @@
 # Identity without the main DB: a vault user signs in on the main app box exactly like every
 # other RawProd staff member (ALEMBIC OTP -> signed assertion -> `POST /auth/alembic-assertion`,
 # which mints the RawProd JWT with roles/permissions embedded) and presents that SAME JWT here;
-# `JwtAuthGuard`/`PermissionsGuard`/`FreshAuthGuard` verify it off `JWT_SECRET` alone (shared with
-# the main app box via SSM — never baked into either box's image). `vault-app.module.ts`'s header
+# `JwtAuthGuard`/`PermissionsGuard`/`FreshAuthGuard` verify it off `JWT_SECRET` alone. P0 decision
+# (2026-09-24, lane FIXV, resolving a prior contradiction — this header always said the two must
+# be equal, but infra/aws/env/render-env.sh's vault case used to read a SEPARATE
+# `/rawaroma/vault/JWT_SECRET` SSM param that could silently drift from the main box's own
+# `/rawaroma/rawprod/JWT_SECRET`): `vault.env`'s `JWT_SECRET` is now rendered from that SAME
+# `/rawaroma/rawprod/JWT_SECRET` param (both prod and demo pairs) — one value, not two copies
+# kept in sync by hand. Never baked into either box's image. `vault-app.module.ts`'s header
 # documents why this box does NOT implement its own `/auth/alembic-assertion` (it would need
 # `iam.user_master` to bind the assertion to a user, i.e. exactly the credential being removed).
 #

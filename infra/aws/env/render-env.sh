@@ -37,7 +37,11 @@ DATABASE_URL=$(g /rawaroma/rawprod/DATABASE_URL)
 FORMULA_DATABASE_URL=$(g /rawaroma/vault/FORMULA_DATABASE_URL)
 FORMULA_KMS_KEY_ID=$(g /rawaroma/vault/FORMULA_KMS_KEY_ID)
 FORMULA_KMS_REGION=us-west-2
-JWT_SECRET=$(g /rawaroma/vault/JWT_SECRET)
+# P0 decision (2026-09-24, lane FIXV): vault-api verifies RawProd-issued JWTs (VONLY design,
+# see vault-api.service's own header) — it MUST use the SAME signing key as rawprod-api's
+# api.env, so this reads the rawprod JWT_SECRET param directly rather than a separate
+# /rawaroma/vault/JWT_SECRET copy that could silently drift out of sync (that param is retired).
+JWT_SECRET=$(g /rawaroma/rawprod/JWT_SECRET)
 ALEMBIC_ASSERTION_VERIFY_KEY=$(g /rawaroma/rawprod/assertion-verify-key)
 RAWPROD_ASSERTION_EXPECTED_TARGETS=vault
 CORS_ORIGINS=https://vault.huecycle.in
