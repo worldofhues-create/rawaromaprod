@@ -47,7 +47,7 @@
   function failureText(reason) {
     if (reason === "http-429") return "Too many questions from here just now. Try again in a minute.";
     if (reason === "http-401" || reason === "http-403") return "Your session has ended. Sign in again to ask Aria.";
-    return "I could not reach the service, so I have nothing to answer against. Try again in a moment. I will not guess.";
+    return "I can't reach the service right now. Try again in a moment.";
   }
   function revealMs(text) { return Math.round(Math.min(900, 250 + String(text || "").length * 2.2)); }
 
