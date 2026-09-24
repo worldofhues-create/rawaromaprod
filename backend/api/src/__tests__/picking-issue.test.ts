@@ -10,7 +10,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PickingService } from '../../../cluster-production/src/picking/picking.service.js';
 import type { FormulaLookup } from '../../../cluster-formula/src/public-api.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
@@ -94,4 +94,35 @@ test('issueMaterials: succeeds and flips issued_qty when materialPickListId is p
     await sql`select issued_qty from production.production_order_ingredients where production_order_id = ${orderId}`
   )[0]!;
   assert.equal(ingredient.issued_qty, true);
+});
+
+/* Golden journey lane/j2 — an instruction line with no floor code (the material has no RM
+ * alias) is refused with the fix, never returned as `{ code: null }`. */
+test('resolveManufacturingInstruction: refuses (409) when a line has no floor code, names only sequence numbers', async () => {
+  const lookup: FormulaLookup = {
+    ...stubFormulaLookup,
+    async resolveManufacturingInstruction() {
+      return [
+        { code: 'RX-1', quantity: 1, uom: 'kg', sequenceNo: 1 },
+        { code: null, quantity: 2, uom: 'kg', sequenceNo: 2 },
+      ] as never;
+    },
+  };
+  const coded = new PickingService(productionDb(), lookup);
+  const orderId = crypto.randomUUID();
+  await testClient()`insert into production.production_order (production_order_id, formula_version_id, order_qty, status)
+    values (${orderId}, ${crypto.randomUUID()}, 3, 'INPROGRESS')`;
+  await assert.rejects(
+    () => coded.resolveManufacturingInstruction(orderId, principal()),
+    (e: unknown) => e instanceof ConflictException && /sequence 2\b/.test((e as Error).message) && /RM alias/.test((e as Error).message),
+  );
+});
+
+test('resolveManufacturingInstruction: a fully coded instruction is returned unchanged', async () => {
+  const lines = [{ code: 'RX-1', quantity: 1, uom: 'kg', sequenceNo: 1 }];
+  const coded = new PickingService(productionDb(), { ...stubFormulaLookup, async resolveManufacturingInstruction() { return lines as never; } });
+  const orderId = crypto.randomUUID();
+  await testClient()`insert into production.production_order (production_order_id, formula_version_id, order_qty, status)
+    values (${orderId}, ${crypto.randomUUID()}, 1, 'INPROGRESS')`;
+  assert.deepEqual(await coded.resolveManufacturingInstruction(orderId, principal()), lines);
 });
