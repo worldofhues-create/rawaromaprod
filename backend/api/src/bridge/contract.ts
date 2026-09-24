@@ -11,6 +11,10 @@ export const INBOUND_FROM_ALEMBIC = [
   'ProductionRequirementCreated',
   'ProductionRequirementChanged',
   'ProductionRequirementCancelled',
+  // Golden-journey gap 3: ALEMBIC's goods receipt of the factory FG IS the physical
+  // hand-over for a bridge requirement (no RawProd sales order / Dispatched exists for it).
+  // Payload: { requirement_id, order_ref, received_qty, uom, receipt_ref, received_at }.
+  'ProductionRequirementFulfilled',
 ] as const;
 export type InboundFromAlembic = (typeof INBOUND_FROM_ALEMBIC)[number];
 
@@ -26,6 +30,8 @@ export const OUTBOUND_TO_ALEMBIC = [
   'DispatchReady',
   'Dispatched',
   'ProductionRequirementCancelledAck',
+  // Emitted exactly once when ProductionRequirementFulfilled is applied (requirement COMPLETE).
+  'ProductionRequirementCompleted',
   // G1/PB-08 — break-glass sales-order continuity actions (OrdersService), emitted via
   // emitBridgeManualEvent (not tied to a production_requirement) so ALEMBIC can reconcile a
   // manually-created/confirmed/amended RawProd sales order against its own commercial order.
@@ -101,6 +107,8 @@ export function validateEnvelope(raw: unknown, allowedTypes: readonly string[]):
  *  bridge slice's scope (see the lane report). */
 export const LOCAL_STATUSES = [
   'CREATED', 'ACCEPTED', 'REJECTED_MAPPING', 'CANCELLED',
+  // Terminal: ALEMBIC confirmed goods receipt (ProductionRequirementFulfilled applied).
+  'COMPLETE',
 ] as const;
 export type LocalStatus = (typeof LOCAL_STATUSES)[number];
 
@@ -132,6 +140,11 @@ export function decideInbound(input: InboundDecisionInput): InboundDecision {
   }
 
   if (input.currentStatus === 'CANCELLED' && input.eventType !== 'ProductionRequirementCancelled') {
+    return { action: 'park', parkedReason: 'out_of_order' };
+  }
+
+  // COMPLETE is terminal: nothing after the fulfilment applies, and nothing re-emits.
+  if (input.currentStatus === 'COMPLETE') {
     return { action: 'park', parkedReason: 'out_of_order' };
   }
 

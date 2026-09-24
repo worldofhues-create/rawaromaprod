@@ -90,6 +90,8 @@ export class ImporterService {
       await this.applyChanged(env);
     } else if (env.type === 'ProductionRequirementCancelled') {
       await this.applyCancelled(env);
+    } else if (env.type === 'ProductionRequirementFulfilled') {
+      await this.applyFulfilled(env);
     }
 
     await this.db.update(inboundEvent).set({ processedAt: new Date() })
@@ -181,6 +183,90 @@ export class ImporterService {
       type: 'ProductionRequirementCancelledAck',
       aggregateId: env.aggregate.id,
       payload: { requirement_id: env.aggregate.id, correlation_id: env.correlationId, _bridge_version: version },
+    });
+  }
+
+  /**
+   * Golden-journey gap 3 — ALEMBIC's goods receipt of the factory FG is the physical
+   * hand-over for a bridge requirement, so it (not RawProd's sales `Dispatched`, which needs
+   * a sales order a bridge requirement never gets) closes the requirement. One transaction:
+   *   1. requirement -> COMPLETE (terminal in decideInbound), lastAppliedVersion + 1;
+   *   2. FG hand-over: every still-ACTIVE finished_good_reservation on an FG batch produced
+   *      for the linked production order (fg -> package_order -> oil_batch -> production_order)
+   *      becomes HANDED_OVER (released_dt stamped) and an equal finished_goods_batch_consumption
+   *      row (consumed_for_document_id = requirement id) is written, so ATP moves the qty from
+   *      "reserved" to "consumed" instead of freeing it. Only ACTIVE rows are touched, so it
+   *      is idempotent. No linked order / no reservation -> recorded in status_reason;
+   *   3. outbox ProductionRequirementCompleted at the next emitted version.
+   */
+  private async applyFulfilled(env: BridgeEnvelope): Promise<void> {
+    const p = env.payload;
+    const receiptRef = String(p.receipt_ref ?? '');
+    const receivedQty = String(p.received_qty ?? '');
+    const uom = String(p.uom ?? '');
+    const orderRef = String(p.order_ref ?? '');
+    const aggregateId = env.aggregate.id;
+
+    await this.db.transaction(async (tx) => {
+      const req = (await tx.select().from(productionRequirement)
+        .where(eq(productionRequirement.alembicRequirementId, aggregateId)).limit(1).for('update'))[0];
+      const productionOrderId = req?.productionOrderId ?? null;
+
+      let handedOver = 0;
+      if (productionOrderId) {
+        const rows = (await tx.execute(sql`
+          with target as (
+            select r.finished_good_reservation_id, r.finished_good_batch_id, r.reserved_qty, r.uom_id
+              from packaging.finished_good_reservation r
+              join packaging.finished_good_batch_master fg on fg.finished_good_batch_id = r.finished_good_batch_id
+              join packaging.package_order po on po.package_order_id = fg.package_order_id
+              join production.oil_batch_master ob on ob.oil_batch_id = po.oil_batch_id
+             where ob.production_order_id = ${productionOrderId}
+               and r.released_dt is null and coalesce(r.status, 'ACTIVE') = 'ACTIVE'
+             for update of r
+          ), upd as (
+            update packaging.finished_good_reservation r
+               set status = 'HANDED_OVER', released_dt = now(), updated_dt = now(), updated_by = 'bridge:alembic'
+              from target t where r.finished_good_reservation_id = t.finished_good_reservation_id
+            returning r.finished_good_reservation_id
+          )
+          insert into packaging.finished_goods_batch_consumption
+            (finished_goods_batch_consumption_id, finished_good_batch_id, consumed_for_document_id,
+             consumed_qty, uom_id, consumed_dt, status, created_by, updated_by)
+          select gen_random_uuid(), t.finished_good_batch_id, ${aggregateId}::uuid,
+                 t.reserved_qty, t.uom_id, now(), 'ACTIVE', 'bridge:alembic', 'bridge:alembic'
+            from target t
+          returning finished_goods_batch_consumption_id
+        `)) as unknown as unknown[];
+        handedOver = rows.length;
+      }
+
+      const fgNote = !productionOrderId
+        ? 'no linked production order; no FG reservation to hand over'
+        : handedOver > 0
+          ? `${handedOver} FG reservation(s) marked HANDED_OVER`
+          : 'no active FG reservation for the linked production order';
+      const statusReason = `fulfilled: ALEMBIC goods receipt ${receiptRef || '(no ref)'}`
+        + ` received ${receivedQty} ${uom}`.trimEnd() + `; ${fgNote}`;
+
+      const bumped = (await tx.update(productionRequirement).set({
+        lifecycleStatus: 'COMPLETE',
+        statusReason,
+        lastAppliedVersion: sql`${productionRequirement.lastAppliedVersion} + 1`,
+        lastEmittedVersion: sql`${productionRequirement.lastEmittedVersion} + 1`,
+        updatedDt: new Date(),
+      }).where(eq(productionRequirement.alembicRequirementId, aggregateId))
+        .returning({ v: productionRequirement.lastEmittedVersion }))[0];
+
+      await tx.insert(outbox).values({
+        type: 'ProductionRequirementCompleted',
+        aggregateId,
+        payload: {
+          requirement_id: aggregateId, correlation_id: env.correlationId,
+          order_ref: orderRef || req?.orderRef || '', receipt_ref: receiptRef,
+          _bridge_version: bumped ? Number(bumped.v) : 1,
+        },
+      });
     });
   }
 }

@@ -140,3 +140,26 @@ test('sealSecret/openSecret round-trip under a configured KEK', () => {
 test('openSecret returns null (never throws) for garbage input', () => {
   assert.equal(openSecret('not-valid-base64-ciphertext'), null);
 });
+
+test('scenario: a Fulfilled event on an ACCEPTED aggregate at the next version applies', () => {
+  const r = validateEnvelope(envelope({ type: 'ProductionRequirementFulfilled', version: 2 }), INBOUND_FROM_ALEMBIC);
+  assert.equal(r.ok, true);
+  assert.deepEqual(decideInbound({
+    alreadyRecorded: false, incomingVersion: 2, lastAppliedVersion: 1,
+    currentStatus: 'ACCEPTED', eventType: 'ProductionRequirementFulfilled',
+  }), { action: 'apply' });
+});
+
+test('scenario: COMPLETE is terminal — any later non-duplicate event parks out_of_order', () => {
+  for (const eventType of ['ProductionRequirementFulfilled', 'ProductionRequirementChanged', 'ProductionRequirementCancelled']) {
+    assert.deepEqual(decideInbound({
+      alreadyRecorded: false, incomingVersion: 3, lastAppliedVersion: 2,
+      currentStatus: 'COMPLETE', eventType,
+    }), { action: 'park', parkedReason: 'out_of_order' });
+  }
+  // a redelivered event_id is still a duplicate, not a park
+  assert.deepEqual(decideInbound({
+    alreadyRecorded: true, incomingVersion: 2, lastAppliedVersion: 2,
+    currentStatus: 'COMPLETE', eventType: 'ProductionRequirementFulfilled',
+  }), { action: 'duplicate' });
+});

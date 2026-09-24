@@ -49,6 +49,7 @@ Field rules:
 | `ProductionRequirementCreated` | A commercial order line's mapped SKU has insufficient FG and no open requirement exists yet for it | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` |
 | `ProductionRequirementChanged` | Qty, needed-by, or priority changes on a requirement RawProd has not yet moved past `PLANNED` | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` |
 | `ProductionRequirementCancelled` | The originating commercial order is cancelled/returned before FG is allocated | `{ requirement_id, order_ref, reason }` |
+| `ProductionRequirementFulfilled` | ALEMBIC posted the goods receipt of the factory FG (the physical hand-over). `version` = ALEMBIC's previous outbound version for the aggregate + 1 (normally 2). RawProd sets the requirement `COMPLETE` (terminal: any later non-duplicate event parks `out_of_order`), marks active FG reservations of the linked production order `HANDED_OVER` (+ consumption row), and emits `ProductionRequirementCompleted` once. No RawProd sales order is involved. | `{ requirement_id, order_ref, received_qty, uom, receipt_ref, received_at }` |
 
 ## Event types — RawProd → ALEMBIC
 
@@ -65,6 +66,7 @@ Field rules:
 | `DispatchReady` | Ready to ship |
 | `Dispatched` | `{ awb, carrier, dispatched_at }` |
 | `ProductionRequirementCancelledAck` | Acknowledges an ALEMBIC-initiated cancellation |
+| `ProductionRequirementCompleted` | `{ requirement_id, correlation_id, order_ref, receipt_ref }` — RawProd applied `ProductionRequirementFulfilled`; exactly once per requirement. `Dispatched` remains for manual-continuity sales orders only. |
 
 All carry `{ requirement_id }` at minimum, correlated by `correlation_id`.
 
