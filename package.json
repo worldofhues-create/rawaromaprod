@@ -18,6 +18,7 @@
     "db:migrate": "tsx scripts/db-migrate.ts",
     "db:seed": "tsx scripts/db-seed.ts",
     "db:seed:data": "tsx scripts/db-seed-data.ts",
+    "demo:seed": "tsx scripts/demo-seed.ts",
     "db:provision": "node scripts/db-provision.mjs",
     "vault:rewrap": "tsx scripts/vault-rewrap.ts",
     "test": "node backend/test-support/run-tests.mjs",

@@ -256,7 +256,6 @@ const VAULT_AUTHORITY_ROLES = new Set(['formulator', 'vault_approver']);
 
 const MATERIAL_COUNT = 60;
 const VENDOR_COUNT = 12;
-const PO_COUNT = 40;
 const PRODUCTION_ORDER_COUNT = 30;
 /** ALEMBIC's own DEMO-ORD-#### numbering (lane D2) — this lane's production requirements
  * mirror DEMO-ORD-0003..0032 (30 ids), overlapping the example range in the lane brief. */
@@ -292,10 +291,24 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
   // BRIDGE_HMAC_KEK seals the connector's own HMAC secret at rest (backend/api/src/bridge/
   // secret-box.ts) — same demo-only, stable-across-runs posture as FORMULA_KEK above.
   process.env.BRIDGE_HMAC_KEK = process.env.BRIDGE_HMAC_KEK ?? demoKey('bridge-hmac-kek');
+  // LANE D1 (coordinator note, post-merge): this deployment IS the demo showcase environment —
+  // RAWPROD_ENVIRONMENT=demo is what lets AuthService ever mint/accept a session for the
+  // `showcase` role at all (see backend/cluster-org/src/auth/auth.service.ts). This script's
+  // own service calls never read it, but the demo account this seed binds
+  // (SHOWCASE_DEMO_EMAIL) is only ever usable end-to-end when the deployment it runs against
+  // also has this set.
+  process.env.RAWPROD_ENVIRONMENT = process.env.RAWPROD_ENVIRONMENT ?? 'demo';
   const bridgeHmacSecret = process.env.DEMO_BRIDGE_HMAC_SECRET ?? demoKey('bridge-hmac-secret');
 
   const sql = postgres(databaseUrl, { max: 10, prepare: false });
   const formulaSql = formulaDatabaseUrl === databaseUrl ? sql : postgres(formulaDatabaseUrl, { max: 5, prepare: false });
+  // TutorialService + AutomationAlertsService get their OWN small connection, isolated from the
+  // ~10-connection pool every schema-scoped Drizzle client above shares — observed postgres.js
+  // Date-handling faults (a parameter-binding fault minting a fresh tutorial_progress row; a
+  // parsing fault reading timestamptz rows back for the alert scan) specifically on that shared
+  // pool after the thousands of prior queries this script runs against it, neither reproducible
+  // against a fresh/dedicated connection in isolation. Cheap and safe regardless of root cause.
+  const tutorialSql = postgres(databaseUrl, { max: 2, prepare: false });
 
   try {
     out(`ALEMBIC OS Demo Factory — seeding against ${databaseUrl}`);
@@ -352,14 +365,17 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
     const salesOrdersService = new SalesOrdersService(salesDb);
     const dispatchService = new DispatchService(salesDb, packagingLookup);
     const packagingQcService = new PackagingQcService(sql);
-    const tutorialService = new TutorialService(sql);
+    const tutorialService = new TutorialService(tutorialSql);
     const importerService = new ImporterService(bridgeDb, sql);
     const configAdminService = new ConfigAdminService(bridgeDb);
     const materialShortageService = new MaterialShortageService(sql);
     const quarantineIntakeService = new QuarantineIntakeService(sql);
     const incomingQcOutcomeService = new IncomingQcOutcomeService(sql);
     const packagingReleaseService = new PackagingReleaseService(sql);
-    const alertsService = new AutomationAlertsService(sql);
+    // Same dedicated-connection fix as TutorialService above — AutomationAlertsService's
+    // scan() read the same "not really a Date" symptom (`r.updated_dt.toISOString is not a
+    // function`) off the shared, heavily-used pool.
+    const alertsService = new AutomationAlertsService(tutorialSql);
 
     const svc = {
       orgService, securityService, classificationService, materialService, masterdataLookup,
@@ -443,6 +459,7 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
   } finally {
     await sql.end({ timeout: 5 });
     if (formulaSql !== sql) await formulaSql.end({ timeout: 5 });
+    await tutorialSql.end({ timeout: 5 });
   }
 }
 
@@ -586,18 +603,30 @@ export interface DemoUsers {
   showcase: AuthPrincipal;
 }
 
+/** LANE D1's canonical demo-showcase account email (scripts/ra-roles.ts `sampleEmail` for
+ * SHOWCASE_ROLE) — reused here by email so this script binds the SAME row `pnpm db:seed`
+ * provisions (passwordless, RAWPROD_ENVIRONMENT=demo, ALEMBIC-assertion-only) rather than
+ * minting a second, password-authenticatable "showcase" account that AuthService would refuse
+ * to ever log in anyway. Formulator/vault_approver demo users stay this script's OWN separate
+ * synthetic staff — never this account — per the coordinator's D1-merge note. */
+const SHOWCASE_DEMO_EMAIL = 'demo@demo.alembic.invalid';
+
 async function findOrCreateUser(
   ctx: Ctx, organizationId: string, roleCode: string, actor: AuthPrincipal,
 ): Promise<{ userId: string; created: boolean }> {
-  const email = `${roleCode}@${EMAIL_DOMAIN}`;
+  const isShowcase = roleCode === 'showcase';
+  const email = isShowcase ? SHOWCASE_DEMO_EMAIL : `${roleCode}@${EMAIL_DOMAIN}`;
   const existing = (await ctx.sql`select user_id as id from iam.user_master where email = ${email} limit 1`)[0] as { id: string } | undefined;
   if (existing) return { userId: existing.id, created: false };
   const row = await ctx.svc.securityService.createUser({
     organizationId,
     employeeCode: `DEMO-${roleCode.toUpperCase()}`,
-    userName: displayName(roleCode),
+    userName: isShowcase ? 'ALEMBIC Demo Showcase' : displayName(roleCode),
     email,
-    password: 'DemoFactory#2026!',
+    // LANE D1: the showcase account is PASSWORDLESS — reachable only via an ALEMBIC demo
+    // assertion (AuthService.login hard-refuses password sign-in for role=showcase regardless).
+    // Every other demo persona gets an ordinary password for local/demo convenience.
+    ...(isShowcase ? {} : { password: 'DemoFactory#2026!' }),
     isActive: true,
   }, actor);
   return { userId: row.userId, created: true };
@@ -1077,7 +1106,13 @@ async function buildRequisitionsAndRfqs(
     const candidateVendors = Array.from(new Set([pick(vendors, i), pick(vendors, i + 3), pick(vendors, i + 6)].map((v) => v.id)))
       .map((id) => vendors.find((v) => v.id === id)!);
 
+    // vi===0 is always this demo's designated awardee (deterministic given the same `vendors`
+    // array and `i`) — tracked regardless of whether its quotation is new this run or already
+    // existed, so `quotationSeeds` (and the PO it feeds in ensureProcurement) is populated
+    // identically on every run, not just the first.
     let awardedQuotationId: string | null = null;
+    let awardedVendorId: string | null = null;
+    let awardedRate = 0;
     for (let vi = 0; vi < candidateVendors.length; vi++) {
       const v = candidateVendors[vi]!;
       const mapExists = (await ctx.sql`select 1 from procurement.rfq_vendor_mappings where rfq_id = ${rfqId} and vendor_id = ${v.id} limit 1`)[0];
@@ -1089,26 +1124,27 @@ async function buildRequisitionsAndRfqs(
       let quotationId: string;
       if (existingQ) {
         quotationId = existingQ.id;
-        if (existingQ.status === 'SELECTED') awardedQuotationId = quotationId;
       } else {
         quotationId = extractId(await ctx.svc.rfqService.createQuotation({ rfqId, vendorId: v.id, quotationNumber: qNumber, quotationDate: isoDate(-(16 + i)) }, buyer), 'quotationId');
         await ctx.svc.rfqService.createQuotationItem({ quotationId, materialId: material.id, quotedQty: 200 + i * 10, uomId: uom.KG, quotedRate: rate }, buyer);
       }
-      if (!awardedQuotationId && vi === 0) {
+      if (vi === 0) {
         awardedQuotationId = quotationId;
-        quotationSeeds.push({
-          quotationId,
-          vendorId: v.id,
-          items: [{ materialId: material.id, orderedQty: 200 + i * 10, uomId: uom.KG, rate, amount: (200 + i * 10) * rate }],
-        });
+        awardedVendorId = v.id;
+        awardedRate = rate;
       }
     }
 
-    if (awardedQuotationId) {
+    if (awardedQuotationId && awardedVendorId) {
       const st = (await ctx.sql`select status from procurement.quotations where quotation_id = ${awardedQuotationId} limit 1`)[0] as { status: string | null } | undefined;
       if (st?.status !== 'SELECTED') {
         await ctx.svc.rfqService.selectQuotation(awardedQuotationId, { remarks: 'Best landed cost — ALEMBIC OS Demo Factory award.' }, awarder);
       }
+      quotationSeeds.push({
+        quotationId: awardedQuotationId,
+        vendorId: awardedVendorId,
+        items: [{ materialId: material.id, orderedQty: 200 + i * 10, uomId: uom.KG, rate: awardedRate, amount: (200 + i * 10) * awardedRate }],
+      });
     }
   }
 
@@ -1715,17 +1751,28 @@ async function ensureAutomationRetryAndDeadLetterDemo(ctx: Ctx, owner: AuthPrinc
  * ════════════════════════════════════════════════════════════════════════ */
 
 async function ensureAlerts(ctx: Ctx): Promise<number> {
+  // Deterministic ORDER BY so the SAME rows are picked (and re-backdated to the same idempotent
+  // result) on every run — without it, Postgres may return a DIFFERENT arbitrary 2 rows under
+  // `LIMIT` on a second run, ageing a different pair each time and growing the alert count
+  // forever instead of staying at one alert per offending row, ever (automation.applied's own
+  // exactly-once contract, which this demo fixture must not defeat by moving the target).
   await ctx.sql`
     update quality.qc_inspections set updated_dt = now() - interval '4 days'
-     where qc_inspection_id in (select qc_inspection_id from quality.qc_inspections where overall_result = 'HOLD' limit 2)
+     where qc_inspection_id in (
+       select qc_inspection_id from quality.qc_inspections where overall_result = 'HOLD' order by qc_inspection_id limit 2
+     )
   `;
   await ctx.sql`
     update procurement.purchase_request set updated_dt = now() - interval '5 days'
-     where purchase_request_id in (select purchase_request_id from procurement.purchase_request where status = 'SUBMITTED' limit 2)
+     where purchase_request_id in (
+       select purchase_request_id from procurement.purchase_request where status = 'SUBMITTED' order by pr_number limit 2
+     )
   `;
   await ctx.sql`
     update procurement.purchase_order set updated_dt = now() - interval '5 days'
-     where purchase_order_id in (select purchase_order_id from procurement.purchase_order where status = 'DRAFT' limit 2)
+     where purchase_order_id in (
+       select purchase_order_id from procurement.purchase_order where status = 'DRAFT' order by po_number limit 2
+     )
   `;
 
   await callPrivate(ctx.svc.alertsService, 'scan')();
@@ -1750,7 +1797,10 @@ async function ensureTutorialProgress(ctx: Ctx, users: DemoUsers): Promise<numbe
     { principal: users.qc, role: 'qc', lessonId: 'qc-record-results', events: ['start', 'advance'] },
     { principal: users.production, role: 'production', lessonId: 'production-plan-create', events: ['start', 'advance', 'advance', 'advance'] },
     { principal: users.packaging, role: 'packaging', lessonId: 'packaging-qc-record', events: ['start'] },
-    { principal: users.sales, role: 'sales', lessonId: 'dispatch-confirmed-order', events: ['start', 'advance'] },
+    // The lesson's own track is 'dispatch' (tutorial-lessons.ts), reachable by the 'sales' role
+    // (reachableTutorialTracks: dispatch -> ['sales']) — `role` here names the TRACK, not the
+    // principal's role.
+    { principal: users.sales, role: 'dispatch', lessonId: 'dispatch-confirmed-order', events: ['start', 'advance'] },
   ];
   let rows = 0;
   for (const p of plan) {
