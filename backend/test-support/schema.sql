@@ -1241,6 +1241,12 @@ create table if not exists procurement.stock_requirement (
   requirement_source varchar(255),
   priority varchar(255),
   status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 -- G4 (lane F3): platform.tutorial_progress — TutorialService (backend/api/src/tutorial/
 -- tutorial.service.ts), matching scripts/migrations/2026-09-24-tutorial-system.sql column-for-
 -- column (this harness uses gen_random_uuid() rather than that migration's uuidv7() default —
