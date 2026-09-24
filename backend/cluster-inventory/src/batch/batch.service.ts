@@ -46,7 +46,8 @@ export class BatchService {
           .values({
             grnItemId: body.grnItemId ?? null,
             materialId: body.materialId ?? null,
-            batchNumber: body.batchNumber ?? `RMB-${uuidv7().split('-')[0]!.toUpperCase()}`,
+            // lane/j2: random tail, not the uuidv7 timestamp head (see grn.service.ts shortId).
+            batchNumber: body.batchNumber ?? `RMB-${uuidv7().replace(/-/g, '').slice(-12).toUpperCase()}`,
             manufacturingDate: body.manufacturingDate ?? null,
             expiryDate: body.expiryDate ?? null,
             receivedQty: body.receivedQty != null ? String(body.receivedQty) : null,

@@ -385,6 +385,26 @@ export class RequirementService {
         );
       }
 
+      // ...and nor can whoever SUBMITTED it (golden journey lane/j2). A PR drafted by the G3
+      // automation (`created_by = 'automation:g3'`) has no human creator, so the creator check
+      // above never fires for it: the procurement user who adopted and submitted the draft
+      // could approve their own submission. The submitter is the PR's human author in that
+      // case, so the same rule applies to them. The PENDING approval row `submitPurchaseRequest`
+      // wrote records who that was.
+      const submission = (
+        await tx
+          .select({ createdBy: purchaseRequestApproval.createdBy })
+          .from(purchaseRequestApproval)
+          .where(eq(purchaseRequestApproval.purchaseRequestId, id))
+          .orderBy(desc(purchaseRequestApproval.purchaseRequestApprovalId))
+          .limit(1)
+      )[0];
+      if (submission?.createdBy && submission.createdBy === principal.userId) {
+        throw new ForbiddenException(
+          'Segregation of duties: you submitted this purchase request, so you cannot approve it. It remains pending for another authorized approver (Purchase Manager).',
+        );
+      }
+
       const now = new Date();
 
       const updated = ensure(

@@ -18,13 +18,14 @@
  * a Nest-parsed body would compute the signature over different bytes than the sender
  * signed. The route reads the raw body itself (see bridge.module.ts's raw-body config).
  */
-import { Body, Controller, Headers, Post, Put, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentUser, Permissions, Public, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { bridge as bridgeContracts } from '@core/contracts';
 import { z } from 'zod';
 import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
+import { RequirementsQueueService } from './requirements-queue.service.js';
 
 type ConfigureBridgeBody = z.infer<typeof bridgeContracts.configureBridgeRequest>;
 
@@ -33,7 +34,16 @@ export class BridgeController {
   constructor(
     private readonly importer: ImporterService,
     private readonly configAdmin: ConfigAdminService,
+    private readonly queue: RequirementsQueueService,
   ) {}
+
+  /* lane/j2 — the planner's incoming-requirements queue (see requirements-queue.service.ts).
+   * `?unlinked=true` narrows to requirements no production order has claimed yet. */
+  @Permissions('production:production_order:read')
+  @Get('v1/bridge/requirements')
+  listRequirements(@Query('unlinked') unlinked?: string, @Query('limit') limit?: string) {
+    return this.queue.list({ unlinkedOnly: unlinked === 'true', limit: limit ? Number(limit) : undefined });
+  }
 
   /* PUBLIC per the JwtAuthGuard's own meaning of the word (backend-kernel/src/
    * edge/jwt-auth.guard.ts): ALEMBIC holds no bearer token this API issued —

@@ -5,7 +5,7 @@
  * planning.service.ts (ProductionScheduled), mixing.service.ts (ProductionStarted),
  * production batch.service.ts + quality inspections.service.ts (QcStatusChanged),
  * packaging orders.service.ts (PackagingStarted), packaging batch.service.ts
- * (FgBatchAvailable), reservation.service.ts (AtpAllocationGranted), and
+ * (FgBatchAvailable — removed at creation by lane/j2, see its test), reservation.service.ts (AtpAllocationGranted), and
  * dispatch.service.ts (DispatchReady/Dispatched).
  *
  * Required properties (lane brief): for each event, emitted in-transaction with the right
@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { ConflictException } from '@nestjs/common';
 import { emitBridgeOutbound } from '../../../backend-kernel/src/events/bridge-emit.js';
 import { MixingService } from '../../../cluster-production/src/mixing/mixing.service.js';
-import { BatchService as ProductionBatchService } from '../../../cluster-production/src/batch/batch.service.js';
+import { BatchService as ProductionBatchService, qcStatusForBridge } from '../../../cluster-production/src/batch/batch.service.js';
 import { PlanningService } from '../../../cluster-production/src/planning/planning.service.js';
 import { OrdersService } from '../../../cluster-packaging/src/orders/orders.service.js';
 import { BatchService as PackagingBatchService } from '../../../cluster-packaging/src/batch/batch.service.js';
@@ -293,6 +293,16 @@ test('production BatchService.recordProductionQc: emits QcStatusChanged for a li
   const rows = await outboxRowsFor(alembicRequirementId);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.type, 'QcStatusChanged');
+  // lane/j2: the contract field ALEMBIC actually reads (docs/bridge/EVENT_CONTRACT.md).
+  assert.equal((rows[0]!.payload as { qc_status?: string }).qc_status, 'passed');
+});
+
+test('qcStatusForBridge: maps grades onto the bridge contract vocabulary', () => {
+  assert.equal(qcStatusForBridge('PASS'), 'passed');
+  assert.equal(qcStatusForBridge('FAIL'), 'failed');
+  assert.equal(qcStatusForBridge('REJECT'), 'failed');
+  assert.equal(qcStatusForBridge('HOLD'), 'pending');
+  assert.equal(qcStatusForBridge(null), 'pending');
 });
 
 test('production BatchService.recordProductionQc: nothing emitted for an oil batch with no linked order', async () => {
@@ -352,12 +362,13 @@ test('packaging OrdersService.createPackageOrder: nothing emitted for RawProd-in
 async function packageOrderFor(oilBatchId: string): Promise<string> {
   const sql = testClient();
   const packageOrderId = crypto.randomUUID();
+  // IN_PROGRESS: an FG batch can only be produced once filling has started (lane/j2 guard).
   await sql`insert into packaging.package_order (package_order_id, oil_batch_id, status)
-    values (${packageOrderId}, ${oilBatchId}, 'DRAFT')`;
+    values (${packageOrderId}, ${oilBatchId}, 'IN_PROGRESS')`;
   return packageOrderId;
 }
 
-test('packaging BatchService.produceFinishedGoodBatch: emits FgBatchAvailable two hops back through the bridge link', async () => {
+test('packaging BatchService.produceFinishedGoodBatch: does NOT emit FgBatchAvailable before packaging QC (lane/j2)', async () => {
   const svc = new PackagingBatchService(packagingDb());
   const { alembicRequirementId } = await freshRequirement();
   const orderId = await freshProductionOrder();
@@ -370,9 +381,10 @@ test('packaging BatchService.produceFinishedGoodBatch: emits FgBatchAvailable tw
     principal(),
   );
 
+  // Availability is emitted by PackagingReleaseService on packaging QC PASS
+  // (automation/__tests__/packaging-release.test.ts), never at batch creation.
   const rows = await outboxRowsFor(alembicRequirementId);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.type, 'FgBatchAvailable');
+  assert.equal(rows.filter((r) => r.type === 'FgBatchAvailable').length, 0);
 });
 
 test('packaging BatchService.produceFinishedGoodBatch: nothing emitted for a RawProd-internal package order', async () => {
@@ -402,6 +414,8 @@ test('reservation.createReservation: emits AtpAllocationGranted three hops back 
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-R1', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createReservation({ finishedGoodBatchId: fgBatchId, reservedQty: 10 }, principal());
 
@@ -419,6 +433,8 @@ test('reservation.createReservation: nothing emitted for a RawProd-internal FG b
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-R2', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createReservation({ finishedGoodBatchId: fgBatchId, reservedQty: 10 }, principal());
   await assertOilBatchHasNoProductionOrder(oilBatchId);
@@ -441,6 +457,8 @@ test('dispatch.createDispatch: emits DispatchReady then Dispatched, in order, fo
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-D1', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createDispatch(
     { salesOrderId: crypto.randomUUID(), items: [{ finishedGoodBatchId: fgBatchId, dispatchedQty: 10 }] },
@@ -466,10 +484,29 @@ test('dispatch.createDispatch: nothing emitted for a RawProd-internal FG batch',
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-D2', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createDispatch(
     { salesOrderId: crypto.randomUUID(), items: [{ finishedGoodBatchId: fgBatchId, dispatchedQty: 10 }] },
     principal(),
   );
   await assertOilBatchHasNoProductionOrder(oilBatchId);
+});
+
+/* lane/j2 — FG batch guard: finished goods cannot be produced against a package order that has
+ * not started filling. */
+test('packaging BatchService.produceFinishedGoodBatch: refused (409) on a DRAFT package order', async () => {
+  const svc = new PackagingBatchService(packagingDb());
+  const oilBatchId = await releasedOilBatchFor(null);
+  const packageOrderId = crypto.randomUUID();
+  await testClient()`insert into packaging.package_order (package_order_id, oil_batch_id, status)
+    values (${packageOrderId}, ${oilBatchId}, 'DRAFT')`;
+  await assert.rejects(
+    () => svc.produceFinishedGoodBatch(
+      { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: `FG-D-${packageOrderId.slice(0, 6)}`, producedQty: 1 },
+      principal(),
+    ),
+    (e: unknown) => e instanceof ConflictException && /status is DRAFT/.test((e as Error).message),
+  );
 });

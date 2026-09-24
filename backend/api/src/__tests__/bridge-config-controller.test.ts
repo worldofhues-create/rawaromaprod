@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { DomainError, ZodValidationPipe } from '@core/backend-kernel';
 import { bridge as bridgeContracts } from '@core/contracts';
 import { BridgeController } from '../bridge/bridge.controller.js';
+import { RequirementsQueueService } from '../bridge/requirements-queue.service.js';
 import { ConfigAdminService } from '../bridge/config-admin.service.js';
 import { ImporterService } from '../bridge/importer.service.js';
 import { ensureSchema, bridgeDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
@@ -29,7 +30,7 @@ before(async () => {
   // tests, so a real client is enough to satisfy the constructor.
   const importer = new ImporterService(db, sql);
   const configAdmin = new ConfigAdminService(db);
-  controller = new BridgeController(importer, configAdmin);
+  controller = new BridgeController(importer, configAdmin, new RequirementsQueueService(sql));
 });
 
 after(async () => {

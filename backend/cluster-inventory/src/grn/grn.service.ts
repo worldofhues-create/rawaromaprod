@@ -34,8 +34,12 @@ const {
 } = inventorySchema;
 
 /** Short, human-friendly batch suffix derived from a fresh uuid (first segment). */
-function shortId(): string {
-  return uuidv7().split('-')[0]!.toUpperCase();
+/** Auto-assigned RM batch number suffix. Golden journey lane/j2: this was the FIRST 8 hex of a
+ *  uuidv7 — which are the top 32 bits of the millisecond TIMESTAMP, identical for ~65 s — so a
+ *  second GRN inside that window collided on `rm_batch_master_number_uq` and the receipt failed
+ *  with a 500. The suffix now comes from the uuid's RANDOM tail (last 12 hex = 48 random bits). */
+export function shortId(): string {
+  return uuidv7().replace(/-/g, '').slice(-12).toUpperCase();
 }
 
 @Injectable()

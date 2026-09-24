@@ -97,7 +97,9 @@ export class PackagingLookupService implements PackagingLookup {
       select overall_result from packaging.packaging_qc
        where finished_good_batch_id = ${finishedGoodBatchId}
        order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
-    const qcFailed = String(qc[0]?.overall_result ?? '').toUpperCase() === 'FAIL';
+    // lane/j2: sellable only once packaging QC has PASSED — un-inspected or HOLD is not available
+    // either (was: only an explicit FAIL blocked). Field name kept for its callers.
+    const qcFailed = String(qc[0]?.overall_result ?? '').toUpperCase() !== 'PASS';
 
     return {
       finishedGoodBatchId: batch.finishedGoodBatchId,

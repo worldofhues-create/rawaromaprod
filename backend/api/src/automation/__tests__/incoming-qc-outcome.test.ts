@@ -26,7 +26,7 @@ function applyOne(qcInspectionId: string, type: string, payload: unknown): Promi
   );
 }
 
-async function quarantinedBatch(opts: { withGrnVendor?: boolean } = {}): Promise<{ rmBatchId: string; vendorId?: string }> {
+async function quarantinedBatch(opts: { withGrnVendor?: boolean; poRate?: number } = {}): Promise<{ rmBatchId: string; vendorId?: string }> {
   const sql = testClient();
   const materialId = randomUUID();
   const rmBatchId = randomUUID();
@@ -39,7 +39,15 @@ async function quarantinedBatch(opts: { withGrnVendor?: boolean } = {}): Promise
     const grnId = randomUUID();
     await sql`insert into inventory.grn_master (grn_id, grn_number, vendor_id, status) values (${grnId}, ${'GRN-' + grnId.slice(0, 8)}, ${vendorId}, 'RECEIVED')`;
     grnItemId = randomUUID();
-    await sql`insert into inventory.grn_items (grn_item_id, grn_id, material_id, received_qty, status) values (${grnItemId}, ${grnId}, ${materialId}, 50, 'ACTIVE')`;
+    // lane/j2: optionally priced through a PO line, so the draft credit note can carry an amount.
+    let poItemId: string | null = null;
+    if (opts.poRate !== undefined) {
+      const poId = randomUUID();
+      poItemId = randomUUID();
+      await sql`insert into procurement.purchase_order (purchase_order_id, po_number, vendor_id, status) values (${poId}, ${'PO-' + poId.slice(0, 8)}, ${vendorId}, 'ACKNOWLEDGED')`;
+      await sql`insert into procurement.purchase_order_items (purchase_order_item_id, purchase_order_id, material_id, ordered_qty, rate) values (${poItemId}, ${poId}, ${materialId}, 50, ${opts.poRate})`;
+    }
+    await sql`insert into inventory.grn_items (grn_item_id, grn_id, purchase_order_item_id, material_id, received_qty, status) values (${grnItemId}, ${grnId}, ${poItemId}, ${materialId}, 50, 'ACTIVE')`;
   }
 
   await sql`insert into inventory.rm_batch_master (rm_batch_id, grn_item_id, material_id, batch_number, received_qty, status)
@@ -122,4 +130,19 @@ test('duplicate FAIL delivery does not draft a second credit note', async () => 
   const sql = testClient();
   const notes = await sql`select count(*)::int as c from procurement.vendor_credit_note where vendor_id = ${vendorId!}`;
   assert.equal(notes[0]?.c, 1, 'exactly one credit note despite 2 delivery attempts');
+});
+
+/* lane/j2 — the draft credit note is priced: rejected batch quantity x the PO line rate. */
+test('QC FAIL prices the draft credit note from the PO line (received qty x rate); unpriced stays NULL', async () => {
+  const sql = testClient();
+  const priced = await quarantinedBatch({ withGrnVendor: true, poRate: 12000 });
+  await applyOne(randomUUID(), 'quality.qc.failed', { rmBatchId: priced.rmBatchId });
+  const [p] = await sql`select amount, status from procurement.vendor_credit_note where vendor_id = ${priced.vendorId!}`;
+  assert.equal(Number(p?.amount), 50 * 12000);
+  assert.equal(p?.status, 'DRAFT', 'still a draft for a human to finalise');
+
+  const unpriced = await quarantinedBatch({ withGrnVendor: true });
+  await applyOne(randomUUID(), 'quality.qc.failed', { rmBatchId: unpriced.rmBatchId });
+  const [u] = await sql`select amount from procurement.vendor_credit_note where vendor_id = ${unpriced.vendorId!}`;
+  assert.equal(u?.amount, null, 'no PO rate -> no invented amount');
 });

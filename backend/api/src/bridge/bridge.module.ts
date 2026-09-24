@@ -12,6 +12,7 @@ import { PG_CLIENT } from '@core/backend-kernel';
 import { BridgeController } from './bridge.controller.js';
 import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
+import { RequirementsQueueService } from './requirements-queue.service.js';
 import { BridgeRelayService } from './relay.service.js';
 import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
 
@@ -26,6 +27,7 @@ import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
     },
     ImporterService,
     ConfigAdminService,
+    RequirementsQueueService,
     BridgeRelayService,
   ],
   exports: [BRIDGE_DB, BridgeRelayService],

@@ -25,16 +25,19 @@ after(async () => {
   await closeTestClient();
 });
 
-async function freshFgBatch(producedQty: number, opts: { qcResult?: string } = {}) {
+// lane/j2: FG is sellable only after packaging QC PASS, so the default fixture is a PASSED
+// batch; pass `qcResult: null` for an un-inspected one.
+async function freshFgBatch(producedQty: number, opts: { qcResult?: string | null } = {}) {
+  const qcResult = opts.qcResult === undefined ? 'PASS' : opts.qcResult;
   const sql = testClient();
   const id = crypto.randomUUID();
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, batch_number, produced_qty, status)
     values (${id}, ${'FG-' + id}, ${producedQty}, 'ACTIVE')`;
-  if (opts.qcResult) {
+  if (qcResult) {
     await sql`insert into packaging.packaging_qc
       (packaging_qc_id, finished_good_batch_id, overall_result, status)
-      values (${crypto.randomUUID()}, ${id}, ${opts.qcResult}, 'ACTIVE')`;
+      values (${crypto.randomUUID()}, ${id}, ${qcResult}, 'ACTIVE')`;
   }
   return id;
 }
@@ -109,4 +112,19 @@ test('fg reservation: concurrent over-reservation attempts never exceed produced
   )[0]!.total;
   assert.ok(totalReserved <= 100, `total reserved (${totalReserved}) must never exceed produced (100)`);
   assert.equal(totalReserved, succeeded.length * 30);
+});
+
+/* lane/j2 — an un-inspected FG batch is not ATP: neither reservable nor counted by the fg-stock
+ * read model (was: only an explicit packaging-QC FAIL zeroed availability). */
+test('fg reservation: a batch with NO packaging QC yet is not reservable and shows 0 ATP', async () => {
+  const batchId = await freshFgBatch(20, { qcResult: null });
+  await assert.rejects(
+    () => svc.createReservation({ finishedGoodBatchId: batchId, reservedQty: 1 }, principal()),
+    (e: unknown) => e instanceof ConflictException && /not PASSED packaging QC/.test((e as Error).message),
+  );
+  const { FgStockService } = await import('../fg-stock/fg-stock.service.js');
+  const stock = await new FgStockService(testClient()).availability({ limit: 200 });
+  const row = (stock.items as unknown as Array<{ finishedGoodBatchId: string; availableQty: number }>)
+    .find((r) => r.finishedGoodBatchId === batchId);
+  assert.equal(row?.availableQty, 0);
 });

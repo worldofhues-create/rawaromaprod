@@ -31,6 +31,11 @@ async function freshBatch() {
   return batch;
 }
 
+/** lane/j2: RELEASED now requires a PASS production QC on file. */
+async function passQc(oilBatchId: string) {
+  await svc.recordProductionQc({ oilBatchId, result: 'PASS' }, principal());
+}
+
 test('oil batch: produce starts ACTIVE', async () => {
   const batch = await freshBatch();
   assert.equal(batch.status, 'ACTIVE');
@@ -40,6 +45,7 @@ test('oil batch: happy path ACTIVE -> IN_MATURATION -> RELEASED writes event his
   const batch = await freshBatch();
   const step1 = await svc.transitionOilBatch(batch.oilBatchId, 'IN_MATURATION', principal());
   assert.equal(step1.status, 'IN_MATURATION');
+  await passQc(batch.oilBatchId);
   const step2 = await svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal());
   assert.equal(step2.status, 'RELEASED');
 
@@ -47,7 +53,7 @@ test('oil batch: happy path ACTIVE -> IN_MATURATION -> RELEASED writes event his
   const forThisBatch = events.filter((e: any) => e.oilBatchId === batch.oilBatchId);
   assert.deepEqual(
     forThisBatch.map((e: any) => e.eventType).sort(),
-    ['IN_MATURATION', 'PRODUCED', 'RELEASED'].sort(),
+    ['IN_MATURATION', 'PRODUCED', 'QC_RECORDED', 'RELEASED'].sort(),
   );
 
   const outboxRows = await productionDb().select().from(productionSchema.outbox);
@@ -75,6 +81,7 @@ test('oil batch: invalid transition (skip a required stage) is rejected', async 
 test('oil batch: terminal states (RELEASED, FAILED) accept no further transitions', async () => {
   const batch = await freshBatch();
   await svc.transitionOilBatch(batch.oilBatchId, 'IN_MATURATION', principal());
+  await passQc(batch.oilBatchId);
   await svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal());
   await assert.rejects(
     () => svc.transitionOilBatch(batch.oilBatchId, 'HOLD', principal()),
@@ -94,6 +101,7 @@ test('oil batch: rework path HOLD -> REWORK -> IN_MATURATION -> RELEASED', async
   await svc.transitionOilBatch(batch.oilBatchId, 'HOLD', principal());
   await svc.transitionOilBatch(batch.oilBatchId, 'REWORK', principal());
   await svc.transitionOilBatch(batch.oilBatchId, 'IN_MATURATION', principal());
+  await passQc(batch.oilBatchId);
   const released = await svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal());
   assert.equal(released.status, 'RELEASED');
 });
@@ -163,4 +171,22 @@ test('oil batch: the compare-and-swap UPDATE itself rejects a stale write under 
   const [a, b] = await Promise.all([attempt(), attempt()]);
   const affected = [a.length, b.length].sort();
   assert.deepEqual(affected, [0, 1], 'exactly one of the two concurrent CAS updates affects a row');
+});
+
+/* lane/j2 — final-QC gate on RELEASED. */
+test('oil batch: RELEASED is refused with no QC on file, and with a latest QC that is not PASS', async () => {
+  const batch = await freshBatch();
+  await svc.transitionOilBatch(batch.oilBatchId, 'IN_MATURATION', principal());
+  await assert.rejects(
+    () => svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal()),
+    (e: unknown) => e instanceof ConflictException && /no QC result/.test((e as Error).message),
+  );
+  await svc.recordProductionQc({ oilBatchId: batch.oilBatchId, result: 'HOLD' }, principal());
+  await assert.rejects(
+    () => svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal()),
+    (e: unknown) => e instanceof ConflictException && /latest QC result is HOLD/.test((e as Error).message),
+  );
+  await passQc(batch.oilBatchId);
+  const released = await svc.transitionOilBatch(batch.oilBatchId, 'RELEASED', principal());
+  assert.equal(released.status, 'RELEASED');
 });

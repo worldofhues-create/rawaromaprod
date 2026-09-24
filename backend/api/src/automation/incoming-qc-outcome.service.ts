@@ -199,18 +199,34 @@ export class IncomingQcOutcomeService implements OnModuleInit, OnModuleDestroy {
     `) as unknown as Array<{ vendor_credit_reason_id: string }>;
     const reasonId = reason[0]?.vendor_credit_reason_id;
 
+    /* THE AMOUNT (golden journey lane/j2). The draft used to carry amount = NULL, so the
+     * reviewer had to go and look up what the rejected material had cost. The rejected batch's
+     * received quantity x the PO line's rate is the value the vendor is being asked to credit —
+     * computed, never guessed: when the GRN line has no PO line or the PO line no rate, the
+     * amount stays NULL for the human to fill, exactly as before. Still a DRAFT either way. */
+    const priced = (await tx`
+      select (rb.received_qty * poi.rate)::numeric(18,4) as amount
+        from inventory.rm_batch_master rb
+        join inventory.grn_items gi on gi.grn_item_id = rb.grn_item_id
+        join procurement.purchase_order_items poi on poi.purchase_order_item_id = gi.purchase_order_item_id
+       where rb.rm_batch_id = ${rmBatchId}
+         and rb.received_qty is not null and poi.rate is not null
+       limit 1
+    `) as unknown as Array<{ amount: string | null }>;
+    const amount = priced[0]?.amount ?? null;
+
     const creditNoteId = randomUUID();
     const creditNoteNumber = `CN-AUTO-${creditNoteId.slice(0, 8).toUpperCase()}`;
     await tx`
       insert into procurement.vendor_credit_note
-        (vendor_credit_note_id, vendor_id, grn_id, vendor_credit_reason_id, credit_note_number, credit_note_date, status, created_by, updated_by)
-      values (${creditNoteId}, ${vendorId}, ${grnId}, ${reasonId ?? null}, ${creditNoteNumber}, current_date, 'DRAFT', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
+        (vendor_credit_note_id, vendor_id, grn_id, vendor_credit_reason_id, credit_note_number, credit_note_date, amount, status, created_by, updated_by)
+      values (${creditNoteId}, ${vendorId}, ${grnId}, ${reasonId ?? null}, ${creditNoteNumber}, current_date, ${amount}, 'DRAFT', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
     `;
 
     return {
       decision: 'FIRED' as const,
       reason: `QC FAIL: RM batch rejected; vendor credit note drafted (inspection ${qcInspectionId})`,
-      outputs: { creditNoteId, vendorId },
+      outputs: { creditNoteId, vendorId, amount },
     };
   }
 }

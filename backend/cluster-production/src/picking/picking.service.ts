@@ -13,7 +13,7 @@
  * created_by/updated_by = principal.userId; numerics via num(); ISO timestamps → Date.
  * material/inventory/uom/order/pick-list refs are id-only soft refs (plain uuid, no FK here).
  */
-import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -194,10 +194,23 @@ export class PickingService {
     }
 
     const permittedBatchQuantity = Number(order.orderQty ?? 0);
-    return this.formula.resolveManufacturingInstruction(order.formulaVersionId, permittedBatchQuantity, {
+    const lines = await this.formula.resolveManufacturingInstruction(order.formulaVersionId, permittedBatchQuantity, {
       actorId: principal.userId,
       requestId: `production_order:${orderId}`,
     });
+    /* Golden journey lane/j2: a line whose material has no floor code (RM alias) came back
+     * as `{ code: null, quantity, uom }` — an instruction the operator cannot act on (charge
+     * WHAT?) that still read as a successful 200. Refuse it with the fix instead, naming only
+     * sequence numbers (never the material: the production role must not learn it here). */
+    const uncoded = (lines ?? []).filter((l) => l.code === null || l.code === undefined || l.code === '');
+    if (uncoded.length > 0) {
+      throw new ConflictException(
+        `${uncoded.length} instruction line(s) (sequence ${uncoded.map((l) => l.sequenceNo ?? '?').join(', ')}) `
+          + 'have no floor code: master data must give each material an RM alias before this order can be '
+          + 'compounded. The coded instruction is withheld rather than issued with blank lines.',
+      );
+    }
+    return lines;
   }
 
   /* ── material issue (CRUD reads) ─────────────────────────────────── */

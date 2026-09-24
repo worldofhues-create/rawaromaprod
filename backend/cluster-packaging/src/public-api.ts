@@ -31,7 +31,7 @@ export interface FinishedGoodStockRef {
   producedQty: string | null;
   reservedQty: string; // sum of ACTIVE (released_dt IS NULL) reservations, '0' if none
   consumedQty: string; // sum of finished_goods_batch_consumption, '0' if none (matches ATP read-model)
-  qcFailed: boolean; // latest packaging QC verdict is FAIL → not sellable/dispatchable
+  qcFailed: boolean; // latest packaging QC verdict is NOT PASS (fail, hold or none yet) → not sellable/dispatchable
 }
 
 /** Cold read port into package orders + finished-good batches + FG stock facts. */

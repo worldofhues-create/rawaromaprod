@@ -825,7 +825,13 @@ async function ensureMaterials(ctx: Ctx, owner: AuthPrincipal, uom: Record<strin
       maxStock: 500,
       qcRequired: true,
     }, owner);
-    materials.push({ id: extractId(row, 'materialId'), code, name });
+    const materialId = extractId(row, 'materialId');
+    // lane/j2: every material gets its floor code (RM alias) — a coded manufacturing instruction
+    // is now withheld (409) for any line whose material has none, and a factory whose materials
+    // have no floor codes cannot compound anything.
+    await ctx.svc.materialService.createRmAlias(
+      { materialId, aliasName: `DX-${String(i + 1).padStart(4, '0')}`, aliasType: 'FLOOR_CODE' }, owner);
+    materials.push({ id: materialId, code, name });
   }
   out(`materials: ${materials.length} ready`);
   return materials;

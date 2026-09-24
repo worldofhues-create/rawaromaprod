@@ -27,16 +27,19 @@ after(async () => {
   await closeTestClient();
 });
 
-async function freshFgBatch(producedQty: number, opts: { qcResult?: string } = {}) {
+// lane/j2: FG is sellable only after packaging QC PASS, so the default fixture is a PASSED
+// batch; pass `qcResult: null` for an un-inspected one.
+async function freshFgBatch(producedQty: number, opts: { qcResult?: string | null } = {}) {
+  const qcResult = opts.qcResult === undefined ? 'PASS' : opts.qcResult;
   const sql = testClient();
   const id = crypto.randomUUID();
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, batch_number, produced_qty, status)
     values (${id}, ${'FGD-' + id}, ${producedQty}, 'ACTIVE')`;
-  if (opts.qcResult) {
+  if (qcResult) {
     await sql`insert into packaging.packaging_qc
       (packaging_qc_id, finished_good_batch_id, overall_result, status)
-      values (${crypto.randomUUID()}, ${id}, ${opts.qcResult}, 'ACTIVE')`;
+      values (${crypto.randomUUID()}, ${id}, ${qcResult}, 'ACTIVE')`;
   }
   return id;
 }

@@ -159,3 +159,51 @@ test('bridge config: BRIDGE_WEBHOOK_ALLOWED_HOSTS unset or empty refuses every p
     else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
   }
 });
+
+/* lane/j2 — plain http:// is admitted ONLY for an allow-listed LOOPBACK host (a same-host
+ * pairing: traffic never leaves the machine). Every other http:// URL is still refused,
+ * allow-listed or not. */
+function withAllowed(value: string, fn: () => void) {
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = value;
+  try {
+    fn();
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+}
+
+test('bridge config: http:// on an allow-listed loopback host:port is admitted', () => {
+  withAllowed('127.0.0.1:4461', () => {
+    assert.equal(parse('http://127.0.0.1:4461/api/v1/bridge/rawprod/webhooks/x').success, true);
+  });
+  withAllowed('localhost:4461', () => {
+    assert.equal(parse('http://localhost:4461/hook').success, true);
+  });
+});
+
+test('bridge config: http:// on an UNLISTED loopback port is still refused', () => {
+  withAllowed('127.0.0.1:4461', () => {
+    assert.equal(parse('http://127.0.0.1:9999/hook').success, false);
+  });
+});
+
+test('bridge config: http:// on an allow-listed RFC1918 host is still refused — https required off-box', () => {
+  withAllowed('10.0.0.5:8443', () => {
+    assert.equal(parse('http://10.0.0.5:8443/hook').success, false);
+    assert.equal(parse('https://10.0.0.5:8443/hook').success, true);
+  });
+});
+
+test('bridge config: http:// on a public host is refused even if (pointlessly) allow-listed', () => {
+  withAllowed('alembic.example.com', () => {
+    assert.equal(parse('http://alembic.example.com/hook').success, false);
+  });
+});
+
+test('bridge config: http:// with no allow-list at all is refused (unchanged default)', () => {
+  withAllowed('', () => {
+    assert.equal(parse('http://127.0.0.1:4461/hook').success, false);
+  });
+});

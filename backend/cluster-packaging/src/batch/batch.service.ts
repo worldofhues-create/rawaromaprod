@@ -12,9 +12,9 @@
  * strings (stored as-is). package_order / product_sku / consumed_for_document / uom are
  * dict-soft refs (plain uuid, no FK at this layer).
  */
-import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { desc, eq, lt } from 'drizzle-orm';
+import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
@@ -25,7 +25,11 @@ import type {
   ProduceFinishedGoodBatch,
 } from '../packaging.dtos.js';
 
-const { finishedGoodBatchMaster, finishedGoodsBatchConsumption, outbox } = packagingSchema;
+const { finishedGoodBatchMaster, finishedGoodsBatchConsumption, outbox, packageOrder } = packagingSchema;
+
+/** Package-order states in which finished goods can actually exist (lane/j2): filling has
+ *  started (IN_PROGRESS) or finished (COMPLETED). */
+const FG_PRODUCIBLE_ORDER_STATES = new Set(['IN_PROGRESS', 'COMPLETED']);
 
 @Injectable()
 export class BatchService {
@@ -39,6 +43,25 @@ export class BatchService {
    */
   async produceFinishedGoodBatch(body: ProduceFinishedGoodBatch, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
+      /* Golden journey lane/j2: an FG batch was accepted against a DRAFT package order —
+       * no materials issued, no filling session, nothing filled — i.e. finished goods that
+       * cannot physically exist. Require the order to be filling or filled. */
+      const order = (
+        await tx
+          .select({ status: packageOrder.status })
+          .from(packageOrder)
+          .where(eq(packageOrder.packageOrderId, body.packageOrderId))
+          .for('update')
+          .limit(1)
+      )[0];
+      if (!order) throw new NotFoundException(`package_order not found: ${body.packageOrderId}`);
+      const orderStatus = String(order.status ?? 'DRAFT').toUpperCase();
+      if (!FG_PRODUCIBLE_ORDER_STATES.has(orderStatus)) {
+        throw new ConflictException(
+          `Cannot produce a finished-good batch on package order ${body.packageOrderId}: status is ${orderStatus} `
+            + '(must be IN_PROGRESS or COMPLETED — issue materials and run a filling session first).',
+        );
+      }
       const batchId = uuidv7();
       const batch = (
         await tx
@@ -92,20 +115,12 @@ export class BatchService {
         batchId,
       );
 
-      // RP-EMIT (lane F6): resolve the production order two hops back (this package order's
-      // oil batch's production order), then emit FgBatchAvailable toward ALEMBIC iff that
-      // order fulfills a bridge requirement.
-      const order = (await tx.execute(sql`
-        select ob.production_order_id
-          from packaging.package_order po
-          join production.oil_batch_master ob on ob.oil_batch_id = po.oil_batch_id
-         where po.package_order_id = ${body.packageOrderId}`
-      )) as unknown as Array<{ production_order_id: string | null }>;
-      await emitBridgeOutbound(tx, 'FgBatchAvailable', order[0]?.production_order_id, {
-        finished_good_batch_id: batchId,
-        package_order_id: body.packageOrderId,
-        batch_number: body.batchNumber,
-      });
+      // NO FgBatchAvailable here (golden journey lane/j2). A just-produced FG batch has not
+      // been through packaging QC; emitting availability at this point told ALEMBIC the goods
+      // were FG_READY before QC had looked at them (live: two FgBatchAvailable per batch, the
+      // first premature). The G3 PackagingReleaseService emits FgBatchAvailable on packaging
+      // QC PASS — backend/api/src/automation/packaging-release.service.ts — the one correct
+      // moment ("packaging QC pass → FG release → ATP → emit availability", directive §18).
 
       return { batch, consumption };
     });
