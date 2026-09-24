@@ -63,10 +63,21 @@ test('packaging QC: a HOLD check (no FAIL) grades overall HOLD', async () => {
 
 test('packaging QC outcome automatically changes availability: a FAIL zeroes reservable stock', async () => {
   const batchId = await freshFgBatch(50);
-  // Before QC: full stock reservable.
+  // lane/j2: before ANY packaging QC the batch is not sellable at all...
+  await assert.rejects(
+    () => reservations.createReservation({ finishedGoodBatchId: batchId, reservedQty: 1 }, principal()),
+    ConflictException,
+  );
+  // ...a PASS makes the full stock reservable...
+  await qc.create(
+    { finishedGoodBatchId: batchId, leakageCheck: 'PASS', labelCheck: 'PASS', cartonCheck: 'PASS' },
+    principal(),
+  );
   const held = await reservations.createReservation({ finishedGoodBatchId: batchId, reservedQty: 10 }, principal());
   await reservations.releaseReservation(held.finishedGoodReservationId, principal());
 
+  // Packaging QC's own timestamps are second-granular in places; make the FAIL strictly later.
+  await new Promise((r) => setTimeout(r, 20));
   await qc.create(
     { finishedGoodBatchId: batchId, leakageCheck: 'FAIL', labelCheck: 'PASS', cartonCheck: 'PASS' },
     principal(),

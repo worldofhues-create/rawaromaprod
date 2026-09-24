@@ -66,7 +66,9 @@ export class ReservationService {
          where finished_good_batch_id = ${body.finishedGoodBatchId}
          order by created_dt desc limit 1`
       )) as unknown as Array<{ overall_result: string | null }>;
-      const qcFailed = String(qc[0]?.overall_result ?? '').toUpperCase() === 'FAIL';
+      // lane/j2: sellable only once packaging QC has PASSED — un-inspected or HOLD is not available
+      // either (was: only an explicit FAIL blocked). Field name kept for its callers.
+      const qcFailed = String(qc[0]?.overall_result ?? '').toUpperCase() !== 'PASS';
 
       const available = qcFailed
         ? 0
@@ -77,7 +79,7 @@ export class ReservationService {
 
       if (Number(body.reservedQty) > available) {
         throw new ConflictException(
-          `Cannot reserve ${body.reservedQty} of finished-good batch ${body.finishedGoodBatchId}: only ${available} available (produced − dispatched − consumed − reserved${qcFailed ? '; batch FAILED packaging QC' : ''}).`,
+          `Cannot reserve ${body.reservedQty} of finished-good batch ${body.finishedGoodBatchId}: only ${available} available (produced − dispatched − consumed − reserved${qcFailed ? '; batch has not PASSED packaging QC' : ''}).`,
         );
       }
 

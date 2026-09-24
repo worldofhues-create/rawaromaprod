@@ -7,7 +7,8 @@
  * from packaging.finished_good_reservation (active = released_dt IS NULL). Raw cross-schema SQL
  * over the shared PG_CLIENT (the schema-per-cluster boundary is a read-model join here). Results
  * are FEFO-ordered (first-expiry-first-out). FG batches carry no material_id, so masking is a
- * no-op. Quantities net only within a single batch (each batch has one uom_id).
+ * no-op. A batch is available ONLY once its latest packaging QC is PASS (golden journey lane/j2:
+ * an un-inspected batch used to count as sellable ATP — only an explicit FAIL zeroed it). Quantities net only within a single batch (each batch has one uom_id).
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
@@ -22,7 +23,7 @@ export class FgStockService {
     const limit = Math.min(Math.max(1, opts.limit ?? 100), 200);
     const skuWhere = opts.productSkuId ? this.sql`fg.product_sku_id = ${opts.productSkuId}` : this.sql`true`;
     const availWhere = opts.onlyAvailable
-      ? this.sql`and case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0 else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end > 0`
+      ? this.sql`and case when upper(coalesce(qc.overall_result,'')) <> 'PASS' then 0 else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end > 0`
       : this.sql``;
     const rows = await this.sql`
       select fg.finished_good_batch_id as "finishedGoodBatchId",
@@ -36,7 +37,7 @@ export class FgStockService {
              coalesce(c.consumed, 0)::float       as "consumedQty",
              coalesce(r.reserved, 0)::float       as "reservedQty",
              qc.overall_result                    as "qcResult",
-             (case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0
+             (case when upper(coalesce(qc.overall_result,'')) <> 'PASS' then 0
                    else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end)::float as "availableQty",
              fg.manufacturing_date     as "manufacturingDate",
              fg.expiry_date            as "expiryDate",
@@ -83,7 +84,7 @@ export class FgStockService {
              pm.product_name    as "productName",
              count(fg.finished_good_batch_id)::int as "batchCount",
              sum(coalesce(fg.produced_qty, 0))::float as "producedQty",
-             sum(case when upper(coalesce(qc.overall_result,'')) = 'FAIL' then 0
+             sum(case when upper(coalesce(qc.overall_result,'')) <> 'PASS' then 0
                       else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end)::float as "availableQty"
       from packaging.finished_good_batch_master fg
       join packaging.product_sku sku on sku.product_sku_id = fg.product_sku_id

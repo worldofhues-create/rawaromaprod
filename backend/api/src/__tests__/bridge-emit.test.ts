@@ -414,6 +414,8 @@ test('reservation.createReservation: emits AtpAllocationGranted three hops back 
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-R1', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createReservation({ finishedGoodBatchId: fgBatchId, reservedQty: 10 }, principal());
 
@@ -431,6 +433,8 @@ test('reservation.createReservation: nothing emitted for a RawProd-internal FG b
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-R2', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createReservation({ finishedGoodBatchId: fgBatchId, reservedQty: 10 }, principal());
   await assertOilBatchHasNoProductionOrder(oilBatchId);
@@ -453,6 +457,8 @@ test('dispatch.createDispatch: emits DispatchReady then Dispatched, in order, fo
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-D1', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createDispatch(
     { salesOrderId: crypto.randomUUID(), items: [{ finishedGoodBatchId: fgBatchId, dispatchedQty: 10 }] },
@@ -478,6 +484,8 @@ test('dispatch.createDispatch: nothing emitted for a RawProd-internal FG batch',
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, package_order_id, batch_number, produced_qty, status)
     values (${fgBatchId}, ${packageOrderId}, 'FG-D2', 100, 'ACTIVE')`;
+  await sql`insert into packaging.packaging_qc (packaging_qc_id, finished_good_batch_id, overall_result, status)
+    values (${crypto.randomUUID()}, ${fgBatchId}, 'PASS', 'ACTIVE')`; // lane/j2: sellable only after QC PASS
 
   await svc.createDispatch(
     { salesOrderId: crypto.randomUUID(), items: [{ finishedGoodBatchId: fgBatchId, dispatchedQty: 10 }] },
