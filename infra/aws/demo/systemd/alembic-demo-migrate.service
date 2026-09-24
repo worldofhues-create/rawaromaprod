@@ -1,0 +1,20 @@
+# DEMO-INFRA: migrations for alembic_demo as alembic_demo_owner, then the alembic_app -> alembic_demo_app grant move
+# (sql/alembic-demo-grants.sql; ALEMBIC migrations name the prod role literally). Installed, DISABLED.
+[Unit]
+Description=Alembic DEMO database migrations
+After=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=alembic-demo
+Group=alembic-demo
+WorkingDirectory=/srv/alembic-demo/app
+EnvironmentFile=/etc/alembic-demo/migrate.env
+ExecStart=/usr/bin/pnpm --filter @alembic/db migrate:up
+ExecStartPost=/usr/bin/psql "${DATABASE_URL}" -X -q -f /usr/local/lib/rawaroma/demo/sql/alembic-demo-grants.sql
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+[Install]
+WantedBy=multi-user.target

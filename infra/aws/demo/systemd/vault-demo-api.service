@@ -1,0 +1,30 @@
+# DEMO-INFRA: Vault DEMO API (PORT 4111, vault box; KMS via role rawprod-vault-demo). Same artifact as prod, deployed to /srv/rawprod-demo/app. Installed, DISABLED.
+[Unit]
+Description=Vault DEMO API (PORT 4111, vault box; KMS via role rawprod-vault-demo)
+After=network-online.target vault-demo-migrate.service
+Requires=vault-demo-migrate.service
+[Service]
+Type=exec
+User=rawprod-demo
+Group=rawprod-demo
+WorkingDirectory=/srv/rawprod-demo/app
+EnvironmentFile=/etc/rawprod-demo/vault.env
+ExecStart=/opt/node-v22.12.0/bin/node --import @swc-node/register/esm-register backend/api/src/vault-main.ts
+StandardOutput=append:/var/log/rawprod-demo/vault-api.log
+StandardError=append:/var/log/rawprod-demo/vault-api.log
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+MemoryMax=400M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# demo must never starve production on the shared t4g.medium: hard memory cap + half the CPU weight of prod units
+CPUWeight=50
+[Install]
+WantedBy=multi-user.target
