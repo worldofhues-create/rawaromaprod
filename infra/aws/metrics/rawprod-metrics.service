@@ -1,0 +1,15 @@
+[Unit]
+Description=RawAroma G6 custom metrics (rawprod)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=rawprod
+Group=rawprod
+ExecStart=/usr/local/lib/rawaroma/rawprod-metrics.sh
+StandardOutput=append:/var/log/rawprod/metrics.log
+StandardError=append:/var/log/rawprod/metrics.log
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true

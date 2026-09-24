@@ -72,6 +72,7 @@ test('editing a DRAFT PO header field via the generic editor still works', async
   const id = await freshPo();
   const p = principal({ userId: CREATOR, permissions: ['procurement:purchase_order:write'] });
   const updated = await editSvc.update('purchase-orders', id, { orderDate: '2026-01-01' }, p);
+  assert.ok(updated, 'editor returned no row');
   assert.equal(String(updated.order_date).slice(0, 10), '2026-01-01');
 });
 
