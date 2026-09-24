@@ -46,6 +46,11 @@ const MAX_ASSERTION_WINDOW_S = 60;
 export interface AlembicAssertionClaims {
   readonly iss: string;
   readonly aud: string;
+  /** S4 security review finding N1 — ALEMBIC's immutable `staff_user.id` (a uuid), NOT
+   *  `staff:<email>`. This file treats it as an opaque, stable identity string either way (the
+   *  binding logic in `AuthService.loginWithAssertion` is what actually cares about the
+   *  shape) — recorded here so a reader does not assume `sub` is email-derived from an old
+   *  example elsewhere in this codebase. `email` (below) is the separate, mutable claim. */
   readonly sub: string;
   readonly tenant_id: string;
   readonly org_id: string;

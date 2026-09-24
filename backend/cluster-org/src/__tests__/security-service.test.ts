@@ -625,3 +625,59 @@ test('item 1: changeUserEmail REFUSES for a Vault-authority role holder (formula
   const stillOld = await svc.getUserById(userId);
   assert.notEqual(stillOld?.email, 'shouldnotwork@rawaroma.local');
 });
+
+/* ── S4 security review finding N2 ──────────────────────────────────────────────────────────
+ *
+ * Fix: `changeUserEmail` clears `alembic_subject` on every successful change (a changed email
+ * is a changed identity as far as the ALEMBIC bridge is concerned — the row must re-bind from
+ * scratch on its next assertion login, not go on answering to a subject proved against an
+ * email it no longer has), and extends the existing Vault-authority refusal to cover an
+ * account with a live PENDING `vault_role_grant_request` too, not only a current role holder —
+ * an account mid-grant is exactly the account an attacker most wants to control the moment
+ * before the grant lands.
+ */
+
+test('N2: changeUserEmail clears alembic_subject on every successful change', async () => {
+  audits = [];
+  const userId = await makeUser('subjectclear');
+  await db.update(userMaster).set({ alembicSubject: `staff:whoever-${sid()}@rawaroma.local` })
+    .where(eq(userMaster.userId, userId));
+  const admin = principal({ userId: uuidv7(), roles: ['admin'], permissions: ['iam:user_master:write'] });
+
+  const updated = await svc.changeUserEmail(userId, 'cleared@rawaroma.local', admin);
+  assert.equal(updated.email, 'cleared@rawaroma.local');
+  assert.equal(updated.alembicSubject, null);
+
+  const reread = await svc.getUserById(userId);
+  assert.equal(reread?.alembicSubject, null);
+  assert.equal(audits[0]!.action, 'security.user_email.changed');
+  assert.match(audits[0]!.reason ?? '', /alembic_subject cleared/);
+});
+
+test('N2: changeUserEmail REFUSES for a user with a live PENDING vault-authority grant request',
+  async () => {
+    const formulatorRoleId = await findOrMakeRoleByCode('formulator');
+    const grantee = await makeUser('pending-email');
+    const owner = principal({ userId: uuidv7(), roles: ['owner'], permissions: ['iam:user_role_mapping:write'] });
+    // Opens a PENDING vault_role_grant_request for `grantee` — no user_role_mapping row yet
+    // (see item 6/A tests above), which is exactly the "mid-grant" window N2 closes. Fires its
+    // own 'security.vault_role.requested' audit, which is why `audits` is reset AFTER this,
+    // not before — this test only cares about what changeUserEmail itself audits.
+    await svc.createUserRole({ userId: grantee, roleId: formulatorRoleId }, owner);
+    audits = [];
+
+    const admin = principal({ userId: uuidv7(), roles: ['admin'], permissions: ['iam:user_master:write'] });
+    await assert.rejects(
+      () => svc.changeUserEmail(grantee, 'shouldnotwork-pending@rawaroma.local', admin),
+      (err: any) => {
+        assert.equal(err.status, 403);
+        return true;
+      },
+    );
+    assert.equal(audits.length, 1, 'the refusal must be audited');
+    assert.equal(audits[0]!.action, 'security.user_email.refused');
+    assert.match(audits[0]!.reason ?? '', /pending Vault-authority role grant request/);
+
+    const stillOld = await svc.getUserById(grantee);
+    assert.notEqual(stillOld?.email, 'shouldnotwork-pending@rawaroma.local');
+  });

@@ -18,7 +18,10 @@ import { ConfigService, JwtService } from '@core/backend-kernel';
 import { AuthService } from '../auth/auth.service.js';
 import { ensureSchema, orgDb, orgSchema, testClient, closeTestClient, principal } from '../../../test-support/db.js';
 
-const { userMaster, roleMaster, permissionMaster, rolePermissionMapping, userRoleMapping } = orgSchema;
+const {
+  userMaster, roleMaster, permissionMaster, rolePermissionMapping, userRoleMapping,
+  vaultRoleGrantRequest,
+} = orgSchema;
 
 let db: ReturnType<typeof orgDb>;
 
@@ -113,6 +116,28 @@ async function makeActiveUser(opts: {
     }
   }
   return userId;
+}
+
+/** S4 finding N2 — opens a live PENDING `vault_role_grant_request` for `userId` directly
+ *  (this file has no `SecurityService` instance; `security-service.test.ts` proves the
+ *  request-opening path itself). A fresh `formulator`-coded role, per row, avoids the
+ *  role_code unique index colliding across tests. */
+async function makePendingVaultGrant(userId: string): Promise<void> {
+  const roleId = uuidv7();
+  const code = `formulator-${sid()}`;
+  await db.insert(roleMaster).values({
+    roleId, roleCode: code, roleName: code, status: 'ACTIVE', createdBy: 'test', updatedBy: 'test',
+  });
+  await db.insert(vaultRoleGrantRequest).values({
+    vaultRoleGrantRequestId: uuidv7(),
+    userId,
+    roleId,
+    grantStatus: 'PENDING',
+    expiresDt: new Date(Date.now() + 60 * 60 * 1000),
+    status: 'ACTIVE',
+    createdBy: 'test',
+    updatedBy: 'test',
+  });
 }
 
 test('valid assertion for a provisioned, active user mints a session with that '
@@ -337,6 +362,80 @@ test('VAULT-TAKEOVER GUARD — an assertion presenting the right email but a DIF
       return true;
     },
   );
+});
+
+/* ── S4 SECURITY REVIEW FINDING N1 — sub is ALEMBIC's staff uuid, cross-repo contract ──────── */
+
+/** CROSS-REPO CONTRACT EXAMPLE UUID. `apps/api/test/rawprod-assertion.test.ts`'s
+ * `ADMIN_STAFF_ID` in the ALEMBIC repository signs the SAME value as `sub` — see
+ * docs/bridge/EVENT_CONTRACT.md's identity-bridge section in both repos. Proving both sides
+ * bind/resolve by this exact literal is what makes this a contract test rather than two
+ * independently-plausible-looking unit tests. */
+const CONTRACT_EXAMPLE_STAFF_UUID = '99999999-9999-9999-9999-999999999999';
+
+test('N1 CONTRACT: sub is accepted and bound in its real shape (a uuid, not staff:<email>) — '
+  + 'binding logic is agnostic to the subject string\'s shape, only to its stability', async () => {
+  // Idempotent against a re-run on the same database, AND against
+  // `facts.service.test.ts`'s OWN "N1 CONTRACT" test sharing this exact literal (the whole
+  // point of a cross-repo/cross-file contract fixture) — the unique partial index on
+  // alembic_subject means at most one row anywhere in `iam.user_master` may hold it, and that
+  // prior row may carry a `user_role_mapping` child (no ON DELETE CASCADE on that FK), so
+  // children are cleared before the parent row.
+  const priorRows = await db.select({ userId: userMaster.userId }).from(userMaster)
+    .where(eq(userMaster.alembicSubject, CONTRACT_EXAMPLE_STAFF_UUID));
+  for (const prior of priorRows) {
+    await db.delete(userRoleMapping).where(eq(userRoleMapping.userId, prior.userId));
+  }
+  await db.delete(userMaster).where(eq(userMaster.alembicSubject, CONTRACT_EXAMPLE_STAFF_UUID));
+  const email = `n1-contract-${sid()}@rawaroma.local`;
+  const userId = await makeActiveUser({ email });
+  const svc = makeService();
+
+  await svc.loginWithAssertion(signAssertion(
+    claimsFor(email, { sub: CONTRACT_EXAMPLE_STAFF_UUID, jti: randomUUID() })));
+
+  const row = (await db.select({ alembicSubject: userMaster.alembicSubject }).from(userMaster)
+    .where(eq(userMaster.userId, userId)))[0];
+  assert.equal(row?.alembicSubject, CONTRACT_EXAMPLE_STAFF_UUID);
+
+  // A second login for the SAME uuid subject still logs in by subject, exactly as it would
+  // for the old staff:<email> shape — the binding never parsed or assumed a format.
+  const second = await svc.loginWithAssertion(signAssertion(
+    claimsFor(email, { sub: CONTRACT_EXAMPLE_STAFF_UUID, jti: randomUUID() })));
+  assert.ok(second.accessToken);
+});
+
+/* ── S4 SECURITY REVIEW FINDING N2 — no first-bind for an account mid-grant ────────────────── */
+
+test('N2: first-bind is refused for an account with a live PENDING vault_role_grant_request',
+  async () => {
+    const email = `n2-pending-${sid()}@rawaroma.local`;
+    const userId = await makeActiveUser({ email });
+    await makePendingVaultGrant(userId);
+    const svc = makeService();
+
+    await assert.rejects(
+      () => svc.loginWithAssertion(signAssertion(claimsFor(email, { jti: randomUUID() }))),
+      (err: any) => {
+        assert.equal(err.code, 'AUTH_FORBIDDEN');
+        assert.match(err.message, /pending Vault-authority role grant request/);
+        return true;
+      },
+    );
+
+    // Never bound — a refused first-bind must leave the row unbound, not partially claimed.
+    const row = (await db.select({ alembicSubject: userMaster.alembicSubject }).from(userMaster)
+      .where(eq(userMaster.userId, userId)))[0];
+    assert.equal(row?.alembicSubject, null);
+  });
+
+test('N2: a row with NO pending vault grant binds normally (control — the guard does not '
+  + 'over-refuse an ordinary account)', async () => {
+  const email = `n2-control-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email });
+  const svc = makeService();
+  const result = await svc.loginWithAssertion(signAssertion(claimsFor(email, { jti: randomUUID() })));
+  assert.ok(result.accessToken);
 });
 
 /* ── S3 SECURITY REVIEW ITEM 12 — status column, not just is_active ────────────────────────── */
