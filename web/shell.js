@@ -300,6 +300,12 @@
     var ic = k === 'warehouse' ? 'mappin' : (k === 'superadmin' ? 'activity' : 'grid');
     ROLES[k].nav.unshift(['dashboard', label, ic, '__dash__']);
   });
+  // G4: "Tutorials" — added to every role's nav the same way Dashboard is above (a nav tuple
+  // dispatched by the sentinel endpoint loadView() already special-cases, not a per-role
+  // permission gate — nav ITEMS aren't individually permission-filtered anywhere else in this
+  // file either; loadTutorialView (web/tutorial.js, loaded after this file) itself decides which
+  // lessons a session may actually see, same split as __dash__/loadDashboard).
+  Object.keys(ROLES).forEach(function (k) { ROLES[k].nav.push(['tutorial', 'Tutorials', 'clipboard', '__tutorial__']); });
   var VIEW = { owner: 'superadmin' };
   function roleView(r) { return VIEW[r] || r; }
 
@@ -371,7 +377,10 @@
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
     var navHtml = R.nav.map(function (n) {
       var on = st.nav === n[0];
-      return '<button data-nav="' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
+      // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
+      // target/action steps use to locate this real nav button (web/tutorial.js) — mirrors
+      // ALEMBIC's own one-attribute convention (data-tutorial-target). Inert otherwise.
+      return '<button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
         '<span class="ic">' + icon(n[2], 14) + '</span><span class="nm">' + n[1] + '</span></button>';
     }).join('');
     // The four destinations kept as labelled segments in the phone tab bar (ALEMBIC's DOCK_HOT —
@@ -430,6 +439,10 @@
     wireShell();
     loadView();
     loadAlerts();
+    // G4: WelcomePanel-equivalent — offer the current workspace's tutorial once, only when no
+    // progress row of any status exists yet for it (see web/tutorial.js). Defensive `typeof`
+    // for the same reason as loadTutorialView above.
+    if (typeof tutorialMaybeShowWelcome === 'function') tutorialMaybeShowWelcome();
   }
 
   // COMPONENT_PARITY_MATRIX.json "Card (glass / GCard, dashboard KPI surfaces)" simplified to the
@@ -1754,6 +1767,13 @@
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
     if (item[3] === '__dash__') return loadDashboard();
+    // G4: `loadTutorialView` is defined in web/tutorial.js, a classic script loaded AFTER this
+    // one (index.html) — by the time this branch can actually run (a nav click, always after
+    // boot()), that script has already executed and the global exists. `typeof` (never a bare
+    // reference) so a build that dropped tutorial.js degrades to an honest message instead of a
+    // ReferenceError. RA_VIEWS/registerViews (this file's window.RA hook) is NOT wired into this
+    // render path yet (see that var's own comment above) — this is the real dispatch.
+    if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials are not available in this build.')); }
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
     if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
     var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING · ENCRYPTED CHANNEL…</div>';
@@ -1783,7 +1803,10 @@
     var kpiBand = '<div class="stats">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
-    var newBtn = canNew ? '<button id="ra-new" class="btn p">+ New</button>' : '';
+    // data-tutorial-target="ra-new-record" (G4): one generic target, valid because only ONE
+    // view's "+ New" button is ever on screen at a time — a tutorial action step reaches this
+    // only after its own preceding target step already navigated to the right workspace/view.
+    var newBtn = canNew ? '<button id="ra-new" data-tutorial-target="ra-new-record" class="btn p">+ New</button>' : '';
     if (!rows.length && !st.search.trim()) {
       V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3><p>This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</p>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
       var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };

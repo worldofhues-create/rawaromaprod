@@ -28,6 +28,9 @@ export const ERROR_CODES = [
   // control plane
   'FEATURE_DISABLED',
   'FEATURE_DEGRADED',
+  // tutorial engine (G4) — client's cached lesson totalSteps/version is stale against the
+  // server-side registry (see backend/api/src/tutorial/tutorial.service.ts).
+  'TUTORIAL_STALE_VERSION',
 ] as const;
 
 export const errorCode = z.enum(ERROR_CODES);

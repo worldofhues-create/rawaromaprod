@@ -55,6 +55,7 @@ import { RelayModule } from './relay/relay.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
 import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
+import { TutorialModule } from './tutorial/tutorial.module.js';
 
 @Module({
   imports: [
@@ -89,6 +90,7 @@ import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
     BridgeModule,
     FactsModule,
     PlatformOpsModule,
+    TutorialModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up

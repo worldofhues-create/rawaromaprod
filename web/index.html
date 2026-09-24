@@ -30,5 +30,9 @@
   <script src="/ws-supply.js"></script>
   <script src="/ws-mfg.js"></script>
   <script src="/ws-platform.js"></script>
+  <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
+       raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
+       ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->
+  <script src="/tutorial.js"></script>
 </body>
 </html>
