@@ -51,6 +51,20 @@ import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import type { AuthPrincipal } from '../backend/backend-kernel/src/edge/principal.js';
 import { ConfigService } from '../backend/backend-kernel/src/config/config.service.js';
 
+// ── the factory/vault deterministic id contract (P0 decision, lane FIXV) ───────────────────
+import {
+  pick,
+  demoMaterialId,
+  demoMaterialCodeAt,
+  demoMaterialNameAt,
+  demoFormulaId,
+  demoFormulaVersionId,
+  demoFormulaIngredientPlan,
+  MATERIAL_COUNT,
+  DEMO_FORMULA_DEFS,
+  type DemoFormulaDef,
+} from './demo-seed-shared.js';
+
 // ── org / identity ──────────────────────────────────────────────────────────
 import { OrgService } from '../backend/cluster-org/src/org/org.service.js';
 import { SecurityService } from '../backend/cluster-org/src/security/security.service.js';
@@ -60,6 +74,7 @@ import * as orgSchema from '@ra/data-org';
 import { ClassificationService } from '../backend/cluster-masterdata/src/classification/classification.service.js';
 import { MaterialService } from '../backend/cluster-masterdata/src/material/material.service.js';
 import { MasterdataLookupService } from '../backend/cluster-masterdata/src/masterdata-lookup.service.js';
+import type { MasterdataLookup } from '../backend/cluster-masterdata/src/public-api.js';
 import * as masterdataSchema from '@ra/data-masterdata';
 
 // ── reference (uom) ─────────────────────────────────────────────────────────
@@ -115,8 +130,20 @@ import * as salesSchema from '@ra/data-sales';
 import { FormulasService } from '../backend/cluster-formula/src/formulas/formulas.service.js';
 import { ApprovalsService } from '../backend/cluster-formula/src/approvals/approvals.service.js';
 import { VaultService } from '../backend/cluster-formula/src/vault.service.js';
-import { FormulaLookupService } from '../backend/cluster-formula/src/formula-lookup.service.js';
 import { EnvKmsAdapter } from '../backend/cluster-formula/src/crypto/env-kms.adapter.js';
+import { AwsKmsAdapter } from '../backend/cluster-formula/src/crypto/aws-kms.adapter.js';
+import type { KmsPort } from '../backend/cluster-formula/src/crypto/kms.port.js';
+/** `@aws-sdk/client-kms` is a dependency of `@ra/cluster-formula`, not of this repo's root
+ * `package.json` (nothing else at this level talks to AWS SDKs directly — see
+ * `scripts/vault-rewrap.ts`'s own `AwsKmsAdapter`-only usage). Derived via `AwsKmsAdapter`'s own
+ * constructor instead of importing the SDK package directly, so this file needs no new
+ * dependency just for a test-only injection seam's type. */
+type KMSClient = NonNullable<ConstructorParameters<typeof AwsKmsAdapter>[1]>;
+import type {
+  FormulaLookup as FormulaLookupPort,
+  PickIngredient,
+  CodedInstruction,
+} from '../backend/cluster-formula/src/public-api.js';
 import * as formulaSchema from '@ra/data-formula';
 
 // ── packaging QC + tutorial (raw-SQL BFF modules) ───────────────────────────
@@ -154,13 +181,34 @@ function demoKey(label: string): string {
   return createHash('sha256').update(`RAWPROD-DEMO-SEED::${label}`).digest('base64');
 }
 
+/**
+ * P0 decision (2026-09-24, lane FIXV): seeding must encrypt with `AwsKmsAdapter` whenever
+ * `FORMULA_KMS_KEY_ID` is set (demo: `alias/rawprod-demo-vault-envelope` via role
+ * `rawprod-vault-demo`) — the local/env adapter is for tests only. Unlike
+ * `formula.module.ts`'s own `resolveKmsAdapter` (which additionally REQUIRES
+ * `FORMULA_KMS_KEY_ID` whenever `APP_ENV=prod`), this seed script already refuses to run at all
+ * under `APP_ENV=prod`/`NODE_ENV=production` (`assertNotProd`) — so the gate here is simply
+ * "is a real KMS key configured", not "are we in prod". A test run sets neither
+ * `FORMULA_KMS_KEY_ID` nor `kmsClient` and gets the same `EnvKmsAdapter` it always has.
+ */
+export function resolveSeedKmsAdapter(config: ConfigService, kmsClient?: KMSClient): KmsPort {
+  if (config.get('FORMULA_KMS_KEY_ID')) return new AwsKmsAdapter(config, kmsClient);
+  return new EnvKmsAdapter(config);
+}
+
 export interface DemoSeedOptions {
   databaseUrl?: string;
   formulaDatabaseUrl?: string;
   quiet?: boolean;
+  /** Test-only seam: inject a mocked `@aws-sdk/client-kms` `KMSClient` into `AwsKmsAdapter` when
+   * `FORMULA_KMS_KEY_ID` is set (see `resolveSeedKmsAdapter`) — mirrors `AwsKmsAdapter`'s own
+   * constructor seam. A real seed run never sets this; it always gets a real client off the
+   * ambient AWS credential/region chain. */
+  kmsClient?: KMSClient;
 }
 
-export interface DemoSeedSummary {
+/** Everything the FACTORY phase (app box, `rawprod_demo`) seeds. */
+export interface FactorySeedSummary {
   org: string;
   users: number;
   roles: number;
@@ -168,8 +216,6 @@ export interface DemoSeedSummary {
   vendors: number;
   vendorMappings: number;
   productSkus: number;
-  formulas: number;
-  formulaVersionsApproved: number;
   purchaseRequests: number;
   rfqs: number;
   purchaseOrders: number;
@@ -200,6 +246,17 @@ export interface DemoSeedSummary {
   locationSchemaAvailable: boolean;
 }
 
+/** Everything the VAULT phase (vault box, `vault_demo`) seeds. */
+export interface VaultSeedSummary {
+  formulas: number;
+  formulaVersionsApproved: number;
+}
+
+/** The combined summary `runDemoSeed` (both phases, one process — local dev / tests only)
+ * returns. Kept as one flat type so existing callers (backend/api/src/__tests__/
+ * demo-seed.test.ts) don't need to change shape. */
+export type DemoSeedSummary = FactorySeedSummary & VaultSeedSummary;
+
 let out: (msg: string) => void = (msg) => console.log(msg);
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -211,7 +268,8 @@ const DAY_MS = 86_400_000;
  * stay real wall-clock, since this really is when the seed ran; see README). */
 const ago = (days: number): Date => new Date(Date.now() - days * DAY_MS);
 const isoDate = (days: number): string => ago(days).toISOString().slice(0, 10);
-const pick = <T>(arr: readonly T[], i: number): T => arr[((i % arr.length) + arr.length) % arr.length]!;
+// `pick`/`sharesFor`/`MATERIAL_COUNT`/`MATERIAL_FAMILIES` now live in demo-seed-shared.ts (the
+// factory/vault deterministic id contract) — imported above, not redefined here.
 
 function principalFor(userId: string, roles: string[], permissions: string[] = []): AuthPrincipal {
   const now = Math.floor(Date.now() / 1000);
@@ -254,7 +312,6 @@ const ROLE_CODES = [
 ] as const;
 const VAULT_AUTHORITY_ROLES = new Set(['formulator', 'vault_approver']);
 
-const MATERIAL_COUNT = 60;
 const VENDOR_COUNT = 12;
 const PRODUCTION_ORDER_COUNT = 30;
 /** ALEMBIC's own DEMO-ORD-#### numbering (lane D2) — this lane's production requirements
@@ -264,32 +321,90 @@ const DEMO_ORD_START = 3;
  * only by the importer, never looked up against a real ALEMBIC tenant in this demo). */
 const DEMO_ALEMBIC_ORG_ID = '00000000-0000-7000-8000-00000000a1ec';
 
-const MATERIAL_FAMILIES = [
-  'Citrus Accord', 'Floral Heart', 'Woody Base', 'Amber Blend', 'Green Note', 'Musk Base',
-  'Spice Accord', 'Aquatic Note', 'Powdery Base', 'Fruity Accord',
-] as const;
-
 /* ════════════════════════════════════════════════════════════════════════
  * main
  * ════════════════════════════════════════════════════════════════════════ */
 
-export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedSummary> {
+/**
+ * VAULT phase — runs on the vault box, seals the 2 demo formulas straight into `vault_demo`
+ * through the real vault-main services (VaultService/FormulasService/ApprovalsService, the
+ * same classes `backend/api/src/vault-main.ts`'s `VaultAppModule` wires in VAULT_MODE=true),
+ * encrypted with whichever `KmsPort` `resolveSeedKmsAdapter` picks. Holds NO connection of any
+ * kind to the main (`rawprod_demo`) database — see `unusedMasterdataLookup` below.
+ */
+export async function runDemoSeedVault(opts: DemoSeedOptions = {}): Promise<VaultSeedSummary> {
+  assertNotProd();
+  if (opts.quiet) out = () => {};
+
+  const formulaDatabaseUrl = opts.formulaDatabaseUrl ?? process.env.FORMULA_DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_dev';
+  // Non-prod-only fallback KEK for EnvKmsAdapter (see demoKey's doc comment) — never consulted
+  // once FORMULA_KMS_KEY_ID is set, since resolveSeedKmsAdapter picks AwsKmsAdapter instead.
+  process.env.FORMULA_KEK = process.env.FORMULA_KEK ?? demoKey('formula-kek');
+  // ConfigService validates the WHOLE app env schema even though this phase only ever reads
+  // FORMULA_KEK/FORMULA_KMS_KEY_ID/FORMULA_KMS_REGION off it — JWT_SECRET is that schema's one
+  // field with no default, so it needs a value to construct at all. Never read for anything
+  // JWT-related here (no HTTP layer in this script).
+  process.env.JWT_SECRET = process.env.JWT_SECRET ?? demoKey('jwt-secret-unused-by-this-script');
+
+  const formulaSql = postgres(formulaDatabaseUrl, { max: 5, prepare: false });
+  try {
+    out(`ALEMBIC OS Demo Factory (vault phase) — sealing formulas against ${formulaDatabaseUrl}`);
+
+    const formulaDb = dbFor(formulaSql, formulaSchema);
+    const kms = resolveSeedKmsAdapter(new ConfigService(process.env), opts.kmsClient);
+    const vaultService = new VaultService(formulaDb, kms);
+    const formulasService = new FormulasService(formulaDb, kms, vaultService, unusedMasterdataLookup);
+    const approvalsService = new ApprovalsService(formulaDb, vaultService);
+
+    const vault = await ensureFormulaVault({ formulaSql, vaultService, formulasService, approvalsService });
+
+    const summary: VaultSeedSummary = {
+      formulas: vault.formulaCount,
+      formulaVersionsApproved: vault.approvedVersionCount,
+    };
+    out('── ALEMBIC OS Demo Factory seed (vault phase) complete ──');
+    out(JSON.stringify(summary, null, 2));
+    return summary;
+  } finally {
+    await formulaSql.end({ timeout: 5 });
+  }
+}
+
+/**
+ * `FormulasService.searchMaterials` is the ONLY method that reads its injected
+ * `MasterdataLookup` — never called by anything the vault phase does (createFormula,
+ * createVersion, addIngredients, finalizeVersion). A real `MasterdataLookupService` would need
+ * a live connection to `rawprod_demo`'s masterdata schema, i.e. exactly the main-DB credential
+ * `VaultAppModule`'s design principle forbids this box from ever holding — a throwing stub
+ * keeps that invariant honest instead of quietly wiring a connection nothing here uses.
+ */
+const unusedMasterdataLookup: MasterdataLookup = {
+  async findMaterial(): Promise<never> {
+    throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
+  },
+  async findAliasForMaterial(): Promise<never> {
+    throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
+  },
+  async findAliasesForMaterials(): Promise<never> {
+    throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
+  },
+  async searchMaterials(): Promise<never> {
+    throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
+  },
+};
+
+/**
+ * FACTORY phase — runs on the app box, seeds everything in `rawprod_demo`. References the
+ * vault phase's formula/material ids through the deterministic id contract
+ * (scripts/demo-seed-shared.ts) only; opens no connection of any kind to `vault_demo`/vault-pg.
+ */
+export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<FactorySeedSummary> {
   assertNotProd();
   if (opts.quiet) out = () => {};
 
   const databaseUrl = opts.databaseUrl ?? process.env.DATABASE_URL ?? 'postgres://apple@localhost:5432/rawprod_dev';
-  const formulaDatabaseUrl = opts.formulaDatabaseUrl ?? process.env.FORMULA_DATABASE_URL ?? databaseUrl;
-  // Non-prod-only stable demo secrets (see demoKey's doc comment) — never real credentials,
-  // never a tenant integration secret (those stay admin-configured self-service, per the
-  // repo's connector convention; this is this SCRIPT's own throwaway crypto material).
-  process.env.FORMULA_KEK = process.env.FORMULA_KEK ?? demoKey('formula-kek');
-  // ConfigService validates the WHOLE app env schema (backend/backend-kernel/src/config/
-  // config.schema.ts) even though this script only ever reads FORMULA_KEK off it — JWT_SECRET
-  // is that schema's one field with no default, so it needs a value to construct at all. Never
-  // read for anything JWT-related here (no HTTP layer in this script).
-  process.env.JWT_SECRET = process.env.JWT_SECRET ?? demoKey('jwt-secret-unused-by-this-script');
   // BRIDGE_HMAC_KEK seals the connector's own HMAC secret at rest (backend/api/src/bridge/
-  // secret-box.ts) — same demo-only, stable-across-runs posture as FORMULA_KEK above.
+  // secret-box.ts) — same demo-only, stable-across-runs posture as demoKey's other callers.
   process.env.BRIDGE_HMAC_KEK = process.env.BRIDGE_HMAC_KEK ?? demoKey('bridge-hmac-kek');
   // LANE D1 (coordinator note, post-merge): this deployment IS the demo showcase environment —
   // RAWPROD_ENVIRONMENT=demo is what lets AuthService ever mint/accept a session for the
@@ -301,7 +416,6 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
   const bridgeHmacSecret = process.env.DEMO_BRIDGE_HMAC_SECRET ?? demoKey('bridge-hmac-secret');
 
   const sql = postgres(databaseUrl, { max: 10, prepare: false });
-  const formulaSql = formulaDatabaseUrl === databaseUrl ? sql : postgres(formulaDatabaseUrl, { max: 5, prepare: false });
   // TutorialService + AutomationAlertsService get their OWN small connection, isolated from the
   // ~10-connection pool every schema-scoped Drizzle client above shares — observed postgres.js
   // Date-handling faults (a parameter-binding fault minting a fresh tutorial_progress row; a
@@ -311,7 +425,7 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
   const tutorialSql = postgres(databaseUrl, { max: 2, prepare: false });
 
   try {
-    out(`ALEMBIC OS Demo Factory — seeding against ${databaseUrl}`);
+    out(`ALEMBIC OS Demo Factory (factory phase) — seeding against ${databaseUrl}`);
 
     // ── schema-scoped drizzle handles (mirrors backend/test-support/db.ts) ──
     const orgDb = dbFor(sql, orgSchema);
@@ -325,7 +439,6 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
     const packagingDb = dbFor(sql, packagingSchema);
     const salesDb = dbFor(sql, salesSchema);
     const bridgeDb = dbFor(sql, bridgeSchema);
-    const formulaDb = dbFor(formulaSql, formulaSchema);
 
     // ── services (constructed directly — no Nest DI container, exactly the idiom this
     // repo's own tests already use: `new PoService(procurementDb())`) ──
@@ -347,14 +460,12 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
     const stockService = new StockService(inventoryDb);
     const inventoryService = new InventoryService(inventoryDb);
     const inspectionsService = new InspectionsService(qualityDb);
-    const kms = new EnvKmsAdapter(new ConfigService(process.env));
-    const vaultService = new VaultService(formulaDb, kms);
-    const formulaLookup = new FormulaLookupService(vaultService, masterdataLookup);
-    const formulasService = new FormulasService(formulaDb, kms, vaultService, masterdataLookup);
-    const approvalsService = new ApprovalsService(formulaDb, vaultService);
-    const planningService = new PlanningService(productionDb, formulaLookup);
+    // No live FORMULA_LOOKUP/VAULT_PORT — this box has no network path to vault-pg. See
+    // buildStaticFormulaPort's own header comment.
+    const staticFormulaPort = buildStaticFormulaPort(masterdataLookup);
+    const planningService = new PlanningService(productionDb, staticFormulaPort);
     const mixingService = new MixingService(productionDb);
-    const pickingService = new PickingService(productionDb, formulaLookup);
+    const pickingService = new PickingService(productionDb, staticFormulaPort);
     const productionBatchService = new ProductionBatchService(productionDb);
     const packagingCatalogService = new PackagingCatalogService(packagingDb);
     const packagingOrdersService = new PackagingOrdersService(packagingDb);
@@ -382,7 +493,7 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
       uomService, sitesService, warehouseService, storageService, vendorService,
       requirementService, rfqService, poService, gateService, grnService, stockService,
       inventoryService,
-      inspectionsService, vaultService, formulasService, approvalsService, planningService,
+      inspectionsService, planningService,
       mixingService, pickingService, productionBatchService, packagingCatalogService,
       packagingOrdersService, packagingBatchService, reservationService, salesMastersService,
       salesOrdersService, dispatchService, packagingQcService, tutorialService, importerService,
@@ -390,7 +501,7 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
       incomingQcOutcomeService, packagingReleaseService, alertsService,
     };
 
-    const ctx: Ctx = { sql, formulaSql, svc, bridgeHmacSecret };
+    const ctx: Ctx = { sql, svc, bridgeHmacSecret };
 
     // ── phases ──
     const org = await ensureOrg(ctx);
@@ -400,20 +511,19 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
     const uom = await ensureUom(ctx, users.owner);
     const materials = await ensureMaterials(ctx, users.owner, uom);
     const { vendors, mappings } = await ensureVendors(ctx, users.procurement, materials);
-    const vault = await ensureFormulaVault(ctx, users, materials);
-    const catalog = await ensureProductCatalog(ctx, users, vault, locationInfo);
+    const catalog = await ensureProductCatalog(ctx, users, locationInfo);
     const procurementCounts = await ensureProcurement(ctx, users, materials, vendors, uom);
     const receiving = await ensureReceivingAndQc(ctx, users, procurementCounts.pos, locationInfo);
     const warehouseOps = await ensureWarehouseOps(ctx, users, receiving.rmBatchIds);
     await ensureBridgeConnector(ctx, users.owner.userId);
-    const bridgeStory = await ensureBridgeProductionAndFactory(ctx, users, catalog, vault);
+    const bridgeStory = await ensureBridgeProductionAndFactory(ctx, users, catalog);
     const automationDemo = await ensureAutomationRetryAndDeadLetterDemo(ctx, users.owner, materials);
     const alertsRaised = await ensureAlerts(ctx);
     const tutorialRows = await ensureTutorialProgress(ctx, users);
 
     const decisionLogRows = (await sql`select count(*)::int as c from automation.decision_log`)[0] as { c: number };
 
-    const summary: DemoSeedSummary = {
+    const summary: FactorySeedSummary = {
       org: org.organizationCode ?? ORG_CODE,
       users: users.count,
       roles: roles.size,
@@ -421,8 +531,6 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
       vendors: vendors.length,
       vendorMappings: mappings,
       productSkus: catalog.skuIds.length,
-      formulas: vault.formulaCount,
-      formulaVersionsApproved: vault.approvedVersionCount,
       purchaseRequests: procurementCounts.purchaseRequestCount,
       rfqs: procurementCounts.rfqCount,
       purchaseOrders: procurementCounts.pos.length,
@@ -453,19 +561,33 @@ export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedS
       locationSchemaAvailable: locationInfo.available,
     };
 
-    out('── ALEMBIC OS Demo Factory seed complete ──');
+    out('── ALEMBIC OS Demo Factory seed (factory phase) complete ──');
     out(JSON.stringify(summary, null, 2));
     return summary;
   } finally {
     await sql.end({ timeout: 5 });
-    if (formulaSql !== sql) await formulaSql.end({ timeout: 5 });
     await tutorialSql.end({ timeout: 5 });
   }
 }
 
+/**
+ * Combined entry point — BOTH phases, one process. This is what local dev (`pnpm demo:seed`)
+ * and the test suite (backend/api/src/__tests__/demo-seed.test.ts, which points
+ * `DATABASE_URL`/`FORMULA_DATABASE_URL` at the SAME physical database) use; ops runs the two
+ * phases separately instead (`pnpm demo:seed:vault` on the vault box, `pnpm demo:seed:factory`
+ * on the app box — see infra/aws/demo/reset-demo.sh). Order between the two calls below doesn't
+ * matter for correctness — the deterministic id contract (scripts/demo-seed-shared.ts) means
+ * neither phase depends on the other having already run — vault-then-factory is kept here only
+ * to mirror reset-demo.sh's own box ordering.
+ */
+export async function runDemoSeed(opts: DemoSeedOptions = {}): Promise<DemoSeedSummary> {
+  const vault = await runDemoSeedVault(opts);
+  const factory = await runDemoSeedFactory(opts);
+  return { ...factory, ...vault };
+}
+
 interface Ctx {
   sql: Sql;
-  formulaSql: Sql;
   bridgeHmacSecret: string;
   svc: {
     orgService: OrgService;
@@ -486,9 +608,10 @@ interface Ctx {
     stockService: StockService;
     inventoryService: InventoryService;
     inspectionsService: InspectionsService;
-    vaultService: VaultService;
-    formulasService: FormulasService;
-    approvalsService: ApprovalsService;
+    // No vaultService/formulasService/approvalsService here — the factory phase (this box) has
+    // no network path to vault-pg (P0 decision, lane FIXV) and constructs neither. planningService
+    // / pickingService below are instead wired against `buildStaticFormulaPort`, not a live
+    // FormulaLookupService/VaultService.
     planningService: PlanningService;
     mixingService: MixingService;
     pickingService: PickingService;
@@ -697,6 +820,15 @@ async function ensureUsers(ctx: Ctx, organizationId: string, roles: Map<string, 
     await ensureUserRole(ctx, p.userId, roles.get(code)!, code, owner, admin);
   }
 
+  // Structural proof of "the demo showcase role never sees plaintext": showcase's permission
+  // set never carries formula:actual:read — the ONE permission §107 gates the decrypted read
+  // behind, held only by formulator/vault_approver (scripts/ra-roles.ts). Checked here (factory
+  // phase) rather than in the vault phase — this is an in-memory fact about THIS principal's
+  // own permission list, not something the vault side has any way to observe.
+  if (rest.showcase!.permissions.includes('formula:actual:read')) {
+    throw new Error('invariant violated: the showcase principal must never carry formula:actual:read');
+  }
+
   out(`users: ${created} created this run, ${OTHER_ROLES.length + 2} demo personas total`);
   return {
     count: OTHER_ROLES.length + 2,
@@ -808,12 +940,13 @@ async function ensureMaterials(ctx: Ctx, owner: AuthPrincipal, uom: Record<strin
 
   const materials: DemoMaterial[] = [];
   for (let i = 0; i < MATERIAL_COUNT; i++) {
-    const code = `DEMO-MAT-${String(i + 1).padStart(4, '0')}`;
-    const family = pick(MATERIAL_FAMILIES, i);
-    const variant = String(Math.floor(i / MATERIAL_FAMILIES.length) + 1).padStart(2, '0');
-    const name = `Demo ${family} ${variant}`;
+    const code = demoMaterialCodeAt(i);
+    const name = demoMaterialNameAt(i);
     const existing = (await ctx.sql`select material_id as id from masterdata.material where material_code = ${code} limit 1`)[0] as { id: string } | undefined;
     if (existing) { materials.push({ id: existing.id, code, name }); continue; }
+    // materialId is FORCED to demoMaterialId(code) — the deterministic id contract
+    // (scripts/demo-seed-shared.ts) the vault phase's sealed ingredients reference this same id
+    // by, without ever querying this database (no network path from the app box to vault-pg).
     const row = await ctx.svc.materialService.createMaterial({
       materialTypeId: pick(typeIds, i),
       materialCode: code,
@@ -824,7 +957,7 @@ async function ensureMaterials(ctx: Ctx, owner: AuthPrincipal, uom: Record<strin
       minStock: 10,
       maxStock: 500,
       qcRequired: true,
-    }, owner);
+    }, owner, demoMaterialId(code));
     materials.push({ id: extractId(row, 'materialId'), code, name });
   }
   out(`materials: ${materials.length} ready`);
@@ -881,28 +1014,43 @@ async function ensureVendors(
 export interface VaultFormula { formulaId: string; versionId: string; code: string; name: string; }
 export interface VaultResult { formulaCount: number; approvedVersionCount: number; formulas: VaultFormula[]; }
 
-const SHARE_TABLE: Record<number, number[]> = {
-  8: [30, 20, 15, 12, 10, 8, 3, 2],
-  6: [35, 25, 15, 10, 10, 5],
-};
-function sharesFor(n: number): number[] {
-  const t = SHARE_TABLE[n];
-  if (t) return t;
-  const base = Math.floor(100 / n);
-  const arr = Array.from({ length: n }, () => base);
-  arr[0] = arr[0]! + (100 - base * n);
-  return arr;
+/** The vault phase's own minimal context — JUST the formula-schema connection + services. No
+ * `sql` (rawprod_demo), no `productionDb`, nothing that would give this box a reason to hold a
+ * main-DB credential (see vault-app.module.ts's own design principle). Runs on the vault box. */
+interface VaultCtx {
+  formulaSql: Sql;
+  vaultService: VaultService;
+  formulasService: FormulasService;
+  approvalsService: ApprovalsService;
 }
 
-async function ensureFormulaVault(ctx: Ctx, users: DemoUsers, materials: DemoMaterial[]): Promise<VaultResult> {
-  const DEFS: Array<{ code: string; name: string; ingredientCount: number }> = [
-    { code: 'DEMO-FRM-001', name: 'Demo Signature Accord', ingredientCount: 8 },
-    { code: 'DEMO-FRM-002', name: 'Demo Citrus Veil', ingredientCount: 6 },
-  ];
+/**
+ * Two independent, freshly-random bootstrap identities for the vault phase's own two-person
+ * grant (§108 SoD: `ApprovalsService.approveVersion` throws if `approver.userId ===
+ * version.createdBy`). These are VAULT-LOCAL synthetic actors — they do NOT need to match the
+ * `formulator`/`vault_approver` demo users the FACTORY phase separately creates in
+ * `iam.user_master` (rawprod_demo). Nothing on the vault side ever joins `formula.audit_events.
+ * actor_id` back against `iam.user_master` (that table doesn't exist in this database, and
+ * VaultAppModule never gets a credential for the one that does) — the audit chain's tamper-
+ * evidence property (§109.8) depends only on the hash chain, not on the actor id resolving to
+ * a real user row. This is a cosmetic decoupling, not a functional one.
+ */
+function vaultPhaseActors(): { formulator: AuthPrincipal; approver: AuthPrincipal } {
+  return {
+    formulator: principalFor(randomUUID(), ['formulator']),
+    approver: principalFor(randomUUID(), ['vault_approver']),
+  };
+}
+
+async function ensureFormulaVault(ctx: VaultCtx): Promise<VaultResult> {
+  const { formulator, approver } = vaultPhaseActors();
   const formulas: VaultFormula[] = [];
 
-  for (let f = 0; f < DEFS.length; f++) {
-    const def = DEFS[f]!;
+  for (let f = 0; f < DEMO_FORMULA_DEFS.length; f++) {
+    const def: DemoFormulaDef = DEMO_FORMULA_DEFS[f]!;
+    const formulaId = demoFormulaId(def.code);
+    const versionId = demoFormulaVersionId(def.code, 1);
+
     const existing = (await ctx.formulaSql`
       select formula_id as id, current_version_id as version from formula.formula_master where formula_code = ${def.code} limit 1
     `)[0] as { id: string; version: string | null } | undefined;
@@ -912,34 +1060,33 @@ async function ensureFormulaVault(ctx: Ctx, users: DemoUsers, materials: DemoMat
       continue;
     }
 
-    const formulaId = existing
-      ? existing.id
-      : extractId(await ctx.svc.formulasService.createFormula({ formulaCode: def.code, formulaName: def.name }, users.formulator), 'formulaId');
+    if (!existing) {
+      // formulaId/versionId are FORCED to the deterministic id contract
+      // (scripts/demo-seed-shared.ts) — the factory phase (rawprod_demo, a SEPARATE database
+      // with no network path to this one) references these ids from
+      // packaging.product_master.formula_id and production_order.formula_version_id without
+      // ever querying this database.
+      await ctx.formulasService.createFormula({ formulaCode: def.code, formulaName: def.name }, formulator, formulaId);
+      await ctx.formulasService.createVersion({ formulaId, versionNumber: 1 }, formulator, versionId);
+    }
 
-    const version = await ctx.svc.formulasService.createVersion({ formulaId, versionNumber: 1 }, users.formulator);
-    const versionId = extractId(version, 'formulaVersionId');
+    // Same {materialId, percentage, sequenceNo} set the factory phase's static
+    // pick-list/coded-instruction port (buildStaticFormulaPort) independently recomputes for
+    // PlanningService/PickingService — a pure function of (formulaIndex, ingredientCount), see
+    // demo-seed-shared.ts's demoFormulaIngredientPlan doc comment.
+    const plan = demoFormulaIngredientPlan(f, def.ingredientCount);
+    await ctx.formulasService.addIngredients(versionId, {
+      ingredients: plan.map((p) => ({ materialId: p.materialId, percentage: p.percentage, sequenceNo: p.sequenceNo })),
+    }, formulator);
 
-    const shares = sharesFor(def.ingredientCount);
-    const chosen = Array.from({ length: def.ingredientCount }, (_, i) => pick(materials, f * 17 + i * 7));
-    await ctx.svc.formulasService.addIngredients(versionId, {
-      ingredients: chosen.map((m, i) => ({ materialId: m.id, percentage: shares[i]!, sequenceNo: i + 1 })),
-    }, users.formulator);
-
-    await ctx.svc.formulasService.finalizeVersion(versionId, users.formulator);
-    await ctx.svc.approvalsService.submitForReview(versionId, {}, users.formulator);
+    await ctx.formulasService.finalizeVersion(versionId, formulator);
+    await ctx.approvalsService.submitForReview(versionId, {}, formulator);
     // §108 SoD, for real: ApprovalsService.approveVersion THROWS if approver.userId ===
     // version.createdBy — this is a genuinely different user, not a role-only distinction.
-    await ctx.svc.approvalsService.approveVersion(versionId, { remarks: 'Approved for the ALEMBIC OS Demo Factory story.' }, users.approver);
+    await ctx.approvalsService.approveVersion(versionId, { remarks: 'Approved for the ALEMBIC OS Demo Factory story.' }, approver);
 
     formulas.push({ formulaId, versionId, code: def.code, name: def.name });
     out(`formula vault: "${def.name}" sealed by the formulator, approved by a different vault_approver`);
-  }
-
-  // Structural proof of "the demo showcase role never sees plaintext": showcase's permission
-  // set never carries formula:actual:read — the ONE permission §107 gates the decrypted read
-  // behind, held only by formulator/vault_approver (scripts/ra-roles.ts).
-  if (users.showcase.permissions.includes('formula:actual:read')) {
-    throw new Error('invariant violated: the showcase principal must never carry formula:actual:read');
   }
 
   return { formulaCount: formulas.length, approvedVersionCount: formulas.length, formulas };
@@ -958,7 +1105,7 @@ export interface CatalogResult {
 }
 
 async function ensureProductCatalog(
-  ctx: Ctx, users: DemoUsers, vault: VaultResult, loc: LocationInfo,
+  ctx: Ctx, users: DemoUsers, loc: LocationInfo,
 ): Promise<CatalogResult> {
   const actor = users.packaging;
   const PKG_MATS: Array<[string, string]> = [
@@ -992,13 +1139,18 @@ async function ensureProductCatalog(
 
   const skuIds: string[] = [];
   const skuCodes: string[] = [];
-  for (let f = 0; f < vault.formulas.length; f++) {
-    const formula = vault.formulas[f]!;
+  for (let f = 0; f < DEMO_FORMULA_DEFS.length; f++) {
+    const def = DEMO_FORMULA_DEFS[f]!;
+    // formulaId comes from the deterministic id contract (scripts/demo-seed-shared.ts), not
+    // from a live query against vault_demo (no network path from the app box to vault-pg) —
+    // the vault phase creates the REAL formula.formula_master row under this exact same id,
+    // independently, on the vault box. See ensureFormulaVault's own header comment.
+    const formulaId = demoFormulaId(def.code);
     const productCode = `DEMO-PRD-${String(f + 1).padStart(3, '0')}`;
     const existingP = (await ctx.sql`select product_id as id from packaging.product_master where product_code = ${productCode} limit 1`)[0] as { id: string } | undefined;
     const productId = existingP
       ? existingP.id
-      : extractId(await ctx.svc.packagingCatalogService.createProduct({ formulaId: formula.formulaId, productCategoryId: categoryId, productCode, productName: formula.name }, actor), 'productId');
+      : extractId(await ctx.svc.packagingCatalogService.createProduct({ formulaId, productCategoryId: categoryId, productCode, productName: def.name }, actor), 'productId');
 
     for (const [suffix, size] of [['050', '50 ml'], ['100', '100 ml']] as const) {
       const skuCode = `DEMO-SKU-${String(f + 1).padStart(3, '0')}-${suffix}`;
@@ -1016,7 +1168,7 @@ async function ensureProductCatalog(
       skuCodes.push(skuCode);
     }
   }
-  out(`catalog: ${skuIds.length} SKUs ready across ${vault.formulas.length} demo products`);
+  out(`catalog: ${skuIds.length} SKUs ready across ${DEMO_FORMULA_DEFS.length} demo products`);
   return { skuIds, skuCodes, packagingMaterialIds };
 }
 
@@ -1439,9 +1591,72 @@ async function ensureTransporter(ctx: Ctx, actor: AuthPrincipal): Promise<string
   return extractId(row, 'transporterId');
 }
 
+/**
+ * A `FormulaLookup`/`VaultPort`-shaped object the FACTORY phase passes to `PlanningService`
+ * (`getPickList`) and `PickingService` (`resolveManufacturingInstruction`) INSTEAD OF a live
+ * `FormulaLookupService` backed by a real `VaultService` — this box has no network path to
+ * vault-pg (P0 decision, lane FIXV), so it cannot decrypt anything.
+ *
+ * It doesn't need to: `demoFormulaIngredientPlan` (scripts/demo-seed-shared.ts) is a PURE
+ * function of (formulaIndex, ingredientCount) that reproduces the exact same
+ * `{materialId, percentage, sequenceNo}` set the vault phase independently seals under the SAME
+ * deterministic ids — so this can answer both reads with zero decrypt, zero DB read of any
+ * formula/vault schema, and zero coupling to whether the vault phase has run yet. Alias
+ * resolution for `resolveManufacturingInstruction` (RM_ALIAS, never a raw material_id) is a
+ * REAL, local read against THIS box's own `masterdata` schema — the one part of this that
+ * genuinely needs a live lookup, and it's already local.
+ *
+ * This is a demo-seed-only stand-in — never used by the real running app (which wires
+ * `FORMULA_LOOKUP`/`VAULT_PORT` for real, see `formula.module.ts` / `vault-port.ts`). Real
+ * customer formulas are never faked this way; only this script's own known, synthetic,
+ * already-fully-determined demo ingredients are.
+ */
+function buildStaticFormulaPort(masterdataLookup: MasterdataLookupService): FormulaLookupPort {
+  const byVersionId = new Map<string, { formulaIndex: number; ingredientCount: number }>();
+  DEMO_FORMULA_DEFS.forEach((def, formulaIndex) => {
+    byVersionId.set(demoFormulaVersionId(def.code, 1), { formulaIndex, ingredientCount: def.ingredientCount });
+  });
+
+  const plan = (formulaVersionId: string) => {
+    const found = byVersionId.get(formulaVersionId);
+    return found ? demoFormulaIngredientPlan(found.formulaIndex, found.ingredientCount) : null;
+  };
+
+  return {
+    async getFloorView() {
+      // Unused by this seed script's own story (nothing here calls the floor-view read) — kept
+      // as a documented not-implemented stub so this object satisfies the full FormulaLookup
+      // shape, exactly like the test suite's own `unusedFormulaLookup` fixture
+      // (backend/api/src/__tests__/demo-seed.test.ts).
+      return null;
+    },
+    async getPickList(formulaVersionId: string): Promise<PickIngredient[] | null> {
+      const p = plan(formulaVersionId);
+      return p ? p.map(({ materialId, percentage, sequenceNo }) => ({ materialId, percentage, sequenceNo })) : null;
+    },
+    async resolveManufacturingInstruction(
+      formulaVersionId: string,
+      permittedBatchQuantity: number,
+    ): Promise<CodedInstruction[] | null> {
+      const p = plan(formulaVersionId);
+      if (!p) return null;
+      return Promise.all(
+        p.map(async ({ materialId, percentage, sequenceNo }) => {
+          const alias = await masterdataLookup.findAliasForMaterial(materialId);
+          const quantity = Math.round((percentage / 100) * permittedBatchQuantity * 1000) / 1000;
+          return { code: alias?.aliasName ?? null, quantity, uom: 'kg', sequenceNo };
+        }),
+      );
+    },
+  };
+}
+
 async function ensureBridgeProductionAndFactory(
-  ctx: Ctx, users: DemoUsers, catalog: CatalogResult, vault: VaultResult,
+  ctx: Ctx, users: DemoUsers, catalog: CatalogResult,
 ): Promise<BridgeStoryResult> {
+  // formulaVersionId comes from the deterministic id contract (scripts/demo-seed-shared.ts),
+  // not from a live vault query — see buildStaticFormulaPort's own header comment.
+  const formulaVersions = DEMO_FORMULA_DEFS.map((def) => ({ versionId: demoFormulaVersionId(def.code, 1), code: def.code }));
   let requirementCount = 0;
   let productionOrderCount = 0;
   let mixingSessionCount = 0;
@@ -1465,7 +1680,7 @@ async function ensureBridgeProductionAndFactory(
     const skuIdx = i % catalog.skuIds.length;
     const skuId = catalog.skuIds[skuIdx]!;
     const skuCode = catalog.skuCodes[skuIdx]!;
-    const version = vault.formulas[Math.floor(skuIdx / 2) % vault.formulas.length]!;
+    const version = formulaVersions[Math.floor(skuIdx / 2) % formulaVersions.length]!;
 
     let requirementRow = (await ctx.sql`
       select alembic_requirement_id as id, production_order_id as poid from bridge.production_requirement where order_ref = ${orderRef} limit 1

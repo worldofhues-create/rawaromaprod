@@ -21,6 +21,25 @@ default to stable, non-secret, demo-only values derived from a fixed label when 
 `demoKey()` in the script. The script refuses to run at all when `APP_ENV=prod` /
 `NODE_ENV=production`.
 
+### Two independent phases (P0 decision, 2026-09-24, lane FIXV)
+
+`pnpm demo:seed` above (`runDemoSeed`) runs BOTH phases in one process against one database —
+for local dev and the test suite only. In ops the two phases run separately, on separate boxes,
+against separate databases, with no network path between them (`infra/aws/demo/reset-demo.sh`):
+
+```
+pnpm demo:seed:factory   # DATABASE_URL only — app box, rawprod_demo. Never touches vault_demo.
+pnpm demo:seed:vault     # FORMULA_DATABASE_URL (+ FORMULA_KMS_KEY_ID) only — vault box, vault_demo.
+```
+
+The vault phase seals the 2 demo formulas through the real vault-main services, encrypted with
+`AwsKmsAdapter` whenever `FORMULA_KMS_KEY_ID` is set (`resolveSeedKmsAdapter` — the local/env KEK
+adapter is for tests only). The factory phase never opens a connection to the formula database at
+all; it references the vault phase's material/formula ids through a pure, deterministic function
+of each entity's own business-key code instead of a live query — see `scripts/demo-seed-shared.ts`
+and `demo-seed.ts`'s `buildStaticFormulaPort`. Order between the two doesn't matter for
+correctness.
+
 ## ID conventions
 
 | Entity | Key pattern | Count |

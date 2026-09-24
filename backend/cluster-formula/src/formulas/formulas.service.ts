@@ -79,13 +79,23 @@ export class FormulasService {
 
   /* ── formula master (+ vault) ─────────────────────────────────────── */
 
-  /** Create the formula and its vault row (fresh DEK, wrapped under the KEK/CMK). */
-  async createFormula(body: CreateFormula, principal: AuthPrincipal) {
+  /**
+   * Create the formula and its vault row (fresh DEK, wrapped under the KEK/CMK).
+   *
+   * `overrideFormulaId` is a SCRIPT-ONLY escape hatch — never part of `CreateFormula`'s Zod
+   * schema, so no HTTP caller can reach it (`formulas.controller.ts` always calls
+   * `createFormula(body, principal)` with exactly two arguments). It exists for
+   * `scripts/demo-seed.ts`'s deterministic id contract (`scripts/demo-seed-shared.ts`): the
+   * demo's factory phase (`rawprod_demo`, a DIFFERENT database than this one) references this
+   * formula's id from `packaging.product_master.formula_id` without ever querying `vault_demo`
+   * (no network path from the app box to vault-pg — P0 decision, lane FIXV).
+   */
+  async createFormula(body: CreateFormula, principal: AuthPrincipal, overrideFormulaId?: string) {
     // Generated up front (not inside the tx below) so the KMS EncryptionContext — bound to
     // {formulaId, vaultId}, see kms.port.ts VaultKeyContext — is fixed BEFORE the wrap call,
     // and the very same ids land in the inserted rows. The plaintext DEK itself isn't needed
     // here (no ingredients sealed yet) — only the wrapped form is persisted.
-    const formulaId = uuidv7();
+    const formulaId = overrideFormulaId ?? uuidv7();
     const formulaVaultId = uuidv7();
     const { wrapped } = await this.kms.generateDek({ formulaId, vaultId: formulaVaultId });
 
@@ -148,9 +158,12 @@ export class FormulasService {
 
   /* ── formula version ──────────────────────────────────────────────── */
 
-  async createVersion(body: CreateVersion, principal: AuthPrincipal) {
+  /** `overrideVersionId` — same script-only escape hatch as `createFormula`'s, and for the same
+   * reason (the demo's factory phase references this version's id from production orders
+   * without ever querying `vault_demo`). Never reachable via the Zod-validated HTTP DTO. */
+  async createVersion(body: CreateVersion, principal: AuthPrincipal, overrideVersionId?: string) {
     return this.db.transaction(async (tx) => {
-      const versionId = uuidv7();
+      const versionId = overrideVersionId ?? uuidv7();
       const row = (
         await tx
           .insert(formulaVersion)

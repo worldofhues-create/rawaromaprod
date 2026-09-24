@@ -19,6 +19,8 @@
     "db:seed": "tsx scripts/db-seed.ts",
     "db:seed:data": "tsx scripts/db-seed-data.ts",
     "demo:seed": "tsx scripts/demo-seed.ts",
+    "demo:seed:factory": "tsx scripts/demo-seed-factory.ts",
+    "demo:seed:vault": "tsx scripts/demo-seed-vault.ts",
     "db:provision": "node scripts/db-provision.mjs",
     "vault:rewrap": "tsx scripts/vault-rewrap.ts",
     "test": "node backend/test-support/run-tests.mjs",

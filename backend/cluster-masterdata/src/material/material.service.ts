@@ -44,9 +44,18 @@ export class MaterialService {
 
   /* ── material — create emits masterdata.material.created ─────────────── */
 
-  async createMaterial(body: CreateMaterial, principal: AuthPrincipal) {
+  /**
+   * `overrideMaterialId` is a SCRIPT-ONLY escape hatch (never part of `CreateMaterial`'s Zod
+   * schema, so no HTTP caller can ever reach it via `ZodValidationPipe` — see
+   * `material.controller.ts`, which always calls `createMaterial(body, principal)` with exactly
+   * two arguments). It exists solely for `scripts/demo-seed.ts`'s deterministic id contract
+   * (`scripts/demo-seed-shared.ts`): the demo's factory phase (this DB) and vault phase (a
+   * SEPARATE `vault_demo` database on a box with no network path to this one) must agree on the
+   * same material id for a given material code without ever querying each other.
+   */
+  async createMaterial(body: CreateMaterial, principal: AuthPrincipal, overrideMaterialId?: string) {
     return this.db.transaction(async (tx) => {
-      const materialId = uuidv7();
+      const materialId = overrideMaterialId ?? uuidv7();
       const row = ensure(
         (
           await tx
