@@ -449,6 +449,7 @@
       err.textContent = 'Sign-in isn\'t set up for this build.';
     }
     var card = h('div', { class: 'login-card' }, [
+      h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
       h('h1', { class: 'mark' }, ['Vault']),
       h('p', { class: 'sub' }, ['Raw Aroma Chem formula access.']),
       goBtn, err,
@@ -476,7 +477,7 @@
     });
     var rail = h('nav', { class: 'rail', id: 'vault-rail' }, [
       h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.panel, 16)]),
-      h('button', { class: 'rb', 'aria-label': 'Vault, Raw Aroma Chem', onclick: function () { location.hash = '#/formulas'; } }, [h('span', { class: 'm', 'aria-hidden': 'true' }, ['RAC']), h('span', { class: 't' }, ['Vault', h('small', {}, ['Raw Aroma Chem'])])]),
+      h('button', { class: 'rb', 'aria-label': 'Vault, Raw Aroma Chem', onclick: function () { location.hash = '#/formulas'; } }, [/* UX-D: the logo, not the RAC tile -- logo/brand.css */ h('img', { class: 'brand-logo brand-logo--rail', src: '/logo/raw-logo-ondark.png', srcset: '/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x', width: '66', height: '30', alt: '' }), h('span', { class: 't' }, ['Vault', h('small', {}, ['Raw Aroma Chem'])])]),
       h('div', { class: 'rail-deep' }, [h('div', { class: 'rs' }, ['Formulas']), h('div', {}, navButtons)]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),

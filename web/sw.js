@@ -5,10 +5,16 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v86';
+const CACHE = 'ra-shell-v87'; // v87: UX-D welcome, logo and icons
 const SHELL = [
   '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
-  '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
+  '/qrcode.js', '/manifest.webmanifest',
+  // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
+  '/rac-preload.js', '/logo/brand.css',
+  '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',
+  '/logo/raw-logo-ondark.png', '/logo/raw-logo-ondark@2x.png', '/logo/raw-logo-ondark@3x.png',
+  '/favicon.ico', '/favicon-16.png', '/favicon-32.png', '/favicon-48.png', '/apple-touch-icon.png',
+  '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png',
   // ALEMBIC visual contract (ui-contract/) — vendored tokens/fonts/shell CSS. Bumped past the old
   // /fonts/*.woff2 (Urbanist) precache entries, which index.html no longer references.
   '/ui-contract/alembic-tokens.css', '/ui-contract/shell.css',
@@ -19,6 +25,7 @@ const SHELL = [
   '/ui-contract/fonts/jetbrains-mono-400-latin.woff2', '/ui-contract/fonts/jetbrains-mono-400-latin-ext.woff2',
   '/ui-contract/fonts/jetbrains-mono-500-latin.woff2', '/ui-contract/fonts/jetbrains-mono-500-latin-ext.woff2',
   '/ui-contract/fonts/jetbrains-mono-600-latin.woff2', '/ui-contract/fonts/jetbrains-mono-600-latin-ext.woff2',
+  '/ui-contract/fonts/cabinet-grotesk-variable.woff2',
 ];
 
 self.addEventListener('install', (e) => {

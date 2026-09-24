@@ -8,7 +8,12 @@
        service-worker registration anywhere in this page or vault.js. §109.4: "Vault Console
        is NOT a PWA." vault.js also actively unregisters any SW previously registered for
        this origin/scope, in case a stray one exists from local dev testing. -->
-  <link rel="icon" href="data:,">
+  <!-- UX-D: the shared favicon only. Still NO manifest, NO apple-touch/app tags and NO service
+       worker -- §109.4, Vault is not a PWA. -->
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
        same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
@@ -19,8 +24,11 @@
   <link rel="stylesheet" href="/fonts/jetbrains-mono.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
   <link rel="stylesheet" href="/vault.css">
+  <link rel="stylesheet" href="/logo/brand.css">
 </head>
 <body>
+  <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body>. -->
+  <script src="/rac-preload.js" data-mount="#root" data-logo="/logo/raw-logo@3x.png" data-fonts="/fonts/"></script>
   <div id="root"></div>
   <script src="/vault.js"></script>
 </body>

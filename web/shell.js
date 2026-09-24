@@ -416,7 +416,8 @@
       '<nav class="rail" id="ra-side">' +
         '<button class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + icon('panel', 16) + '</button>' +
         '<button class="rb" aria-label="Factory, Raw Aroma Chem">' +
-          '<span class="m" aria-hidden="true">RAC</span>' +
+          // UX-D: the logo (reversed art on the ink rail), not the RAC tile -- logo/brand.css.
+          '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' +
           '<span class="t">Factory<small>Raw Aroma Chem</small></span></button>' +
         '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div>' + navHtml + '</div></div>' +
         '<div class="rme">' +
@@ -2005,6 +2006,7 @@
     $('app').className = '';
     $('app').innerHTML =
       '<div class="login-wrap"><div class="login-card">' +
+        '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aroma Chem production.</p>' +
         '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
