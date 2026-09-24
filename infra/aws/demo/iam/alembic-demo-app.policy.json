@@ -1,0 +1,25 @@
+{
+ "Version": "2012-10-17",
+ "Statement": [
+  {
+   "Sid": "DemoAriaMantle",
+   "Effect": "Allow",
+   "Action": "bedrock-mantle:CreateInference",
+   "Resource": "arn:aws:bedrock-mantle:us-west-2:859485559854:project/*"
+  },
+  {
+   "Sid": "DemoBedrockInvoke",
+   "Effect": "Allow",
+   "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream", "bedrock:Converse", "bedrock:ConverseStream"],
+   "Resource": "*",
+   "Condition": {"StringEquals": {"aws:RequestedRegion": "us-west-2"}}
+  },
+  {
+   "Sid": "DemoTranslate",
+   "Effect": "Allow",
+   "Action": "translate:TranslateText",
+   "Resource": "*",
+   "Condition": {"StringEquals": {"aws:RequestedRegion": "us-west-2"}}
+  }
+ ]
+}

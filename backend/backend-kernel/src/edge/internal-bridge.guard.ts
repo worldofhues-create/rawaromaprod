@@ -17,11 +17,15 @@
  * bad/replayed signature all refuse (401) — never a silent pass, same posture every other
  * optional security config in this codebase takes (`ALEMBIC_ASSERTION_VERIFY_KEY`,
  * `FORMULA_KEK`, …).
+ *
+ * L1: a valid signature is accepted ONCE — `InternalBridgeReplayCache` (in-memory, bounded,
+ * per-process; see its doc for the single-process assumption) refuses a reused signature within
+ * the skew window.
  */
 import { type CanActivate, type ExecutionContext, Inject, Injectable } from '@nestjs/common';
 import { ConfigService } from '../config/config.service.js';
 import { DomainError } from './domain-error.js';
-import { verifyInternalBridgeSignature } from './internal-bridge-signing.js';
+import { InternalBridgeReplayCache, verifyInternalBridgeSignature } from './internal-bridge-signing.js';
 
 interface InternalBridgeRequest {
   method?: string;
@@ -37,6 +41,8 @@ function header(req: InternalBridgeRequest, name: string): string | undefined {
 
 @Injectable()
 export class InternalBridgeGuard implements CanActivate {
+  private readonly replayCache = new InternalBridgeReplayCache();
+
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
   canActivate(context: ExecutionContext): boolean {
@@ -72,6 +78,13 @@ export class InternalBridgeGuard implements CanActivate {
       throw DomainError.unauthorized(
         'INTERNAL_BRIDGE_UNAUTHORIZED',
         'Invalid or expired internal bridge signature.',
+      );
+    }
+    // Only record AFTER the signature verified, so unauthenticated junk can't fill the cache.
+    if (!this.replayCache.checkAndRecord(signature)) {
+      throw DomainError.unauthorized(
+        'INTERNAL_BRIDGE_UNAUTHORIZED',
+        'Replayed internal bridge signature.',
       );
     }
     return true;

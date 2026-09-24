@@ -1,0 +1,12 @@
+# H1: root-owned refresher of the demo AWS session (see infra/aws/demo/demo-aws-creds.sh). Runs as root with IMDS;
+# the demo app units themselves are IMDS-denied and read only the 0640 file this writes.
+[Unit]
+Description=Refresh short-lived demo AWS credentials (vault box)
+After=network-online.target
+Wants=network-online.target
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/rawaroma/demo/demo-aws-creds.sh vault
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true

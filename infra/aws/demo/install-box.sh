@@ -18,7 +18,7 @@ app)
   install -d -o alembic-demo -g alembic-demo -m 750 /var/log/alembic-demo
   install -d -o rawprod-demo -g rawprod-demo -m 750 /var/log/rawprod-demo
   for u in alembic-demo-api.socket alembic-demo-api.service alembic-demo-web.service alembic-demo-migrate.service \
-           rawprod-demo-api.service rawprod-demo-migrate.service; do unit $u; done
+           rawprod-demo-api.service rawprod-demo-migrate.service alembic-demo-aws-creds.service alembic-demo-aws-creds.timer; do unit $u; done
   systemctl daemon-reload
   "$LIB/render-demo-env.sh" app
   # demo origin vhost
@@ -42,7 +42,7 @@ app)
 vault)
   mkuser rawprod-demo /srv/rawprod-demo
   install -d -o rawprod-demo -g rawprod-demo -m 750 /srv/rawprod-demo /srv/rawprod-demo/app /var/log/rawprod-demo
-  unit vault-demo-api.service; unit vault-demo-migrate.service
+  unit vault-demo-api.service; unit vault-demo-migrate.service; unit vault-demo-aws-creds.service; unit vault-demo-aws-creds.timer
   systemctl daemon-reload
   "$LIB/render-demo-env.sh" vault
   ;;

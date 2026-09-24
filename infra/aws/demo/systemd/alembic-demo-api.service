@@ -5,6 +5,8 @@ Description=Alembic DEMO API
 Requires=alembic-demo-api.socket
 After=network-online.target alembic-demo-migrate.service
 Requires=alembic-demo-migrate.service
+Wants=alembic-demo-aws-creds.service
+After=alembic-demo-aws-creds.service
 [Service]
 Type=exec
 User=alembic-demo
@@ -21,6 +23,11 @@ RestartSec=5s
 ReadWritePaths=/srv/alembic-demo/var /srv/alembic-demo/app
 MemoryDenyWriteExecute=false
 MemoryMax=450M
+# H1: no demo process may reach IMDS (the box role is a PROD role). IPv4 + IPv6 IMDS endpoints.
+IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
+Environment=AWS_EC2_METADATA_DISABLED=true
+# short-lived demo-role session written by root (alembic-demo-aws-creds.timer); credential_process, no credential_source
+Environment=AWS_CONFIG_FILE=/etc/alembic-demo/aws/config AWS_SHARED_CREDENTIALS_FILE=/etc/alembic-demo/aws/credentials AWS_SDK_LOAD_CONFIG=1
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

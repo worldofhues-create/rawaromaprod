@@ -85,6 +85,38 @@ test('editing a non-DRAFT (APPROVED) PO header field via the generic editor is r
   );
 });
 
+test('L2: statusGuard is atomic — an edit racing a concurrent DRAFT->APPROVED commit gets 409 and writes nothing', async () => {
+  const id = await freshPo();
+  const sql = testClient();
+  const p = principal({ userId: CREATOR, permissions: ['procurement:purchase_order:write'] });
+  const before = (await sql`select order_date from procurement.purchase_order where purchase_order_id = ${id}`)[0]!;
+
+  let editPromise!: Promise<unknown>;
+  await sql.begin(async (tx) => {
+    // Second caller (the approver) holds the row lock and moves it beyond DRAFT...
+    await tx`update procurement.purchase_order set status = 'APPROVED' where purchase_order_id = ${id}`;
+    // ...while the editor's request starts (it saw DRAFT under the old check-then-write).
+    editPromise = editSvc.update('purchase-orders', id, { orderDate: '2030-12-31' }, p).then(
+      () => 'ok', (e: unknown) => e,
+    );
+    await new Promise((r) => setTimeout(r, 150));
+  });
+  const outcome = await editPromise;
+  assert.ok(outcome instanceof ConflictException, `expected 409, got ${String(outcome)}`);
+  const after = (await sql`select status, order_date from procurement.purchase_order where purchase_order_id = ${id}`)[0]!;
+  assert.equal(after.status, 'APPROVED');
+  assert.equal(String(after.order_date), String(before.order_date));
+});
+
+test('L2: two sequential callers — first edit on DRAFT succeeds, edit after approval is 409; unknown id is 404', async () => {
+  const id = await freshPo();
+  const p = principal({ userId: CREATOR, permissions: ['procurement:purchase_order:write'] });
+  assert.ok(await editSvc.update('purchase-orders', id, { orderDate: '2026-02-02' }, p));
+  await svc.approvePurchaseOrder(id, {}, principal({ userId: APPROVER }));
+  await assert.rejects(() => editSvc.update('purchase-orders', id, { orderDate: '2026-03-03' }, p), ConflictException);
+  await assert.rejects(() => editSvc.update('purchase-orders', randomUUID(), { orderDate: '2026-03-03' }, p), NotFoundException);
+});
+
 /* ── amendPurchaseOrder ──────────────────────────────────────────────────── */
 
 test('amend refuses a DRAFT PO (edit it directly instead)', async () => {

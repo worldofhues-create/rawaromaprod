@@ -1,0 +1,9 @@
+# H1: every 30 min (sessions last 1 h). Installed, DISABLED with the rest of the demo; enable with the demo units.
+[Unit]
+Description=Refresh short-lived demo AWS credentials every 30 min (app box)
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30min
+Persistent=true
+[Install]
+WantedBy=timers.target

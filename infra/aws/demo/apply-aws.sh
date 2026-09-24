@@ -84,6 +84,20 @@ cat > "$tmp/demo-kms.json" <<J
 J
 aws iam put-role-policy --role-name rawprod-vault-demo --policy-name demo-envelope --policy-document "file://$tmp/demo-kms.json"
 
+# ---------- IAM: demo ALEMBIC role (H1, RC .2 review) ----------
+# The demo ALEMBIC API needs AWS only for ARIA (bedrock-mantle / bedrock) and Translate. It never reads the box role:
+# root's demo-aws-creds.sh app assumes this role every 30 min and the IMDS-denied unit reads the 0640 session file.
+# No S3 (prod documents/backups), no Chime, no Secrets Manager, no SSM.
+if ! aws iam get-role --role-name alembic-demo-app >/dev/null 2>&1; then
+  cat > "$tmp/trust-app.json" <<J
+{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::$ACCT:role/alembic-ec2"},"Action":"sts:AssumeRole"}]}
+J
+  aws iam create-role --role-name alembic-demo-app --assume-role-policy-document "file://$tmp/trust-app.json" --max-session-duration 3600 \
+    --description "Demo ALEMBIC API only: ARIA inference + Translate. Assumed by root on the app box (demo-aws-creds.sh)." \
+    --tags Key=Project,Value=rawaroma Key=Component,Value=demo >/dev/null
+fi
+aws iam put-role-policy --role-name alembic-demo-app --policy-name demo-app --policy-document "file://$D/iam/alembic-demo-app.policy.json"
+
 # ---------- IAM: instance-role additions (demo paths only) ----------
 aws iam put-role-policy --role-name alembic-ec2 --policy-name demo-runtime --policy-document "file://$D/iam/alembic-ec2.demo-runtime.json"
 aws iam put-role-policy --role-name rawprod-vault-app --policy-name demo-vault --policy-document "file://$D/iam/rawprod-vault-app.demo-vault.json"

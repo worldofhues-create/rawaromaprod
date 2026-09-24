@@ -69,3 +69,52 @@ export function verifyInternalBridgeSignature(
   const skewSeconds = Math.abs(now / 1000 - ts);
   return skewSeconds <= INTERNAL_BRIDGE_CLOCK_SKEW_S;
 }
+
+/**
+ * L1 (security review) — replay cache for the internal channel. The HMAC + timestamp window
+ * alone lets a captured request be replayed verbatim for as long as its timestamp is inside
+ * the skew window; this closes that by remembering every accepted signature until it could no
+ * longer verify anyway, and refusing a second use.
+ *
+ * A signature can verify while |now - ts| <= INTERNAL_BRIDGE_CLOCK_SKEW_S, i.e. over a span of
+ * up to 2x the skew in receiver time, so entries are retained for 2x the skew window.
+ *
+ * SINGLE-PROCESS ASSUMPTION: the cache is in-memory, per receiving process. That is correct for
+ * this channel's deployment — each receiver (the Vault EC2's vault-api, the main app box's api)
+ * runs as ONE Node process behind its SG-scoped port — and deliberately avoids a DB dependency
+ * (the Vault box has its own isolated DB and no shared store with the app box). If a receiver
+ * is ever scaled to >1 process, this must move to a shared store (e.g. a unique-keyed table).
+ *
+ * BOUNDED: at most `maxEntries` live signatures. When full (after purging expired entries) it
+ * fails CLOSED — refuses new requests rather than evicting a live entry (evicting would reopen
+ * the replay window). Only a holder of INTERNAL_BRIDGE_KEY can fill it.
+ */
+export class InternalBridgeReplayCache {
+  private readonly seen = new Map<string, number>(); // signature -> expiry (ms epoch)
+  constructor(
+    private readonly maxEntries = 10_000,
+    private readonly retentionMs = 2 * INTERNAL_BRIDGE_CLOCK_SKEW_S * 1000,
+  ) {}
+
+  get size(): number { return this.seen.size; }
+
+  private purge(now: number): void {
+    // Map preserves insertion order and expiries are monotonic in insertion time, so stop at
+    // the first live entry.
+    for (const [sig, exp] of this.seen) {
+      if (exp > now) break;
+      this.seen.delete(sig);
+    }
+  }
+
+  /** Returns true (and records it) if `signature` has not been seen within the window;
+   *  false if it is a replay, or if the cache is full (fail closed). */
+  checkAndRecord(signature: string, now: number = Date.now()): boolean {
+    this.purge(now);
+    const exp = this.seen.get(signature);
+    if (exp !== undefined && exp > now) return false;
+    if (this.seen.size >= this.maxEntries) return false;
+    this.seen.set(signature, now + this.retentionMs);
+    return true;
+  }
+}

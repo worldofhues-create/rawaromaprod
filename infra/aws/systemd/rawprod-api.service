@@ -61,6 +61,10 @@ ProtectHome=true
 PrivateDevices=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=true
+# H1 (RC .2 review): the main RawProd API calls no AWS API (no @aws-sdk client outside the vault's KMS
+# adapter), so it has no business reaching IMDS / the instance role. Deny both IMDS endpoints.
+IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
+Environment=AWS_EC2_METADATA_DISABLED=true
 # MemoryDenyWriteExecute is deliberately absent — see alembic-api.service's own note. Node/V8
 # needs writable+executable memory for its JIT; the process does not start under this control.
 
