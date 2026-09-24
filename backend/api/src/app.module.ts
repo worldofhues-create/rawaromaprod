@@ -57,6 +57,7 @@ import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
 import { MaterialFactsModule } from './vault-bridge/material-facts.module.js';
 import { TutorialModule } from './tutorial/tutorial.module.js';
+import { AriaBridgeModule } from './aria/aria-bridge.module.js';
 
 @Module({
   imports: [
@@ -96,6 +97,7 @@ import { TutorialModule } from './tutorial/tutorial.module.js';
     // routes are never mounted here (FormulaModule stays VAULT_MODE=false in this process).
     MaterialFactsModule,
     TutorialModule,
+    AriaBridgeModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up
