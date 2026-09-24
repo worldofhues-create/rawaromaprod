@@ -30,6 +30,53 @@ create table if not exists masterdata.material (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- D3 (demo-seed): MaterialService.createMaterial (backend/cluster-masterdata/src/material/
+-- material.service.ts) writes the full packages/data-masterdata/src/schema/material.ts column
+-- set. Purely additive/nullable, no FK enforcement here (matching this harness's existing
+-- convention of plain soft-ref columns, not this Drizzle schema's in-schema FKs).
+alter table masterdata.material add column if not exists material_group_id uuid;
+alter table masterdata.material add column if not exists material_type_id uuid;
+alter table masterdata.material add column if not exists material_category_id uuid;
+alter table masterdata.material add column if not exists uom_id uuid;
+alter table masterdata.material add column if not exists description text;
+alter table masterdata.material add column if not exists scientific_name text;
+alter table masterdata.material add column if not exists density numeric(12,4);
+alter table masterdata.material add column if not exists cas_number text;
+alter table masterdata.material add column if not exists shelf_life_days integer;
+alter table masterdata.material add column if not exists reorder_level numeric(18,4);
+alter table masterdata.material add column if not exists min_stock numeric(18,4);
+alter table masterdata.material add column if not exists max_stock numeric(18,4);
+alter table masterdata.material add column if not exists qc_required boolean;
+
+-- D3 (demo-seed): masterdata.material_type_master — ClassificationService.createMaterialType
+-- (backend/cluster-masterdata/src/classification/classification.service.ts); missing entirely
+-- from this harness until now.
+create table if not exists masterdata.material_type_master (
+  material_type_id uuid primary key default gen_random_uuid(),
+  type_code varchar(50),
+  type_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists material_type_master_code_uq on masterdata.material_type_master (type_code);
+
+-- D3 (demo-seed): masterdata.outbox — MaterialService.createMaterial/createRmAlias record
+-- `masterdata.material.created`/`masterdata.alias.created` here (recordOutbox, @core/data-
+-- kernel's outboxTable shape); missing entirely from this harness until now (mirrors
+-- inventory.outbox / quality.outbox / production.outbox elsewhere in this file).
+create table if not exists masterdata.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
+);
 
 -- RP-S1 (lane S1, security review item 3): masterdata.rm_alias — DashboardService.
 -- traceFinishedGood left-joins it to resolve the masked material identity.
@@ -63,6 +110,27 @@ create table if not exists inventory.inventory_batch (
 
 -- RP-PROC (lane F3): GRN + RM batch, needed for ProcAnalyticsService.qcRejectedGrns/vendorPerformance
 -- (RP-PROC-007) to test against real GRN -> rm_batch -> qc_inspections joins.
+-- D3 (demo-seed): inventory.gate_entry_master — GateService.createGateEntry; missing entirely
+-- from this harness until now.
+create table if not exists inventory.gate_entry_master (
+  gate_entry_id uuid primary key default gen_random_uuid(),
+  gate_entry_number varchar(50),
+  vendor_id uuid,
+  purchase_order_id uuid,
+  location_id uuid,
+  vehicle_number varchar(20),
+  entry_dt timestamptz,
+  exit_dt timestamptz,
+  driver_name varchar(200),
+  invoice_number text,
+  challan_number text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
 create table if not exists inventory.grn_master (
   grn_id uuid primary key default gen_random_uuid(),
   grn_number varchar(50),
@@ -109,6 +177,24 @@ create table if not exists inventory.rm_batch_master (
   received_qty numeric(18,4),
   uom_id uuid,
   storage_location_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- D3 (demo-seed): inventory.stock_transfer — StockService.createStockTransfer; missing
+-- entirely from this harness until now.
+create table if not exists inventory.stock_transfer (
+  stock_transfer_id uuid primary key default gen_random_uuid(),
+  inventory_batch_id uuid references inventory.inventory_batch(inventory_batch_id),
+  from_location_id uuid,
+  to_location_id uuid,
+  transfer_qty numeric(18,4),
+  uom_id uuid,
+  transfer_dt timestamptz,
+  requested_by uuid,
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
@@ -176,6 +262,22 @@ create table if not exists quality.qc_inspections (
   inspector_user_id uuid,
   inspection_dt timestamptz,
   overall_result varchar(255),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+
+-- D3 (demo-seed): quality.qc_result_details — InspectionsService.addResults; missing entirely
+-- from this harness until now.
+create table if not exists quality.qc_result_details (
+  qc_result_detail_id uuid primary key default gen_random_uuid(),
+  qc_inspection_id uuid references quality.qc_inspections(qc_inspection_id),
+  qc_parameter_id uuid,
+  observed_value numeric(18,4),
+  observed_text text,
+  result varchar(255),
   status varchar(30),
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
@@ -737,6 +839,35 @@ create table if not exists packaging.finished_good_reservation (
 
 -- RP-S1 (lane S1, security review item 3): packaging.product_master — DashboardService.
 -- traceFinishedGood left-joins it (via product_sku.product_id) for the product name.
+-- D3 (demo-seed): packaging.product_category_master + packaging.packaging_material_master —
+-- PackagingCatalogService.createProductCategory/createPackagingMaterial; missing entirely from
+-- this harness until now (product_master/packaging_bom_master below already carry the
+-- soft-ref uuid columns pointing at these, just never had the tables themselves).
+create table if not exists packaging.product_category_master (
+  product_category_id uuid primary key default gen_random_uuid(),
+  category_code varchar(50),
+  category_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists product_category_master_code_uq on packaging.product_category_master (category_code);
+
+create table if not exists packaging.packaging_material_master (
+  packaging_material_id uuid primary key default gen_random_uuid(),
+  packaging_material_code varchar(50),
+  packaging_material_name varchar(200),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists packaging_material_master_code_uq on packaging.packaging_material_master (packaging_material_code);
+
 create table if not exists packaging.product_master (
   product_id uuid primary key default gen_random_uuid(),
   formula_id uuid,
@@ -987,6 +1118,17 @@ create table if not exists iam.org_master (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- D3 (demo-seed): OrgService.createOrg (backend/cluster-org/src/org/org.service.ts) writes the
+-- full packages/data-org/src/schema/org.ts column set unconditionally (undefined optional
+-- fields still reach the generated INSERT's column list) — this harness's org_master predated
+-- those columns. Purely additive/nullable, matching the real schema exactly (soft refs, no FK
+-- here either); safe to add to an already-populated table.
+alter table iam.org_master add column if not exists org_group_id uuid;
+alter table iam.org_master add column if not exists org_type_id uuid;
+alter table iam.org_master add column if not exists registration_country_id uuid;
+alter table iam.org_master add column if not exists base_currency_id uuid;
+alter table iam.org_master add column if not exists default_timezone_id uuid;
+alter table iam.org_master add column if not exists default_language_id uuid;
 
 create table if not exists iam.user_master (
   user_id uuid primary key default gen_random_uuid(),
@@ -1131,6 +1273,23 @@ create table if not exists iam.location_authority_master (
 -- ALEMBIC (backend/api/src/bridge/*, packages/data-bridge/src/schema/*). Only the two tables the
 -- lane F6 emission hooks need against this harness — connector_config/inbound_event (the inbound
 -- half) aren't exercised by these tests.
+-- D3 (demo-seed): bridge.inbound_event — ImporterService.handleAlembicEvent's dedupe table
+-- (packages/data-bridge/src/schema/inbound-event.ts); genuinely exercised now (the real
+-- inbound importer path), unlike when the comment above was written.
+create table if not exists bridge.inbound_event (
+  event_id uuid primary key,
+  version integer not null,
+  type text not null,
+  aggregate_id uuid not null,
+  correlation_id uuid not null,
+  causation_id uuid,
+  occurred_at timestamptz not null,
+  received_at timestamptz not null default now(),
+  payload jsonb not null,
+  processed_at timestamptz,
+  parked_reason text
+);
+
 create table if not exists bridge.production_requirement (
   production_requirement_id uuid primary key default gen_random_uuid(),
   alembic_requirement_id uuid not null,
@@ -1155,6 +1314,12 @@ create table if not exists bridge.production_requirement (
 );
 create unique index if not exists bridge_production_requirement_alembic_id_uq
   on bridge.production_requirement (alembic_requirement_id);
+-- D3 (demo-seed): the real Drizzle schema (packages/data-bridge/src/schema/
+-- production-requirement.ts) tacks `...metaColumns()` onto this table too — a generic
+-- `status` column DISTINCT from the business-specific `lifecycle_status` above — which this
+-- harness's hand-written DDL omitted. ImporterService's plain `.select()` lists every
+-- schema-defined column by name, so it needs to exist even though this script never reads it.
+alter table bridge.production_requirement add column if not exists status varchar(30);
 
 create table if not exists bridge.outbox (
   id uuid primary key default gen_random_uuid(),
@@ -1191,6 +1356,21 @@ create table if not exists bridge.facts_nonce (
 -- (backend/api/src/automation/*) runs through. See scripts/migrations/0020_adhoc_g3_automation.sql.
 create schema if not exists automation;
 create schema if not exists platform;
+
+-- D3 (demo-seed): platform.uom_master — UomService.createUom (backend/cluster-reference/src/
+-- uom/uom.service.ts) writes here (packages/data-reference/src/schema/uom.ts); missing from
+-- this harness entirely until now. Minimal dictionary shape, matching the real schema.
+create table if not exists platform.uom_master (
+  uom_id uuid primary key default gen_random_uuid(),
+  uom_code varchar(50),
+  uom_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists uom_master_code_uq on platform.uom_master (uom_code);
 
 create table if not exists automation.applied (
   rule_code varchar(64) not null,
