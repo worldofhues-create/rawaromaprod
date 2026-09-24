@@ -22,6 +22,16 @@ import { productionEvents } from '../production.events.js';
 import { paginate, num, type Page } from '../_helpers.js';
 import type { ListQuery, ProduceOilBatch, RecordProductionQc } from '../production.dtos.js';
 
+/** Maps a production-QC grade onto the bridge contract's `qc_status` vocabulary
+ *  (docs/bridge/EVENT_CONTRACT.md): PASS → passed; FAIL/REJECT → failed; anything else
+ *  (HOLD, an ungraded reading) → pending. Exported for its test. */
+export function qcStatusForBridge(graded: string | null | undefined): 'passed' | 'failed' | 'pending' {
+  const g = String(graded ?? '').toUpperCase();
+  if (g === 'PASS' || g === 'ACCEPT') return 'passed';
+  if (g === 'FAIL' || g === 'REJECT' || g === 'FAILED') return 'failed';
+  return 'pending';
+}
+
 // Oil-batch lifecycle state machine (audit H-C6): the only legal moves. Was raw any→any status
 // PATCH via the generic editor (client-side guards only) — an API caller could go FAILED→RELEASED.
 const OIL_TRANSITIONS: Record<string, string[]> = {
@@ -140,6 +150,26 @@ export class BatchService {
     if (current === tgt) return batch; // idempotent
     if (!(OIL_TRANSITIONS[current] ?? []).includes(tgt)) {
       throw new ConflictException(`Oil batch cannot move from ${current} to ${tgt || '(none)'}.`);
+    }
+    /* Final-QC gate (golden journey lane/j2): RELEASED is the state packaging consumes, and it
+     * was reachable with NO production QC on file at all — live, a matured batch went straight
+     * to RELEASED. The latest QC reading recorded against the batch must be a PASS. */
+    if (tgt === 'RELEASED') {
+      const latest = (
+        await this.db
+          .select({ result: productionQc.result })
+          .from(productionQc)
+          .where(eq(productionQc.oilBatchId, id))
+          .orderBy(desc(productionQc.productionQcId))
+          .limit(1)
+      )[0];
+      if (String(latest?.result ?? '').toUpperCase() !== 'PASS') {
+        throw new ConflictException(
+          latest
+            ? `Oil batch ${id} cannot be RELEASED: its latest QC result is ${latest.result ?? 'ungraded'}, not PASS.`
+            : `Oil batch ${id} cannot be RELEASED: no QC result has been recorded against it (POST /v1/production-qc).`,
+        );
+      }
     }
     return this.db.transaction(async (tx) => {
       const updated = (
@@ -361,6 +391,10 @@ export class BatchService {
         production_qc_id: productionQcId,
         oil_batch_id: body.oilBatchId,
         result: graded,
+        // docs/bridge/EVENT_CONTRACT.md: `{ qc_status: "pending"|"passed"|"failed" }` — the one
+        // field ALEMBIC's transitionRequirement reads. Emitting only `result` (golden journey,
+        // lane/j2) made ALEMBIC park every QcStatusChanged as an unknown transition.
+        qc_status: qcStatusForBridge(graded),
       });
 
       return { qc };

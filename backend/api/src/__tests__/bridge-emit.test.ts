@@ -18,7 +18,7 @@ import assert from 'node:assert/strict';
 import { ConflictException } from '@nestjs/common';
 import { emitBridgeOutbound } from '../../../backend-kernel/src/events/bridge-emit.js';
 import { MixingService } from '../../../cluster-production/src/mixing/mixing.service.js';
-import { BatchService as ProductionBatchService } from '../../../cluster-production/src/batch/batch.service.js';
+import { BatchService as ProductionBatchService, qcStatusForBridge } from '../../../cluster-production/src/batch/batch.service.js';
 import { PlanningService } from '../../../cluster-production/src/planning/planning.service.js';
 import { OrdersService } from '../../../cluster-packaging/src/orders/orders.service.js';
 import { BatchService as PackagingBatchService } from '../../../cluster-packaging/src/batch/batch.service.js';
@@ -293,6 +293,16 @@ test('production BatchService.recordProductionQc: emits QcStatusChanged for a li
   const rows = await outboxRowsFor(alembicRequirementId);
   assert.equal(rows.length, 1);
   assert.equal(rows[0]!.type, 'QcStatusChanged');
+  // lane/j2: the contract field ALEMBIC actually reads (docs/bridge/EVENT_CONTRACT.md).
+  assert.equal((rows[0]!.payload as { qc_status?: string }).qc_status, 'passed');
+});
+
+test('qcStatusForBridge: maps grades onto the bridge contract vocabulary', () => {
+  assert.equal(qcStatusForBridge('PASS'), 'passed');
+  assert.equal(qcStatusForBridge('FAIL'), 'failed');
+  assert.equal(qcStatusForBridge('REJECT'), 'failed');
+  assert.equal(qcStatusForBridge('HOLD'), 'pending');
+  assert.equal(qcStatusForBridge(null), 'pending');
 });
 
 test('production BatchService.recordProductionQc: nothing emitted for an oil batch with no linked order', async () => {
