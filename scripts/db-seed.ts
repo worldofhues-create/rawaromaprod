@@ -37,6 +37,7 @@ import {
   MANUFACTURING_INSTRUCTION_ROLES,
   MANUAL_CONTINUITY_PERMISSION,
   MANUAL_CONTINUITY_ROLES,
+  SHOWCASE_ROLE,
   type RoleDef,
 } from './ra-roles.js';
 
@@ -135,6 +136,17 @@ async function grantRole(
       `SECURITY: role '${role.code}' must not be granted ${MANUFACTURING_INSTRUCTION_PERMISSION} — only ${MANUFACTURING_INSTRUCTION_ROLES.join('/')} may hold it (§109.7)`,
     );
   }
+  // HARD INVARIANT (LANE D1): the demo showcase role is READ-ONLY and never unmasked — every
+  // permission it holds ends in `:read`, and it never holds material reveal, Vault, IAM or formula.
+  if (role.code === SHOWCASE_ROLE) {
+    const offending = granted.filter((p) => !p.code.endsWith(':read') || p.code === 'masterdata:material:reveal'
+      || p.code.startsWith('vault:') || p.code.startsWith('iam:') || p.code.startsWith('formula:'));
+    if (offending.length) {
+      throw new Error(
+        `SECURITY: role '${SHOWCASE_ROLE}' must be read-only and masked — refused [${offending.map((p) => p.code).join(', ')}] (LANE D1)`,
+      );
+    }
+  }
   // HARD INVARIANT (G1/PB-08, FINAL_OS §2.3/§41): the sales manual-continuity break-glass
   // permission is held ONLY by owner/admin — no factory/sales role, ever.
   if (!MANUAL_CONTINUITY_ROLES.includes(role.code) && granted.some((p) => p.code === MANUAL_CONTINUITY_PERMISSION)) {
@@ -168,9 +180,11 @@ async function upsertUserForRole(
   role: RoleDef,
   roleId: string,
   email: string,
-  password: string,
+  password: string | null,
 ): Promise<void> {
-  const passwordHash = await argon2.hash(password, { type: argon2.argon2id });
+  // LANE D1: `null` provisions a PASSWORDLESS account (the demo showcase), reachable only
+  // through an ALEMBIC assertion. No hash is written at all rather than a hash of nothing.
+  const passwordHash = password === null ? null : await argon2.hash(password, { type: argon2.argon2id });
   let user = (await db.select().from(userMaster).where(eq(userMaster.email, email)).limit(1))[0];
   if (!user) {
     user = (
@@ -262,6 +276,15 @@ async function main(): Promise<void> {
 
       const email =
         role.code === 'owner' ? process.env.BOOTSTRAP_OWNER_EMAIL ?? role.sampleEmail : role.sampleEmail;
+      // LANE D1: the demo showcase account is provisioned — passwordless — ONLY in a demo
+      // deployment. A production seed creates the role (so the catalog is one catalog) and never
+      // the account; AuthService refuses the role outside demo even if one were created by hand.
+      if (role.code === SHOWCASE_ROLE) {
+        if (process.env.RAWPROD_ENVIRONMENT === 'demo') {
+          await upsertUserForRole(db, role, roleId, email, null);
+        }
+        continue;
+      }
       const password = process.env[role.passwordEnv];
       if (password) {
         await upsertUserForRole(db, role, roleId, email, password);
