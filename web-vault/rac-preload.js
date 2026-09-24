@@ -71,12 +71,28 @@
   /* The three faces the welcome draws, spelled out (not templated) so every
      family name is a literal a font audit can read, quoted as ALEMBIC's own
      app/fonts/*.css quote them. Same files the pages use. */
+  /* ONLY A FAMILY THE PAGE HAS NOT ALREADY DECLARED. A second, identical
+     @font-face for a family the page's own stylesheet registers is a second
+     FontFace: WebKit renders with one and leaves the other `unloaded` for the
+     life of the page (own-origin.spec, /store on webkit). This script runs
+     after the head's stylesheets, so their faces are already in
+     document.fonts; where the page declares none at that weight
+     (RawProd's consoles have no Cabinet Grotesk), the welcome brings its own. */
+  function declared(family, weight) {
+    var found = false;
+    try {
+      D.fonts.forEach(function (f) {
+        if (String(f.family).replace(/["']/g, '') === family && String(f.weight) === weight) found = true;
+      });
+    } catch (e) { /* no FontFaceSet: declare it, as before */ }
+    return found;
+  }
   function fontCss(dir) {
     if (!dir) return '';
     var tail = ') format("woff2");font-style:normal;font-display:swap}';
-    return '@font-face{font-family:\'Cabinet Grotesk\';font-weight:100 900;src:url(' + dir + 'cabinet-grotesk-variable.woff2' + tail +
-      '@font-face{font-family:Outfit;font-weight:300;src:url(' + dir + 'outfit-300-latin.woff2' + tail +
-      '@font-face{font-family:\'JetBrains Mono\';font-weight:500;src:url(' + dir + 'jetbrains-mono-500-latin.woff2' + tail;
+    return (declared('Cabinet Grotesk', '100 900') ? '' : '@font-face{font-family:\'Cabinet Grotesk\';font-weight:100 900;src:url(' + dir + 'cabinet-grotesk-variable.woff2' + tail) +
+      (declared('Outfit', '300') ? '' : '@font-face{font-family:Outfit;font-weight:300;src:url(' + dir + 'outfit-300-latin.woff2' + tail) +
+      (declared('JetBrains Mono', '500') ? '' : '@font-face{font-family:\'JetBrains Mono\';font-weight:500;src:url(' + dir + 'jetbrains-mono-500-latin.woff2' + tail);
   }
 
   function mountCss(sel) {
@@ -84,6 +100,7 @@
       '@media (prefers-reduced-motion:reduce){html.rac-revealing ' + sel + '{animation-duration:.01s}}';
   }
 
+  var faces = null;
   function css(sel, logo) {
     var s = D.getElementById('rac-pl-css');
     if (!s) {
@@ -92,7 +109,10 @@
       p.rel = 'preload'; p.as = 'image'; p.href = logo;
       D.head.appendChild(p);
     }
-    s.textContent = fontCss(FONTS) + CSS + mountCss(sel);
+    /* Decided once, on the first start: a replay would otherwise find the
+       welcome's OWN faces in document.fonts and drop them. */
+    if (faces === null) faces = fontCss(FONTS);
+    s.textContent = faces + CSS + mountCss(sel);
   }
 
   function mounted(sel) {
