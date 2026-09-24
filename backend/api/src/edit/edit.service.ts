@@ -199,21 +199,6 @@ export class EditService {
     if (!(principal.permissions || []).includes(cfg.perm)) {
       throw new ForbiddenException(`Missing permission ${cfg.perm}`);
     }
-    if (cfg.statusGuard) {
-      const guarded = (await this.sql`
-        select ${this.sql.unsafe(cfg.statusGuard.column)} as v
-          from ${this.sql.unsafe(`${cfg.schema}.${cfg.table}`)}
-         where ${this.sql.unsafe(cfg.pk)} = ${id}
-         limit 1`) as Array<{ v: string | null }>;
-      if (!guarded.length) throw new NotFoundException(`${resource} ${id} not found`);
-      const cur = String(guarded[0]!.v ?? '').toUpperCase();
-      const allowed = cfg.statusGuard.allowed.map((a) => a.toUpperCase());
-      if (!allowed.includes(cur)) {
-        throw new ConflictException(
-          `${resource} ${id} cannot be edited directly while its ${cfg.statusGuard.column} is ${cur || '(none)'} — only ${allowed.join('/')} may be edited this way.`,
-        );
-      }
-    }
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(body || {})) {
       const col = cfg.cols[k];
@@ -222,6 +207,29 @@ export class EditService {
     }
     if (!Object.keys(patch).length) throw new BadRequestException('No editable fields supplied');
     patch.updated_by = principal.userId;
+
+    if (cfg.statusGuard) {
+      // L2: the status check and the write are ONE statement (UPDATE ... WHERE status IN allowed
+      // ... RETURNING) — a separate SELECT-then-UPDATE let a concurrent status change (e.g. an
+      // approval) slip in between and the header edit land on a no-longer-DRAFT row.
+      const col = cfg.statusGuard.column;
+      const allowed = cfg.statusGuard.allowed.map((a) => a.toUpperCase());
+      const rows = (await this.sql`
+        update ${this.sql.unsafe(`${cfg.schema}.${cfg.table}`)}
+           set ${this.sql(patch)}, updated_dt = now()
+         where ${this.sql.unsafe(cfg.pk)} = ${id}
+           and upper(coalesce(${this.sql.unsafe(col)}::text, '')) = any(${allowed}::text[])
+         returning *`) as Array<Record<string, unknown>>;
+      if (rows.length) return rows[0];
+      const cur = (await this.sql`
+        select ${this.sql.unsafe(col)} as v from ${this.sql.unsafe(`${cfg.schema}.${cfg.table}`)}
+         where ${this.sql.unsafe(cfg.pk)} = ${id} limit 1`) as Array<{ v: string | null }>;
+      if (!cur.length) throw new NotFoundException(`${resource} ${id} not found`);
+      const v = String(cur[0]!.v ?? '').toUpperCase();
+      throw new ConflictException(
+        `${resource} ${id} cannot be edited directly while its ${col} is ${v || '(none)'} — only ${allowed.join('/')} may be edited this way.`,
+      );
+    }
 
     const rows = (await this.sql`
       update ${this.sql.unsafe(`${cfg.schema}.${cfg.table}`)}

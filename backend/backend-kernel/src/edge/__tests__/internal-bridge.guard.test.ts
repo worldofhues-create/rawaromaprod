@@ -102,3 +102,22 @@ test('refuses a request whose rawBody was tampered with after signing', () => {
     ),
   );
 });
+
+test('L1: refuses a replayed (reused) signature within the window', () => {
+  const guard = new InternalBridgeGuard(config({ INTERNAL_BRIDGE_KEY: KEY }));
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const body = '{"replay":true}';
+  const path = '/internal/vault/resolve-manufacturing-instruction';
+  const signature = computeInternalBridgeSignature(KEY, { method: 'POST', path, body, timestamp });
+  const req = () => fakeContext({
+    method: 'POST', url: path, rawBody: body,
+    headers: { 'x-internal-signature': signature, 'x-internal-timestamp': timestamp },
+  });
+  assert.equal(guard.canActivate(req()), true);
+  assertUnauthorized(() => guard.canActivate(req()), /Replayed/);
+});
+
+test('L1: INTERNAL_BRIDGE_KEY shorter than 32 chars is rejected by the config schema', () => {
+  assert.throws(() => config({ INTERNAL_BRIDGE_KEY: 'short-key' }));
+  assert.doesNotThrow(() => config({ INTERNAL_BRIDGE_KEY: 'k'.repeat(32) }));
+});

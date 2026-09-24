@@ -22,6 +22,11 @@
  * `assertMainRoleCannotReadVault` (that check queries `PG_CLIENT`, which this process never has
  * — the isolation it proves is structurally true here by construction: there is no connection to
  * revoke a grant on).
+ *
+ * BIND HOST (L1): listens on VAULT_BIND_HOST (default 0.0.0.0 — see vault-bind-host.ts). The app
+ * box reaches this port across hosts, so loopback is not an option; set VAULT_BIND_HOST to the
+ * private-interface IP to narrow it. The security group (this port open to the app-box SG ONLY)
+ * is the sole network path to this process.
  */
 import 'reflect-metadata';
 import { NestFactory } from '@nestjs/core';
@@ -32,6 +37,7 @@ import {
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@core/backend-kernel';
 import { VaultAppModule } from './vault-app.module.js';
+import { resolveVaultBindHost } from './vault-bind-host.js';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
@@ -93,8 +99,9 @@ async function bootstrap(): Promise<void> {
   app.enableShutdownHooks();
 
   const port = config.get('PORT');
-  await app.listen(port, '0.0.0.0');
-  new Logger('Bootstrap').log(`vault-api listening on :${port} (${config.get('APP_ENV')})`);
+  const host = resolveVaultBindHost(config.get('VAULT_BIND_HOST'));
+  await app.listen(port, host);
+  new Logger('Bootstrap').log(`vault-api listening on ${host}:${port} (${config.get('APP_ENV')})`);
 }
 
 bootstrap().catch((err) => {

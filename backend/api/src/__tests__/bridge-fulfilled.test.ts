@@ -33,13 +33,13 @@ function send(env: Record<string, unknown>) {
   return importer.handleAlembicEvent(body, signBody(body, SECRET));
 }
 
-function fulfilled(reqId: string, correlationId: string, version: number, eventId = crypto.randomUUID()) {
+function fulfilled(reqId: string, correlationId: string, version: number, eventId = crypto.randomUUID(), receivedQty = '10') {
   return {
     event_id: eventId, version, type: 'ProductionRequirementFulfilled',
     org_id: crypto.randomUUID(), correlation_id: correlationId, causation_id: null,
     occurred_at: new Date().toISOString(), source: 'alembic',
     aggregate: { type: 'production_requirement', id: reqId },
-    payload: { requirement_id: reqId, order_ref: 'ORD-GJ3', received_qty: '10', uom: 'kg',
+    payload: { requirement_id: reqId, order_ref: 'ORD-GJ3', received_qty: receivedQty, uom: 'kg',
       receipt_ref: 'GRN-GJ3-1', received_at: new Date().toISOString() },
   };
 }
@@ -126,4 +126,68 @@ test('Fulfilled works with no sales order and no linked production order (reason
 test('Fulfilled for an unknown requirement parks unknown_aggregate', async () => {
   const r = await send(fulfilled(crypto.randomUUID(), crypto.randomUUID(), 2));
   assert.equal(r.body.outcome, 'parked_unknown_aggregate');
+});
+
+test('M3: a partial receipt consumes only received_qty; remainder stays reserved; replay is a no-op; partials accumulate to COMPLETE', async () => {
+  const sql = testClient();
+  const { reqId, correlationId, reservationId, fgId } = await acceptedRequirement({ withFg: true });
+  const first = fulfilled(reqId, correlationId, 2, crypto.randomUUID(), '4');
+
+  assert.equal((await send(first)).body.outcome, 'applied');
+  let res = (await sql`select status, released_dt, reserved_qty from packaging.finished_good_reservation
+                         where finished_good_reservation_id = ${reservationId}`)[0]!;
+  assert.equal(res.status, 'ACTIVE');
+  assert.equal(res.released_dt, null);
+  assert.equal(Number(res.reserved_qty), 6);
+  let consumed = (await sql`select coalesce(sum(consumed_qty),0)::numeric as n from packaging.finished_goods_batch_consumption
+                              where finished_good_batch_id = ${fgId}`)[0]!;
+  assert.equal(Number(consumed.n), 4);
+  let req = (await sql`select lifecycle_status, last_applied_version from bridge.production_requirement
+                         where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.notEqual(req.lifecycle_status, 'COMPLETE');
+  assert.equal(Number(req.last_applied_version), 2);
+  assert.equal((await sql`select 1 from bridge.outbox where aggregate_id = ${reqId}
+                          and type = 'ProductionRequirementCompleted'`).length, 0);
+
+  // Replaying the same event id is a no-op (nothing further consumed).
+  assert.equal((await send(first)).body.outcome, 'already_seen');
+  res = (await sql`select reserved_qty from packaging.finished_good_reservation
+                     where finished_good_reservation_id = ${reservationId}`)[0]!;
+  assert.equal(Number(res.reserved_qty), 6);
+
+  // Second partial (6) completes it.
+  assert.equal((await send(fulfilled(reqId, correlationId, 3, crypto.randomUUID(), '6'))).body.outcome, 'applied');
+  res = (await sql`select status, released_dt from packaging.finished_good_reservation
+                     where finished_good_reservation_id = ${reservationId}`)[0]!;
+  assert.equal(res.status, 'HANDED_OVER');
+  assert.ok(res.released_dt);
+  consumed = (await sql`select coalesce(sum(consumed_qty),0)::numeric as n from packaging.finished_goods_batch_consumption
+                          where finished_good_batch_id = ${fgId}`)[0]!;
+  assert.equal(Number(consumed.n), 10);
+  req = (await sql`select lifecycle_status from bridge.production_requirement where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.equal(req.lifecycle_status, 'COMPLETE');
+  assert.equal((await sql`select 1 from bridge.outbox where aggregate_id = ${reqId}
+                          and type = 'ProductionRequirementCompleted'`).length, 1);
+});
+
+test('M4: a thrown apply leaves no inbound_event row, and the retry of the same event completes', async () => {
+  const sql = testClient();
+  const { reqId, correlationId, reservationId } = await acceptedRequirement({ withFg: true });
+  const ev = fulfilled(reqId, correlationId, 2);
+  const target = importer as unknown as { applyFulfilled: (...a: unknown[]) => Promise<void> };
+  const original = target.applyFulfilled;
+  target.applyFulfilled = async () => { throw new Error('boom mid-apply'); };
+  try {
+    await assert.rejects(() => send(ev), /boom mid-apply/);
+  } finally {
+    target.applyFulfilled = original;
+  }
+  assert.equal((await sql`select 1 from bridge.inbound_event where event_id = ${ev.event_id}`).length, 0);
+
+  assert.equal((await send(ev)).body.outcome, 'applied');
+  const row = (await sql`select processed_at from bridge.inbound_event where event_id = ${ev.event_id}`)[0]!;
+  assert.ok(row.processed_at);
+  const res = (await sql`select status from packaging.finished_good_reservation
+                           where finished_good_reservation_id = ${reservationId}`)[0]!;
+  assert.equal(res.status, 'HANDED_OVER');
 });

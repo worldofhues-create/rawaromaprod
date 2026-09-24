@@ -227,8 +227,13 @@ export const configSchema = z.object({
    * so every OTHER deployable (main.ts/worker.ts outside this bridge) boots without it;
    * `InternalBridgeGuard` fails CLOSED (401) on every request when it's unset, same "refuse
    * rather than silently degrade" rule every other optional security secret here follows.
+   * L1: when set it must be >= 32 chars (an HMAC key shorter than that is guessable).
    */
-  INTERNAL_BRIDGE_KEY: z.string().optional(),
+  INTERNAL_BRIDGE_KEY: z.string().min(32).optional(),
+  /** L1: the interface vault-main.ts binds. Default 0.0.0.0 (see vault-bind-host.ts) — the
+   *  app box reaches the vault's port ACROSS hosts, so loopback would break it; set this to the
+   *  vault EC2's private IP to bind only the private interface. */
+  VAULT_BIND_HOST: z.string().min(1).optional(),
   /** Main API's own base URL, reachable from the Vault box's SG-scoped private path — the
    *  target `MaterialFactsClient` (vault mode) calls for material-alias/search facts. */
   MAIN_API_INTERNAL_URL: z.string().url().optional(),
