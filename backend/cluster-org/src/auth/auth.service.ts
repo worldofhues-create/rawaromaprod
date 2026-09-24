@@ -8,7 +8,7 @@
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.
  */
 import { HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
-import { eq, lt } from "drizzle-orm";
+import { and, eq, gt, lt } from "drizzle-orm";
 import * as argon2 from "argon2";
 import { createHash, randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
@@ -99,6 +99,28 @@ export class AuthService {
       .onConflictDoNothing()
       .returning({ jti: assertionJti.jti });
     return inserted.length > 0;
+  }
+
+  /** S4 security review finding N2 — true if `userId` currently holds a LIVE (not yet decided,
+   *  not yet expired) PENDING `vault_role_grant_request`. Sibling check to
+   *  `SecurityService.hasPendingVaultRoleGrant` (that file's own doc has the full reasoning);
+   *  duplicated here in a couple of lines rather than reached for through a new cross-service
+   *  dependency, because `AuthService` has no existing wiring to `SecurityService` and this
+   *  read is the only thing it needs from it. A PENDING row past its own `expiresDt` reads as
+   *  "no live request" — this is a read-only guard, not the lazy sweep `approveVaultRoleGrant`
+   *  performs. */
+  private async hasPendingVaultRoleGrant(userId: string): Promise<boolean> {
+    const { vaultRoleGrantRequest } = orgSchema;
+    const rows = await this.db
+      .select({ id: vaultRoleGrantRequest.vaultRoleGrantRequestId })
+      .from(vaultRoleGrantRequest)
+      .where(and(
+        eq(vaultRoleGrantRequest.userId, userId),
+        eq(vaultRoleGrantRequest.grantStatus, 'PENDING'),
+        gt(vaultRoleGrantRequest.expiresDt, new Date()),
+      ))
+      .limit(1);
+    return rows.length > 0;
   }
 
   /** Record a login in iam.login_history so the admin Login-history view has data (audit
@@ -227,9 +249,26 @@ export class AuthService {
    *  vault-takeover path: anyone holding `iam:user_master:write` could retarget a privileged
    *  account's email to an address they control on ALEMBIC and sign in as that account.
    *  `user_master.alembic_subject` closes it: the FIRST successful assertion login for a row
-   *  with no subject yet BINDS it (`claims.sub`, e.g. `staff:admin@rawaroma.local`); every
-   *  login after that must match the bound subject — an assertion presenting the right EMAIL
-   *  but a DIFFERENT subject is refused outright, never silently re-bound. */
+   *  with no subject yet BINDS it (`claims.sub`); every login after that must match the bound
+   *  subject — an assertion presenting the right EMAIL but a DIFFERENT subject is refused
+   *  outright, never silently re-bound.
+   *
+   *  S4 SECURITY REVIEW FINDING N1 — `claims.sub` IS ALEMBIC'S IMMUTABLE `staff_user.id` (a
+   *  uuid), NOT `staff:<email>`. It used to be the latter (`Actor.id` on the ALEMBIC side), which
+   *  made this very binding effectively email-bound after all: a colleague's email change on
+   *  ALEMBIC minted a brand-new `sub` for the same human, so the OLD binding on this row went
+   *  stale and a lookup-by-email fallback (right below) could re-bind the row to whatever
+   *  DIFFERENT account now happened to hold that email string. A `sub` that never changes for
+   *  the life of the ALEMBIC staff account closes that: `email` still travels as its own claim
+   *  (used only for the byEmail fallback and for display), but it is no longer what identity is
+   *  proved against.
+   *
+   *  S4 SECURITY REVIEW FINDING N2 — AN ACCOUNT MID-GRANT MAY NOT BE FIRST-BOUND. A row with a
+   *  live PENDING `vault_role_grant_request` is refused here even when its email matches and it
+   *  has no subject yet (see `hasPendingVaultRoleGrant` below) — the account is moments from
+   *  becoming Vault-authority-holding, and that is exactly the window an attacker most wants to
+   *  claim the ALEMBIC binding in, before `SecurityService.changeUserEmail`'s own refusal for a
+   *  CURRENT holder would even apply. */
   async loginWithAssertion(assertion: string): Promise<LoginResult> {
     const verifyKey = this.config.get('ALEMBIC_ASSERTION_VERIFY_KEY');
     if (!verifyKey) {
@@ -308,6 +347,14 @@ export class AuthService {
         throw DomainError.forbidden(
           'AUTH_FORBIDDEN',
           'This account is bound to a different ALEMBIC identity. Sign-in refused — contact an administrator.',
+        );
+      }
+      // S4 finding N2: refuse first-bind outright for an account mid-grant for a
+      // Vault-authority role — see hasPendingVaultRoleGrant's own doc above.
+      if (await this.hasPendingVaultRoleGrant(byEmail.userId)) {
+        throw DomainError.forbidden(
+          'AUTH_FORBIDDEN',
+          'This account has a pending Vault-authority role grant request and cannot be bound to an ALEMBIC identity yet. Ask an administrator to resolve the pending request first.',
         );
       }
       // First successful assertion login for this row — bind it now.

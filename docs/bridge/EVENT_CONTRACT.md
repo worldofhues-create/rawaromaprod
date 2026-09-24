@@ -124,3 +124,56 @@ un-parked (receiver) is left in place with its failure recorded
 (`last_error`, `attempts` on the sender; `parked_reason` on the receiver) —
 both are queryable dead-letter views over the same tables, not a separate
 DLQ table, so "what's stuck" is always one query against live state.
+
+## Identity bridge — staffId / assertion subject (PB-04, PB-06)
+
+This section is a different contract from the event envelope above (PB-04's
+one-login assertion bridge and PB-06's RawProd Facts API), sharing this file
+only because it is the same two repos agreeing on a wire shape. Governs S4
+security review findings N1/N2.
+
+**`sub` / `caller.staffId` is ALEMBIC's immutable `staff_user.id` (a uuid),
+never `staff:<email>`.**
+
+- ALEMBIC mints it: `apps/api/src/auth/rawprod-assertion.ts` signs `sub` as
+  the staff uuid (`rawprod-assertion-routes.ts`'s `staffIdForActor`, resolved
+  by tenant + normalised email); `apps/api/src/adapters/rawprod-facts-client.ts`
+  resolves `caller.staffId` the same way (`resolveStaffUuid`) before a Facts
+  API request ever reaches the wire. `email` still travels as its own,
+  mutable claim on the assertion — for RawProd's first-bind lookup and for
+  display — but it is no longer what identity is proved against.
+- RawProd treats it as opaque and stable: `AuthService.loginWithAssertion`
+  binds `user_master.alembic_subject = claims.sub` on first login and matches
+  by it thereafter (`backend/cluster-org/src/auth/auth.service.ts`);
+  `FactsService.permissionsForCaller` resolves permissions by
+  `alembic_subject = caller.staffId` (`backend/api/src/facts/facts.service.ts`).
+  Neither RawProd function parses the string — both required NO code change
+  for N1; only ALEMBIC's minted value changed shape.
+- **Why it matters:** the old `staff:<email>` shape made the RawProd binding
+  effectively email-bound — a colleague's email change on ALEMBIC minted a
+  brand-new subject for the same human, so the OLD binding went stale and
+  RawProd's email-fallback lookup could re-bind to a DIFFERENT account that
+  now held that email string. A subject that never changes for the life of
+  the ALEMBIC staff account closes that.
+- **Cross-repo contract test fixture:** both repos' test suites sign/bind the
+  same example uuid, `99999999-9999-9999-9999-999999999999`, so a reader
+  diffing the two repos can confirm both sides agree on the wire shape:
+  - ALEMBIC: `apps/api/test/rawprod-assertion.test.ts` (`ADMIN_STAFF_ID`)
+  - RawProd: `backend/cluster-org/src/__tests__/auth-service-assertion.test.ts`
+    (`CONTRACT_EXAMPLE_STAFF_UUID`, the "N1 CONTRACT" test) and
+    `backend/api/src/facts/facts.service.test.ts` (same name, "N1 CONTRACT" test)
+
+**N2 — an account may not be claimed (first-bound) while a Vault-authority
+role grant is pending for it**, and its email may not be changed while one
+is holding or pending:
+
+- `SecurityService.changeUserEmail` clears `alembic_subject` on every
+  successful email change (a changed email is a changed identity as far as
+  the bridge is concerned), and refuses the change outright — same posture
+  as for a CURRENT Vault-authority role holder (formulator/vault_approver) —
+  for an account with a live PENDING `vault_role_grant_request` too.
+- `AuthService.loginWithAssertion`'s first-bind branch refuses to bind an
+  account with a live PENDING `vault_role_grant_request`, even when its
+  email matches and it has no subject yet — closing the window between a
+  vault-role request being opened and it being decided, which is exactly
+  when an attacker most wants to claim the ALEMBIC binding.

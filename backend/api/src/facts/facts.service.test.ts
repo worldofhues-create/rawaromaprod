@@ -121,6 +121,56 @@ test("permissionsForCaller: S3 item 5 — resolves from RawProd's OWN grant via 
   assert.equal(heldForUnboundStaffId.size, 0);
 });
 
+/* ── S4 SECURITY REVIEW FINDING N1 — caller resolution by the staff uuid, cross-repo contract ─
+ *
+ * `permissionsForCaller` already resolves by a straight `alembic_subject = staffId` match
+ * (untouched by this finding — see this file's own header on why that is correct regardless of
+ * what SHAPE `staffId` is). What N1 fixes is upstream, on ALEMBIC's side: `caller.staffId` on
+ * the wire is now the immutable `staff_user` uuid (`apps/api/src/adapters/
+ * rawprod-facts-client.ts`'s `resolveStaffUuid`), not `staff:<email>`. This test proves THIS
+ * repository's half of that contract — resolution by the uuid ALEMBIC now actually sends,
+ * using the SAME example uuid `apps/api/test/rawprod-assertion.test.ts`'s `ADMIN_STAFF_ID`
+ * signs in the ALEMBIC repository (see docs/bridge/EVENT_CONTRACT.md's identity-bridge
+ * section in both repos). */
+test("N1 CONTRACT: permissionsForCaller resolves by the staff uuid ALEMBIC's facts client "
+  + "actually sends (not staff:<email>) — the SAME example uuid ALEMBIC's own test signs",
+  async () => {
+    const sql = testClient();
+    const CONTRACT_EXAMPLE_STAFF_UUID = "99999999-9999-9999-9999-999999999999";
+    const roleCode = `facts-n1-role-${randomUUID()}`;
+    // Idempotent against a re-run on the same database, AND against
+    // `auth-service-assertion.test.ts`'s OWN "N1 CONTRACT" test sharing this exact literal
+    // (the whole point of a cross-repo/cross-file contract fixture) — the unique partial index
+    // on alembic_subject means at most one row anywhere in `iam.user_master` may hold it. Any
+    // prior row's `user_role_mapping` children are cleared first (no ON DELETE CASCADE on that
+    // FK), then the row itself, before inserting fresh.
+    await sql`
+      delete from iam.user_role_mapping where user_id in (
+        select user_id from iam.user_master where alembic_subject = ${CONTRACT_EXAMPLE_STAFF_UUID})`;
+    await sql`delete from iam.user_master where alembic_subject = ${CONTRACT_EXAMPLE_STAFF_UUID}`;
+    const userId = randomUUID();
+    await sql`
+      insert into iam.user_master (user_id, email, user_name, is_active, status, alembic_subject)
+      values (${userId}, ${`${roleCode}@rawaroma.local`}, 'Facts N1 Contract Test', true, 'ACTIVE',
+        ${CONTRACT_EXAMPLE_STAFF_UUID})`;
+    const [role] = await sql`
+      insert into iam.role_master (role_code, status) values (${roleCode}, 'ACTIVE') returning role_id`;
+    const [perm] = await sql`
+      insert into iam.permission_master (permission_code, status)
+      values ('production:production_order:read', 'ACTIVE')
+      on conflict (permission_code) do update set status = 'ACTIVE'
+      returning permission_id`;
+    await sql`
+      insert into iam.user_role_mapping (user_id, role_id, status) values (${userId}, ${role!.role_id}, 'ACTIVE')`;
+    await sql`
+      insert into iam.role_permission_mapping (role_id, permission_id, status)
+      values (${role!.role_id}, ${perm!.permission_id}, 'ACTIVE')
+      on conflict (role_id, permission_id) do nothing`;
+
+    const held = await facts.permissionsForCaller(CONTRACT_EXAMPLE_STAFF_UUID);
+    assert.ok(held.has("production:production_order:read"));
+  });
+
 test("permissionsForRoles: real role->permission mapping, never trusting the caller's own claim", async () => {
   const sql = testClient();
   const roleCode = `role-${randomUUID()}`;

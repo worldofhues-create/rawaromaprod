@@ -5,7 +5,7 @@
  * paginated (desc PK, limit+1). `passwordHash` is taken as-is for now (auth service later).
  */
 import { Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
-import { and, desc, eq, inArray, lt } from 'drizzle-orm';
+import { and, desc, eq, gt, inArray, lt } from 'drizzle-orm';
 import * as argon2 from 'argon2';
 import {
   DomainError,
@@ -164,16 +164,51 @@ export class SecurityService {
   }
 
   /**
+   * S4 security review finding N2 — true for `userId` if it currently holds a LIVE (not yet
+   * decided, not yet expired) PENDING `vault_role_grant_request`. An account mid-grant for a
+   * Vault-authority role is exactly the account an attacker most wants to control the moment
+   * before the grant lands — either by re-pointing its email (`changeUserEmail`, below) or by
+   * being the first to bind an ALEMBIC identity to it (`AuthService.loginWithAssertion`'s
+   * first-bind branch, the sibling check for the same finding). Lazily treats a PENDING row
+   * past its own `expiresDt` as already expired, the same way `approveVaultRoleGrant`'s own
+   * pre-pass does, rather than requiring every caller to know about the sweep — this is a
+   * read-only guard, not the sweep itself, so a stale PENDING row here simply reads as "no
+   * live request" instead of being written to EXPIRED.
+   */
+  private async hasPendingVaultRoleGrant(userId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: vaultRoleGrantRequest.vaultRoleGrantRequestId })
+      .from(vaultRoleGrantRequest)
+      .where(and(
+        eq(vaultRoleGrantRequest.userId, userId),
+        eq(vaultRoleGrantRequest.grantStatus, 'PENDING'),
+        gt(vaultRoleGrantRequest.expiresDt, new Date()),
+      ))
+      .limit(1);
+    return rows.length > 0;
+  }
+
+  /**
    * S3 security review item 1 — the DEDICATED, AUDITED path for changing a user's email.
    * `EditService`'s generic PATCH (`edit.service.ts`) never lists `email` as an editable
    * column any more — this is the only way to change it. Refuses outright for a target
-   * holding a Vault-authority role (formulator/vault_approver): those accounts are exactly
-   * the ones `AuthService.loginWithAssertion`'s old email-only mapping made a takeover target
-   * for, and a rare, high-stakes edit like this is safer refused than built out into a second
-   * two-person flow nobody will exercise often enough to trust. An ordinary user's email may
+   * holding a Vault-authority role (formulator/vault_approver), OR ONE PENDING FOR ONE (S4
+   * finding N2): those accounts are exactly the ones `AuthService.loginWithAssertion`'s old
+   * email-only mapping made a takeover target for, and a rare, high-stakes edit like this is
+   * safer refused outright than built out into a second two-person flow nobody will exercise
+   * often enough to trust — the SAME judgement this file already made for a current holder,
+   * extended to cover the account that is about to become one. An ordinary user's email may
    * still be corrected here, permission-gated the same as the generic editor was
    * (`iam:user_master:write`), and every attempt is written to the audit sink whether it
    * succeeds or is refused.
+   *
+   * S4 FINDING N2, THE RULE (documented here because this is the one place it is enforced):
+   * every successful email change on this path CLEARS `alembic_subject` unconditionally. A
+   * changed email is a changed identity as far as the ALEMBIC bridge is concerned — leaving
+   * the old binding in place would let the row go on answering to a subject that was proved
+   * against an email it no longer has, and forces the honest outcome instead: the very next
+   * assertion login for this row re-binds from scratch (S3 item 1's first-bind path), the same
+   * as it would for a brand-new account.
    */
   async changeUserEmail(userId: string, newEmail: string, principal: AuthPrincipal): Promise<SafeUser> {
     const target = await this.getUserById(userId);
@@ -184,8 +219,9 @@ export class SecurityService {
       .from(userRoleMapping)
       .innerJoin(roleMaster, eq(roleMaster.roleId, userRoleMapping.roleId))
       .where(and(eq(userRoleMapping.userId, userId), inArray(roleMaster.roleCode, VAULT_AUTHORITY_ROLES)));
+    const pendingVaultGrant = vaultRoles.length === 0 && (await this.hasPendingVaultRoleGrant(userId));
 
-    if (vaultRoles.length > 0) {
+    if (vaultRoles.length > 0 || pendingVaultGrant) {
       if (this.auditSink) {
         await this.auditSink
           .record({
@@ -193,14 +229,18 @@ export class SecurityService {
             action: 'security.user_email.refused',
             entityType: 'user_master',
             entityId: userId,
-            reason: `refused email change for a Vault-authority role holder (${vaultRoles.map((r) => r.code).join(', ')})`,
+            reason: vaultRoles.length > 0
+              ? `refused email change for a Vault-authority role holder (${vaultRoles.map((r) => r.code).join(', ')})`
+              : 'refused email change for a user with a pending Vault-authority role grant request',
             result: 'refuse',
           })
           .catch(() => {});
       }
       throw DomainError.forbidden(
         'AUTH_FORBIDDEN',
-        'This account holds a Vault-authority role (formulator/vault_approver) — its email cannot be changed through this path. Contact the owner.',
+        vaultRoles.length > 0
+          ? 'This account holds a Vault-authority role (formulator/vault_approver) — its email cannot be changed through this path. Contact the owner.'
+          : 'This account has a pending Vault-authority role grant request — its email cannot be changed until that request is decided or expires. Contact the owner.',
       );
     }
 
@@ -208,7 +248,9 @@ export class SecurityService {
     const actor = principal.userId;
     const rows = await this.db
       .update(userMaster)
-      .set({ email, updatedBy: actor })
+      // S4 finding N2: alembic_subject is cleared on every email change, unconditionally —
+      // see this method's own doc for why a changed email must never keep an old binding.
+      .set({ email, alembicSubject: null, updatedBy: actor })
       .where(eq(userMaster.userId, userId))
       .returning(USER_SAFE);
     const updated = ensure(rows[0]);
@@ -220,7 +262,8 @@ export class SecurityService {
           action: 'security.user_email.changed',
           entityType: 'user_master',
           entityId: userId,
-          reason: `email changed from "${target.email ?? ''}" to "${email}"`,
+          reason: `email changed from "${target.email ?? ''}" to "${email}"`
+            + (target.alembicSubject ? ' — alembic_subject cleared, re-bind required on next ALEMBIC sign-in' : ''),
           result: 'allow',
         })
         .catch(() => {});
