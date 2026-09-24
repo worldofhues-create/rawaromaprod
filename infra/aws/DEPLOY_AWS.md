@@ -165,3 +165,13 @@ Verified locally end-to-end this lane (Docker PostGIS PG, `postgres://apple@127.
 seed → dump (main + formula) → restore into a fresh database → `reconcile.ts` reports 0/43
 mismatches → mutate one row in the target → `reconcile.ts` catches it (non-zero exit, names the
 exact failing check) in two independent domains (a status-value mutation and a row deletion).
+
+## 9. Public huecycle.in hosts (lane HOSTS, 2026-09-24)
+`infra/aws/nginx/huecycle-hosts.conf` → `/etc/nginx/sites-available/huecycle-hosts.conf`, enabled as
+`sites-enabled/zz-huecycle-hosts.conf` (must load after alembic.conf, rawaroma-demo-origin.conf, rawprod-cf-origin.conf —
+it reuses their upstreams/maps). Cert: `certbot certonly --nginx --cert-name rawlanes.huecycle.in -d <9 names>` —
+same nginx authenticator as raw.huecycle.in; `certbot.timer` renews. Change procedure: `nginx -t` then `systemctl reload nginx` only.
+- rawfactory / rawplatform: static from `/var/www/rawprod-cf/{factory,platform}`, API `/rpc|/crypto/|/v1/|/auth/|/health` → 127.0.0.1:4100 (no-store).
+- rawdemofactory / rawdemoplatform: static from `/var/www/rawprod-demo-cf/{factory,platform}` (install-box.sh), API → :4110.
+- On a RawProd web deploy, refresh those copy dirs; nothing in this file changes.
+- Vault has no public name (no rawvault / rawdemovault vhost, by design).

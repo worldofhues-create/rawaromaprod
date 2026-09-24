@@ -361,3 +361,12 @@ from the SAME SSM param as their paired `api.env` (`/rawaroma/rawprod/JWT_SECRET
 not a separate `/rawaroma/{vault,demo/vault}/JWT_SECRET` copy that could silently drift. `infra/aws/demo/apply-aws.sh` no
 longer creates that now-unused demo param. `vault-api.service`'s header and `DEPLOY_AWS.md`'s env table are updated to
 state this as a fact, not a "should probably" hedge.
+
+---
+# Lane HOSTS (2026-09-24): public hostnames on the ALEMBIC box (i-04e7dc4e5edcc1ff7, 35.82.209.155)
+- DNS A (GoDaddy, ns11.domaincontrol.com): rawstudio, rawfactory, rawplatform, rawdemo, rawdemoadmin, rawdemoagent,
+  rawdemostudio, rawdemofactory, rawdemoplatform .huecycle.in → 35.82.209.155. No rawvault / rawdemovault (private).
+- LE cert `rawlanes.huecycle.in` (ECDSA, SAN = the 9 names), authenticator=nginx, auto-renew via certbot.timer.
+- nginx: `/etc/nginx/sites-enabled/zz-huecycle-hosts.conf` → sites-available/huecycle-hosts.conf (repo: infra/aws/nginx/huecycle-hosts.conf).
+- Created empty `/var/www/rawprod-demo-cf/platform` (demo platform static not yet deployed → 403 until install-box.sh fills it).
+- Expected until deploy: rawprod-api :4100 and demo :4010/:3010/:4110 down → 502 on those paths.
