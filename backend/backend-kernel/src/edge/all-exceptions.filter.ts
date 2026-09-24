@@ -82,6 +82,29 @@ export class AllExceptionsFilter implements ExceptionFilter {
       };
     }
 
+    /* Postgres refusals that are the CALLER's to fix, not a server fault (golden journey
+     * lane/j2: re-running the harness surfaced `duplicate key ... product_sku_code_uq` and
+     * a malformed `:id` as 500 "Internal server error"). 23505 unique_violation -> 409 naming
+     * the constraint (never the conflicting values); 22P02 invalid_text_representation (e.g.
+     * a non-uuid id) -> 400. Everything else stays a 500. */
+    const pg = postgresErrorOf(exception);
+    if (pg?.code === '23505') {
+      return {
+        status: HttpStatus.CONFLICT,
+        error: {
+          code: 'CONFLICT',
+          message: `A record with the same unique value already exists${pg.constraint_name ? ` (${pg.constraint_name})` : ''}.`,
+          requestId,
+        },
+      };
+    }
+    if (pg?.code === '22P02') {
+      return {
+        status: HttpStatus.BAD_REQUEST,
+        error: { code: statusToCode(HttpStatus.BAD_REQUEST), message: 'Malformed value in the request (e.g. an id that is not a uuid).', requestId },
+      };
+    }
+
     return {
       status: HttpStatus.INTERNAL_SERVER_ERROR,
       error: { code: 'INTERNAL_ERROR', message: 'Internal server error', requestId },
@@ -110,4 +133,17 @@ function statusToCode(status: number): ErrorCode {
     default:
       return 'INTERNAL_ERROR';
   }
+}
+
+/** The postgres.js error (`PostgresError`: `code`, `constraint_name`) behind an exception, whether
+ *  thrown directly or wrapped once by the query layer as `cause`. Exported for its test. */
+export function postgresErrorOf(e: unknown): { code: string; constraint_name?: string } | null {
+  for (const candidate of [e, (e as { cause?: unknown } | null)?.cause]) {
+    const c = candidate as { name?: unknown; code?: unknown; constraint_name?: unknown } | null;
+    if (c && typeof c === 'object' && typeof c.code === 'string' && /^[0-9A-Z]{5}$/.test(c.code)
+        && (c.name === 'PostgresError' || 'constraint_name' in c || 'severity' in c)) {
+      return { code: c.code, ...(typeof c.constraint_name === 'string' ? { constraint_name: c.constraint_name } : {}) };
+    }
+  }
+  return null;
 }
