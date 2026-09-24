@@ -35,6 +35,8 @@
        UI-parity lanes stop colliding. Plain classic scripts (no bundler): shell.js declares the
        shared globals (tunnel, ROLES, COLS, ACTIONS, primitives, router, boot); the ws-*.js files
        add workspace-specific view specials and MUST load after it. -->
+  <!-- Click/notification/alert sounds (window.RaSound); before shell.js, which calls it. -->
+  <script src="/sound.js"></script>
   <script src="/shell.js"></script>
   <script src="/ws-supply.js"></script>
   <script src="/ws-mfg.js"></script>

@@ -321,6 +321,7 @@
   function toast(msg, bad) {
     var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]);
     document.body.appendChild(t);
+    if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); }
     setTimeout(function () { t.remove(); }, 3400);
   }
 
@@ -597,6 +598,8 @@
         h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:0', onclick: function () { railOpen = false; if (ariaApi) { ariaApi.destroy(); ariaApi = null; } document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
       ]),
     ]);
+    /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
+    var rme = rail.querySelector('.rme'); if (window.RaSound && rme) RaSound.mountToggle(rme, rme.lastChild, 'rail-min', 'position:static;margin-left:0');
     var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
     ariaCtx = 'Vault · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [

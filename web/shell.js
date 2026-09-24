@@ -1380,6 +1380,7 @@
     var t = document.createElement('div'); t.className = 'toast' + (tone === 'bad' ? ' bad' : tone === 'good' ? ' good' : '');
     t.innerHTML = '<span class="d"></span>' + escHtml(msg);
     document.body.appendChild(t);
+    if (window.RaSound) { if (tone === 'bad') RaSound.play('alert'); else if (tone === 'good') RaSound.play('success'); else RaSound.cue(msg); }
     setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, 1900);
   }
   function wireActions() {
@@ -2070,6 +2071,11 @@
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
       var d = res.json && res.json.data; if (!d) return;
+      // A count that went UP since the last look is news; the first load is not.
+      if (window.RaSound && loadAlerts.seen != null && d.total > loadAlerts.seen) {
+        RaSound.play((d.alerts || []).some(function (a) { return a.severity === 'high'; }) ? 'alert' : 'notify');
+      }
+      loadAlerts.seen = d.total;
       var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'inline'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
       pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div class="sect" style="padding:var(--s-tight) var(--s-tight) var(--s-snug)">Alerts</div>' + d.alerts.map(function (a) {
@@ -2095,6 +2101,8 @@
     if ($('ra-home')) $('ra-home').onclick = home;
     if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
     $('ra-logout').onclick = function () { if (_aria) { _aria.destroy(); _aria = null; } session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
+    if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
