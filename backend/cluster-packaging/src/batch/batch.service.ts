@@ -12,7 +12,7 @@
  * strings (stored as-is). package_order / product_sku / consumed_for_document / uom are
  * dict-soft refs (plain uuid, no FK at this layer).
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -25,7 +25,11 @@ import type {
   ProduceFinishedGoodBatch,
 } from '../packaging.dtos.js';
 
-const { finishedGoodBatchMaster, finishedGoodsBatchConsumption, outbox } = packagingSchema;
+const { finishedGoodBatchMaster, finishedGoodsBatchConsumption, outbox, packageOrder } = packagingSchema;
+
+/** Package-order states in which finished goods can actually exist (lane/j2): filling has
+ *  started (IN_PROGRESS) or finished (COMPLETED). */
+const FG_PRODUCIBLE_ORDER_STATES = new Set(['IN_PROGRESS', 'COMPLETED']);
 
 @Injectable()
 export class BatchService {
@@ -39,6 +43,25 @@ export class BatchService {
    */
   async produceFinishedGoodBatch(body: ProduceFinishedGoodBatch, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
+      /* Golden journey lane/j2: an FG batch was accepted against a DRAFT package order —
+       * no materials issued, no filling session, nothing filled — i.e. finished goods that
+       * cannot physically exist. Require the order to be filling or filled. */
+      const order = (
+        await tx
+          .select({ status: packageOrder.status })
+          .from(packageOrder)
+          .where(eq(packageOrder.packageOrderId, body.packageOrderId))
+          .for('update')
+          .limit(1)
+      )[0];
+      if (!order) throw new NotFoundException(`package_order not found: ${body.packageOrderId}`);
+      const orderStatus = String(order.status ?? 'DRAFT').toUpperCase();
+      if (!FG_PRODUCIBLE_ORDER_STATES.has(orderStatus)) {
+        throw new ConflictException(
+          `Cannot produce a finished-good batch on package order ${body.packageOrderId}: status is ${orderStatus} `
+            + '(must be IN_PROGRESS or COMPLETED — issue materials and run a filling session first).',
+        );
+      }
       const batchId = uuidv7();
       const batch = (
         await tx

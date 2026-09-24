@@ -362,8 +362,9 @@ test('packaging OrdersService.createPackageOrder: nothing emitted for RawProd-in
 async function packageOrderFor(oilBatchId: string): Promise<string> {
   const sql = testClient();
   const packageOrderId = crypto.randomUUID();
+  // IN_PROGRESS: an FG batch can only be produced once filling has started (lane/j2 guard).
   await sql`insert into packaging.package_order (package_order_id, oil_batch_id, status)
-    values (${packageOrderId}, ${oilBatchId}, 'DRAFT')`;
+    values (${packageOrderId}, ${oilBatchId}, 'IN_PROGRESS')`;
   return packageOrderId;
 }
 
@@ -483,4 +484,21 @@ test('dispatch.createDispatch: nothing emitted for a RawProd-internal FG batch',
     principal(),
   );
   await assertOilBatchHasNoProductionOrder(oilBatchId);
+});
+
+/* lane/j2 — FG batch guard: finished goods cannot be produced against a package order that has
+ * not started filling. */
+test('packaging BatchService.produceFinishedGoodBatch: refused (409) on a DRAFT package order', async () => {
+  const svc = new PackagingBatchService(packagingDb());
+  const oilBatchId = await releasedOilBatchFor(null);
+  const packageOrderId = crypto.randomUUID();
+  await testClient()`insert into packaging.package_order (package_order_id, oil_batch_id, status)
+    values (${packageOrderId}, ${oilBatchId}, 'DRAFT')`;
+  await assert.rejects(
+    () => svc.produceFinishedGoodBatch(
+      { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: `FG-D-${packageOrderId.slice(0, 6)}`, producedQty: 1 },
+      principal(),
+    ),
+    (e: unknown) => e instanceof ConflictException && /status is DRAFT/.test((e as Error).message),
+  );
 });
