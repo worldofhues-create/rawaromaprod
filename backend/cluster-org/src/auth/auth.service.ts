@@ -46,6 +46,13 @@ export interface LoginResult {
   expiresIn: number;
 }
 
+/** LANE D1 — the demo showcase role (scripts/ra-roles.ts). It may hold a RawProd session ONLY
+ *  when this deployment's RAWPROD_ENVIRONMENT is `demo`, ONLY by way of an ALEMBIC assertion
+ *  minted by a demo ALEMBIC (never a password), and its sessions never refresh — so an ALEMBIC
+ *  administrator's kill switch reaches a held RawProd showcase session within one access-token
+ *  lifetime (JWT_ACCESS_TTL), and a re-open is refused by ALEMBIC at the assertion. */
+const SHOWCASE_ROLE = "showcase";
+
 // Login lockout thresholds (audit LOW): N failures per identifier → locked for the window.
 const LOGIN_MAX_FAILS = 5;
 const LOGIN_LOCK_MS = 15 * 60 * 1000;
@@ -196,6 +203,11 @@ export class AuthService {
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
 
+    // LANE D1: the showcase account never signs in with a password, in any environment.
+    if (roles.includes(SHOWCASE_ROLE)) {
+      throw DomainError.forbidden("AUTH_FORBIDDEN", "The demo showcase signs in only from the ALEMBIC demo.");
+    }
+
     // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
     // roles don't belong to it. Unset = unified single console (the current deployment) → no gate.
     const consoleEnv = process.env.CONSOLE;
@@ -297,6 +309,8 @@ export class AuthService {
       now,
       expectedTargets,
       expectedTenantId: this.config.get('ALEMBIC_ASSERTION_TENANT_ID') || undefined,
+      // LANE D1: a demo assertion only in a demo deployment, a production one only in production.
+      expectedEnvironment: this.config.get('RAWPROD_ENVIRONMENT'),
     });
     if (!verified.ok) {
       throw new DomainError('AUTH_ASSERTION_INVALID', verified.detail, 401);
@@ -378,6 +392,13 @@ export class AuthService {
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
 
+    // LANE D1: the showcase role holds a session only in a DEMO deployment. A `showcase` row that
+    // exists in production (seeded, or granted by mistake) authenticates nobody — the same rule
+    // ALEMBIC applies to its own demo account.
+    if (roles.includes(SHOWCASE_ROLE) && this.config.get('RAWPROD_ENVIRONMENT') !== 'demo') {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'Demo access is not available on this deployment.');
+    }
+
     // Same two-console gate password sign-in already honours — unset CONSOLE (this
     // deployment's current shape) applies no gate.
     const consoleEnv = process.env.CONSOLE;
@@ -435,6 +456,14 @@ export class AuthService {
     if (row.isActive === false) throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
+
+    // LANE D1: a showcase session NEVER refreshes. It lives one access-token lifetime and is then
+    // re-opened from ALEMBIC, which refuses the assertion while the demo kill switch is off — so
+    // switching demo access off in ALEMBIC reaches a held RawProd showcase session within
+    // JWT_ACCESS_TTL, deterministically, without RawProd having to ask ALEMBIC anything.
+    if (roles.includes(SHOWCASE_ROLE)) {
+      throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "Demo sessions do not refresh. Re-open RawProd from the ALEMBIC demo.");
+    }
 
     // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
     // roles don't belong to it. Unset = unified single console (the current deployment) → no gate.
