@@ -5,7 +5,7 @@
  * planning.service.ts (ProductionScheduled), mixing.service.ts (ProductionStarted),
  * production batch.service.ts + quality inspections.service.ts (QcStatusChanged),
  * packaging orders.service.ts (PackagingStarted), packaging batch.service.ts
- * (FgBatchAvailable), reservation.service.ts (AtpAllocationGranted), and
+ * (FgBatchAvailable — removed at creation by lane/j2, see its test), reservation.service.ts (AtpAllocationGranted), and
  * dispatch.service.ts (DispatchReady/Dispatched).
  *
  * Required properties (lane brief): for each event, emitted in-transaction with the right
@@ -367,7 +367,7 @@ async function packageOrderFor(oilBatchId: string): Promise<string> {
   return packageOrderId;
 }
 
-test('packaging BatchService.produceFinishedGoodBatch: emits FgBatchAvailable two hops back through the bridge link', async () => {
+test('packaging BatchService.produceFinishedGoodBatch: does NOT emit FgBatchAvailable before packaging QC (lane/j2)', async () => {
   const svc = new PackagingBatchService(packagingDb());
   const { alembicRequirementId } = await freshRequirement();
   const orderId = await freshProductionOrder();
@@ -380,9 +380,10 @@ test('packaging BatchService.produceFinishedGoodBatch: emits FgBatchAvailable tw
     principal(),
   );
 
+  // Availability is emitted by PackagingReleaseService on packaging QC PASS
+  // (automation/__tests__/packaging-release.test.ts), never at batch creation.
   const rows = await outboxRowsFor(alembicRequirementId);
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0]!.type, 'FgBatchAvailable');
+  assert.equal(rows.filter((r) => r.type === 'FgBatchAvailable').length, 0);
 });
 
 test('packaging BatchService.produceFinishedGoodBatch: nothing emitted for a RawProd-internal package order', async () => {

@@ -13,8 +13,8 @@
  * dict-soft refs (plain uuid, no FK at this layer).
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { desc, eq, lt } from 'drizzle-orm';
+import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
@@ -92,20 +92,12 @@ export class BatchService {
         batchId,
       );
 
-      // RP-EMIT (lane F6): resolve the production order two hops back (this package order's
-      // oil batch's production order), then emit FgBatchAvailable toward ALEMBIC iff that
-      // order fulfills a bridge requirement.
-      const order = (await tx.execute(sql`
-        select ob.production_order_id
-          from packaging.package_order po
-          join production.oil_batch_master ob on ob.oil_batch_id = po.oil_batch_id
-         where po.package_order_id = ${body.packageOrderId}`
-      )) as unknown as Array<{ production_order_id: string | null }>;
-      await emitBridgeOutbound(tx, 'FgBatchAvailable', order[0]?.production_order_id, {
-        finished_good_batch_id: batchId,
-        package_order_id: body.packageOrderId,
-        batch_number: body.batchNumber,
-      });
+      // NO FgBatchAvailable here (golden journey lane/j2). A just-produced FG batch has not
+      // been through packaging QC; emitting availability at this point told ALEMBIC the goods
+      // were FG_READY before QC had looked at them (live: two FgBatchAvailable per batch, the
+      // first premature). The G3 PackagingReleaseService emits FgBatchAvailable on packaging
+      // QC PASS — backend/api/src/automation/packaging-release.service.ts — the one correct
+      // moment ("packaging QC pass → FG release → ATP → emit availability", directive §18).
 
       return { batch, consumption };
     });
