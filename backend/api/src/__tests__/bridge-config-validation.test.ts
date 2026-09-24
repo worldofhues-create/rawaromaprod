@@ -90,3 +90,72 @@ test('bridge config: unknown extra fields are stripped, not an error (zod defaul
   const r = configureBridgeRequest.safeParse({ enabled: true, extra: 'nope' } as never);
   assert.equal(r.success, true);
 });
+
+/* BRIDGE_WEBHOOK_ALLOWED_HOSTS — the golden-journey gap #3 fix. A single-VPC/local pairing
+ * (factory ALEMBIC as a private host) is exactly what this allow-list exists to unblock; an
+ * unlisted private host, and the link-local/metadata range regardless of listing, must stay
+ * refused. Each test restores the env var afterward so this file's ordering never leaks state
+ * into the plain-refusal tests above. */
+test('bridge config: BRIDGE_WEBHOOK_ALLOWED_HOSTS admits an exact-listed private host', () => {
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = '10.0.0.5:8443, 192.168.1.1';
+  try {
+    assert.equal(parse('https://10.0.0.5:8443/webhooks/rawprod').success, true);
+    assert.equal(parse('https://192.168.1.1/webhooks/rawprod').success, true);
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+});
+
+test('bridge config: BRIDGE_WEBHOOK_ALLOWED_HOSTS does not widen to an unlisted private host', () => {
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = '10.0.0.5:8443';
+  try {
+    assert.equal(parse('https://10.0.0.6:8443/webhooks/rawprod').success, false);
+    assert.equal(parse('https://192.168.1.1/hook').success, false);
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+});
+
+test('bridge config: an allow-listed host on the WRONG port still refuses (exact host[:port] match)', () => {
+  // A bare hostname (not an IP literal, not `localhost`) is not syntactically identifiable as
+  // private at all — `isUnsafeWebhookHost` never flags it, allow-list or not (DNS resolution is
+  // explicitly out of scope for this boundary; see this file's header) — so this exercises the
+  // exactness rule with an IP literal, the one shape the guard actually restricts.
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = '10.0.0.5:8443';
+  try {
+    assert.equal(parse('https://10.0.0.5:9999/webhooks/rawprod').success, false);
+    assert.equal(parse('https://10.0.0.5/webhooks/rawprod').success, false);
+    assert.equal(parse('https://10.0.0.5:8443/webhooks/rawprod').success, true);
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+});
+
+test('bridge config: the link-local/metadata range can NEVER be allow-listed, even if named exactly', () => {
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = '169.254.169.254, 169.254.1.1';
+  try {
+    assert.equal(parse('https://169.254.169.254/latest/meta-data/').success, false);
+    assert.equal(parse('https://169.254.1.1/hook').success, false);
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+});
+
+test('bridge config: BRIDGE_WEBHOOK_ALLOWED_HOSTS unset or empty refuses every private host (safe default)', () => {
+  const prev = process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+  try {
+    assert.equal(parse('https://10.0.0.5/hook').success, false);
+  } finally {
+    if (prev === undefined) delete process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
+    else process.env.BRIDGE_WEBHOOK_ALLOWED_HOSTS = prev;
+  }
+});
