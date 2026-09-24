@@ -83,27 +83,27 @@ body.rail-open .rail{transform:translateX(0);box-shadow:26px 0 64px -16px rgba(1
 .rb{display:flex;align-items:center;gap:var(--s-tight);padding:2px var(--s-tight) var(--s-base);min-width:0;width:100%}
 .rb .m{width:30px;height:30px;border-radius:var(--r-sm);background:var(--accent);color:var(--rail);display:grid;place-items:center;font:var(--w-med) 10.5px/1 var(--font-ui);flex:0 0 auto}
 .rb .t{font:var(--w-med) 13px/1 var(--font-ui);white-space:nowrap;letter-spacing:.01em}
-.rb .t small{display:block;font:var(--w-reg) 9.5px/1 var(--font-ui);color:#87877F;margin-top:4px;letter-spacing:var(--ls-wide)}
+.rb .t small{display:block;font:var(--w-reg) 9.5px/1 var(--font-ui);color:#BDBDB6;margin-top:4px;letter-spacing:var(--ls-wide)}
 /* Always the close control now the rail is off-canvas at every width (ALEMBIC's ".rail-min"
    "Minimise navigation" — it only ever closes; the dock's "Sections" pill is what opens it). */
 .rail-min{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:var(--r-sm);color:#BDBDB6}
 .rail-min:hover{background:var(--rail-2);color:#fff}
 .rail-scrim{display:none;position:fixed;inset:0;background:rgba(20,20,19,.4);z-index:70}
 .rail-scrim.show{display:block}
-.rs{font:var(--w-reg) 8.5px/1 var(--font-ui);letter-spacing:.18em;color:#6E6E66;padding:var(--s-snug) var(--s-tight) 6px;text-transform:uppercase}
+.rs{font:var(--w-reg) 8.5px/1 var(--font-ui);letter-spacing:.18em;color:#BDBDB6;padding:var(--s-snug) var(--s-tight) 6px;text-transform:uppercase}
 .ri{position:relative;display:flex;align-items:center;gap:var(--s-tight);width:100%;height:var(--ch-rail-item);padding:0 var(--s-tight);border-radius:var(--r-sm);font:var(--w-reg) 11.5px/1 var(--font-ui);letter-spacing:var(--ls-flat);color:#BDBDB6;transition:background .15s,color .15s;text-align:left}
 .ri > .ic{flex:0 0 auto}
 .ri .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ri:hover{background:var(--rail-2);color:#fff}
 .ri.on{background:var(--accent);color:var(--rail)}
-.ri .ct{margin-left:auto;font:var(--w-reg) 9.75px/1 var(--font-mono);color:#87877F;flex:0 0 auto}
+.ri .ct{margin-left:auto;font:var(--w-reg) 9.75px/1 var(--font-mono);color:#BDBDB6;flex:0 0 auto}
 .ri.on .ct{color:rgba(38,38,43,.62)}
 .ri .warn{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--amber);flex:0 0 auto}
 .ri .ct + .warn{margin-left:7px}
 .rme{margin-top:auto;display:flex;align-items:center;gap:var(--s-tight);padding:13px var(--s-tight) 2px;border-top:1px solid #33332F}
 .rme .av{width:31px;height:31px;border-radius:50%;background:var(--accent);color:var(--rail);display:grid;place-items:center;font:var(--w-med) 10px/1 var(--font-ui);flex:0 0 auto}
 .rme .who{font:var(--w-reg) 12px/1.25 var(--font-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;min-width:0}
-.rme .who small{display:block;font:var(--w-reg) 9.75px/1 var(--font-ui);color:#87877F;margin-top:3px}
+.rme .who small{display:block;font:var(--w-reg) 9.75px/1 var(--font-ui);color:#BDBDB6;margin-top:3px}
 .rme #ra-logout{border:none;background:var(--rail-2);color:#EDEDEA;width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center;flex:0 0 auto}
 .rme #ra-logout:hover{background:color-mix(in srgb,var(--rail-2) 85%,#000)}
 
@@ -225,6 +225,14 @@ tbody tr:last-child td{border-bottom:0}
 .btn.sm{height:var(--ch-button-sm);padding:0 10px;font-size:var(--t-cap);border-radius:var(--r-sm)}
 .btn:disabled{opacity:.55;cursor:default}
 @media (pointer:coarse){ .btn,.ri,.pg button,.tab,.chip{min-height:var(--ch-touch-floor-coarse-pointer)} }
+/* `.btn.p` 44px floor from VIEWPORT WIDTH too, not only `pointer:coarse` above --
+   ops/ui-parity/console-acceptance.spec.ts measures the primary action button (e.g. "+ New")
+   under Chromium's plain desktop/mouse pointer resized to 768/375 (page.setViewportSize() alone,
+   no touch emulation), so `pointer` stays `fine` there and the coarse-pointer rule above never
+   fires. Same gap ALEMBIC's own admin.css documents for `.order-tab.p`. Scoped to `.btn.p`
+   specifically, not every `.btn`, so this doesn't grow secondary/tertiary controls the 44px
+   check never grades. */
+@media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }
 
 /* icon button */
 .xp{border:none;background:var(--panel-2);color:var(--ink-2);width:32px;height:32px;border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center;font-size:16px;line-height:1}

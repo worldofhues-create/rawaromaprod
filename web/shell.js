@@ -3,10 +3,15 @@
  * per the signed-in role. Transport is the encrypted tunnel (only /crypto/handshake + /rpc on the
  * wire). Role comes from the DB (the JWT), never self-picked. Responsive on every device. */
 'use strict';
-  // Backend base. Local dev → :3000. Deployed → same-origin '' (Vercel rewrites /crypto + /rpc to
-  // Render, so the backend host never appears in the network tab). Override with window.RA_API.
-  var API = (typeof window.RA_API === 'string') ? window.RA_API
-    : (/(localhost|127\.0\.0\.1|0\.0\.0\.0)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+  // Backend base: same-origin '' always, unless overridden with window.RA_API. Every deployed
+  // vhost (infra/aws/nginx/rawprod-main.conf) AND the local stand-in for it
+  // (ops/ui-parity/static-proxy.mjs) reverse-proxy /crypto,/rpc,/v1,/auth,/health on this SAME
+  // origin, so a relative fetch is correct in both. A stale localhost-only guess here used to
+  // replace the port with :3000 (a leftover Vercel+Render-era assumption — that infra is gone),
+  // which on this codebase's actual current local stand-up hits nothing this app owns and reads
+  // back as "Could not reach the backend." A raw `npm run dev` backend on a different port from
+  // the static files (no reverse proxy at all) needs `window.RA_API` set explicitly.
+  var API = (typeof window.RA_API === 'string') ? window.RA_API : '';
   // PB-04 / SB-02: where "Sign in via ALEMBIC" sends the browser — ALEMBIC's own console,
   // which mints a short-lived signed assertion and returns here with it in the URL FRAGMENT
   // (never a query string a server would log) at `#assertion=<token>`. Same deploy-time
@@ -1237,8 +1242,15 @@
     var avail = actionsFor(endpoint, r) || [];
     avail.forEach(function (a) {
       var bg = a.tone === 'bad' ? 'var(--red)' : a.tone === 'warn' ? 'var(--amber)' : a.tone === 'good' ? 'var(--green)' : 'var(--accent)';
+      // actBtn's own default fg (#fff) reads fine on red/amber/green (dark, muted tones) but
+      // measured at 1.21:1 -- axe color-contrast serious -- on --accent (#E9F260, a light
+      // yellow-green): needs --accent-ink, the same pairing .btn.p already uses for --accent
+      // everywhere else in this stylesheet. Mirrors bg's own branches exactly (not just
+      // `a.tone` truthy) -- tone:'accent' is a real, truthy value distinct from bad/warn/good
+      // that also renders on --accent and was missed by a plain truthy check.
+      var fg = (a.tone === 'bad' || a.tone === 'warn' || a.tone === 'good') ? '#fff' : 'var(--accent-ink)';
       var k = 'ra' + (_actSeq++); _acts[k] = { a: a, r: r };
-      out.push(actBtn(k, a.label, bg));
+      out.push(actBtn(k, a.label, bg, fg));
     });
     var cfg = EDIT[endpoint];
     if (cfg && can(cfg.perm)) {

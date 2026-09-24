@@ -53,8 +53,10 @@
    *    on the full AppModule (both consoles the same origin) — a deploy only needs to set
    *    `window.MAIN_API` once vault-api is actually cut over to `vault-main.ts`.
    * --------------------------------------------------------------------------------------- */
-  var API = (typeof window.VAULT_API === 'string') ? window.VAULT_API
-    : (/(localhost|127\.0\.0\.1)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+  // Backend base: same-origin '' always, unless overridden with window.VAULT_API — see
+  // web/shell.js's own header comment for why a localhost-only :3000 guess here is wrong for
+  // this codebase's actual (nginx reverse-proxy, same origin) local and deployed topology.
+  var API = (typeof window.VAULT_API === 'string') ? window.VAULT_API : '';
   var MAIN_API = (typeof window.MAIN_API === 'string') ? window.MAIN_API : API;
 
   function te(s) { return new TextEncoder().encode(s); }

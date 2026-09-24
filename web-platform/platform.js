@@ -16,8 +16,10 @@
 (function () {
   'use strict';
 
-  var API = (typeof window.PLATFORM_API === 'string') ? window.PLATFORM_API
-    : (/(localhost|127\.0\.0\.1)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+  // Backend base: same-origin '' always, unless overridden with window.PLATFORM_API — see
+  // web/shell.js's own header comment for why a localhost-only :3000 guess here is wrong for
+  // this codebase's actual (nginx reverse-proxy, same origin) local and deployed topology.
+  var API = (typeof window.PLATFORM_API === 'string') ? window.PLATFORM_API : '';
 
   /* ---- encrypted tunnel (own implementation, same wire contract as backend/api/src/crypto;
      verified against session-keys.service.ts's exact HKDF salt/info + iv|ct|tag layout) ---- */

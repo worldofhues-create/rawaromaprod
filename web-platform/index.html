@@ -8,9 +8,15 @@
   <meta name="theme-color" content="#26262B">
   <link rel="icon" href="/icon.svg">
   <meta name="robots" content="noindex, nofollow, noarchive">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
+       same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
+       (two third-party origins in the boot path of a console that handles credentials, every
+       visitor's IP disclosed to Google) and, here, the reason a same-origin `connect-src 'self'`
+       CSP is enough with no font-origin allowance at all. -->
+  <link rel="stylesheet" href="/fonts/outfit.css">
+  <link rel="stylesheet" href="/fonts/jetbrains-mono.css">
+  <link rel="stylesheet" href="/alembic-tokens.css">
+  <link rel="stylesheet" href="/platform.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
   <link rel="stylesheet" href="/platform.css">
 </head>
