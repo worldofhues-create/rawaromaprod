@@ -28,6 +28,8 @@ export const ERROR_CODES = [
   // control plane
   'FEATURE_DISABLED',
   'FEATURE_DEGRADED',
+  // internal service-to-service bridge (PB-03 remainder — main app box <-> Vault EC2)
+  'INTERNAL_BRIDGE_UNAUTHORIZED',
 ] as const;
 
 export const errorCode = z.enum(ERROR_CODES);

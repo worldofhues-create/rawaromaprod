@@ -55,6 +55,7 @@ import { RelayModule } from './relay/relay.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
 import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
+import { MaterialFactsModule } from './vault-bridge/material-facts.module.js';
 
 @Module({
   imports: [
@@ -89,6 +90,10 @@ import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
     BridgeModule,
     FactsModule,
     PlatformOpsModule,
+    // PB-03 remainder (V4 §109.1) — serves the Vault box's material-facts bridge (RM_ALIAS/
+    // search only, InternalBridgeGuard-signed, @Public); the Vault's own plaintext formula
+    // routes are never mounted here (FormulaModule stays VAULT_MODE=false in this process).
+    MaterialFactsModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up

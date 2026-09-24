@@ -12,8 +12,21 @@ export const configSchema = z.object({
   APP_ENV: z.enum(['dev', 'staging', 'prod']).default('dev'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
 
-  /** One Postgres instance; per-schema clients are created from this single URL. */
-  DATABASE_URL: z.string().url(),
+  /**
+   * The MAIN schema Postgres instance (iam/platform/masterdata/… — every cluster EXCEPT
+   * formula, which never shares this connection). Required to boot `main.ts` (AppModule) and
+   * `worker.ts` (WorkerModule) — `DrizzleModule`'s `PG_CLIENT` factory throws a clear boot
+   * error if it's unset when actually instantiated.
+   *
+   * OPTIONAL here (not `.optional()` was the old, PB-03-blocking shape) specifically so
+   * `vault-main.ts` (`VaultAppModule`) can boot on the isolated Vault EC2, which by design
+   * (V4 §109.1) has no network path to this database at all and must never be handed its
+   * credential — see `vault-main.ts`'s header comment. `VaultAppModule` never imports
+   * `DrizzleModule`/`BackendKernelModule.forRoot()`, so this being unset there is inert; every
+   * OTHER deployable that needs it (main.ts/worker.ts) still fails fast via the DrizzleModule
+   * guard, exactly as before.
+   */
+  DATABASE_URL: z.string().url().optional(),
 
   /** Optional Redis URL (sessions / rate-limit / BullMQ) — placeholder wiring only here. */
   REDIS_URL: z.string().url().optional(),
@@ -171,6 +184,49 @@ export const configSchema = z.object({
    */
   GIT_SHA: z.string().optional(),
   BUILD_TIME: z.string().optional(),
+
+  /**
+   * PB-03 remainder (V4 §109.1) — true on the standalone Vault EC2's `vault-main.ts`
+   * (`VaultAppModule`) ONLY. Read directly off `process.env` (not via an injected
+   * `ConfigService`) by `@ra/cluster-formula`'s `formula.module.ts` at MODULE-DECORATION time
+   * — before Nest's DI container exists — to decide, once per process, whether to mount the
+   * formula plaintext HTTP routes (CatalogController/FormulasController/ApprovalsController;
+   * vault mode only) and whether `MASTERDATA_LOOKUP` resolves locally off the shared main
+   * `PG_CLIENT` (main mode; `ClusterMasterdataModule`) or over the signed internal bridge
+   * (vault mode; `MaterialFactsClient` — zero main-DB credential on the Vault box). Also
+   * exposed here (typed, via `ConfigService`) so `vault-main.ts` can assert it's true and
+   * `main.ts` can assert it's NOT true, as a boot-time sanity check that the right entrypoint
+   * is running the right module.
+   */
+  VAULT_MODE: z
+    .enum(['true', 'false'])
+    .default('false')
+    .transform((v) => v === 'true'),
+
+  /**
+   * PB-03 remainder — the shared secret for the ONE internal, service-to-service signed
+   * channel between the main app box and the standalone Vault EC2 (an HMAC-SHA256 over
+   * method+path+timestamp+body, `internal-bridge-signing.ts`; §109's "signed internal
+   * channel"). Used BOTH directions:
+   *   - main → vault: `VaultPortHttpClient` (`@ra/cluster-formula`) calling
+   *     `VAULT_API_INTERNAL_URL` to resolve a coded manufacturing instruction.
+   *   - vault → main: `MaterialFactsClient` (`@ra/cluster-formula`, vault mode only) calling
+   *     `MAIN_API_INTERNAL_URL` to resolve a material's RM_ALIAS / run the Vault material
+   *     picker's search — the ONLY main-DB-shaped data the Vault box ever sees, and only ever
+   *     alias/code/name refs, never formula plaintext, over a read-only proxy call.
+   * Distributed to both boxes via SSM (never baked into an AMI/image or committed). Optional
+   * so every OTHER deployable (main.ts/worker.ts outside this bridge) boots without it;
+   * `InternalBridgeGuard` fails CLOSED (401) on every request when it's unset, same "refuse
+   * rather than silently degrade" rule every other optional security secret here follows.
+   */
+  INTERNAL_BRIDGE_KEY: z.string().optional(),
+  /** Main API's own base URL, reachable from the Vault box's SG-scoped private path — the
+   *  target `MaterialFactsClient` (vault mode) calls for material-alias/search facts. */
+  MAIN_API_INTERNAL_URL: z.string().url().optional(),
+  /** Vault API's own base URL, reachable from the app box's SG-scoped private path (SG rule
+   *  vault-app ← app-box, one port — see `scripts/apply-vault-port-sg-rule.sh`) — the target
+   *  `VaultPortHttpClient` (main mode) calls to resolve a coded manufacturing instruction. */
+  VAULT_API_INTERNAL_URL: z.string().url().optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

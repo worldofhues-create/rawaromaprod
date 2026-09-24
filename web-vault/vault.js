@@ -8,7 +8,10 @@
  * Transport: the SAME encrypted /crypto/handshake + /rpc tunnel every RawProd client uses
  * (backend/api/src/crypto) — an ECDH-derived AES-256-GCM session wraps the whole request
  * (method/path/body/bearer token) into one opaque blob, so the browser network tab never
- * shows a readable path, token, or payload for any Vault call either.
+ * shows a readable path, token, or payload for any Vault call either. PB-03 remainder (V4
+ * §109.1): this console talks to TWO backends over TWO independent instances of that tunnel —
+ * `VAULT_API` (the standalone Vault EC2, every formula/vault route) and `MAIN_API` (the main
+ * app box, `/auth/alembic-assertion` + `/me` only — see section 1's header below for why).
  *
  * Visual language: ALEMBIC tokens (alembic-tokens.css) + the component recipes in
  * release/ui/PORTING_GUIDE.md (vault.css). The only permitted departure is the secure-zone
@@ -30,14 +33,30 @@
   }
 
   /* ---------------------------------------------------------------------------------------
-   * 1. backend base + encrypted tunnel (own implementation — this console shares no code
+   * 1. backend base(s) + encrypted tunnel (own implementation — this console shares no code
    *    with web/app.js, per the lane boundary; the WIRE PROTOCOL is the same because it's
    *    the backend's existing contract, not a copy of that file).
+   *
+   *    PB-03 remainder (V4 §109.1): TWO separate backends, TWO separate encrypted channels.
+   *    `VAULT_API` is the standalone Vault EC2 (`vault-main.ts`/`VaultAppModule`) — every
+   *    formula/vault route (`/v1/formulas`, `/v1/vault/materials`, …). It does NOT run
+   *    `cluster-org`'s `AuthController` (no main-DB credential on that box at all — see
+   *    `vault-app.module.ts`'s header), so `/auth/alembic-assertion` and `/me` are NOT
+   *    reachable there. `MAIN_API` is the main app box (the SAME one every other RawProd
+   *    console signs in against) — used ONLY for those two auth calls. Each backend runs its
+   *    OWN `SessionKeysService` (in-memory per process — `backend/api/src/crypto`), so each
+   *    needs its OWN independent ECDH handshake/AES session; `makeChannel` below is that
+   *    per-backend state, instantiated twice.
+   *
+   *    Defaulting `MAIN_API` to `API` (this console's own `VAULT_API`/dev-fallback value) when
+   *    unset keeps this a no-op today wherever the interim topology still runs the Vault box
+   *    on the full AppModule (both consoles the same origin) — a deploy only needs to set
+   *    `window.MAIN_API` once vault-api is actually cut over to `vault-main.ts`.
    * --------------------------------------------------------------------------------------- */
   var API = (typeof window.VAULT_API === 'string') ? window.VAULT_API
     : (/(localhost|127\.0\.0\.1)/.test(location.hostname) ? location.origin.replace(/:\d+$/, ':3000') : '');
+  var MAIN_API = (typeof window.MAIN_API === 'string') ? window.MAIN_API : API;
 
-  var aesKey = null, keyId = null, handshakePromise = null;
   function te(s) { return new TextEncoder().encode(s); }
   function b64(bytes) {
     var s = '', CHUNK = 0x8000;
@@ -50,74 +69,86 @@
     return out;
   }
 
-  function handshake() {
-    if (aesKey) return Promise.resolve();
-    if (handshakePromise) return handshakePromise;
-    handshakePromise = (async function () {
-      var kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-      var pub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
-      var res = await fetch(API + '/crypto/handshake', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ clientPub: b64(pub) }),
-      });
-      var hs = (await res.json()).data;
-      var serverKey = await crypto.subtle.importKey('raw', ub64(hs.serverPub), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
-      var shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: serverKey }, kp.privateKey, 256);
-      var hk = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
-      var bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te('ra-session-v1') }, hk, 256);
-      aesKey = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
-      keyId = hs.keyId;
-    })();
-    return handshakePromise;
-  }
-  async function seal(plaintext) {
-    var iv = crypto.getRandomValues(new Uint8Array(12));
-    var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, te(plaintext)));
-    var out = new Uint8Array(12 + ct.length);
-    out.set(iv, 0); out.set(ct, 12);
-    return b64(out);
-  }
-  async function open(blob) {
-    var raw = ub64(blob);
-    var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, aesKey, raw.slice(12));
-    return new TextDecoder().decode(pt);
-  }
-
-  /** POST any REST call through the single opaque /rpc envelope. Never call fetch() directly
-   * for a formula/vault route elsewhere in this file — this is the one chokepoint, so "no
-   * formula payload in the network tab" is true by construction, not by convention. */
-  async function tunnel(path, opts) {
-    opts = opts || {};
-    await handshake();
-    var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
-    if (opts.body !== undefined) payload.body = opts.body;
-    if (session.token) payload.token = session.token;
-    var res = await fetch(API + '/rpc', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-ra-key': keyId },
-      body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }),
-    });
-    var envelope = await res.json();
-    if (!envelope || !envelope.data || !envelope.data.enc) {
-      // Transient failure (cold start / dropped connection) — reset and let the caller retry.
-      aesKey = null; handshakePromise = null;
-      throw new VaultError('NETWORK', 'Could not reach the secure channel. Try again.', 0);
-    }
-    var inner = JSON.parse(await open(envelope.data.enc));
-    var body = inner.body ? JSON.parse(inner.body) : null;
-    return { status: inner.status, json: body };
-  }
-
   function VaultError(code, message, status) {
     this.code = code; this.message = message; this.status = status;
   }
   VaultError.prototype = Object.create(Error.prototype);
 
+  /** One independent encrypted channel (handshake + /rpc) bound to `base`. Returns a `call(path,
+   * opts)` that mirrors the old module-level `tunnel()`. Each backend (Vault box, main app box)
+   * gets its own instance — the AES session key from one is meaningless to the other's
+   * `SessionKeysService`. */
+  function makeChannel(base) {
+    var aesKey = null, keyId = null, handshakePromise = null;
+
+    function handshake() {
+      if (aesKey) return Promise.resolve();
+      if (handshakePromise) return handshakePromise;
+      handshakePromise = (async function () {
+        var kp = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+        var pub = new Uint8Array(await crypto.subtle.exportKey('raw', kp.publicKey));
+        var res = await fetch(base + '/crypto/handshake', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ clientPub: b64(pub) }),
+        });
+        var hs = (await res.json()).data;
+        var serverKey = await crypto.subtle.importKey('raw', ub64(hs.serverPub), { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+        var shared = await crypto.subtle.deriveBits({ name: 'ECDH', public: serverKey }, kp.privateKey, 256);
+        var hk = await crypto.subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
+        var bits = await crypto.subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te('ra-session-v1') }, hk, 256);
+        aesKey = await crypto.subtle.importKey('raw', bits, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
+        keyId = hs.keyId;
+      })();
+      return handshakePromise;
+    }
+    async function seal(plaintext) {
+      var iv = crypto.getRandomValues(new Uint8Array(12));
+      var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, te(plaintext)));
+      var out = new Uint8Array(12 + ct.length);
+      out.set(iv, 0); out.set(ct, 12);
+      return b64(out);
+    }
+    async function open(blob) {
+      var raw = ub64(blob);
+      var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, aesKey, raw.slice(12));
+      return new TextDecoder().decode(pt);
+    }
+
+    /** POST any REST call through this channel's single opaque /rpc envelope. Never call
+     * fetch() directly for a formula/vault/auth route elsewhere in this file — these two
+     * channels are the only chokepoints, so "no formula payload in the network tab" is true
+     * by construction, not by convention. */
+    return async function tunnel(path, opts) {
+      opts = opts || {};
+      await handshake();
+      var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
+      if (opts.body !== undefined) payload.body = opts.body;
+      if (session.token) payload.token = session.token;
+      var res = await fetch(base + '/rpc', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-ra-key': keyId },
+        body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }),
+      });
+      var envelope = await res.json();
+      if (!envelope || !envelope.data || !envelope.data.enc) {
+        // Transient failure (cold start / dropped connection) — reset and let the caller retry.
+        aesKey = null; handshakePromise = null;
+        throw new VaultError('NETWORK', 'Could not reach the secure channel. Try again.', 0);
+      }
+      var inner = JSON.parse(await open(envelope.data.enc));
+      var body = inner.body ? JSON.parse(inner.body) : null;
+      return { status: inner.status, json: body };
+    };
+  }
+
+  var vaultTunnel = makeChannel(API);
+  var mainTunnel = makeChannel(MAIN_API);
+
   /** Call the tunnel and throw a VaultError on any >=400, carrying the server's error code
    * (AUTH_STEP_UP_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, …) so callers can react —
    * e.g. the fresh-auth prompt fires specifically on AUTH_STEP_UP_REQUIRED, never on a
    * generic catch-all. */
-  async function api(path, opts) {
+  async function callTunnel(tunnel, path, opts) {
     var r = await tunnel(path, opts);
     if (r.status >= 400) {
       var err = (r.json && r.json.error) || {};
@@ -125,6 +156,11 @@
     }
     return r.json ? r.json.data : null;
   }
+  /** Every formula/vault route — the Vault EC2 (`VAULT_API`). */
+  function api(path, opts) { return callTunnel(vaultTunnel, path, opts); }
+  /** ONLY `/auth/alembic-assertion` and `/me` — the main app box (`MAIN_API`), the one process
+   * that holds `iam.user_master` (see this section's header comment). */
+  function mainApi(path, opts) { return callTunnel(mainTunnel, path, opts); }
 
   /* ---------------------------------------------------------------------------------------
    * 2. session (in-memory ONLY — never persisted; a reload always returns to the login
@@ -142,11 +178,11 @@
    * `POST /auth/login` used to mint. `backend/cluster-org/src/auth/auth.service.ts` refuses
    * `/auth/login` unconditionally once APP_ENV=prod. */
   async function loginWithAssertion(assertion) {
-    var data = await api('/auth/alembic-assertion', { method: 'POST', body: { assertion: assertion } });
+    var data = await mainApi('/auth/alembic-assertion', { method: 'POST', body: { assertion: assertion } });
     session.token = data.accessToken;
     session.iat = Math.floor(Date.now() / 1000); // token was just minted — this IS its iat
     session.email = (data.user && data.user.email) || null;
-    var me = await api('/me');
+    var me = await mainApi('/me');
     session.userId = me.userId;
     session.roles = me.roles || [];
     session.permissions = me.permissions || [];

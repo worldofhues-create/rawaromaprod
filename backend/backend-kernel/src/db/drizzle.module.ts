@@ -22,13 +22,28 @@ import {
     {
       provide: PG_CLIENT,
       inject: [ConfigService],
-      useFactory: (config: ConfigService): Sql =>
-        postgres(config.get('DATABASE_URL'), {
+      useFactory: (config: ConfigService): Sql => {
+        const url = config.get('DATABASE_URL');
+        if (!url) {
+          // DATABASE_URL became optional in configSchema (PB-03 remainder) so vault-main.ts
+          // (VaultAppModule) can boot without a main-DB credential at all — but DrizzleModule
+          // itself is never imported there. Every deployable that DOES import it (main.ts's
+          // AppModule, worker.ts's WorkerModule) still needs a main schema connection to
+          // function at all — fail fast here with the same "clear boot error, never a mysterious
+          // runtime failure" rule createFormulaClient already follows for FORMULA_DATABASE_URL.
+          throw new Error(
+            'DATABASE_URL is required to boot this deployable (DrizzleModule/PG_CLIENT). ' +
+              'The Vault-only deployment must use vault-main.ts/VaultAppModule instead, which ' +
+              'never imports DrizzleModule and has no main-DB credential by design (V4 §109.1).',
+          );
+        }
+        return postgres(url, {
           max: 10,
           // postgres-js parses bigint identity columns; keep them as JS bigint to match
           // the data layer's `{ mode: "bigint" }` outbox.seq.
           types: {},
-        }),
+        });
+      },
     },
     {
       provide: IAM_DB,
