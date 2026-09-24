@@ -158,3 +158,6 @@ label.field > span.lbl { font: var(--w-reg) var(--t-micro)/1 var(--font-ui); let
   tbody td::before { content: attr(data-label); font-weight: var(--w-med); color: var(--ink-3); }
 }
 @media (max-width: 375px) { .xp-sheet { width: calc(100vw - 16px); } }
+
+/* 44px touch floor below 900px — same rule as web/ui-contract/shell.css (lane UI6). */
+@media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }

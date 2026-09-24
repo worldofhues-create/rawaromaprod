@@ -239,3 +239,6 @@ label.field textarea { min-height: 64px; padding: var(--s-tight); border-radius:
 @media (max-width: 375px) {
   .xp-sheet { width: calc(100vw - 16px); }
 }
+
+/* 44px touch floor below 900px — same rule as web/ui-contract/shell.css (lane UI6). */
+@media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }
