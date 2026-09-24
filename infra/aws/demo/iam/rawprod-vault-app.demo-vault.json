@@ -1,0 +1,21 @@
+{
+ "Version": "2012-10-17",
+ "Statement": [
+  {
+   "Sid": "DemoVaultParams",
+   "Effect": "Allow",
+   "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+   "Resource": [
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/vault/*",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/factory-url",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/rawprod/assertion-verify-key"
+   ]
+  },
+  {
+   "Sid": "AssumeDemoVaultRole",
+   "Effect": "Allow",
+   "Action": "sts:AssumeRole",
+   "Resource": "arn:aws:iam::859485559854:role/rawprod-vault-demo"
+  }
+ ]
+}

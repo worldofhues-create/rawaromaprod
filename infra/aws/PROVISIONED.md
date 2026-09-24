@@ -226,3 +226,80 @@ CloudTrail S3 plus CWL ingestion ~$1. Weekly vault drill ~$0.05. CloudFront, onc
   The vault is untouched and closed.
 - Cost: HTTP API $1.00 per million requests plus data out, so ≈ $0–1/mo at this traffic. S3 dumps ≈ 0.4 MB/day, a few cents per month. SG is free.
 - Delete when CloudFront is live: `aws apigatewayv2 delete-api --api-id izcqrmad81` (and 4f8gxugmq8). Then detach and delete sg-0eb2c2a212fa82207.
+
+---
+
+# Lane DEMO-INFRA (2026-09-24): ALEMBIC OS DEMO environment, staged (no app code deployed)
+
+Code: `infra/aws/demo/` (idempotent). Production was never restarted: raw/rawadmin returned 200 and alembic-api/web stayed active
+before and after every step. nginx got a graceful reload gated by `nginx -t`. No secret value is in git or in any log.
+
+## Data isolation (separate DBs, separate roles)
+| DB | Instance | Owner / app role | Extensions |
+|---|---|---|---|
+| `alembic_demo` | alembic-pg | `alembic_demo_owner` / `alembic_demo_app` | pgcrypto, btree_gist (same as prod) |
+| `rawprod_demo` | alembic-pg | `rawprod_demo_owner` / `rawprod_demo_app` | pgcrypto, citext, pg_trgm, postgis |
+| `vault_demo` | vault-pg | `vault_demo_owner` / `vault_demo_app` | pgcrypto, citext, pg_trgm, postgis |
+- `provision-db.sh app|vault`: CONNECT/TEMP is revoked from PUBLIC and granted only to that DB's two demo roles. The master is a member of the demo owner only while the script runs.
+  Proven with has_database_privilege: the prod roles alembic_app, rawprod_owner, rawprod_app, ra_vault_owner and ra_vault get **false** on every demo DB, and every demo role gets **false** on alembic, rawprod and vault.
+  **Residual:** the alembic-pg RDS master *is* `alembic_owner`, which is also ALEMBIC's migrate role. As rds_superuser it can reach every DB, demo included. That was already the case before this lane and cannot be changed without a new master.
+- ALEMBIC migrations GRANT to the literal `alembic_app` in 73 files, and roles are cluster-wide. `sql/alembic-demo-grants.sql` moves every table, column, schema, routine, type, default-ACL and policy privilege
+  from `alembic_app` to `alembic_demo_app` inside alembic_demo, and it raises an error if anything is left behind. It runs as ExecStartPost of `alembic-demo-migrate` and inside reset.
+  It was tested on a full local migrate: 398 relation grants and 159 column grants moved, and 0 remained on alembic_app.
+- RawProd and vault migrations name no role. `sql/app-role-grants.sql` grants DML to the demo app role after each migrate.
+
+## KMS / IAM
+- `alias/rawprod-demo-vault-envelope`, key 034c5485-02cb-4aad-b944-ff08a9b33f1e, with rotation on. Its policy mirrors the prod envelope key: admins get management only, crypto is allowed only to
+  role **`rawprod-vault-demo`**, and an explicit Deny applies to every other principal. That role is assumed from the vault box role, through `/etc/rawprod-demo/aws-config` (credential_source=Ec2InstanceMetadata).
+  Proven: the demo role can GenerateDataKey on the demo key. The box role on the demo key gets AccessDenied. The demo role on the prod key gets AccessDenied.
+- Inline policies: `alembic-ec2/demo-runtime` (`iam/alembic-ec2.demo-runtime.json`) and `rawprod-vault-app/demo-vault` (`iam/rawprod-vault-app.demo-vault.json`: `/rawaroma/demo/vault/*`,
+  the demo verify key, and sts:AssumeRole on rawprod-vault-demo only).
+
+## SSM (SecureString unless noted)
+`/rawaroma/demo/password` (owner-published demo credential), `/rawaroma/demo/origin-secret`,
+`/rawaroma/demo/alembic/{DB_PASSWORD_owner,DB_PASSWORD_app,SECRET_KEYS,rawprod-assertion-signing-key}`,
+`/rawaroma/demo/rawprod/{DB_PASSWORD_owner,DB_PASSWORD_app,JWT_SECRET,assertion-verify-key}` (a new Ed25519 pair, not the prod pair),
+`/rawaroma/demo/vault/{DB_PASSWORD_owner,DB_PASSWORD_app,JWT_SECRET}` and `/rawaroma/demo/vault/FORMULA_KMS_KEY_ID` (String),
+`/rawaroma/demo/{alembic-url,factory-url}` (String).
+
+## Runtime (installed, **disabled, not started**)
+| Unit | Box | Port | User / workdir | Env (root 0600, `render-demo-env.sh`) |
+|---|---|---|---|---|
+| alembic-demo-api.socket + .service | app | 127.0.0.1:4010 | alembic-demo, /srv/alembic-demo/app | /etc/alembic-demo/api.env (ALEMBIC_ENVIRONMENT=demo) |
+| alembic-demo-web | app | 127.0.0.1:3010 | alembic-demo | /etc/alembic-demo/web.env |
+| alembic-demo-migrate | app | n/a | alembic-demo | /etc/alembic-demo/migrate.env |
+| rawprod-demo-api / -migrate | app | 4110 | rawprod-demo, /srv/rawprod-demo/app | /etc/rawprod-demo/api.env (RAWPROD_ENVIRONMENT=demo, JWT_ACCESS_TTL=300) |
+| vault-demo-api / -migrate | vault | 4111 | rawprod-demo, /srv/rawprod-demo/app | /etc/rawprod-demo/vault.env (demo KMS key, vault_demo) |
+Each demo unit has MemoryMax set (450M/450M/500M/400M) and CPUWeight=50, so the demo cannot starve prod. ALEMBIC_TENANT_ID comes from `/etc/alembic-demo/tenant-id`, which reset writes.
+- **Headroom:** the app box (t4g.medium, 2 vCPU, 3.8 GiB) has 3.0 GiB available, 0 swap and load 0.07. Prod rawprod-api (~0.3 GiB) plus the three demo units (~0.6 GiB typical, 1.4 GiB capped) fit, so **no resize is needed**.
+  Recommendation for P0: add a 2 GiB swapfile. It needs no reboot, and I did not do it. The vault box (t4g.small, 1.8 GiB) has 1.4 GiB available, which is enough for vault-api plus vault-demo-api.
+
+## HTTPS without DNS: API Gateway HTTP APIs (in `demo/apply-aws.sh`)
+| Demo | ApiId | URL | Origin |
+|---|---|---|---|
+| ALEMBIC (store `/`, Admin `/admin`, Agent `/agent`, API `/api/`) | s6sc99wp4g | https://s6sc99wp4g.execute-api.us-west-2.amazonaws.com/ | raw.huecycle.in:8444 |
+| RawProd factory | b41jjd8l48 | https://b41jjd8l48.execute-api.us-west-2.amazonaws.com/ | raw.huecycle.in:8445 |
+- Origin vhost `demo/nginx/rawaroma-demo-origin.conf` is **enabled**. Prod ALEMBIC nginx splits surfaces by host, and execute-api gives one hostname, so the demo routes by **path** instead. The Next app already serves /admin and /agent by path.
+  Console security headers are used on /admin and /agent. Host and X-Forwarded-Host are set from `X-Demo-Host` (= `$context.domainName`), because API Gateway forbids overwriting X-Forwarded-Host.
+- Gates: SG `sg-061d01a9c5b2e04ee` `rawaroma-demo-apigw-origin` allows 8444-8445 from the 14 API_GATEWAY us-west-2 CIDRs only, has no egress, and is attached with no restart. The request must also carry
+  X-Origin-Verify = `/rawaroma/demo/origin-secret` (a different secret from prod) and X-Demo-Site pinned per port.
+  Verified: on-box, no header gives 403, the wrong site gives 403 and the right one gives 200. /healthz returns 200 on both URLs. The factory placeholder `/` returns 200. ALEMBIC `/api/*` returns 502 because the app is not deployed (expected). A direct connection to :8444 from the internet times out.
+
+## Reset: `infra/aws/demo/reset-demo.sh ssm` (or `vault`, then `app`, on the boxes)
+It recreates vault_demo, then alembic_demo and rawprod_demo. It then runs the ALEMBIC migrate with the grant move, ALEMBIC `pnpm demo:seed`, writes the tenant-id, and runs `create-demo-account.mjs --user demo --mark-tenant-demo`
+(the password comes from SSM on stdin; demo access stays **OFF** until Admin turns on `demo.access_enabled`). After that come the RawProd migrate and the RawProd `pnpm demo:seed`, and finally the units that were enabled are restarted. It refuses to run until
+/srv/alembic-demo/app and /srv/rawprod-demo/app are deployed (checked: it refuses today).
+
+## Deploy (P0, one step once the RC is chosen)
+Put the RC artifact into /srv/alembic-demo/app and /srv/rawprod-demo/app (on both boxes), owned by the demo users. Then run `reset-demo.sh ssm`, then
+`systemctl enable --now alembic-demo-api.socket alembic-demo-api alembic-demo-web rawprod-demo-api` (app) and `vault-demo-api` (vault). Re-run `install-box.sh app` to copy the factory static files.
+
+## Open items for P0 / owner
+1. **Formula seed path.** The RawProd seed writes formulas to FORMULA_DATABASE_URL, and the app box cannot reach vault-pg. Reset therefore refuses with `FORMULA_TARGET=vault` until there is a path
+   (for example a 5432 rule from alembic-web to rawprod-vault-db, which is a prod-vault SG change and was not made). `FORMULA_TARGET=local` puts the formula schema into rawprod_demo instead; that is an explicit opt-in.
+2. **Seeded formulas vs the demo KMS key.** `demo-seed.ts` seals with EnvKmsAdapter (FORMULA_KEK derived from a label), and vault-api in NODE_ENV=production accepts only AWS KMS. The demo vault-api will
+   therefore not decrypt seeded formulas until the seed can use `FORMULA_KMS_KEY_ID`. This is an app-code item.
+3. The demo vault JWT_SECRET is kept separate from the demo RawProd one, mirroring prod. vault-api.service's header says the two must be equal, and prod has the same contradiction. Decide it once for both.
+4. ALEMBIC `ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY` is set in the demo api.env (demo pair). Prod has not loaded its own key yet.
+- Cost: about $1/mo for the KMS key, $0 for SSM Standard, a few cents for HTTP APIs, and the extra DBs are free on the existing instances. **≈ $1–2/mo.**
+- Delete path: disable the units, `aws apigatewayv2 delete-api` s6sc99wp4g and b41jjd8l48, detach and delete sg-061d01a9c5b2e04ee, DROP the 3 DBs and 6 roles, schedule deletion of the demo key, delete role rawprod-vault-demo and `/rawaroma/demo/*`.

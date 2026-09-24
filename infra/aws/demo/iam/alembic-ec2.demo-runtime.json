@@ -1,0 +1,18 @@
+{
+ "Version": "2012-10-17",
+ "Statement": [
+  {
+   "Sid": "DemoParamsAppBox",
+   "Effect": "Allow",
+   "Action": ["ssm:GetParameter", "ssm:GetParameters", "ssm:GetParametersByPath"],
+   "Resource": [
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/alembic/*",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/rawprod/*",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/password",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/origin-secret",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/alembic-url",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/demo/factory-url"
+   ]
+  }
+ ]
+}

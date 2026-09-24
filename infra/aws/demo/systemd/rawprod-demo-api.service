@@ -1,0 +1,30 @@
+# DEMO-INFRA: RawProd DEMO API (PORT 4110; prod 4100). Same artifact as prod, deployed to /srv/rawprod-demo/app. Installed, DISABLED.
+[Unit]
+Description=RawProd DEMO API (PORT 4110; prod 4100)
+After=network-online.target rawprod-demo-migrate.service
+Requires=rawprod-demo-migrate.service
+[Service]
+Type=exec
+User=rawprod-demo
+Group=rawprod-demo
+WorkingDirectory=/srv/rawprod-demo/app
+EnvironmentFile=/etc/rawprod-demo/api.env
+ExecStart=/opt/node-v22.12.0/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
+StandardOutput=append:/var/log/rawprod-demo/api.log
+StandardError=append:/var/log/rawprod-demo/api.log
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+MemoryMax=500M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# demo must never starve production on the shared t4g.medium: hard memory cap + half the CPU weight of prod units
+CPUWeight=50
+[Install]
+WantedBy=multi-user.target

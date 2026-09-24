@@ -1,0 +1,9 @@
+# DEMO-INFRA: demo ALEMBIC API socket (prod is alembic-api.socket on 127.0.0.1:4000). Installed, DISABLED.
+[Unit]
+Description=Alembic DEMO API socket
+PartOf=alembic-demo-api.service
+[Socket]
+ListenStream=127.0.0.1:4010
+Backlog=512
+[Install]
+WantedBy=sockets.target

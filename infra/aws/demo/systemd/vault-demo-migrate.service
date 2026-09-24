@@ -1,0 +1,20 @@
+# DEMO-INFRA: demo migrations (SKIP_TARGETS=main) as the demo owner, then DML grants to the demo app role. Installed, DISABLED.
+[Unit]
+Description=Vault DEMO database migrations
+After=network-online.target
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=rawprod-demo
+Group=rawprod-demo
+WorkingDirectory=/srv/rawprod-demo/app
+EnvironmentFile=/etc/rawprod-demo/vault-migrate.env
+Environment=PATH=/opt/node-v22.12.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env pnpm db:migrate
+ExecStartPost=/usr/bin/psql "${FORMULA_DATABASE_URL}" -X -q -v app=vault_demo_app -v skip= -f /usr/local/lib/rawaroma/demo/sql/app-role-grants.sql
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+[Install]
+WantedBy=multi-user.target

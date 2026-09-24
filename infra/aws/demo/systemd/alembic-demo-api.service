@@ -1,0 +1,34 @@
+# DEMO-INFRA: demo ALEMBIC API — same artifact as prod (deployed to /srv/alembic-demo/app by P0), own DB/role/env.
+# Installed, DISABLED. Enable only after reset-demo.sh has written /etc/alembic-demo/tenant-id.
+[Unit]
+Description=Alembic DEMO API
+Requires=alembic-demo-api.socket
+After=network-online.target alembic-demo-migrate.service
+Requires=alembic-demo-migrate.service
+[Service]
+Type=exec
+User=alembic-demo
+Group=alembic-demo
+WorkingDirectory=/srv/alembic-demo/app
+EnvironmentFile=/etc/alembic-demo/api.env
+ExecStart=/usr/bin/node apps/api/src/index.ts
+StandardOutput=append:/var/log/alembic-demo/api.log
+StandardError=append:/var/log/alembic-demo/api.log
+KillSignal=SIGTERM
+TimeoutStopSec=30
+Restart=on-failure
+RestartSec=5s
+ReadWritePaths=/srv/alembic-demo/var /srv/alembic-demo/app
+MemoryDenyWriteExecute=false
+MemoryMax=450M
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateDevices=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LockPersonality=true
+# demo must never starve production on the shared t4g.medium: hard memory cap + half the CPU weight of prod units
+CPUWeight=50
+[Install]
+WantedBy=multi-user.target
