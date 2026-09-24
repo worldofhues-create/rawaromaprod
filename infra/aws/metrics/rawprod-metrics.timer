@@ -1,0 +1,10 @@
+[Unit]
+Description=RawAroma G6 custom metrics (rawprod), every 5 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=5min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

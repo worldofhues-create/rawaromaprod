@@ -49,9 +49,12 @@ Type=exec
 User=rawprod
 Group=rawprod
 WorkingDirectory=/srv/rawprod/app
-EnvironmentFile=/etc/rawprod/vault-api.env
-ExecStart=/usr/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
+EnvironmentFile=/etc/rawprod/vault.env
+ExecStart=/opt/node-v22.12.0/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
 
+# G6: logs to a file the CloudWatch agent ships to /rawaroma/rawprod/vault-api (PID1 opens it, so ProtectSystem=strict is fine)
+StandardOutput=append:/var/log/rawprod/vault-api.log
+StandardError=append:/var/log/rawprod/vault-api.log
 KillSignal=SIGTERM
 TimeoutStopSec=30
 Restart=on-failure

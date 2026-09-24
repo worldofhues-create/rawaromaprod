@@ -23,7 +23,8 @@ User=rawprod
 Group=rawprod
 WorkingDirectory=/srv/rawprod/app
 EnvironmentFile=/etc/rawprod/vault-migrate.env
-ExecStart=/usr/bin/pnpm db:migrate
+Environment=PATH=/opt/node-v22.12.0/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env pnpm db:migrate
 
 NoNewPrivileges=true
 PrivateTmp=true

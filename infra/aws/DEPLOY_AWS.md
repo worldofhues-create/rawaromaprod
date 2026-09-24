@@ -59,7 +59,7 @@ no ALEMBIC processes to collide with.
    `nginx -t && systemctl reload nginx`.
 
 **Vault EC2** (its own instance, own SG, own IAM role — MIGRATION_AWS_PLAN.md §2/§3 B4):
-1-4 as above, but `/etc/rawprod/vault-api.env` and `/etc/rawprod/vault-migrate.env` (§5), and
+1-4 as above, but `/etc/rawprod/vault.env` and `/etc/rawprod/vault-migrate.env` (§5), and
 `infra/aws/nginx/vault.conf` + `security-headers-vault.conf`.
 5. **Before** exposing this host publicly: replace `infra/aws/nginx/vault-allowlist.conf.placeholder`
    with a real `vault-allowlist.conf` (H5 — office IP/VPN) and swap `vault.conf`'s `deny all;`
@@ -100,7 +100,7 @@ diff, commit. `0014+` (the former `create-*.cjs` scripts' schema DDL) and
 |---|---|---|
 | `api.env` | `rawprod-api.service` | `DATABASE_URL` (rawprod_app role), `FORMULA_DATABASE_URL` (until PB-03 lands — see §6), `JWT_SECRET`, `CORS_ORIGINS=https://rawfactory.huecycle.in,https://rawplatform.huecycle.in`, `PORT=4100`, `NODE_ENV=production`, `APP_ENV=prod`, `RUN_WORKER_IN_PROCESS=true` |
 | `migrate.env` | `rawprod-migrate.service` | `DATABASE_URL` (rawprod_owner role, DDL), `SKIP_TARGETS=formula` |
-| `vault-api.env` | `vault-api.service` | `DATABASE_URL` (interim — see §6), `FORMULA_DATABASE_URL` (ra_vault role, vault-pg), `FORMULA_KEK` or a KMS adapter once PB-03 lands, `JWT_SECRET` (same signing key as `api.env` if callers must be recognised on both hosts), `PORT=4100` |
+| `vault.env` | `vault-api.service` | `DATABASE_URL` (interim — see §6), `FORMULA_DATABASE_URL` (ra_vault role, vault-pg), `FORMULA_KEK` or a KMS adapter once PB-03 lands, `JWT_SECRET` (same signing key as `api.env` if callers must be recognised on both hosts), `PORT=4100` |
 | `vault-migrate.env` | `vault-migrate.service` | `FORMULA_DATABASE_URL` (ra_vault_owner role, vault-pg), `SKIP_TARGETS=main` — **no `DATABASE_URL`** |
 
 No GSTIN, no static tenant config, no credential ever lives in these files beyond the connection

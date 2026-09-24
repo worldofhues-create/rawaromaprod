@@ -98,3 +98,96 @@ The t4g.large upgrade and alembic-pg Multi-AZ from the plan were **not** done: b
   (`aws ec2 authorize-security-group-ingress --group-id sg-09345a5b4efc3ce65 --protocol tcp --port 443 --cidr <ip>/32`)
   and write the nginx `vault-allowlist.conf`.
 - H1/H2 Neon source credential and the real-vs-demo ruling. H4 legacy FORMULA_KEK, for the re-wrap into the envelope CMK.
+
+---
+
+# Lane INFRA2 (2026-09-24): G6 monitoring, G7 restore drills, alembic-pg CONNECT hardening, go-live prep, CloudFront
+
+Everything below is code in `infra/aws/` and is idempotent. The only ALEMBIC-box service restarted was `amazon-cloudwatch-agent`
+(via append-config). nginx got one graceful `reload`, gated by `nginx -t`. No alembic-* restart, no reboot.
+ALEMBIC health was 200 before and after every step. No secret value is in git or in any log.
+
+## IAM (additive inline policies, JSON in `infra/aws/iam/`)
+- `alembic-ec2` / `rawprod-runtime`: ssm:GetParameter* on `/rawaroma/{rawprod,bridge,alembic}/*`, PutMetricData (namespace `RawAroma/*`),
+  logs on `/rawaroma/*`.
+- `rawprod-vault-app` / `vault-ops`: GetParameter on `/rawaroma/rawprod/{DATABASE_URL,assertion-verify-key}`, PutMetricData `RawAroma/*`,
+  logs `/rawaroma/*`, RDS PITR restore of vault-pg into `vault-drill-*` only, Delete/Modify on `vault-drill-*` only, and s3:PutObject on
+  `restore-drills/*`.
+- `rawaroma-cloudtrail-to-cwl` (CloudTrail -> CloudWatch Logs).
+
+## G6 monitoring (FINAL_OS §36): `infra/aws/cloudwatch/apply.sh`
+- SNS `arn:aws:sns:us-west-2:859485559854:rawprod-alerts`, with email subscriptions to almaskhanraw@gmail.com and avinandan.toc@gmail.com.
+  **HUMAN STEP: both are PendingConfirmation. Each recipient must click Confirm in the AWS email.**
+- CloudTrail `rawaroma-audit`: single region, management events (read+write), log-file validation. It writes to S3 `rawaroma-cloudtrail-859485559854-usw2`
+  (SSE-S3, public access blocked, TLS-only, 90-day expiry) and to log group `/rawaroma/cloudtrail` (30 days). This is the first trail in the account, so the management-event copy is free.
+  The only costs are S3 and about $0.50/GB of CWL ingestion.
+- Metric filter `kms-envelope-decrypt-errors`: CloudTrail events with kms Decrypt + errorCode on the envelope CMK go to `RawAroma/Security EnvelopeKeyDecryptErrors`
+  (the pattern was checked with test-metric-filter).
+- 22 alarms `rawprod-*`, all wired to the topic: vault-pg cpu/free-storage/connections/memory; vault EC2 status-check/cpu/disk; rawprod DB size (>5 GiB)
+  and DB-size growth (>256 MiB/day, metric math DIFF); KMS decrypt errors; rawprod-api / vault-api unit down; bridge backlog age (>15 min);
+  outbox backlog age (>30 min); dead letters (>=1); QC-hold age (>48 h); overdue PR/PO (>=1); metrics heartbeats (missing data breaches);
+  weekly restore-drill failed x2.
+  **No replica-lag alarm:** vault-pg is Multi-AZ with no read replica, and a Multi-AZ standby does not publish ReplicaLag. alembic-pg's own alarms are unchanged.
+- Custom metrics, one per box, as a systemd timer every 5 min, running as user `rawprod` with hardened units:
+  - app box `rawprod-metrics.timer` (`infra/aws/metrics/rawprod-metrics.sh`, read-only SQL on `rawprod`) writes `RawAroma/RawProd`: BridgeBacklog(+OldestAge),
+    OutboxBacklog(+OldestAge) summed across every `<schema>.outbox`, DeadLetterCount (outbox attempts>=5 + parked `bridge.inbound_event`),
+    QcHoldCount/OldestAgeHours, OverduePurchaseRequests/Orders, DatabaseSizeBytes, UnitActive, and MetricsHeartbeat. First run: all zero, DB 26 MB.
+  - vault box `vault-metrics.timer` writes `RawAroma/Vault` UnitActive and a heartbeat. A unit reports UnitActive only once it is *enabled*, so the staged units do not alarm.
+- CloudWatch agent: newly installed on the vault box (it also collects mem/disk into `RawAroma/Host`). On the ALEMBIC box a second config was appended to the existing agent.
+  Log groups: `/rawaroma/rawprod/{api,vault-api,metrics,restore-drill,vault-nginx-error,vault-nginx-access}` (30 d, restore-drill 90 d).
+  The rawprod-api/vault-api units now log to `/var/log/rawprod/*.log`, with logrotate.
+- The vault box had the snap aws CLI, which cannot run inside hardened units, so AWS CLI v2 is now installed at /usr/local/bin.
+
+## G7 restore drills: `infra/aws/restore-drill/`, timers `Sun 21:30 UTC` weekly on both boxes
+- rawprod: pg_dump -Fc, then restore into a throwaway `rawprod_drill_<ts>` DB on alembic-pg (CONNECT revoked from PUBLIC), then exact row counts per table,
+  then DROP. The dump is also kept at `s3://alembic-backups-859485559854-usw2/rawprod/pg_dump/` (a weekly logical backup).
+- vault-pg: RDS PITR to the latest restorable time into `vault-drill-<ts>` (single-AZ micro, same private subnet/SG/PG, storage CMK), then row counts vs live,
+  then delete with skip-final-snapshot and delete-automated-backups. Cost is about $0.01 per drill.
+- **First run 2026-09-24, both PASS.** Evidence:
+  - `s3://alembic-backups-859485559854-usw2/restore-drills/rawprod/20260924T004639Z.json`: 193/193 tables, 8519/8519 rows, 19 ledger rows, 9 s.
+  - `s3://alembic-backups-859485559854-usw2/restore-drills/vault/20260924T004608Z.json`: 17/17 tables, 8504/8504 rows, ssl on,
+    10.7 min to available. The drill instance was deleted.
+- Runbook: `docs/VAULT_BREAK_GLASS.md` (KMS key recovery, role recreation, key disable/deletion, PITR restore, true break-glass, log).
+
+## alembic-pg CONNECT hardening (done, verified)
+- `alembic`: `GRANT CONNECT, TEMPORARY ... TO alembic_owner, alembic_app`, then `REVOKE CONNECT ... FROM PUBLIC`. ACL is now
+  `{=T/alembic_owner, alembic_owner=CTc, alembic_app=Tc}`. Fresh connections were proved with ALEMBIC's own env-file credentials
+  (alembic_app via api.env DATABASE_URL_APP, alembic_owner via migrate.env). Health was 200 local and public, before and after. No rollback was needed.
+  Rollback if ever needed: `GRANT CONNECT ON DATABASE alembic TO PUBLIC`.
+- `rawprod`: already correct from INFRA (`rawprod_owner=CTc`, `rawprod_app=Tc`, no PUBLIC). No change.
+- Found but not mine: **`alembic-backup.service` has failed nightly since 2026-09-21.** pg_dump cannot find `/home/alembic/.postgresql/root.crt`
+  (sslmode=verify-full with no sslrootcert). The fix is to set PGSSLROOTCERT to an RDS bundle in its env. Flagged to P0. I did not touch it.
+
+## Go-live prep (step 4)
+- SSM SecureString, created (values never printed): `/rawaroma/alembic/rawprod-assertion-signing-key` (Ed25519 pkcs8 DER b64 = ALEMBIC's
+  `ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY`), `/rawaroma/rawprod/assertion-verify-key` (spki DER b64 = `ALEMBIC_ASSERTION_VERIFY_KEY`),
+  `/rawaroma/bridge/hmac` (32 bytes hex), `/rawaroma/rawprod/JWT_SECRET` and `/rawaroma/vault/JWT_SECRET` (kept separate on purpose, so a factory token is not a vault token),
+  and `/rawaroma/rawprod/cf-origin-secret`.
+  ALEMBIC still has to load the signing key into its own config, and the bridge HMAC goes into the bridge connector config through Admin (self-service). Both are P0/ALEMBIC steps.
+- Env files, rendered by `/usr/local/lib/rawaroma/render-env.sh app|vault` (source `infra/aws/env/render-env.sh`), are root 0600:
+  app `/etc/rawprod/api.env` and `migrate.env` (SKIP_TARGETS=formula); vault `/etc/rawprod/vault.env` and `vault-migrate.env` (SKIP_TARGETS=main). No value is empty.
+- Units installed in /etc/systemd/system and **disabled, not started**: rawprod-api/rawprod-migrate (app) and vault-api/vault-migrate (vault).
+  Unit fixes: ExecStart now uses `/opt/node-v22.12.0/bin/node` (the app box's /usr/bin/node is ALEMBIC's node 24), migrate puts node 22 first in PATH,
+  and vault-api reads `/etc/rawprod/vault.env`.
+- nginx: `rawprod-main.conf` (app) and `vault.conf` (vault) are staged in sites-available only. `http2 on;` was changed to `listen ... ssl http2`,
+  because both boxes run nginx 1.24, which does not have the `http2` directive.
+- Known gap (unchanged, documented in vault-api.service): the vault box cannot reach alembic-pg for its interim `DATABASE_URL`, because alembic-db's SG only
+  admits alembic-web. vault-api cannot boot until P0 decides between an SG rule and the vault-only entrypoint (PB-03).
+
+## CloudFront front door (P0 ruling 2026-09-24: DNS and office IPs are POST_LAUNCH)
+- Origin vhost `rawprod-cf-origin.conf` is **enabled** on the app box: port 8443 TLS with the raw.huecycle.in LE cert, so certbot renewal covers it.
+  A request without the correct `X-Origin-Verify` header gets 403. Security headers are on every response. `/healthz` is a static 200. `/` is a placeholder page (`/var/www/rawprod-cf`).
+  `/rpc,/crypto/,/v1/,/auth/,/health` proxy to 127.0.0.1:4100 with no-store. Right now they return 502 because rawprod-api is not started (by design).
+  Tested on-box: no header 403, wrong header 403, right header 200 with HSTS/XFO/no-store. ALEMBIC was 200 before and after the reload.
+- SG `sg-08d47035c2cd53a57` `rawprod-cf-origin`: 8443 from the CloudFront origin-facing prefix list `pl-82a045eb` only, no egress. It is attached to i-04e7dc4e5edcc1ff7
+  in addition to alembic-web, with no restart. From the internet, 8443 times out.
+- Distribution: `infra/aws/cloudfront/apply.sh`. Origin raw.huecycle.in:8443 https-only, with the secret header. API paths and /health(z) use CachingDisabled with all methods.
+  PriceClass_200 (includes India), http2and3, IPv6. Aliases and the ACM cert come from `CF_ALIASES`/`CF_CERT_ARN`, so they can be added when DNS is ready.
+  **BLOCKED (HUMAN STEP):** CreateDistribution returned `AccessDenied: Your account must be verified before you can add new CloudFront resources`.
+  The owner must open an AWS Support case (Account and billing, which works on the free support plan) asking to verify the account for CloudFront. After that, re-run
+  `AWS_PROFILE=rawaroma infra/aws/cloudfront/apply.sh`. Everything else is in place.
+- The origin depends on DNS `raw.huecycle.in -> 35.82.209.155` and on that cert. If the box's public IP changes, update DNS; nothing else needs to change.
+
+## INFRA2 monthly cost delta (approximate)
+CloudWatch: 22 alarms (~$2.2, the first 10 are free), about 15 custom metrics (~$4.5), agent mem/disk (~$0.6), logs <1 GB (~$0.5).
+CloudTrail S3 plus CWL ingestion ~$1. Weekly vault drill ~$0.05. CloudFront, once live, is pay-per-use (~$1 at this traffic). **Total ≈ $10/mo.**

@@ -1,0 +1,11 @@
+[Unit]
+Description=RawAroma G7 weekly restore drill (rawprod)
+
+[Timer]
+# Sunday 21:30 UTC = Monday 03:00 IST, low traffic
+OnCalendar=Sun *-*-* 21:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

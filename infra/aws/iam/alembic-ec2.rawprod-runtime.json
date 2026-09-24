@@ -1,0 +1,48 @@
+{
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Sid": "RawprodParams",
+            "Effect": "Allow",
+            "Action": [
+                "ssm:GetParameter",
+                "ssm:GetParameters",
+                "ssm:GetParametersByPath"
+            ],
+            "Resource": [
+                "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/rawprod/*",
+                "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/bridge/*",
+                "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/alembic/*"
+            ]
+        },
+        {
+            "Sid": "Metrics",
+            "Effect": "Allow",
+            "Action": "cloudwatch:PutMetricData",
+            "Resource": "*",
+            "Condition": {
+                "StringLike": {
+                    "cloudwatch:namespace": "RawAroma/*"
+                }
+            }
+        },
+        {
+            "Sid": "Logs",
+            "Effect": "Allow",
+            "Action": [
+                "logs:CreateLogGroup",
+                "logs:CreateLogStream",
+                "logs:PutLogEvents",
+                "logs:DescribeLogStreams",
+                "logs:PutRetentionPolicy"
+            ],
+            "Resource": "arn:aws:logs:us-west-2:859485559854:log-group:/rawaroma/*"
+        },
+        {
+            "Sid": "LogsDescribe",
+            "Effect": "Allow",
+            "Action": "logs:DescribeLogGroups",
+            "Resource": "*"
+        }
+    ]
+}

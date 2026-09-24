@@ -40,12 +40,15 @@ User=rawprod
 Group=rawprod
 WorkingDirectory=/srv/rawprod/app
 EnvironmentFile=/etc/rawprod/api.env
-# /usr/bin/node must resolve to the version pinned in .node-version (22.12.0) — install via
+# Node is pinned to 22.12.0 at /opt/node-v22.12.0 (the box system node is ALEMBIC's node 24; never use it). Was: install via
 # NodeSource or nvm's system-wide mode, the same way the ALEMBIC host pins its Node. Run from
 # source via the swc ESM loader (DEPLOY.md §3): the workspace packages export `src/*.ts`, and a
 # compiled `dist/main.js` resolves those deps to `.ts` and crashes with ERR_UNKNOWN_FILE_EXTENSION.
-ExecStart=/usr/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
+ExecStart=/opt/node-v22.12.0/bin/node --import @swc-node/register/esm-register backend/api/src/main.ts
 
+# G6: logs to a file the CloudWatch agent ships to /rawaroma/rawprod/api (PID1 opens it, so ProtectSystem=strict is fine)
+StandardOutput=append:/var/log/rawprod/api.log
+StandardError=append:/var/log/rawprod/api.log
 KillSignal=SIGTERM
 TimeoutStopSec=30
 Restart=on-failure
