@@ -199,6 +199,7 @@
       err.textContent = 'Sign-in isn\'t set up for this build.';
     }
     var card = h('div', { class: 'login-card' }, [
+      h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
       h('h1', { class: 'mark' }, ['Platform']),
       h('p', { class: 'sub' }, ['Raw Aroma Chem platform operations.']),
       goBtn, err,
@@ -230,9 +231,9 @@
     x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
   };
   function raw(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
-  // BrandMark — the "RAC" tile until UX-D publishes the cropped logo (release/ui/BRAND_ASSETS.md).
+  // BrandMark — the RAW logo (UX-D, release/ui/BRAND_ASSETS.md): reversed art on the ink rail.
   function brandMark(sub, onInk) {
-    return raw('<span class="brandmark' + (onInk ? ' on-ink' : '') + '"><span class="bm" aria-hidden="true">RAC</span><span class="bt">Alembic<small>' + sub + '</small></span></span>');
+    return raw('<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (onInk ? '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' : '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="66" height="30" alt="">') + '<span class="bt">Alembic<small>' + sub + '</small></span></span>');
   }
   // Rail state, as the reference's useRailToggle: collapsed by default (body.rail-off, the dock is
   // the navigation); on a phone the rail opens as a drawer (body.rail-open).
@@ -330,7 +331,7 @@
     var view = h('section', { class: 'pageview' }, [contentEl]);
     var main = h('div', { class: 'main' }, [ bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
-      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [raw('<span class="bm" aria-hidden="true">RAC</span>')]),
+      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
        h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'Show navigation', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
          [raw(CI.menu), h('span', { class: 'kb' }, ['Sections', h('span', { class: 'kc' }, [' · ⌘\\'])])]),
        h('span', { class: 'sep' })]

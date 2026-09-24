@@ -383,10 +383,11 @@
     arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>'
   };
   window.RA_CI = CI; // ws-*.js dialogs use the same close glyph
-  // BrandMark — the lockup, one builder so it can't drift. The tile is the reference's "RAC"
-  // monogram until UX-D publishes the cropped logo (release/ui/BRAND_ASSETS.md).
+  // BrandMark — the lockup, one builder so it can't drift.
   function brandMark(sub, onInk, compact) {
-    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '"><span class="bm" aria-hidden="true">RAC</span>' +
+    // UX-D (release/ui/BRAND_ASSETS.md): the RAW logo, not a letter tile — reversed art on the ink
+    // rail, colour art on light glass; logo/brand.css fixes the height per context.
+    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (compact ? '<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">' : (onInk ? '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' : '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="66" height="30" alt="">')) +
       (compact ? '' : '<span class="bt">Alembic' + (sub ? '<small>' + sub + '</small>' : '') + '</span>') + '</span>';
   }
   // GCard — one card shell so every panel is the same shape: glass, lift, title + caption, the
@@ -485,7 +486,7 @@
     }).join('');
     var HOT = {}; R.nav.slice(0, 4).forEach(function (n) { HOT[n[0]] = 1; });
     var dockHtml =
-      '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><span class="bm" aria-hidden="true">RAC</span></button>' +
+      '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
       '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="Show navigation" aria-pressed="false">' + CI.menu + '<span class="kb">Sections<span class="kc"> · ⌘\\</span></span></button>' +
       '<span class="sep"></span>' +
       R.nav.map(function (n, i) {
@@ -2120,6 +2121,7 @@
     $('app').className = '';
     $('app').innerHTML =
       '<div class="login-wrap"><div class="login-card">' +
+        '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aroma Chem production.</p>' +
         '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +

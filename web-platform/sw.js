@@ -4,9 +4,15 @@
  * network-only and falls straight through, same principle as the factory PWA's sw.js but
  * simpler (this console has no offline-write workflow to support at all — it's read-mostly
  * platform telemetry, not factory operations). */
-const CACHE = 'platform-shell-v8';
+const CACHE = 'platform-shell-v9'; // v9: reference shell (rac-console.css) + UX-D welcome, logo and icons
 const SHELL = [
-  '/', '/index.html', '/rac-console.css', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg',
+  '/', '/index.html', '/rac-console.css', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest',
+  // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
+  '/rac-preload.js', '/logo/brand.css',
+  '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',
+  '/logo/raw-logo-ondark.png', '/logo/raw-logo-ondark@2x.png', '/logo/raw-logo-ondark@3x.png',
+  '/favicon.ico', '/favicon-16.png', '/favicon-32.png', '/favicon-48.png', '/apple-touch-icon.png',
+  '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png',
   // Vendored fonts (no longer fetched from fonts.googleapis.com/fonts.gstatic.com — see index.html).
   '/fonts/outfit.css', '/fonts/jetbrains-mono.css',
   '/fonts/outfit-300-latin.woff2', '/fonts/outfit-300-latin-ext.woff2',
@@ -14,6 +20,7 @@ const SHELL = [
   '/fonts/outfit-500-latin.woff2', '/fonts/outfit-500-latin-ext.woff2',
   '/fonts/jetbrains-mono-400-latin.woff2', '/fonts/jetbrains-mono-400-latin-ext.woff2',
   '/fonts/jetbrains-mono-500-latin.woff2', '/fonts/jetbrains-mono-500-latin-ext.woff2',
+  '/fonts/cabinet-grotesk-variable.woff2',
 ];
 
 self.addEventListener('install', (event) => {

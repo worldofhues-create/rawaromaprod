@@ -1,0 +1,10 @@
+/* UX-D: THE brand mark, one class for Factory, Platform and Vault.
+ * Byte-identical in web/logo/, web-platform/logo/ and web-vault/logo/ -- the
+ * same pattern as alembic-tokens.css. The logo at a FIXED height per context,
+ * the width from its own 400:182 ratio. Contract: ALEMBIC
+ * release/ui/BRAND_ASSETS.md (ALEMBIC's React surfaces use BrandLogo.jsx at
+ * the same heights). */
+.brand-logo{display:block;flex:0 0 auto;width:auto;object-fit:contain}
+.brand-logo--rail{height:30px}
+.brand-logo--dock{height:22px}
+.brand-logo--login{height:40px;margin:0 0 var(--s-base,20px)}

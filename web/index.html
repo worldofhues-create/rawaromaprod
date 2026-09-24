@@ -6,7 +6,12 @@
   <title>Factory · Raw Aroma Chem</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#EDEDEB">
-  <link rel="icon" href="/icon.svg">
+  <!-- UX-D: the one icon set every ALEMBIC and RawProd surface uses (ALEMBIC release/ui/BRAND_ASSETS.md). -->
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <!-- Reference console design layer (rac-console.css, vendored verbatim from the owner reference)
        then the ALEMBIC visual contract (web/ui-contract/CONTRACT_HASH pins its version; do not
        hand-edit alembic-tokens.css — regenerate + re-vendor instead), then the Factory layer. -->
@@ -15,8 +20,12 @@
   <link rel="stylesheet" href="/ui-contract/rac-console.css">
   <link rel="stylesheet" href="/ui-contract/alembic-tokens.css">
   <link rel="stylesheet" href="/ui-contract/shell.css">
+  <link rel="stylesheet" href="/logo/brand.css">
 </head>
 <body>
+  <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body> so
+       it paints before shell.js runs; it lifts once #app has content. -->
+  <script src="/rac-preload.js" data-mount="#app" data-logo="/logo/raw-logo@3x.png" data-fonts="/ui-contract/fonts/"></script>
   <div class="stage" id="root"><div id="app" class="app"></div></div>
   <script src="/qrcode.js"></script>
   <!-- Split from the former monolithic app.js (mechanical, no behaviour change) so parallel
