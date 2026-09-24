@@ -68,6 +68,7 @@ if [ "$MODE" = vault ]; then
   log "recreate vault_demo"; RECREATE=1 "$LIB/provision-db.sh" vault
   log "migrate vault_demo"; systemctl restart vault-demo-migrate.service
   log "vault demo:seed (formula vault phase)"
+  "$LIB/demo-aws-creds.sh" vault   # H1: fresh demo-role session; the seed reads it via vault.env AWS_CONFIG_FILE
   ( envf /etc/rawprod-demo/vault.env
     export PATH=/opt/node-v22.12.0/bin:$PATH
     # vault.env is the real runtime env (NODE_ENV=production APP_ENV=prod) — demo-seed.ts's
@@ -90,6 +91,7 @@ log "stopping demo units"; systemctl stop $UNITS 2>/dev/null || true
 log "recreate alembic_demo + rawprod_demo"; RECREATE=1 "$LIB/provision-db.sh" app
 "$LIB/render-demo-env.sh" app >/dev/null
 
+"$LIB/demo-aws-creds.sh" app   # H1: fresh demo-role session for the ALEMBIC demo units
 log "ALEMBIC migrate"; systemctl restart alembic-demo-migrate.service
 
 log "ALEMBIC demo:seed"

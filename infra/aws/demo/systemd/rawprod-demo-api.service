@@ -17,6 +17,10 @@ TimeoutStopSec=30
 Restart=on-failure
 RestartSec=5s
 MemoryMax=500M
+# H1: no demo process may reach IMDS (the box role is a PROD role). IPv4 + IPv6 IMDS endpoints.
+IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
+Environment=AWS_EC2_METADATA_DISABLED=true
+# rawprod-demo-api uses no AWS service: it gets no credentials at all.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

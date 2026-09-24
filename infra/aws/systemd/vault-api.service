@@ -76,6 +76,9 @@ ProtectHome=true
 PrivateDevices=true
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 LockPersonality=true
+# H1 (RC .2 review): IMDS deliberately NOT denied here. vault-api's AWS KMS adapter (FORMULA_KMS_KEY_ID) gets its
+# credentials from the rawprod-vault-app instance role via IMDS — that role is this process's own identity,
+# scoped to the prod envelope key. Denying IMDS would break KMS. The demo counterpart (vault-demo-api) IS denied.
 
 [Install]
 WantedBy=multi-user.target

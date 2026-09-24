@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # DEMO-INFRA: render the demo env files from SSM /rawaroma/demo/* (root 0600; values never printed).
 #   app box:   render-demo-env.sh app    -> /etc/alembic-demo/{api,web,migrate}.env, /etc/rawprod-demo/{api,migrate}.env
-#   vault box: render-demo-env.sh vault  -> /etc/rawprod-demo/{vault,vault-migrate}.env, /etc/rawprod-demo/aws-config
+#   vault box: render-demo-env.sh vault  -> /etc/rawprod-demo/{vault,vault-migrate}.env
+# H1: AWS credentials are NOT rendered here. demo-aws-creds.sh (root, *-demo-aws-creds.timer, every 30 min) writes a
+# short-lived demo-role session to /etc/{alembic,rawprod}-demo/aws/ (0640 root:<demo user>); the env only points there.
+# No demo env ever carries credential_source=Ec2InstanceMetadata, and every demo unit is IMDS-denied.
 # The demo ALEMBIC tenant id is written by reset-demo.sh to /etc/alembic-demo/tenant-id (it exists only after the seed).
 set -euo pipefail
 export AWS_DEFAULT_REGION=us-west-2
@@ -24,6 +27,10 @@ ALEMBIC_DB_CA_FILE=/etc/alembic/certs/rds-global-bundle.pem
 ALEMBIC_PUBLIC_WEB_ORIGIN=$AURL
 ALEMBIC_CORS_ORIGINS=$AURL
 ALEMBIC_BEDROCK_REGION=us-west-2
+AWS_CONFIG_FILE=/etc/alembic-demo/aws/config
+AWS_SHARED_CREDENTIALS_FILE=/etc/alembic-demo/aws/credentials
+AWS_SDK_LOAD_CONFIG=1
+AWS_EC2_METADATA_DISABLED=true
 ALEMBIC_SECRET_KEYS=$(g /rawaroma/demo/alembic/SECRET_KEYS)
 ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY=$(g /rawaroma/demo/alembic/rawprod-assertion-signing-key)
 ALEMBIC_JANITOR_MS=300000
@@ -52,6 +59,7 @@ ALEMBIC_ASSERTION_AUDIENCE=rawprod
 ALEMBIC_ASSERTION_VERIFY_KEY=$(g /rawaroma/demo/rawprod/assertion-verify-key)
 RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform
 CORS_ORIGINS=$FURL
+AWS_EC2_METADATA_DISABLED=true
 X
   put /etc/rawprod-demo/migrate.env <<X
 PGSSLROOTCERT=/etc/rawprod/rds-global-bundle.pem
@@ -71,8 +79,10 @@ PGSSLROOTCERT=/etc/rawprod/rds-global-bundle.pem
 FORMULA_DATABASE_URL=postgres://vault_demo_app:$(enc "$(g /rawaroma/demo/vault/DB_PASSWORD_app)")@$VPG/vault_demo?sslmode=require
 FORMULA_KMS_KEY_ID=$(g /rawaroma/demo/vault/FORMULA_KMS_KEY_ID)
 FORMULA_KMS_REGION=us-west-2
-AWS_CONFIG_FILE=/etc/rawprod-demo/aws-config
+AWS_CONFIG_FILE=/etc/rawprod-demo/aws/config
+AWS_SHARED_CREDENTIALS_FILE=/etc/rawprod-demo/aws/credentials
 AWS_SDK_LOAD_CONFIG=1
+AWS_EC2_METADATA_DISABLED=true
 # P0 decision (2026-09-24, lane FIXV): mirrors prod's render-env.sh — vault-api verifies
 # RawProd-issued JWTs, so it MUST use the SAME signing key as rawprod-demo's api.env. Reads the
 # demo rawprod JWT_SECRET param directly; /rawaroma/demo/vault/JWT_SECRET is retired.
@@ -88,14 +98,10 @@ PGSSLROOTCERT=/etc/rawprod/rds-global-bundle.pem
 FORMULA_DATABASE_URL=postgres://vault_demo_owner:$(enc "$(g /rawaroma/demo/vault/DB_PASSWORD_owner)")@$VPG/vault_demo?sslmode=require
 SKIP_TARGETS=main
 X
-  # demo vault-api runs as role rawprod-vault-demo (the only principal the demo envelope key allows), assumed from the box role
-  install -m 644 /dev/stdin /etc/rawprod-demo/aws-config <<X
-[default]
-region = us-west-2
-role_arn = arn:aws:iam::859485559854:role/rawprod-vault-demo
-credential_source = Ec2InstanceMetadata
-role_session_name = vault-demo-api
-X
-  chmod 755 /etc/rawprod-demo; chown root:rawprod-demo /etc/rawprod-demo/aws-config 2>/dev/null || true
+  # demo vault-api runs as role rawprod-vault-demo (the only principal the demo envelope key allows). H1: the old
+  # /etc/rawprod-demo/aws-config (credential_source=Ec2InstanceMetadata) is retired — the demo process reached IMDS
+  # and so could mint the PROD box role. The session now comes from demo-aws-creds.sh vault (root timer).
+  rm -f /etc/rawprod-demo/aws-config
+  chmod 755 /etc/rawprod-demo
   ;;
 esac

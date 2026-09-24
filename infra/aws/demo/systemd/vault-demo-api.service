@@ -3,6 +3,8 @@
 Description=Vault DEMO API (PORT 4111, vault box; KMS via role rawprod-vault-demo)
 After=network-online.target vault-demo-migrate.service
 Requires=vault-demo-migrate.service
+Wants=vault-demo-aws-creds.service
+After=vault-demo-aws-creds.service
 [Service]
 Type=exec
 User=rawprod-demo
@@ -17,6 +19,11 @@ TimeoutStopSec=30
 Restart=on-failure
 RestartSec=5s
 MemoryMax=400M
+# H1: no demo process may reach IMDS (the box role is a PROD role). IPv4 + IPv6 IMDS endpoints.
+IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
+Environment=AWS_EC2_METADATA_DISABLED=true
+# short-lived demo-role session written by root (vault-demo-aws-creds.timer); credential_process, no credential_source
+Environment=AWS_CONFIG_FILE=/etc/rawprod-demo/aws/config AWS_SHARED_CREDENTIALS_FILE=/etc/rawprod-demo/aws/credentials AWS_SDK_LOAD_CONFIG=1
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

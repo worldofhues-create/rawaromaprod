@@ -252,7 +252,7 @@ before and after every step. nginx got a graceful reload gated by `nginx -t`. No
 
 ## KMS / IAM
 - `alias/rawprod-demo-vault-envelope`, key 034c5485-02cb-4aad-b944-ff08a9b33f1e, with rotation on. Its policy mirrors the prod envelope key: admins get management only, crypto is allowed only to
-  role **`rawprod-vault-demo`**, and an explicit Deny applies to every other principal. That role is assumed from the vault box role, through `/etc/rawprod-demo/aws-config` (credential_source=Ec2InstanceMetadata).
+  role **`rawprod-vault-demo`**, and an explicit Deny applies to every other principal. That role was assumed from the vault box role through `/etc/rawprod-demo/aws-config` (credential_source=Ec2InstanceMetadata) — **retired by lane S5 (H1), see below.**
   Proven: the demo role can GenerateDataKey on the demo key. The box role on the demo key gets AccessDenied. The demo role on the prod key gets AccessDenied.
 - Inline policies: `alembic-ec2/demo-runtime` (`iam/alembic-ec2.demo-runtime.json`) and `rawprod-vault-app/demo-vault` (`iam/rawprod-vault-app.demo-vault.json`: `/rawaroma/demo/vault/*`,
   the demo verify key, and sts:AssumeRole on rawprod-vault-demo only).
@@ -299,7 +299,7 @@ deployed (checked: it refuses today).
 
 ## Deploy (P0, one step once the RC is chosen)
 Put the RC artifact into /srv/alembic-demo/app and /srv/rawprod-demo/app (on both boxes), owned by the demo users. Then run `reset-demo.sh ssm`, then
-`systemctl enable --now alembic-demo-api.socket alembic-demo-api alembic-demo-web rawprod-demo-api` (app) and `vault-demo-api` (vault). Re-run `install-box.sh app` to copy the factory static files.
+`systemctl enable --now alembic-demo-aws-creds.timer alembic-demo-api.socket alembic-demo-api alembic-demo-web rawprod-demo-api` (app) and `vault-demo-aws-creds.timer vault-demo-api` (vault) — the creds timer FIRST (H1 below). Re-run `install-box.sh app` to copy the factory static files.
 
 ## Open items for P0 / owner
 1. ~~**Formula seed path.**~~ **Resolved, lane FIXV (2026-09-24)** — see "Lane FIXV" below. `FORMULA_TARGET` no longer exists.
@@ -361,3 +361,24 @@ from the SAME SSM param as their paired `api.env` (`/rawaroma/rawprod/JWT_SECRET
 not a separate `/rawaroma/{vault,demo/vault}/JWT_SECRET` copy that could silently drift. `infra/aws/demo/apply-aws.sh` no
 longer creates that now-unused demo param. `vault-api.service`'s header and `DEPLOY_AWS.md`'s env table are updated to
 state this as a fact, not a "should probably" hedge.
+
+# Lane S5 (2026-09-24): H1 — demo processes can no longer reach IMDS (security review RC .2)
+
+Finding: every demo unit could reach IMDS and so mint the PROD box role (`alembic-ec2` / `rawprod-vault-app`).
+- Every demo unit (alembic-demo-api/web/migrate, rawprod-demo-api/migrate, vault-demo-api/migrate) has
+  `IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128` and `AWS_EC2_METADATA_DISABLED=true`.
+- `demo-aws-creds.sh app|vault` (root; `alembic-demo-aws-creds.timer` / `vault-demo-aws-creds.timer`, every 30 min, 1 h sessions)
+  assumes the demo role and writes `/etc/{alembic,rawprod}-demo/aws/{creds.json,config,credentials}`, dir 0750 / files 0640
+  root:<demo user>. `config` = `credential_process = /bin/cat …/creds.json` (JSON carries Expiration, so the SDK re-reads it
+  before expiry; a static key in a credentials file would be memoised past expiry). `credentials` is intentionally empty so
+  nothing shadows it. No `credential_source` anywhere; `/etc/rawprod-demo/aws-config` is deleted by render-demo-env.sh.
+- New role **`alembic-demo-app`** (trust: role alembic-ec2 only; max session 1 h; inline `demo-app` =
+  `iam/alembic-demo-app.policy.json`: bedrock-mantle:CreateInference, bedrock Invoke/Converse in us-west-2, translate:TranslateText
+  — no S3, SSM, Secrets Manager or Chime). `alembic-ec2/demo-runtime` gained sts:AssumeRole on it only. Created + applied live.
+- rawprod-demo-api uses no AWS API: IMDS-denied, no credentials at all. vault-demo-api keeps `rawprod-vault-demo` (KMS on the demo key).
+- Staged on both boxes via SSM (units installed DISABLED, env re-rendered, creds written once). Proven: `runuser -u <demo user>`
+  with only the new files resolves `assumed-role/alembic-demo-app/…` and `assumed-role/rawprod-vault-demo/…`; a transient unit
+  with the same IPAddressDeny times out on the IMDS token PUT. Nothing was started or enabled; no prod unit restarted.
+- Production units (repo only, NOT applied to the hosts — P0 installs at the next deploy): `rawprod-api.service` now denies IMDS
+  (the main API calls no AWS API). `vault-api.service` deliberately does NOT: its AWS KMS adapter uses the rawprod-vault-app
+  instance role through IMDS, and that role is its own identity. Test: `backend/api/src/__tests__/demo-units-imds.test.ts`.

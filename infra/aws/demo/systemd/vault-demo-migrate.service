@@ -12,6 +12,9 @@ EnvironmentFile=/etc/rawprod-demo/vault-migrate.env
 Environment=PATH=/opt/node-v22.12.0/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=/usr/bin/env pnpm db:migrate
 ExecStartPost=/usr/bin/psql "${FORMULA_DATABASE_URL}" -X -q -v app=vault_demo_app -v skip= -f /usr/local/lib/rawaroma/demo/sql/app-role-grants.sql
+# H1: no demo process may reach IMDS (the box role is a PROD role). IPv4 + IPv6 IMDS endpoints.
+IPAddressDeny=169.254.169.254/32 fd00:ec2::254/128
+Environment=AWS_EC2_METADATA_DISABLED=true
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
