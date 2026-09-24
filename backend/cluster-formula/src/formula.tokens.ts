@@ -38,7 +38,15 @@ export function createFormulaClient(config: ConfigService): Sql {
           'SB-01). Provision a dedicated ra_vault-role connection string (scripts/provision-vault-isolation.sql) first.',
       );
     }
-    return postgres(config.get('DATABASE_URL'), { max: 5, types: {} });
+    const mainUrl = config.get('DATABASE_URL');
+    if (!mainUrl) {
+      throw new Error(
+        'Neither FORMULA_DATABASE_URL nor DATABASE_URL is set. The Formula Vault needs ONE of ' +
+          'them outside prod (dev/CI convenience); vault-main.ts (VAULT_MODE=true) must always ' +
+          'set FORMULA_DATABASE_URL explicitly — it never has a DATABASE_URL to fall back to.',
+      );
+    }
+    return postgres(mainUrl, { max: 5, types: {} });
   }
   return postgres(url, { max: 5, types: {} });
 }

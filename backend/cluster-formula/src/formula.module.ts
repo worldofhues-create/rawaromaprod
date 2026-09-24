@@ -5,14 +5,36 @@
  *
  * Wires: the dedicated FORMULA_DB client, the KMS port (EnvKmsAdapter over FORMULA_KEK), the
  * VaultService crypto engine, the three domain service/controller pairs (catalog, formulas,
- * approvals), and the FORMULA_LOOKUP cold-read port (floor view = alias only). Imports
- * ClusterMasterdataModule to resolve material → RM_ALIAS for the floor view. Closes its pool
+ * approvals), and the FORMULA_LOOKUP cold-read port (floor view = alias only). Closes its pool
  * on shutdown. Exports FORMULA_DB (for the worker's outbox source) + FORMULA_LOOKUP.
+ *
+ * PB-03 remainder (V4 §109.1) — VAULT_MODE-gated shape. Read directly off `process.env` at
+ * MODULE-DECORATION time (before Nest's DI container exists — the earliest point a plain
+ * `@Module({...})` object can vary), because it decides the STATIC composition of this module
+ * (which controllers exist, which sibling module gets imported) rather than a runtime value any
+ * provider reads:
+ *
+ *   VAULT_MODE=false (default — main.ts's AppModule, worker.ts's WorkerModule): NO controllers
+ *   (formula plaintext HTTP routes never exist on the main app box's process at all — "the main
+ *   API must not expose formula plaintext routes when running in main mode"), and
+ *   `MASTERDATA_LOOKUP` resolves locally via `ClusterMasterdataModule` (shared main `PG_CLIENT`
+ *   — already true, unchanged).
+ *
+ *   VAULT_MODE=true (vault-main.ts's VaultAppModule, ONLY): the three controllers ARE mounted
+ *   (this is the one process that's allowed to serve them), and `MASTERDATA_LOOKUP` resolves via
+ *   `MaterialFactsClient` — a signed HTTP call to the main app box's material-facts bridge
+ *   (`facts-bridge/material-facts.client.ts`) — instead of `ClusterMasterdataModule`, which
+ *   needs the shared `PG_CLIENT` (main DB) the Vault box must never hold a credential for. This
+ *   is the "keeps no main-DB credentials on the vault box" design choice the lane brief asked
+ *   this file to pick and document; the alternative considered (a synced local material catalog)
+ *   was rejected because it needs its own replication/staleness story for no real benefit over a
+ *   live read-only proxy call the Vault box already has a signed channel for (VaultPort, the
+ *   opposite direction).
  */
 import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { ConfigService, SECURITY_AUDIT_SINK } from '@core/backend-kernel';
-import { ClusterMasterdataModule } from '@ra/cluster-masterdata';
+import { ClusterMasterdataModule, MASTERDATA_LOOKUP } from '@ra/cluster-masterdata';
 import { CatalogController } from './catalog/catalog.controller.js';
 import { CatalogService } from './catalog/catalog.service.js';
 import { FormulasController } from './formulas/formulas.controller.js';
@@ -23,6 +45,7 @@ import { VaultService } from './vault.service.js';
 import { VaultSecurityAuditSink } from './security-audit-sink.adapter.js';
 import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
+import { MaterialFactsClient } from './facts-bridge/material-facts.client.js';
 import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
@@ -34,6 +57,15 @@ import {
   drizzle,
   formulaSchema,
 } from './formula.tokens.js';
+
+/** Exported (not inlined) so `formula-module-vault-mode.test.ts` can assert on it without
+ *  booting Nest — same "unit-test the decision, not the DI container" pattern
+ *  `resolveKmsAdapter`/`createFormulaClient` already follow. */
+export function isVaultMode(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.VAULT_MODE === 'true';
+}
+
+const VAULT_MODE = isVaultMode();
 
 /**
  * PB-03 / V4 §109.2: production (APP_ENV=prod) accepts ONLY AwsKmsAdapter — a real AWS KMS
@@ -64,8 +96,11 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
 
 @Global()
 @Module({
-  imports: [ClusterMasterdataModule],
-  controllers: [CatalogController, FormulasController, ApprovalsController],
+  // VAULT_MODE=true: no ClusterMasterdataModule import at all (it needs the shared main
+  // PG_CLIENT) — MASTERDATA_LOOKUP is instead provided directly, below, off MaterialFactsClient.
+  imports: VAULT_MODE ? [] : [ClusterMasterdataModule],
+  // VAULT_MODE=false (main app box): zero formula HTTP routes exist in this process.
+  controllers: VAULT_MODE ? [CatalogController, FormulasController, ApprovalsController] : [],
   providers: [
     {
       provide: FORMULA_PG_CLIENT,
@@ -82,6 +117,12 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
       inject: [ConfigService],
       useFactory: (config: ConfigService) => resolveKmsAdapter(config),
     },
+    // VAULT_MODE=true only — see this file's header. Harmless to construct when unused
+    // (ClusterMasterdataModule's own MASTERDATA_LOOKUP binding wins via `imports` above when
+    // VAULT_MODE=false; this provider is simply never registered in that case).
+    ...(VAULT_MODE
+      ? [MaterialFactsClient, { provide: MASTERDATA_LOOKUP, useExisting: MaterialFactsClient }]
+      : []),
     VaultService,
     CatalogService,
     FormulasService,
@@ -91,7 +132,9 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     VaultSecurityAuditSink,
     { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
-  exports: [FORMULA_DB, FORMULA_LOOKUP, SECURITY_AUDIT_SINK],
+  // FORMULA_PG_CLIENT: needed by vault-main.ts's VaultHealthController (pings the one DB
+  // connection the Vault process actually holds) — see backend/api/src/vault-bridge.
+  exports: [FORMULA_DB, FORMULA_PG_CLIENT, FORMULA_LOOKUP, SECURITY_AUDIT_SINK],
 })
 export class FormulaModule implements OnModuleDestroy {
   constructor(@Inject(FORMULA_PG_CLIENT) private readonly client: Sql) {}

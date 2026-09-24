@@ -16,3 +16,10 @@ export {
   type SecurityAuditEntry,
   type SecurityAuditSink,
 } from './security-audit-sink.js';
+export {
+  computeInternalBridgeSignature,
+  verifyInternalBridgeSignature,
+  INTERNAL_BRIDGE_CLOCK_SKEW_S,
+  type InternalBridgeSignInput,
+} from './internal-bridge-signing.js';
+export { InternalBridgeGuard } from './internal-bridge.guard.js';

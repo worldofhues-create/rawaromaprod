@@ -17,7 +17,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
-import { FORMULA_LOOKUP, type CodedInstruction, type FormulaLookup } from '@ra/cluster-formula';
+import { VAULT_PORT, type CodedInstruction, type VaultPort } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { paginate, type Page } from '../_helpers.js';
@@ -44,7 +44,7 @@ const ACTIVE_ORDER_STATUSES = new Set(['INPROGRESS']);
 export class PickingService {
   constructor(
     @Inject(PRODUCTION_DB) private readonly db: ProductionDb,
-    @Inject(FORMULA_LOOKUP) private readonly formula: FormulaLookup,
+    @Inject(VAULT_PORT) private readonly formula: VaultPort,
   ) {}
 
   /* ── material pick list (CRUD reads) ─────────────────────────────── */
