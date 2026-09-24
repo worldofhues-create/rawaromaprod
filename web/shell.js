@@ -465,26 +465,30 @@
     shell();
   }
 
-  /* ---------------- Ask Aria (UX-E) ----------------
+  /* ---------------- Ask Aria (UX-E panel, UX-H answers) ----------------
    * The panel is ALEMBIC's own (ui-contract/aria-panel.js, AlembicAria.mount — the vanilla port of
    * AriaPanel, same DOM/classes/states), opened from the top bar's "Ask Aria" and the dock's
    * "Ask Aria · ⌘K", exactly as ALEMBIC Admin/Agent open it.
    *
-   * WHERE THE ANSWERS COME FROM — the documented choice (coordinator brief, UX-C). Aria answers
-   * through ALEMBIC's POST /api/v1/copilot/ask, which needs an ALEMBIC staff session. This console
-   * holds a RawProd session only (the identity bridge hands ALEMBIC's assertion to RawProd, never
-   * the other way), its CSP is connect-src 'self', and no RawProd vhost proxies to ALEMBIC — there
-   * is no /main/ route in infra/aws/nginx. A cross-origin call would therefore be refused on every
-   * deployment, and a proxy would still arrive without ALEMBIC credentials. So the panel opens in
-   * an honest "Aria answers in ALEMBIC" state: every question gets that one plain answer, shown as
-   * a refusal (never as a fact), and nothing is invented locally. Wiring a real answer path needs
-   * a server-side RawProd→ALEMBIC copilot bridge with its own auth — backend work, not UI. */
+   * WHERE THE ANSWERS COME FROM (UX-H). This console holds a RawProd session and its CSP is
+   * connect-src 'self', so it asks its OWN server — POST /v1/aria/ask, through the same encrypted
+   * /rpc tunnel as every other call — and RawProd's server forwards the question to ALEMBIC over
+   * the signed rawprod_bridge channel (backend/api/src/aria/aria-bridge.service.ts). ALEMBIC answers
+   * as the ALEMBIC staff member this RawProd user is bound to, with that person's own permissions,
+   * through the same code path as ALEMBIC Admin's Aria. What is sent: the question, the thread id
+   * and the NAME of this view — never page data.
+   *
+   * THE HONEST FALLBACK STAYS. GET /v1/aria/status is asked on open; when the bridge is not
+   * configured, or this sign-in is not linked to an ALEMBIC account, the panel opens in the
+   * "Aria answers in ALEMBIC" state it has always had: that one plain answer, shown as a refusal
+   * (never as a fact), with nothing invented locally. */
   var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
-  var _aria = null;
-  function ariaContext() {
+  var _aria = null, _ariaMode = null, _ariaMsg = '';
+  function ariaView() {
     var R = ROLES[st.role]; var it = R && R.nav.filter(function (n) { return n[0] === st.nav; })[0];
-    return 'Factory · ' + (it ? it[1] : 'Dashboard');
+    return it ? it[1] : 'Dashboard';
   }
+  function ariaContext() { return 'Factory · ' + ariaView(); }
   // Fetched the first time Aria opens, as ALEMBIC's AriaCoPilot lazy-loads its panel: nothing of
   // it is on first paint, and index.html keeps loading only the split modules (ui-parity-check §18).
   var _ariaLoading = null;
@@ -498,22 +502,54 @@
     });
     return _ariaLoading;
   }
-  function ariaPanel() {
-    if (_aria) return _aria;
+  // Is Aria connected for THIS user? Once it is, it is not asked again this session.
+  function ariaStatus() {
+    if (_ariaMode === 'live') return Promise.resolve({ live: true });
+    return tunnel('/v1/aria/status').then(function (r) {
+      var d = r && r.status < 400 && r.json ? r.json.data : null;
+      return d && d.available ? { live: true } : { live: false, message: (d && d.message) || ARIA_HERE };
+    }).catch(function () { return { live: false, message: ARIA_HERE }; });
+  }
+  // One question to this console's own server, answered by ALEMBIC (see the header above).
+  function ariaAsk(question, extra) {
+    var body = { question: question, console: 'factory', view: ariaView(), persist: true };
+    if (extra && extra.conversationId) body.conversationId = extra.conversationId;
+    return tunnel('/v1/aria/ask', { method: 'POST', body: body }).then(function (r) {
+      if (r.status >= 400) return { ok: false, reason: 'http-' + r.status };
+      var d = r.json && r.json.data;
+      if (d && d.status === 'answered') return { ok: true, text: d.text, via: d.via, cited: d.cited || [], conversationId: d.conversationId || null };
+      if (d && d.reason === 'rate_limited') return { ok: false, reason: 'http-429' };
+      if (d && d.reason !== 'unreachable' && d.message) return { ok: true, via: 'refusal', text: d.message, cited: [] };
+      return { ok: false, reason: 'unreachable' };
+    }).catch(function () { return { ok: false, reason: 'unreachable' }; });
+  }
+  function ariaPanel(s) {
+    var mode = s.live ? 'live' : 'fallback';
+    if (_aria && _ariaMode === mode && (s.live || _ariaMsg === s.message)) return _aria;
+    if (_aria) _aria.destroy();
+    _ariaMode = mode; _ariaMsg = s.live ? '' : s.message;
+    if (s.live) {
+      _aria = AlembicAria.mount({ context: ariaContext(), ask: ariaAsk, parent: document.body });
+      return _aria;
+    }
+    var msg = _ariaMsg;
     _aria = AlembicAria.mount({
       context: ariaContext(),
       prompts: ['Where can I ask Aria?'],
-      ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: ARIA_HERE, cited: [] }); },
+      ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: msg, cited: [] }); },
       parent: document.body,
     });
     // The panel's fixed greeting promises answers from orders, stock and enquiries; here it says
-    // where Aria answers instead. Re-applied whenever the panel repaints its empty state.
-    var fix = function () { var p = _aria.element.querySelector('.aria-empty > p'); if (p && p.textContent !== ARIA_HERE) p.textContent = ARIA_HERE; };
-    new MutationObserver(fix).observe(_aria.element, { childList: true, subtree: true }); fix();
+    // why Aria cannot answer yet. Re-applied whenever the panel repaints its empty state.
+    var panel = _aria;
+    var fix = function () { var p = panel.element.querySelector('.aria-empty > p'); if (p && p.textContent !== msg) p.textContent = msg; };
+    new MutationObserver(fix).observe(panel.element, { childList: true, subtree: true }); fix();
     return _aria;
   }
+  function ariaReset() { if (_aria) _aria.destroy(); _aria = null; _ariaMode = null; _ariaMsg = ''; }
   function toggleAria() {
-    loadAria().then(function () { var a = ariaPanel(); a.setContext(ariaContext()); a.toggle(); })
+    if (_aria && _aria.isOpen()) { _aria.close(); return; }
+    Promise.all([loadAria(), ariaStatus()]).then(function (v) { var a = ariaPanel(v[1]); a.setContext(ariaContext()); a.open(); })
       .catch(function () { toast('Aria didn\'t load. Try again.', 'bad'); });
   }
 
@@ -2100,7 +2136,7 @@
     var home = function () { navTo(ROLES[st.role].nav[0][0]); };
     if ($('ra-home')) $('ra-home').onclick = home;
     if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
-    $('ra-logout').onclick = function () { if (_aria) { _aria.destroy(); _aria = null; } session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };

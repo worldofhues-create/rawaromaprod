@@ -252,14 +252,18 @@
   function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === '#/' + id) { render(); return; } location.hash = '#/' + id; }
   function visibleNav() { return NAV.filter(function (n) { return !n.need || hasPerm(n.need); }); }
   window.addEventListener('resize', applyRail);
-  /* ---- Ask Aria (UX-E): ALEMBIC's own panel (aria-panel.js, AlembicAria.mount), fetched the first
-   * time it opens and opened from the top bar and the dock's "Ask Aria · ⌘K", as in ALEMBIC.
-   * Answers: ALEMBIC's /api/v1/copilot/ask needs an ALEMBIC staff session, this console holds a
-   * RawProd one, its CSP is connect-src 'self' and no RawProd vhost proxies to ALEMBIC — so the
-   * panel opens in an honest "Aria answers in ALEMBIC" state and invents nothing (same choice and
-   * reasoning as web/shell.js's Ask Aria block). */
+  /* ---- Ask Aria (UX-E panel, UX-H answers): ALEMBIC's own panel (aria-panel.js,
+   * AlembicAria.mount), fetched the first time it opens and opened from the top bar and the
+   * dock's "Ask Aria · ⌘K", as in ALEMBIC.
+   * Answers (UX-H): this console asks its own server's POST /v1/aria/ask through the encrypted
+   * /rpc tunnel (so connect-src 'self' holds), and RawProd forwards it to ALEMBIC over the signed
+   * rawprod_bridge channel; ALEMBIC answers as the ALEMBIC staff member this sign-in is bound to,
+   * with that person's own permissions (same reasoning as web/shell.js's Ask Aria block).
+   * When GET /v1/aria/status says the bridge is not configured or this sign-in is not linked, the
+   * panel keeps its honest "Aria answers in ALEMBIC" state and invents nothing. */
   var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
-  var ariaApi = null, ariaLoading = null, ariaCtx = 'Platform';
+  var ariaApi = null, ariaLoading = null, ariaCtx = 'Platform', ariaMode = null, ariaMsg = '';
+  function ariaView() { var i = ariaCtx.indexOf(' · '); return i < 0 ? 'Platform' : ariaCtx.slice(i + 3); }
   function loadAria() {
     if (typeof AlembicAria !== 'undefined') return Promise.resolve();
     if (ariaLoading) return ariaLoading;
@@ -270,15 +274,42 @@
     });
     return ariaLoading;
   }
+  function ariaStatus() {
+    if (ariaMode === 'live') return Promise.resolve({ live: true });
+    return tunnel('/v1/aria/status').then(function (r) {
+      var d = r && r.status < 400 && r.json ? r.json.data : null;
+      return d && d.available ? { live: true } : { live: false, message: (d && d.message) || ARIA_HERE };
+    }).catch(function () { return { live: false, message: ARIA_HERE }; });
+  }
+  function ariaAsk(question, extra) {
+    var body = { question: question, console: 'platform', view: ariaView(), persist: true };
+    if (extra && extra.conversationId) body.conversationId = extra.conversationId;
+    return tunnel('/v1/aria/ask', { method: 'POST', body: body }).then(function (r) {
+      if (r.status >= 400) return { ok: false, reason: 'http-' + r.status };
+      var d = r.json && r.json.data;
+      if (d && d.status === 'answered') return { ok: true, text: d.text, via: d.via, cited: d.cited || [], conversationId: d.conversationId || null };
+      if (d && d.reason === 'rate_limited') return { ok: false, reason: 'http-429' };
+      if (d && d.reason !== 'unreachable' && d.message) return { ok: true, via: 'refusal', text: d.message, cited: [] };
+      return { ok: false, reason: 'unreachable' };
+    }).catch(function () { return { ok: false, reason: 'unreachable' }; });
+  }
+  function ariaMount(s) {
+    var mode = s.live ? 'live' : 'fallback';
+    if (ariaApi && ariaMode === mode && (s.live || ariaMsg === s.message)) return;
+    if (ariaApi) ariaApi.destroy();
+    ariaMode = mode; ariaMsg = s.live ? '' : s.message;
+    if (s.live) { ariaApi = AlembicAria.mount({ context: ariaCtx, parent: document.body, ask: ariaAsk }); return; }
+    var msg = ariaMsg, panel = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Aria?'], parent: document.body,
+      ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: msg, cited: [] }); } });
+    ariaApi = panel;
+    var fix = function () { var p = panel.element.querySelector('.aria-empty > p'); if (p && p.textContent !== msg) p.textContent = msg; };
+    new MutationObserver(fix).observe(panel.element, { childList: true, subtree: true }); fix();
+  }
+  function ariaReset() { if (ariaApi) ariaApi.destroy(); ariaApi = null; ariaMode = null; ariaMsg = ''; }
   function toggleAria() {
-    loadAria().then(function () {
-      if (!ariaApi) {
-        ariaApi = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Aria?'], parent: document.body,
-          ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: ARIA_HERE, cited: [] }); } });
-        var fix = function () { var p = ariaApi.element.querySelector('.aria-empty > p'); if (p && p.textContent !== ARIA_HERE) p.textContent = ARIA_HERE; };
-        new MutationObserver(fix).observe(ariaApi.element, { childList: true, subtree: true }); fix();
-      }
-      ariaApi.setContext(ariaCtx); ariaApi.toggle();
+    if (ariaApi && ariaApi.isOpen()) { ariaApi.close(); return; }
+    Promise.all([loadAria(), ariaStatus()]).then(function (v) {
+      ariaMount(v[1]); ariaApi.setContext(ariaCtx); ariaApi.open();
     }).catch(function () { toast('Aria didn\'t load. Try again.', true); });
   }
   // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
@@ -352,7 +383,7 @@
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
         
-        h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:auto', onclick: function () { railOpen = false; if (ariaApi) { ariaApi.destroy(); ariaApi = null; } document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
+        h('button', { type: 'button', class: 'rail-min', style: 'position:static;margin-left:auto', onclick: function () { railOpen = false; ariaReset(); document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); logout(); }, 'aria-label': 'Sign out', title: 'Sign out' }, [icon(ICONS.logout, 13)]),
       ]),
     ]);
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
