@@ -4,8 +4,9 @@ This replaces `DEPLOY.md` (Vercel + Render + Neon) as the production path. It mi
 own ops pattern (`/Users/apple/Downloads/alembic/ops/`) rather than inventing a new one: systemd
 units for every long-running process, nginx terminating TLS in front of loopback upstreams,
 Let's Encrypt via certbot, and an exact-SHA deploy script with a compatibility-checked rollback.
-`DEPLOY.md`, `render.yaml` and every `web*/vercel.json` are marked `RETIRED-for-production` (not
-deleted — still usable for branch preview deploys) with a header pointing here.
+`render.yaml` and every `web*/vercel.json` have been deleted (G8 — production is AWS-only;
+`infra/aws/nginx/` has the equivalent static-file serving); `DEPLOY.md` is now a short pointer
+to this file.
 
 Authority: `MIGRATION_AWS_PLAN.md` (the approved-direction plan this lane executes against) and
 `FINAL_OS_EXECUTION_STATE.json` PB-01/PB-02/PB-16.

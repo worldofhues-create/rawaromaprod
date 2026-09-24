@@ -264,6 +264,9 @@ export const RA_PERMISSIONS: string[] = [
   'sales:dispatch_items:write',
   'sales:dispatch_master:read',
   'sales:dispatch_master:write',
+  // G1/PB-08 (FINAL_OS §2.3/§41): break-glass manual-continuity write, owner+admin only — see
+  // MANUAL_CONTINUITY_PERMISSION/MANUAL_CONTINUITY_ROLES in scripts/ra-roles.ts.
+  'sales:manual_continuity:write',
   'sales:sales_order:read',
   'sales:sales_order:write',
   'sales:sales_order_items:read',

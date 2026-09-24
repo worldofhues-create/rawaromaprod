@@ -56,6 +56,8 @@ import {
   VAULT_APPROVER_FORBIDDEN_PERMISSIONS,
   MANUFACTURING_INSTRUCTION_PERMISSION,
   MANUFACTURING_INSTRUCTION_ROLES,
+  MANUAL_CONTINUITY_PERMISSION,
+  MANUAL_CONTINUITY_ROLES,
   CAPABILITY_PERMISSIONS,
 } from './ra-roles.js';
 import { RA_PERMISSIONS } from './ra-permissions.js';
@@ -192,6 +194,8 @@ const out = {
   vaultApproverForbiddenPermissions: [...VAULT_APPROVER_FORBIDDEN_PERMISSIONS].sort(),
   manufacturingInstructionPermission: MANUFACTURING_INSTRUCTION_PERMISSION,
   manufacturingInstructionRoles: [...MANUFACTURING_INSTRUCTION_ROLES].sort(),
+  manualContinuityPermission: MANUAL_CONTINUITY_PERMISSION,
+  manualContinuityRoles: [...MANUAL_CONTINUITY_ROLES].sort(),
   // Replaces ALEMBIC's hand-maintained undecorated-route exemption table -- every controller
   // method with an HTTP decorator, its access decision, and (for the non-static decisions) the
   // verified reason string from the source. `decision: 'none'` should never appear here:

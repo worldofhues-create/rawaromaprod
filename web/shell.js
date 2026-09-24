@@ -273,7 +273,7 @@
     '/v1/fg-stock/by-sku': ['skuCode', 'productName', 'batchCount', 'producedQty', 'availableQty'],
     '/v1/fg-reservations': ['finishedGoodBatchId', 'reservedQty', 'channel', 'reservedForDocumentId', 'reservedDt', 'status'],
     '/v1/product-skus': ['skuCode', 'packSize', 'status'],
-    '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'status'],
+    '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'origin', 'status'],
     '/v1/customers': ['customerCode', 'customerName', 'status'],
     '/v1/transporters': ['transporterCode', 'transporterName', 'status'],
     '/v1/stock-requirements': ['materialCode', 'materialName', 'requiredQty', 'requiredByDate', 'priority', 'status'],
@@ -793,9 +793,13 @@
     ],
     '/v1/purchase-orders': [
       { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT' && !isCreator(r); }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
-      { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT', 'REJECTED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
+      { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT', 'REJECTED', 'CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
       { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} },
-      { label: 'Reject', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'ISSUED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-orders', 'purchaseOrderId', r); } }
+      { label: 'Reject', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['DRAFT', 'PENDING', 'PENDING_APPROVAL', 'ISSUED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-orders', 'purchaseOrderId', r); } },
+      // G2/V4 §113: a non-DRAFT PO can't be edited directly (409) — Amend raises a new DRAFT
+      // revision linked to this one instead, which needs re-approval.
+      { label: 'Amend', perm: 'procurement:purchase_order:write', tone: 'accent', when: function (r) { return ['DRAFT', 'CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, run: function (r) { amendPurchaseOrder(r); } },
+      { label: 'Cancel', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, run: function (r) { cancelPurchaseOrderFlow(r); } }
     ],
     '/v1/rm-batches': [
       { label: 'QR label', perm: 'inventory:rm_batch_master:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Batch ' + (r.batchNumber || ''), (r.batchNumber || String(r.rmBatchId).slice(0, 8)), 'RA-BATCH:' + (r.batchNumber || '') + ':' + r.rmBatchId, 'RM batch'); } },
@@ -831,7 +835,10 @@
       { label: 'Generate pick list', perm: 'production:material_pick_list:write', when: function (r) { return ['INPROGRESS', 'PLANNING'].indexOf(UP(r.status)) >= 0; }, path: function (r) { return '/v1/production-orders/' + r.productionOrderId + '/pick-list'; }, body: {} }
     ],
     '/v1/sales-orders': [
-      { label: 'Confirm', perm: 'sales:sales_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, path: function (r) { return '/v1/sales-orders/' + r.salesOrderId + '/confirm'; }, body: {} },
+      // G1/PB-08: sales orders should originate from the ALEMBIC bridge — confirming one here
+      // is a break-glass continuity action (owner/admin only, sales:manual_continuity:write)
+      // and always asks for a reason (see confirmSalesOrderManual, ws-mfg.js), audited server-side.
+      { label: 'Confirm', perm: 'sales:manual_continuity:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT'; }, run: function (r) { confirmSalesOrderManual(r); } },
       { label: 'Dispatch', perm: 'sales:dispatch_master:write', when: function (r) { return UP(r.status) === 'CONFIRMED'; }, run: function (r) { openDispatch(r); } }
     ],
     '/v1/fg-reservations': [
@@ -1649,8 +1656,13 @@
     '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
       header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date', req: true } ],
       item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Unit price', t: 'number', req: true } ] },
-    '/v1/sales-orders': { title: 'New sales order', perm: 'sales:sales_order:write', itemMin: 1,
-      header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' } ],
+    // G1/PB-08: sales orders should originate from the ALEMBIC bridge, not this manual form —
+    // it is now a break-glass CONTINUITY path (owner/admin only: sales:manual_continuity:write
+    // hides the "+ New" button for every other role via the generic `can(cfg.perm)` gate above)
+    // and always requires a reason, audited server-side (origin=MANUAL_CONTINUITY + a bridge
+    // event toward ALEMBIC — see OrdersService).
+    '/v1/sales-orders': { title: 'New sales order (manual continuity)', perm: 'sales:manual_continuity:write', itemMin: 1,
+      header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'reason', l: 'Reason this order is created manually, outside the ALEMBIC bridge (required, audited)', t: 'text', req: true } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
       header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],

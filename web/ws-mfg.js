@@ -54,6 +54,22 @@
     sheet.querySelector('.xp').onclick = close;
     return { scrim: scrim, sheet: sheet, close: close };
   }
+  // G1/PB-08: sales orders should originate from the ALEMBIC bridge, not a manual click here —
+  // confirming one through the UI is a break-glass CONTINUITY action, gated server-side on
+  // sales:manual_continuity:write (owner/admin only; the ACTIONS entry's `perm` already hides
+  // this button for every other role — see shell.js's '/v1/sales-orders' ACTIONS block) and
+  // always requires a plain-language reason, which the server audits (origin=MANUAL_CONTINUITY
+  // on the row + a bridge.outbox event toward ALEMBIC — see OrdersService.confirmSalesOrder).
+  function confirmSalesOrderManual(row) {
+    var reason = window.prompt('Reason for confirming ' + (row.soNumber || 'this sales order') + ' manually, outside the ALEMBIC bridge (required — audited):');
+    if (reason === null) return; // cancelled
+    reason = reason.trim();
+    if (!reason) { toast('A reason is required for this break-glass action.', 'bad'); return; }
+    tunnel('/v1/sales-orders/' + row.salesOrderId + '/confirm', { method: 'POST', body: { reason: reason } }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Confirm failed (' + res.status + ')'), 'bad'); return; }
+      toast('Confirmed ✓ (manual continuity, audited)', 'good'); loadView();
+    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+  }
   // Dispatch a confirmed sales order: pick an FG batch that actually has stock (FEFO, avail > 0)
   // and a real quantity. The server re-checks available (produced − reserved − already dispatched)
   // and rejects over-dispatch (409). One line per dispatch here; add more via the Dispatches list.

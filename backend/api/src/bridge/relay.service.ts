@@ -64,6 +64,16 @@ export class BridgeRelayService implements OnModuleDestroy {
             .where(eq(productionRequirement.alembicRequirementId, ev.aggregateId)).limit(1))[0]
         : undefined;
 
+      // G1/PB-08: not every bridge.outbox row is about a production_requirement any more —
+      // emitBridgeManualEvent (bridge-emit.ts) writes rows for other RawProd aggregates (e.g. a
+      // sales order) that have no production_requirement to look an org id up from. Rather than
+      // mislabel every such row as 'production_requirement' (the aggregate.type this envelope
+      // used to hardcode unconditionally), resolve it from the event's own name: this codebase's
+      // event-type convention is PascalCase starting with the aggregate's noun (Production*,
+      // SalesOrder*, …), so a type this relay doesn't recognize as production-requirement-shaped
+      // is reported as the aggregate it actually names instead of a silently wrong guess.
+      const aggregateType = ev.type.startsWith('SalesOrder') ? 'sales_order' : 'production_requirement';
+
       const body = JSON.stringify({
         event_id: ev.id,
         version,
@@ -73,7 +83,7 @@ export class BridgeRelayService implements OnModuleDestroy {
         causation_id: null,
         occurred_at: ev.occurredAt.toISOString(),
         source: 'rawprod',
-        aggregate: { type: 'production_requirement', id: ev.aggregateId },
+        aggregate: { type: aggregateType, id: ev.aggregateId },
         payload: rawPayload,
       });
       try {

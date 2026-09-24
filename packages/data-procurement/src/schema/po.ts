@@ -44,6 +44,10 @@ export const purchaseOrder = procurement.table(
     replacementOfPoId: uuid("replacement_of_po_id").references(
       (): AnyPgColumn => purchaseOrder.purchaseOrderId,
     ),
+    /** G2/V4 §113 — set when `status = 'CANCELLED'` via PoService.cancelPurchaseOrder. Null
+     * otherwise. Kept on the row (in addition to the `procurement.po.cancelled` outbox event)
+     * so the reason is visible directly on the document, not only in the event log. */
+    cancellationReason: text("cancellation_reason"),
     ...metaColumns(),
   },
   (t) => [

@@ -26,6 +26,12 @@ export const OUTBOUND_TO_ALEMBIC = [
   'DispatchReady',
   'Dispatched',
   'ProductionRequirementCancelledAck',
+  // G1/PB-08 — break-glass sales-order continuity actions (OrdersService), emitted via
+  // emitBridgeManualEvent (not tied to a production_requirement) so ALEMBIC can reconcile a
+  // manually-created/confirmed/amended RawProd sales order against its own commercial order.
+  'SalesOrderManualContinuityCreated',
+  'SalesOrderManualContinuityConfirmed',
+  'SalesOrderManualContinuityItemAdded',
 ] as const;
 export type OutboundToAlembic = (typeof OUTBOUND_TO_ALEMBIC)[number];
 

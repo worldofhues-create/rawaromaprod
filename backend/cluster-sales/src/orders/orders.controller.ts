@@ -1,8 +1,13 @@
 /**
  * OrdersController — REST over the sales order document + its child lines. Reads require
- * `sales:<table>:read`, writes `:write`. The flow endpoints: POST /sales-orders creates the
- * header + lines and fires `sales.order.created`; POST /sales-orders/:id/confirm flips status
- * and fires `sales.order.confirmed`. Per-arg ZodValidationPipe; principal from the token.
+ * `sales:<table>:read`. G1/PB-08 (FINAL_OS §2.3/§41): RawProd must not be an independent
+ * commercial-order writer — a sales order should originate from the ALEMBIC bridge, not a
+ * direct manual POST. Until that importer path exists, create/confirm/item-add are a
+ * break-glass CONTINUITY path, gated on `sales:manual_continuity:write` instead of the ordinary
+ * `sales:sales_order(_items):write` (owner/admin only — see scripts/ra-roles.ts
+ * MANUAL_CONTINUITY_ROLES; no factory/sales role holds it). Every call requires a `reason`,
+ * which OrdersService audits (stamped on the row) and reports to ALEMBIC via the bridge
+ * outbox so it can reconcile. Per-arg ZodValidationPipe; principal from the token.
  */
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
 import {
@@ -16,9 +21,11 @@ import {
   createSalesOrder,
   createSalesOrderItem,
   listQuery,
+  manualContinuityReason,
   type CreateSalesOrder,
   type CreateSalesOrderItem,
   type ListQuery,
+  type ManualContinuityReason,
 } from '../sales.dtos.js';
 
 @Controller()
@@ -39,9 +46,9 @@ export class OrdersController {
     return this.orders.getSalesOrder(id);
   }
 
-  /* ── flow: create with items ──────────────────────────────────────── */
+  /* ── flow: create with items (break-glass manual continuity) ───────── */
 
-  @Permissions('sales:sales_order:write')
+  @Permissions('sales:manual_continuity:write')
   @Post('v1/sales-orders')
   createSalesOrder(
     @Body(new ZodValidationPipe(createSalesOrder)) body: CreateSalesOrder,
@@ -50,15 +57,16 @@ export class OrdersController {
     return this.orders.createSalesOrder(body, principal);
   }
 
-  /* ── flow: confirm ────────────────────────────────────────────────── */
+  /* ── flow: confirm (break-glass manual continuity) ──────────────────── */
 
-  @Permissions('sales:sales_order:write')
+  @Permissions('sales:manual_continuity:write')
   @Post('v1/sales-orders/:id/confirm')
   confirmSalesOrder(
     @Param('id') id: string,
+    @Body(new ZodValidationPipe(manualContinuityReason)) body: ManualContinuityReason,
     @CurrentUser() principal: AuthPrincipal,
   ) {
-    return this.orders.confirmSalesOrder(id, principal);
+    return this.orders.confirmSalesOrder(id, body, principal);
   }
 
   /* ── sales order items ────────────────────────────────────────────── */
@@ -75,7 +83,9 @@ export class OrdersController {
     return this.orders.getSalesOrderItem(id);
   }
 
-  @Permissions('sales:sales_order_items:write')
+  // Break-glass manual continuity (see class doc) — item-add on an existing sales order is one
+  // of the three manual write paths G1/PB-08 locks down, same as create/confirm above.
+  @Permissions('sales:manual_continuity:write')
   @Post('v1/sales-order-items')
   createSalesOrderItem(
     @Body(new ZodValidationPipe(createSalesOrderItem)) body: CreateSalesOrderItem,

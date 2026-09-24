@@ -97,3 +97,34 @@ export async function emitBridgeOutbound(
     values (${type}, ${requirement.alembic_requirement_id}, ${payload}::jsonb)
   `);
 }
+
+/**
+ * emitBridgeManualEvent — a second, simpler bridge.outbox writer alongside emitBridgeOutbound
+ * above, for a RawProd-originated event that is NOT keyed to a bridge.production_requirement
+ * (G1/PB-08: a break-glass sales-order continuity action ALEMBIC needs to reconcile against its
+ * own commercial order — sales orders have no requirement row to look up a correlation/version
+ * counter from, unlike production). Unlike emitBridgeOutbound this ALWAYS emits — there is no
+ * requirement-lookup gate to no-op on — because the caller (not this helper) is the one
+ * deciding whether the event should exist at all; this just performs the write, inside the
+ * caller's own transaction, so the bridge row commits atomically with the domain write it
+ * accompanies.
+ *
+ * `aggregateId` here names whatever RawProd-side row the event is about (e.g. a
+ * sales_order_id), not an alembic_requirement_id — so, unlike emitBridgeOutbound's rows,
+ * `relay.service.ts`'s production_requirement org-id lookup will miss for a row emitted here;
+ * that file resolves the outgoing envelope's `aggregate.type` from the event `type`'s prefix
+ * (see its own comment) precisely so this stays correct without this helper needing to know
+ * about org ids or the production-requirement schema at all.
+ */
+export async function emitBridgeManualEvent(
+  tx: BridgeEmitTx,
+  type: string,
+  aggregateId: string,
+  payload: Record<string, unknown>,
+): Promise<void> {
+  const json = JSON.stringify(payload);
+  await tx.execute(sql`
+    insert into bridge.outbox (type, aggregate_id, payload)
+    values (${type}, ${aggregateId}, ${json}::jsonb)
+  `);
+}
