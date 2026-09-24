@@ -5,13 +5,19 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v85';
+const CACHE = 'ra-shell-v89'; // v89: reference shell, UX-D welcome/logo/icons, UX-E Aria panel
 const SHELL = [
   '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
-  '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
+  '/qrcode.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',
+  // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
+  '/rac-preload.js', '/logo/brand.css',
+  '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',
+  '/logo/raw-logo-ondark.png', '/logo/raw-logo-ondark@2x.png', '/logo/raw-logo-ondark@3x.png',
+  '/favicon.ico', '/favicon-16.png', '/favicon-32.png', '/favicon-48.png', '/apple-touch-icon.png',
+  '/icon-192.png', '/icon-512.png', '/icon-maskable-192.png', '/icon-maskable-512.png',
   // ALEMBIC visual contract (ui-contract/) — vendored tokens/fonts/shell CSS. Bumped past the old
   // /fonts/*.woff2 (Urbanist) precache entries, which index.html no longer references.
-  '/ui-contract/alembic-tokens.css', '/ui-contract/shell.css',
+  '/ui-contract/rac-console.css', '/ui-contract/alembic-tokens.css', '/ui-contract/shell.css',
   '/ui-contract/fonts/outfit.css', '/ui-contract/fonts/jetbrains-mono.css',
   '/ui-contract/fonts/outfit-300-latin.woff2', '/ui-contract/fonts/outfit-300-latin-ext.woff2',
   '/ui-contract/fonts/outfit-400-latin.woff2', '/ui-contract/fonts/outfit-400-latin-ext.woff2',
@@ -19,6 +25,7 @@ const SHELL = [
   '/ui-contract/fonts/jetbrains-mono-400-latin.woff2', '/ui-contract/fonts/jetbrains-mono-400-latin-ext.woff2',
   '/ui-contract/fonts/jetbrains-mono-500-latin.woff2', '/ui-contract/fonts/jetbrains-mono-500-latin-ext.woff2',
   '/ui-contract/fonts/jetbrains-mono-600-latin.woff2', '/ui-contract/fonts/jetbrains-mono-600-latin-ext.woff2',
+  '/ui-contract/fonts/cabinet-grotesk-variable.woff2',
 ];
 
 self.addEventListener('install', (e) => {

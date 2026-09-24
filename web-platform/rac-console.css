@@ -1,0 +1,1295 @@
+/* rac-console.css — the reference console design layer, vendored verbatim from
+ * rawprod-lanes/reference/admin/template.txt (owner reference "Raw Aroma Chem Admin.html"):
+ * part 1 is the shared rac-console.css (identical in the Admin and Agent references), part 2
+ * is the Admin page's own shell block. Do not hand-edit — RawProd-specific rules and the
+ * WCAG/touch-floor corrections live in the console stylesheet loaded after this one
+ * (web/ui-contract/shell.css, web-platform/platform.css, web-vault/vault.css), and the ALEMBIC
+ * token file loaded after this one wins on every shared custom property. */
+
+/* rac-console.css — shared design layer for the Agent console + Admin.
+   Convox-derived: Outfit 300/400/500, two greys + lime accent, frosted glass
+   with refraction, one type ramp, one card grid, real chart primitives. */
+
+/* ── Cross-console live toasts (rac-live.jsx) ───────────────────────── */
+.rac-live{position:fixed;right:18px;bottom:18px;z-index:200;display:flex;flex-direction:column;gap:8px;
+  align-items:flex-end;pointer-events:none;max-width:min(360px,calc(100vw - 36px))}
+.rac-live-t{pointer-events:auto;display:flex;gap:10px;align-items:flex-start;padding:12px 14px;border-radius:13px;
+  background:rgba(18,19,17,.96);color:#F2F4EA;box-shadow:0 22px 44px -22px rgba(0,0,0,.8);
+  border:.5px solid rgba(255,255,255,.14);animation:racLiveIn .32s cubic-bezier(.2,.9,.25,1)}
+@keyframes racLiveIn{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:none}}
+.rac-live-t .src{font:500 9px/1 var(--ui,inherit);letter-spacing:.14em;text-transform:uppercase;
+  padding:5px 7px;border-radius:6px;background:rgba(233,242,96,.18);color:#E9F260;flex:0 0 auto}
+.rac-live-t .txt{font:400 12.5px/1.45 var(--ui,inherit);min-width:0}
+.rac-live-t .txt b{font-weight:500}
+.rac-live-t .txt small{display:block;opacity:.6;font:400 11px/1.4 var(--ui,inherit);margin-top:3px}
+
+:root{
+  /* ── Accent, corrected to the console lime (was inheriting storefront amber) ── */
+  --accent:#E9F260;
+  --accent-ink:#5A6410;
+  --accent-soft:rgba(233,242,96,.16);
+  --accent-line:rgba(233,242,96,.55);
+  --accent-glow:rgba(233,242,96,.40);
+
+  /* ── One type ramp. Outfit 300/400/500 only, nothing heavier. ── */
+  --t-hero:38px; --t-fig:28px; --t-fig-sm:23px;
+  --t-h1:21px;   --t-h2:16.5px; --t-h3:14.5px;
+  --t-body:13.5px; --t-cap:11.5px; --t-micro:10px;
+  --w-light:300; --w-reg:400; --w-med:500;
+  --ls-tight:-.02em; --ls-flat:-.005em; --ls-wide:.14em;
+
+  /* ── One spacing + radius scale ── */
+  /* Tight = inside a group (label→value). Loose = between groups.
+     Only these six. Anything else is an accident. */
+  --s-hair:2px; --s-tight:6px; --s-snug:12px; --s-base:20px; --s-loose:32px; --s-open:48px;
+  --r-sm:10px; --r-md:14px; --r-lg:20px; --r-xl:24px; --r-pill:999px;
+  /* Card interior: generous and equal on three sides, deeper at the foot
+     so the figure sits optically centred rather than mathematically. */
+  --pad-card:30px; --pad-card-top:26px; --pad-card-btm:28px;
+  --pad-region:40px;
+
+  /* ── Card grid: fixed row height is what makes sizes consistent ── */
+  --gr-row:300px; --gr-gap:18px;
+
+  /* ── Glass ── */
+  --gl-tint:rgba(255,255,255,.62);
+  --gl-tint-2:rgba(255,255,255,.44);
+  --gl-tint-deep:rgba(255,255,255,.78);
+  --gl-blur:26px;
+  --gl-sat:190%;
+  --gl-rim:rgba(255,255,255,.92);
+  --gl-rim-2:rgba(255,255,255,.34);
+  --surf-2:#F1F1EE;
+  --gl-hair:rgba(20,20,19,.07);
+  --gl-shadow:
+    0 1px 0 var(--gl-rim) inset,
+    0 0 0 .5px var(--gl-hair),
+    0 2px 6px -2px rgba(20,20,19,.06),
+    0 14px 34px -14px rgba(20,20,19,.16),
+    0 40px 90px -50px rgba(20,20,19,.22);
+}
+
+/* ═══════════════ Glass surface with refraction ═══════════════
+   Three stacked layers per pane:
+   1. the pane itself   — translucent tint + backdrop blur/saturate/brighten
+   2. ::before          — refraction: light bending through the sheet
+   3. ::after           — specular rim: a caustic hairline, bright top-left
+   The refraction layer shifts on hover, which is what sells it as glass
+   rather than a flat translucent rectangle.                                */
+
+.glass{
+  position:relative;
+  background:linear-gradient(150deg, var(--gl-tint) 0%, var(--gl-tint-2) 58%, var(--gl-tint) 100%);
+  -webkit-backdrop-filter:blur(var(--gl-blur)) saturate(var(--gl-sat)) brightness(1.05);
+  backdrop-filter:blur(var(--gl-blur)) saturate(var(--gl-sat)) brightness(1.05);
+  border-radius:var(--r-xl);
+  box-shadow:var(--gl-shadow);
+  isolation:isolate;
+  overflow:hidden;
+}
+.glass::before{
+  content:"";position:absolute;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(120% 70% at 8% 2%,  rgba(255,255,255,.52) 0%, rgba(255,255,255,0) 38%),
+    radial-gradient(80% 60% at 97% 100%, rgba(255,255,255,.20) 0%, rgba(255,255,255,0) 44%),
+    linear-gradient(150deg, rgba(233,242,96,.035) 0%, rgba(255,255,255,0) 42%, rgba(160,190,255,.025) 100%);
+  opacity:.85;
+  transition:transform .7s cubic-bezier(.2,.9,.25,1), opacity .5s ease;
+  transform:translate3d(0,0,0) scale(1);
+}
+.glass::after{
+  content:"";position:absolute;inset:0;z-index:2;pointer-events:none;border-radius:inherit;
+  padding:1px;
+  background:linear-gradient(145deg,
+    var(--gl-rim) 0%, rgba(255,255,255,.42) 26%,
+    rgba(255,255,255,.08) 52%, var(--gl-rim-2) 82%, rgba(255,255,255,.62) 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask:linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite:xor; mask-composite:exclude;
+}
+.glass > *{position:relative;z-index:1}
+
+/* refraction responds to pointer — light moves across the sheet */
+.glass.lift{transition:transform .42s cubic-bezier(.2,.9,.25,1), box-shadow .42s ease}
+.glass.lift:hover{
+  transform:translateY(-2px);
+  box-shadow:
+    0 1px 0 var(--gl-rim) inset,
+    0 0 0 .5px var(--gl-hair),
+    0 4px 10px -3px rgba(20,20,19,.08),
+    0 22px 48px -16px rgba(20,20,19,.20),
+    0 60px 120px -60px rgba(20,20,19,.26);
+}
+.glass.lift:hover::before{transform:translate3d(-3%,-2%,0) scale(1.08);opacity:1}
+
+/* deeper variant for floating chrome (dock, panels, tooltips) */
+.glass-deep{
+  background:linear-gradient(150deg, var(--gl-tint-deep) 0%, rgba(255,255,255,.60) 60%, var(--gl-tint-deep) 100%);
+  -webkit-backdrop-filter:blur(34px) saturate(200%) brightness(1.06);
+  backdrop-filter:blur(34px) saturate(200%) brightness(1.06);
+}
+/* dark glass for the rail / overlays on ink */
+.glass-ink{
+  background:linear-gradient(150deg, rgba(38,38,43,.82) 0%, rgba(28,28,32,.72) 60%, rgba(38,38,43,.82) 100%);
+  -webkit-backdrop-filter:blur(30px) saturate(160%);
+  backdrop-filter:blur(30px) saturate(160%);
+  color:#EDEDEA;
+  box-shadow:0 1px 0 rgba(255,255,255,.10) inset, 0 22px 50px -20px rgba(0,0,0,.55);
+}
+.glass-ink::after{
+  background:linear-gradient(145deg, rgba(255,255,255,.26) 0%, rgba(255,255,255,.05) 44%, rgba(255,255,255,.02) 70%, rgba(255,255,255,.16) 100%);
+}
+/* accent-tinted pane — the reference's yellow hero card */
+.glass-accent{
+  background:
+    linear-gradient(155deg, rgba(233,242,96,.22) 0%, rgba(233,242,96,.07) 46%, rgba(255,255,255,.62) 100%);
+}
+.glass-accent::before{
+  background:
+    radial-gradient(110% 65% at 6% 0%, rgba(255,255,255,.58), transparent 42%),
+    radial-gradient(70% 55% at 94% 98%, rgba(233,242,96,.16), transparent 50%);
+  opacity:.9;
+}
+
+/* ═══════════════ Type ramp — apply, don't improvise ═══════════════ */
+.t-hero{font:var(--w-light) var(--t-hero)/1.12 var(--ui);letter-spacing:var(--ls-tight);margin:0}
+.t-fig {font:var(--w-light) var(--t-fig)/1.18 var(--ui);letter-spacing:var(--ls-tight);margin:0;font-variant-numeric:tabular-nums}
+.t-fig-sm{font:var(--w-light) var(--t-fig-sm)/1.08 var(--ui);letter-spacing:var(--ls-tight);margin:0;font-variant-numeric:tabular-nums}
+.t-h1  {font:var(--w-reg) var(--t-h1)/1.18 var(--ui);letter-spacing:var(--ls-tight);margin:0}
+.t-h2  {font:var(--w-med) var(--t-h2)/1.24 var(--ui);letter-spacing:var(--ls-flat);margin:0}
+.t-h3  {font:var(--w-med) var(--t-h3)/1.3 var(--ui);letter-spacing:var(--ls-flat);margin:0}
+.t-body{font:var(--w-reg) var(--t-body)/1.55 var(--ui);letter-spacing:0;margin:0;color:var(--ink-2)}
+.t-cap {font:var(--w-reg) var(--t-cap)/1.35 var(--ui);color:var(--ink-3);margin:0}
+.t-micro{font:var(--w-med) var(--t-micro)/1 var(--ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3);margin:0}
+.t-num {font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+.t-mono{font-family:var(--mono);letter-spacing:.01em}
+
+/* ═══════════════ Uniform card grid ═══════════════
+   Every card sits on the same 150px row. Height comes from span
+   classes only — never from ad-hoc padding, which is what made the
+   sizes inconsistent before.                                        */
+.gwrap{display:grid;grid-template-columns:repeat(12,minmax(0,1fr));grid-auto-rows:minmax(var(--gr-row),auto);gap:var(--gr-gap);align-content:start}
+/* Row rhythm between blocks must equal the column gap inside them. */
+.gwrap + .gwrap{margin-top:var(--gr-gap)}
+/* KPI strip: a figure plus a sparkline needs ~170px, not a full content row.
+   Giving it its own shorter auto-row is what creates hierarchy between the
+   headline numbers and the analysis cards below them. */
+.gwrap.strip{grid-auto-rows:176px}
+.c3{grid-column:span 3} .c4{grid-column:span 4} .c5{grid-column:span 5}
+.c6{grid-column:span 6} .c7{grid-column:span 7} .c8{grid-column:span 8}
+.c9{grid-column:span 9} .c12{grid-column:span 12}
+.r1{grid-row:span 1} .r2{grid-row:span 2} .r3{grid-row:span 3} .r4{grid-row:span 4}
+
+.gcard{
+  display:flex;flex-direction:column;min-width:0;min-height:0;max-width:100%;
+  padding:var(--pad-card-top) var(--pad-card) var(--pad-card-btm);
+}
+/* header sits apart from the body — this gap is what makes a card feel composed */
+.gcard-hd{display:flex;align-items:flex-start;gap:var(--s-snug);margin-bottom:var(--s-base);flex:0 0 auto}
+.gcard-hd .ttl{flex:1;min-width:0}
+.gcard-hd .ttl .t-cap{margin-top:var(--s-tight)}
+.gcard-bd{flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column;justify-content:flex-end;gap:var(--s-snug)}
+/* foot separated by a full step, never a hairline crowd */
+.gcard-ft{flex:0 0 auto;margin-top:var(--s-base);padding-top:var(--s-snug);display:flex;align-items:center;gap:var(--s-snug);border-top:1px solid rgba(20,20,19,.06)}
+
+/* expand affordance, top-right of every card — straight from the reference */
+.xp{
+  width:26px;height:26px;border-radius:9px;flex:0 0 auto;cursor:pointer;border:0;
+  display:grid;place-items:center;color:var(--ink-3);
+  background:rgba(255,255,255,.55);box-shadow:0 0 0 .5px var(--gl-hair);
+  transition:background .2s, color .2s, transform .2s;
+}
+.xp:hover{background:var(--accent);color:var(--accent-ink);transform:scale(1.08)}
+.xp svg{width:12px;height:12px}
+
+/* delta chip: dot + label + signed number, one style everywhere */
+.dchip{display:inline-flex;align-items:center;gap:5px;font:var(--w-reg) var(--t-cap)/1 var(--ui);color:var(--ink-3)}
+.dchip i{width:6px;height:6px;border-radius:50%;background:var(--accent);display:inline-block;flex:0 0 auto}
+.dchip b{font-weight:var(--w-med);color:var(--ink-2)}
+.dchip.up b{color:#48601F} .dchip.dn b{color:#8A5A4C}
+
+/* ═══════════════ Top pill tab bar (centered, reference layout) ═══════════════ */
+.ptabs{display:inline-flex;align-items:center;gap:2px;padding:5px;border-radius:var(--r-pill);position:relative}
+.ptabs .pt{
+  position:relative;z-index:1;border:0;background:transparent;cursor:pointer;
+  padding:0 15px;height:34px;border-radius:var(--r-pill);
+  font:var(--w-reg) var(--t-body)/1 var(--ui);color:var(--ink-2);white-space:nowrap;
+  transition:color .22s ease;
+}
+.ptabs .pt:hover{color:var(--ink)}
+.ptabs .pt.on{color:var(--ink);font-weight:var(--w-med)}
+.ptabs .pill-glide{
+  position:absolute;top:5px;height:34px;border-radius:var(--r-pill);z-index:0;
+  background:linear-gradient(180deg, rgba(255,255,255,.95), rgba(255,255,255,.72));
+  box-shadow:0 1px 0 rgba(255,255,255,.95) inset, 0 0 0 .5px var(--gl-hair), 0 4px 12px -4px rgba(20,20,19,.16);
+  transition:left .42s cubic-bezier(.34,1.36,.44,1), width .42s cubic-bezier(.34,1.36,.44,1);
+}
+
+/* ═══════════════ Quick-access dock (bottom centre, floating) ═══════════════ */
+.qdock{
+  position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:520;
+  display:flex;align-items:center;gap:2px;padding:5px;border-radius:var(--r-pill);width:max-content;overflow:visible;
+  transition:transform .34s cubic-bezier(.3,.9,.25,1), opacity .24s ease;
+}
+/* Auto-retract so the dock never sits over live data (verified collision with
+   full-width tables at rest scroll). Scroll down = out of the way; scroll up,
+   hover near the bottom edge, or ⌘\ = back. */
+body.dock-away .qdock{display:none}
+.dock-peek{display:none}
+/* Summon handle — the dock's only resting footprint, deliberately narrow so it
+   sits clear of table columns. */
+.dock-handle{
+  position:fixed;left:50%;bottom:0;transform:translateX(-50%);z-index:521;
+  width:96px;height:20px;border:0;cursor:pointer;padding:0;
+  border-radius:12px 12px 0 0;background:rgba(20,20,19,.82);
+  display:grid;place-items:center;transition:height .2s ease, background .2s ease;
+}
+.dock-handle:hover{height:26px;background:rgba(20,20,19,.94)}
+.dock-handle i{display:block;width:34px;height:3px;border-radius:2px;background:rgba(244,244,241,.68)}
+body:not(.dock-away) .dock-handle{display:none}
+.qdock .qb{
+  width:40px;height:40px;border-radius:14px;border:0;cursor:pointer;position:relative;
+  display:grid;place-items:center;color:var(--ink-2);background:transparent;
+  transition:background .2s, color .2s, transform .26s cubic-bezier(.34,1.36,.44,1);
+}
+.qdock .qb:hover{background:rgba(255,255,255,.72);color:var(--ink);transform:translateY(-4px) scale(1.06)}
+.qdock .qb.on{background:var(--accent);color:var(--accent-ink)}
+.qdock .qb svg{width:17px;height:17px}
+.qdock .qb .kb{
+  position:absolute;top:-30px;left:50%;transform:translateX(-50%) translateY(4px);
+  padding:5px 9px;border-radius:8px;background:rgba(20,20,19,.92);color:#F4F4F1;
+  font:var(--w-med) var(--t-micro)/1 var(--ui);letter-spacing:.06em;white-space:nowrap;
+  opacity:0;pointer-events:none;transition:opacity .18s ease, transform .18s ease;
+}
+.qdock .qb:hover .kb{opacity:1;transform:translateX(-50%) translateY(0)}
+.qdock .sep{width:1px;height:22px;background:var(--gl-hair);margin:0 4px}
+.qdock .qb .dot{position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:#9A6A5C}
+
+/* ═══════════════ Chart primitives ═══════════════ */
+.chart{overflow:visible;width:100%;display:block;overflow:visible}
+.chart .grid{stroke:rgba(20,20,19,.07);stroke-width:1;stroke-dasharray:2 4}
+.chart .axis{font:var(--w-reg) 9px var(--ui);fill:var(--ink-3)}
+.chart .spark-line{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.chart .spark-accent{stroke:#C8D43A}
+.chart .spark-area{fill:url(#gSpark)}
+.chart .spark-dot{fill:var(--accent);stroke:var(--ink);stroke-width:1.2}
+/* HTML bar series — no SVG stretch, so radius stays true at any width */
+.bseries{display:flex;align-items:flex-end;gap:6px;width:100%;min-width:0}
+.bcol{flex:1 1 0;min-width:0;display:flex;align-items:flex-end;height:100%;position:relative}
+.bcol > span{display:block;width:100%;max-width:22px;margin:0 auto;border-radius:5px;
+  background:rgba(20,20,19,.13);transition:background .2s,transform .2s;transform-origin:bottom}
+.bcol.hi > span{background:var(--accent)}
+.bcol:hover > span{background:rgba(20,20,19,.24)}
+.bcol.hi:hover > span{background:#DCE84C}
+.chart .bar{fill:rgba(20,20,19,.14);transition:fill .2s}
+.chart .bar.hi{fill:var(--accent)}
+.chart g:hover > .bar{fill:rgba(20,20,19,.26)}
+.chart g:hover > .bar.hi{fill:#DCE84C}
+.chart .arc-track{fill:none;stroke:rgba(20,20,19,.09);stroke-linecap:round}
+.chart .arc-val{fill:none;stroke:#D8E445;stroke-linecap:round}
+
+/* ratio slider — two-sided with a centre handle */
+.ratio{position:relative;flex:0 0 8px;height:8px;border-radius:var(--r-pill);background:rgba(20,20,19,.09);overflow:visible}
+.ratio .fill{position:absolute;inset:0 auto 0 0;border-radius:var(--r-pill);background:linear-gradient(90deg,#D9E64A,var(--accent));transition:width .8s cubic-bezier(.2,.9,.25,1)}
+.ratio .knob{
+  position:absolute;top:50%;width:14px;height:26px;border-radius:7px;
+  transform:translate(-50%,-50%);background:var(--accent);
+  box-shadow:0 0 0 3px rgba(255,255,255,.9), 0 4px 12px -3px rgba(20,20,19,.3);
+  transition:left .8s cubic-bezier(.2,.9,.25,1);cursor:grab;
+}
+.ratio .knob:active{cursor:grabbing}
+
+/* stacked sentiment bar */
+.stack{display:flex;height:36px;border-radius:var(--r-md);overflow:hidden;box-shadow:0 0 0 .5px var(--gl-hair)}
+.stack span{display:grid;min-width:0;overflow:hidden;place-items:center;font:var(--w-med) var(--t-micro)/1 var(--ui);letter-spacing:.06em;transition:flex-grow .8s cubic-bezier(.2,.9,.25,1)}
+
+/* ═══════════════ Aria co-pilot ═══════════════ */
+/* Visibility is carried by `display` ALONE. The old rule left opacity:0 and
+   pointer-events:none in the base state and only restored display on .open,
+   so the panel mounted invisible and unclickable. */
+.aria-dock{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(18px + 56px + 12px);
+  width:min(420px,calc(100vw - 32px));
+  z-index:530;
+  border-radius:var(--r-xl);flex-direction:column;max-height:calc(100dvh - 190px);
+  display:none;
+}
+.aria-dock.open{display:flex;opacity:1;pointer-events:auto;transform:translateX(-50%)}
+.aria-hd{display:flex;align-items:center;gap:var(--s-tight);padding:var(--s-base) var(--s-base) var(--s-snug);flex:0 0 auto}
+.aria-orb{
+  width:28px;height:28px;border-radius:50%;flex:0 0 auto;
+  background:conic-gradient(from 0deg, var(--accent), #C8D43A, #EFF7A0, var(--accent));
+  box-shadow:0 0 0 2px rgba(255,255,255,.8), 0 0 16px var(--accent-glow);
+  animation:orbSpin 7s linear infinite;
+}
+@keyframes orbSpin{to{transform:rotate(360deg)}}
+.aria-bd{flex:1;overflow-y:auto;padding:0 var(--s-base) var(--s-snug);display:flex;flex-direction:column;gap:var(--s-tight)}
+.aria-bd::-webkit-scrollbar{width:5px}
+.aria-bd::-webkit-scrollbar-thumb{background:rgba(20,20,19,.16);border-radius:4px}
+.acard{
+  border-radius:var(--r-md);padding:var(--s-snug);
+  background:rgba(255,255,255,.66);box-shadow:0 0 0 .5px var(--gl-hair);
+  transition:box-shadow .22s, transform .22s;
+}
+.acard:hover{box-shadow:0 0 0 1px var(--accent-line), 0 6px 16px -8px rgba(20,20,19,.2);transform:translateY(-1px)}
+.acard.applied{background:var(--accent-soft);box-shadow:0 0 0 1px var(--accent-line)}
+.aria-ft{flex:0 0 auto;padding:var(--s-snug) var(--s-base) var(--s-base);display:flex;gap:var(--s-tight)}
+.aria-in{
+  flex:1;height:36px;border-radius:var(--r-pill);border:0;outline:none;padding:0 var(--s-snug);
+  background:rgba(255,255,255,.8);box-shadow:0 0 0 .5px var(--gl-hair);
+  font:var(--w-reg) var(--t-body)/1 var(--ui);color:var(--ink);
+}
+.aria-in:focus{box-shadow:0 0 0 1.5px var(--accent-line)}
+/* thinking shimmer */
+.think{display:inline-flex;gap:3px;align-items:center}
+.think i{width:5px;height:5px;border-radius:50%;background:var(--ink-3);animation:thinkB 1.1s ease-in-out infinite}
+.think i:nth-child(2){animation-delay:.16s} .think i:nth-child(3){animation-delay:.32s}
+@keyframes thinkB{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+
+/* ═══════════════ Shared controls ═══════════════ */
+.gbtn{
+  height:32px;padding:0 13px;border-radius:var(--r-pill);border:0;cursor:pointer;
+  display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  font:var(--w-med) var(--t-cap)/1 var(--ui);color:var(--ink);
+  background:rgba(255,255,255,.72);box-shadow:0 0 0 .5px var(--gl-hair);
+  transition:transform .18s, box-shadow .2s, background .2s;
+}
+.gbtn:hover{transform:translateY(-1px);background:rgba(255,255,255,.95);box-shadow:0 0 0 .5px var(--gl-hair), 0 6px 14px -6px rgba(20,20,19,.22)}
+.gbtn:active{transform:translateY(0) scale(.98)}
+.gbtn.acc{background:var(--accent);color:var(--accent-ink);box-shadow:0 0 0 .5px rgba(90,100,16,.2), 0 3px 8px -4px rgba(160,175,40,.45)}
+.gbtn.acc:hover{background:#F0F878}
+.gbtn.ink{background:rgba(20,20,19,.9);color:#F4F4F1}
+.gbtn.ink:hover{background:#141413}
+.gbtn svg{width:13px;height:13px}
+.gbtn:focus-visible,.qb:focus-visible,.pt:focus-visible,.xp:focus-visible{outline:2px solid var(--accent-line);outline-offset:2px}
+
+/* skeleton for the loading states */
+.skl{background:linear-gradient(90deg, rgba(20,20,19,.05) 25%, rgba(20,20,19,.10) 37%, rgba(20,20,19,.05) 63%);
+  background-size:400% 100%;animation:sklSlide 1.4s ease infinite;border-radius:8px}
+@keyframes sklSlide{0%{background-position:100% 0}100%{background-position:0 0}}
+
+@media (prefers-reduced-motion: reduce){
+  .glass::before,.glass.lift,.pill-glide,.ratio .fill,.ratio .knob{transition:none}
+  .aria-orb,.think i,.skl{animation:none}
+}
+
+/* card titles truncate rather than push the figure out of frame */
+.gcard-hd .ttl .t-h2{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.gcard-hd .ttl .t-cap{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ── Grouping rules: tight inside a unit, loose between units ── */
+.gcard-bd > * + *{margin-top:0}
+/* A flex-end body pushes overflow off the TOP where it is clipped and
+   invisible to scrollHeight. Never let the first child be the one that
+   loses: lists shrink, headers hold. */
+.gcard-bd > .unit{margin-top:0}
+.gcard-bd > .kpi-hd{flex:0 0 auto}
+.gcard-bd > .shrink{min-height:0;flex:1 1 auto;overflow:hidden}
+.gcard-bd.top{justify-content:flex-start}
+.unit{display:flex;flex-direction:column;gap:var(--s-tight)}
+.row-sb{display:flex;align-items:baseline;justify-content:space-between;gap:var(--s-snug)}
+.row-sb > *{min-width:0}
+.stack-tight{display:flex;flex-direction:column;gap:var(--s-tight)}
+.unit-row{display:flex;align-items:flex-end;gap:var(--s-base)}
+.unit-row > .flex{flex:1;min-width:0}
+.stack-loose{display:flex;flex-direction:column;gap:var(--s-loose)}
+.stack-base{display:flex;flex-direction:column;gap:var(--s-base)}
+
+/* region padding so content never hugs the chrome; the extra bottom runway
+   lets the final row scroll clear of the retracting dock. */
+.content, .main > .content{container-type:inline-size;container-name:region;padding:var(--pad-region) var(--pad-region) 104px !important;}
+
+/* ═══ Collapsible sidebar ═══ */
+.rail{
+  transition:width .46s cubic-bezier(.32,1.02,.34,1), transform .46s cubic-bezier(.32,1.02,.34,1),
+             opacity .3s ease, padding .46s cubic-bezier(.32,1.02,.34,1);
+  will-change:width;
+}
+/* Collapse the grid TRACK — removing the rail as a grid item would promote
+   .main into track 1 and leave track 2 empty. visibility+inert keeps it out
+   of the tab order without taking it out of grid flow. */
+/* glass tokens the legacy .card/.stat shells read */
+:root{
+  --line-soft:rgba(20,20,19,.06);
+  --glass-bg:rgba(255,255,255,.62);
+}
+/* Minimised = the rail folds away and the dock becomes the navigation. */
+body.rail-off .app{grid-template-columns:0 1fr !important}
+body.rail-off .rail{
+  width:0 !important;min-width:0 !important;padding:0 !important;
+  border:0 !important;margin:0 !important;overflow:hidden;
+  visibility:hidden;pointer-events:none;
+}
+/* Dock is the nav in this state, so it is always visible and labelled.
+   Two mechanisms must not fight: with the dock pinned, retract is dead. */
+body.rail-off .qdock{display:flex !important}
+body.rail-off .dock-handle,body.rail-off .dock-peek{display:none !important}
+body.rail-off .qdock .qb span:not(.mega){display:inline !important}
+/* Inbox uses .body > .col, not .content, so it needs its own dock runway. */
+body.rail-off .comp{padding-bottom:62px}
+body.rail-off .col-sc{scroll-padding-bottom:62px}
+body.rail-off .rail .lbl,
+body.rail-off .rail-brand .t,
+body.rail-off .rail-me span:not(.av){display:none !important}
+/* Section headers become a hairline divider — grouping without the label. */
+body.rail-off .rail .rail-sec{
+  display:block !important;font-size:0 !important;line-height:0 !important;
+  padding:0 !important;height:1px !important;box-sizing:border-box;
+  margin:14px auto 14px;width:28px;
+  background:rgba(255,255,255,.14);border-radius:1px;
+}
+body.rail-off .rail > *:first-child + .rail-sec,
+body.rail-off .rail .rail-sec:first-of-type{margin-top:2px}
+body.rail-off .rail-i{justify-content:center;padding:0 !important;width:44px;height:44px;margin:0 auto 4px}
+body.rail-off .rail-brand{justify-content:center;padding:0 0 14px}
+body.rail-off .rail-me{justify-content:center}
+body.rail-off .rail-min{right:auto;left:50%;transform:translateX(-50%)}
+body.rail-off .main{margin-left:0}
+.rail-min{
+  position:absolute;top:16px;right:14px;z-index:6;
+  width:28px;height:28px;border-radius:9px;border:0;cursor:pointer;display:grid;place-items:center;
+  background:rgba(255,255,255,.14);color:#EDEDEA;transition:background .2s, transform .2s;
+}
+.rail-min:hover{background:rgba(255,255,255,.26);transform:scale(1.08)}
+.rail-min svg{width:13px;height:13px}
+/* deeper nav needs its own scroll and tighter section rhythm */
+.rail-deep{flex:1;min-height:0;overflow-y:auto;padding-bottom:var(--s-base)}
+.rail-deep::-webkit-scrollbar{width:4px}
+.rail-deep::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+.rail-sub{
+  display:block;padding:6px 0 6px 34px;font:400 11.5px/1.4 var(--ui);
+  color:rgba(237,237,234,.52);cursor:pointer;border:0;background:transparent;width:100%;text-align:left;
+  transition:color .18s;
+}
+.rail-sub:hover{color:#EDEDEA}
+.rail-sub.on{color:var(--accent)}
+
+/* ═══ Brand lockup ═══ */
+.brandmark{display:inline-flex;align-items:center;gap:10px;min-width:0}
+.brandmark .bm{
+  width:32px;height:32px;border-radius:11px;flex:0 0 auto;display:grid;place-items:center;
+  background:linear-gradient(150deg,#1B1B1A,#3A3A35);color:var(--accent);
+  font:500 11px/1 var(--ui);letter-spacing:.04em;
+  box-shadow:0 0 0 1px rgba(255,255,255,.10) inset, 0 4px 12px -4px rgba(20,20,19,.4);
+}
+.brandmark .bt{font:400 14.5px/1.15 var(--ui);letter-spacing:-.015em;color:var(--ink);white-space:nowrap}
+.brandmark .bt em{font-style:normal;color:#8A9420}
+.brandmark .bt small{display:block;font:400 9.5px/1 var(--ui);letter-spacing:.16em;text-transform:uppercase;color:var(--ink-3);margin-top:4px}
+.brandmark.on-ink .bt{color:#EDEDEA}
+.brandmark.on-ink .bt small{color:rgba(237,237,234,.45)}
+.brandmark.on-ink .bm{background:linear-gradient(150deg,var(--accent),#C3CE3A);color:#2A2E08}
+.qdock .brandmark{padding:0 10px 0 4px;margin-right:2px}
+.qdock .brandmark + .sep{margin-left:0}
+
+/* ═══ Expanded card overlay ═══ */
+/* Visibility is gated on display only — NEVER on a transitioned property.
+   Transitions stall at frame 0 in some embeds, which would pin these panes
+   invisible while still eating clicks. */
+.xp-scrim{
+  position:fixed;inset:0;z-index:600;background:rgba(20,20,19,.34);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  display:none;
+}
+.xp-scrim.open{display:block}
+.xp-sheet{
+  position:fixed;z-index:610;left:50%;top:50%;
+  width:min(920px, calc(100vw - 96px));max-height:calc(100vh - 120px);
+
+  border-radius:var(--r-xl);display:flex;flex-direction:column;
+  padding:var(--s-loose);
+  transform:translate(-50%,-50%);
+  display:none;
+}
+.xp-sheet.open{display:flex}
+.xp-sheet-hd{display:flex;align-items:flex-start;gap:var(--s-snug);margin-bottom:var(--s-loose);flex:0 0 auto}
+.xp-sheet-bd{flex:1;min-height:0;overflow-y:auto}
+.xp-sheet-bd::-webkit-scrollbar{width:5px}
+.xp-sheet-bd::-webkit-scrollbar-thumb{background:rgba(20,20,19,.16);border-radius:4px}
+
+
+
+/* ═══════════════ Page transition ═══════════════
+   Keyframed, and deliberately WITHOUT fill-mode: if a runtime stalls the
+   timeline the element still computes its base (correct) styles. */
+@keyframes pageIn{
+  0%  {transform:translateY(12px) scale(.992)}
+  100%{transform:none}
+}
+/* Route entrance is driven from JS, not CSS keyframes: in embedded
+   runtimes an animation/transition timeline can stall at frame 0 and pin the
+   0% frame forever. Here the RESTING state is correct and the offset is an
+   additive class removed on a timer, so a stall degrades to no motion. */
+.pageview{transform:none;opacity:1}
+.pageview[data-enter="l"]{transform:translateX(-24px) scale(.995)}
+.pageview[data-enter="r"]{transform:translateX(24px)  scale(.995)}
+.pageview[data-settling]{transition:transform .40s cubic-bezier(.22,.9,.28,1)}
+.gwrap > *{transform:none;opacity:1}
+@media (prefers-reduced-motion:reduce){
+  .pageview[data-enter],.pageview[data-settling]{transform:none;transition:none}
+}
+
+
+
+/* orphan-free stat rows — a trailing lone tile is worse than a wider row, so
+   the column count follows the tile count rather than being fixed at 4. */
+.stats{grid-template-columns:repeat(4,1fr)}
+.stats:has(> :nth-child(2)):not(:has(> :nth-child(3))){grid-template-columns:repeat(2,1fr)}
+.stats:has(> :nth-child(3)):not(:has(> :nth-child(4))){grid-template-columns:repeat(3,1fr)}
+.stats:has(> :nth-child(5)):not(:has(> :nth-child(6))){grid-template-columns:repeat(5,1fr)}
+.stats:has(> :nth-child(6)):not(:has(> :nth-child(7))){grid-template-columns:repeat(3,1fr)}
+.stats:has(> :nth-child(7)):not(:has(> :nth-child(8))){grid-template-columns:repeat(4,1fr)}
+.stats:has(> :nth-child(7)):not(:has(> :nth-child(8))) > :nth-child(5){grid-column:span 2}
+
+/* ─── Responsive guards ───────────────────────────────────
+   The consoles were authored desktop-first. These collapse the rail,
+   stack the split panes and let wide tables scroll instead of
+   blowing out the shell. */
+*,*::before,*::after{min-width:0}
+.card,.gcard{overflow-wrap:anywhere}
+
+/* Card tiers key off the REGION width, not the viewport — the main area is
+   236px narrower whenever the rail is open, which a media query can't see. */
+@container region (max-width:1180px){
+  .gwrap [class*="c4"],.gwrap [class*="c5"],.gwrap [class*="c3"]{grid-column:span 6}
+}
+@container region (max-width:900px){
+  /* A 2-up card here is narrower than its own chart needs. Go 1-up and shorten
+     the row: a full-width card does not need 300px of height. */
+  .gwrap{grid-template-columns:minmax(0,1fr);--gr-row:236px;--gr-gap:14px}
+  .gwrap > *{grid-column:1 / -1 !important}
+  .gwrap [class*="r2"],.gwrap [class*="r3"]{grid-row:span 1 !important}
+}
+@container region (max-width:640px){
+  .gwrap{--gr-row:210px}
+}
+@media (max-width:1023px){
+  /* tablet and below → dock-based navigation, no rail, no drawer */
+  .app{grid-template-columns:minmax(0,1fr) !important}
+  .rail{display:none !important}
+  /* Tab bar, not a squeezed desktop pill: flush to the bottom edge, full width,
+     equal segments, glyph over label, safe-area aware. */
+  .qdock{
+    display:flex !important;left:0;right:0;bottom:0;transform:none;max-width:100%;
+    /* the desktop pill sizes to max-content; left/right alone cannot beat that,
+       so the bar overflowed the phone viewport by the width of its labels */
+    width:auto;
+    justify-content:stretch;align-items:stretch;gap:0;overflow:visible;
+    border-radius:0;border-left:0;border-right:0;border-bottom:0;
+    border-top:1px solid var(--gl-hair);
+    background:rgba(247,247,244,.86);
+    -webkit-backdrop-filter:blur(30px) saturate(180%);backdrop-filter:blur(30px) saturate(180%);
+    box-shadow:0 -1px 0 rgba(255,255,255,.7) inset;
+    padding:7px 6px calc(7px + env(safe-area-inset-bottom,0px));
+  }
+  .qdock::-webkit-scrollbar{display:none}
+  .qdock .qb{
+    flex:1 1 0;min-width:0;width:auto;height:auto;padding:5px 2px;border-radius:12px;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;
+    min-height:48px;background:transparent;color:var(--ink-3);transition:color .18s,background .18s;
+  }
+  .qdock .qb:hover,.qdock .qb:active{transform:none;background:transparent}
+  .qdock .qb.on{background:transparent;color:var(--ink)}
+  .qdock .qb.on > svg{color:#8E9B1F}
+  .qdock .qb > svg{width:23px;height:23px;flex:0 0 23px}
+  /* label sits under the glyph like a real tab bar, not a floating tooltip */
+  .qdock .qb .kb{
+    position:static !important;display:block !important;opacity:1 !important;
+    transform:none !important;box-shadow:none !important;background:none !important;
+    border:0 !important;padding:0 !important;color:inherit !important;
+    font:500 10.5px/1.1 var(--ui) !important;letter-spacing:.01em;
+    max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;pointer-events:none;
+  }
+  .qdock .qb .dot{top:3px;right:calc(50% - 16px)}
+  .qdock .dk-navtoggle,.qdock .sep,.qdock .brandmark{display:none !important}
+  body.rail-off .app{grid-template-columns:0 1fr !important}
+  body.rail-off .rail{width:0 !important;min-width:0 !important;padding:0 !important;overflow:hidden;visibility:hidden;pointer-events:none}
+  .dock-handle,.dock-peek{display:none !important}
+  body.dock-away .qdock{display:flex !important}
+  .content{padding:var(--s-loose) var(--s-base) calc(86px + env(safe-area-inset-bottom,0px))}
+  .gwrap{grid-template-columns:repeat(6,minmax(0,1fr))}
+  .gwrap > *{grid-column:span 6 !important}
+  .gwrap{grid-auto-rows:auto !important}
+  .gcard{min-height:232px}
+  .stats{grid-template-columns:repeat(2,minmax(0,1fr)) !important}
+  .split,.two-col{grid-template-columns:minmax(0,1fr) !important}
+  .col-sc{max-height:none}
+  /* wide tables scroll */
+  .tscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tscroll > *{min-width:760px}
+}
+@media (max-width:767px){
+  .content{padding:20px 16px 96px !important}
+  .gcard{padding:20px 20px 18px}
+  .stats{grid-template-columns:minmax(0,1fr) !important}
+  .topbar{flex-wrap:wrap;row-gap:8px}
+  .team-strip{display:none}
+}
+
+/* dock glyphs: one size, regardless of source viewBox */
+.qdock button > svg,.qdock button > span > svg{width:18px;height:18px;flex:0 0 18px;display:block}
+.qdock .qd-brand svg{width:18px;height:18px}
+
+/* ═══ Expanded analyst view ═══ */
+.dtl{display:flex;flex-direction:column;gap:var(--s-base)}
+.dtl-top{display:flex;align-items:flex-start;justify-content:space-between;gap:var(--s-base);flex-wrap:wrap}
+.dtl-delta{display:flex;gap:26px;flex-wrap:wrap}
+.dtl-chart{padding:2px 0}
+.dtl-tabs{display:flex;gap:3px;padding:4px;border-radius:var(--r-pill);background:rgba(20,20,19,.045);
+  align-self:flex-start;max-width:100%;overflow-x:auto;scrollbar-width:none}
+.dtl-tabs::-webkit-scrollbar{display:none}
+.dtl-tab{border:0;cursor:pointer;background:transparent;padding:8px 15px;border-radius:var(--r-pill);
+  font:400 12.5px/1 var(--ui);color:var(--ink-3);white-space:nowrap;transition:background .18s,color .18s}
+.dtl-tab:hover{color:var(--ink)}
+.dtl-tab.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 3px rgba(20,20,19,.07)}
+.dtl-pane{display:flex;flex-direction:column;gap:var(--s-base);min-height:150px}
+.dtl-acts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:10px}
+.dtl-act{display:flex;flex-direction:column;align-items:flex-start;gap:4px;text-align:left;
+  padding:14px 16px;border-radius:14px;cursor:pointer;
+  background:var(--panel);border:1px solid var(--line);transition:border-color .18s,transform .18s,background .18s}
+.dtl-act:hover{border-color:var(--accent);transform:translateY(-2px)}
+.dtl-act.done{background:rgba(126,140,19,.07);border-color:rgba(126,140,19,.3);cursor:default;transform:none}
+.dtl-act.inline{flex-direction:row;align-items:center;margin-top:12px;padding:10px 16px;
+  background:var(--ink);border-color:var(--ink);color:var(--panel);font:400 12.5px/1 var(--ui)}
+.dtl-act.inline:hover{transform:translateY(-1px)}
+.dtl-fcrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,120px),1fr));gap:14px}
+.dtl-fc{padding:16px 18px;border-radius:14px;background:rgba(20,20,19,.035);display:flex;flex-direction:column;gap:5px}
+.dtl-note{padding:13px 16px;border-radius:12px;background:rgba(20,20,19,.04);
+  font:400 13px/1.6 var(--ui);color:var(--ink-2)}
+.dtl-note.warn{background:rgba(154,106,92,.09);color:#7A5044}
+.dtl-tbl{width:100%;border-collapse:collapse;font:400 13px/1.5 var(--ui)}
+.dtl-tbl th{font:500 10px/1 var(--ui);letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3);
+  padding:0 14px 10px;border-bottom:1px solid var(--line)}
+.dtl-tbl td{padding:12px 14px;border-bottom:1px solid var(--line-soft,rgba(20,20,19,.05));color:var(--ink-2)}
+.dtl-tbl tbody tr:last-child td{border-bottom:0}
+.dtl-chk{display:flex;gap:12px;align-items:flex-start;padding:13px 16px;border-radius:12px;background:rgba(20,20,19,.035)}
+.dtl-chk-i{width:20px;height:20px;flex:0 0 20px;border-radius:50%;display:grid;place-items:center;
+  font:600 11px/1 var(--ui);color:#F4F4F1;background:var(--ink-3)}
+.dtl-chk.ok .dtl-chk-i{background:#7E8C13}
+.dtl-chk.warn .dtl-chk-i{background:#9A6A5C}
+.dtl-chk.bad .dtl-chk-i{background:#8C3A2A}
+.dtl-ai{padding:18px 20px;border-radius:16px;background:rgba(20,20,19,.035);border:1px solid var(--line)}
+.dtl-ai-hd{display:flex;align-items:center;justify-content:space-between;gap:12px}
+@media (max-width:640px){
+  .dtl-top{flex-direction:column}
+  .dtl-delta{gap:18px}
+}
+
+/* Aria empty state — a section with no open findings still offers a way in */
+.aria-empty{padding:var(--s-base) 2px}
+.aria-empty p{margin:0 0 var(--s-base);font:400 13.5px/1.6 var(--ui);color:var(--ink-2)}
+.aria-empty .lbl{display:block;margin-bottom:var(--s-snug);font:500 10px/1 var(--ui);letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3)}
+.aria-empty .prompts{display:flex;flex-direction:column;gap:6px}
+.aria-empty .prompts button{
+  text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;
+  background:var(--surf-2);border:1px solid var(--gl-hair);
+  font:400 13px/1.4 var(--ui);color:var(--ink);transition:background .18s,border-color .18s;
+}
+.aria-empty .prompts button:hover{background:#fff;border-color:var(--line-2)}
+
+/* Spark terminal mark lives in HTML, not the stretched viewBox — a <circle>
+   inside preserveAspectRatio="none" shears into an ellipse and half of it
+   falls outside the box, which .gcard-bd{overflow:hidden} then clips. */
+.spark-wrap{position:relative;width:100%}
+.spark-wrap .chart{display:block;width:100%}
+.spark-dot-el{
+  position:absolute;right:2px;width:7px;height:7px;border-radius:50%;
+  transform:translateY(-50%);
+  background:var(--ink);box-shadow:0 0 0 2px var(--gl-tint,rgba(255,255,255,.62));
+  pointer-events:none;
+}
+.spark-dot-el.accent{background:var(--accent)}
+
+/* ═══════════════ Agent intelligence ═══════════════ */
+.rs-bar{display:flex;align-items:center;gap:10px;padding:8px 10px;margin-top:8px;
+  border-radius:12px;border:1px solid var(--line);background:var(--panel-2);min-width:0}
+.rs-bar.idle{background:transparent;border-style:dashed}
+.rs-bar.ok{border-color:rgba(124,138,62,.4);background:rgba(124,138,62,.07)}
+.rs-bar.warn{border-color:rgba(184,160,32,.4);background:rgba(184,160,32,.07)}
+.rs-bar.bad{border-color:rgba(154,106,92,.4);background:rgba(154,106,92,.07)}
+.rs-dot{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+.rs-t{font:400 11px/1.4 var(--ui);color:var(--ink-3);min-width:0}
+.rs-num{font:300 22px/1 var(--ui);letter-spacing:-.02em;flex:0 0 auto;font-variant-numeric:tabular-nums}
+.rs-mid{display:flex;flex-direction:column;gap:5px;min-width:96px;flex:0 0 auto}
+.rs-v{font:500 10.5px/1 var(--ui)}
+.rs-track{height:3px;border-radius:3px;background:rgba(20,20,19,.1);overflow:hidden}
+.rs-track i{display:block;height:100%;background:var(--ink);border-radius:3px}
+.rs-bar.ok .rs-track i{background:var(--green)}
+.rs-bar.warn .rs-track i{background:var(--amber)}
+.rs-bar.bad .rs-track i{background:var(--red)}
+.rs-chk{display:flex;flex-wrap:wrap;gap:4px;flex:1;min-width:0}
+.rs-p{font:500 10.5px/1 var(--ui);letter-spacing:.02em;padding:4px 7px;border-radius:5px;
+  background:rgba(20,20,19,.05);color:var(--ink-3);white-space:nowrap;cursor:help}
+.rs-p.on{background:rgba(124,138,62,.14);color:#5A6410}
+.rs-live{margin-left:auto;font:500 10px/1 var(--ui);color:var(--green);letter-spacing:.04em}
+.stk{display:flex;align-items:center;gap:8px;padding:7px 0;border-top:1px solid var(--line);min-width:0}
+.stk:first-of-type{border-top:0}
+.stk-n{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.stk-n{font:500 11.5px/1.25 var(--ui)}
+.stk-n i{font-style:normal;font-size:9.5px;color:var(--ink-3)}
+.stk-q{display:flex;flex-direction:column;gap:3px;text-align:right;flex:0 0 auto}
+.stk-q b{font:500 12px/1 var(--ui);font-variant-numeric:tabular-nums}
+.stk-q b.low{color:var(--red)}
+.stk-q i{font-style:normal;font:400 9.5px/1 var(--ui);color:var(--ink-3)}
+
+/* ═══ Rail mega-menu: a 76px icon column that still exposes the tree ═══ */
+.rail-i{position:relative}
+.mega{
+  position:absolute;left:calc(100% + 12px);top:-6px;z-index:640;
+  display:none;flex-direction:column;gap:6px;
+  min-width:206px;max-width:250px;padding:12px 14px;
+  border-radius:16px;text-align:left;
+  background:rgba(38,38,43,.97);
+  -webkit-backdrop-filter:blur(22px) saturate(170%);backdrop-filter:blur(22px) saturate(170%);
+  box-shadow:0 22px 54px -18px rgba(0,0,0,.55), 0 0 0 .5px rgba(255,255,255,.09) inset;
+}
+.mega::before{
+  content:"";position:absolute;left:-6px;top:18px;width:10px;height:10px;
+  background:rgba(38,38,43,.97);transform:rotate(45deg);border-radius:2px;
+}
+/* Collapsed rail only — expanded labels make the flyout redundant. */
+body.rail-off .rail-i:hover .mega,
+body.rail-off .rail-i:focus .mega,
+body.rail-off .rail-i.mega-open .mega{display:flex}
+.mega-t{font:500 12.5px/1.25 var(--ui);color:#F2F2EF}
+.mega-n{font:400 11px/1.45 var(--ui);color:rgba(242,242,239,.62)}
+.mega-p{display:flex;flex-wrap:wrap;gap:5px;margin-top:3px}
+.mega-p i{
+  font-style:normal;font:500 9.5px/1 var(--ui);letter-spacing:.03em;
+  padding:4px 7px;border-radius:5px;white-space:nowrap;
+  background:rgba(255,255,255,.09);color:rgba(242,242,239,.8);
+}
+
+/* ═══ Formulation assist ═══ */
+.fa-hd{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+.fa-m{font:500 12.5px/1.2 var(--ui)}
+.fa-f{font:400 10px/1 var(--ui);color:var(--ink-3);margin-left:auto;white-space:nowrap}
+.fa-row{display:flex;align-items:center;gap:9px;padding:6px 0;min-width:0}
+.fa-row > span{font:400 10.5px/1 var(--ui);color:var(--ink-3);width:48px;flex:0 0 auto}
+.fa-row > b{font:500 12px/1 var(--ui);font-variant-numeric:tabular-nums;width:42px;text-align:right;flex:0 0 auto}
+.fa-row > b.ok{color:var(--green)} .fa-row > b.warn{color:var(--amber)} .fa-row > b.bad{color:var(--red)}
+.fa-row input[type=range]{flex:1;min-width:0;accent-color:var(--ink);height:3px}
+.fa-row select{flex:1;min-width:0;padding:5px 7px;border-radius:7px;border:1px solid var(--line);
+  background:var(--panel);font:400 11.5px/1 var(--ui);color:var(--ink)}
+.fa-v{font:400 10.5px/1.4 var(--ui);margin:5px 0 9px}
+.fa-v.ok{color:var(--green)} .fa-v.warn{color:var(--amber)} .fa-v.bad{color:var(--red)}
+.fa-pyr{display:flex;flex-direction:column;gap:6px;padding:9px 0;border-top:1px solid var(--line)}
+.fa-pyr > div{display:flex;flex-wrap:wrap;gap:4px;align-items:center;min-width:0}
+.fa-pyr i{font-style:normal;font:500 10px/1 var(--ui);letter-spacing:.12em;color:var(--ink-3);width:38px;flex:0 0 auto}
+.fa-pyr span{font:400 10.5px/1 var(--ui);padding:4px 6px;border-radius:5px;
+  background:rgba(20,20,19,.05);color:var(--ink-2);white-space:nowrap}
+.fa-note{font:400 10.5px/1.5 var(--ui);color:var(--ink-3);margin:0;padding-top:8px;border-top:1px dashed var(--line)}
+.rs-tip{font:400 10px/1.35 var(--ui);color:var(--ink-3);max-width:150px;flex:0 0 auto}
+
+/* Agent inbox panes: reflow on their own width, not the viewport. */
+.col-sc{container-type:inline-size;container-name:pane}
+@container pane (max-width:280px){
+  .stk{flex-wrap:wrap;row-gap:4px}
+  .stk-q{text-align:left}
+  .fa-row > span{width:auto}
+}
+
+/* ═══ Console breakpoint tiers ═══
+   The manual-orders row carries 464px of fixed track. Shed columns rather
+   than crush the name column. */
+:root{--row-mo:minmax(0,1.6fr) 88px minmax(0,1fr) 76px 88px 92px 120px}
+
+@container region (max-width:1120px){
+  .pageview,.col,.body{--row-mo:minmax(0,1.6fr) 88px minmax(0,1fr) 88px 120px}
+}
+@container region (max-width:880px){
+  .pageview,.col,.body{--row-mo:minmax(0,1.6fr) 96px 120px}
+}
+@container region (max-width:620px){
+  .pageview,.col,.body{--row-mo:minmax(0,1fr) auto}
+}
+
+/* Wide · 1920×1080 — fill the region, cap the measure, open the air. */
+@container region (min-width:1480px){
+  body .gwrap{--gr-gap:22px}
+  body .pageview{padding-top:4px}
+}
+@container region (min-width:1760px){
+  body .gwrap{--gr-row:330px}
+}
+
+/* Tablet — the rail is gone by here; give the panes room. */
+@container region (max-width:1024px){
+  body .kv{grid-template-columns:minmax(0,1fr)}
+  body .kv dt{margin-top:8px}
+  body .card-hd{flex-wrap:wrap;row-gap:6px}
+}
+
+/* Phone · 6.2in — tables scroll, headers stack, figures come down. */
+@container region (max-width:560px){
+  body .gwrap{--gr-gap:12px}
+  body .gcard{padding:16px 16px 14px;border-radius:18px}
+  body .card > table{min-width:640px}
+  body .t-num{font-size:26px}
+  body .subnav,body .tabs{overflow-x:auto;scrollbar-width:none}
+  .subnav::-webkit-scrollbar,.tabs::-webkit-scrollbar{display:none}
+}
+
+/* Region padding must stay viewport-keyed: .content IS the container, and a
+   container query cannot restyle its own container. */
+@media (min-width:1600px){
+  :root{--gr-gap:22px}
+  .content{padding:44px 44px 108px}
+}
+.mo-hd{display:flex;align-items:flex-start;gap:12px;padding:20px 22px 14px;border-bottom:1px solid var(--line)}
+.mo-bd{flex:1;min-height:0;overflow-y:auto;padding:16px 22px 20px}
+.mo-ft{display:flex;gap:8px;align-items:center;padding:14px 22px;border-top:1px solid var(--line);flex-wrap:wrap;row-gap:8px}
+
+.mo-steps{list-style:none;margin:8px 0 0;padding:0;display:flex;flex-direction:column;gap:0}
+.mo-steps li{display:flex;align-items:center;gap:10px;font:400 12px/1 var(--ui);color:var(--ink-3);padding:7px 0;position:relative}
+.mo-steps li span{width:9px;height:9px;border-radius:50%;background:var(--line-2);flex:0 0 auto}
+.mo-steps li.done{color:var(--ink)}
+.mo-steps li.done span{background:var(--green)}
+.mo-steps li:not(:last-child)::after{
+  content:"";position:absolute;left:4px;top:22px;width:1px;height:calc(100% - 15px);background:var(--line);
+}
+
+.mo-line{display:flex;align-items:baseline;gap:10px;padding:9px 0;border-top:1px solid var(--line);min-width:0}
+.mo-line:first-of-type{border-top:0}
+.mo-line .n{flex:1;min-width:0;font:400 12.5px/1.35 var(--ui);display:flex;flex-direction:column;gap:3px}
+.mo-line .n i{font-style:normal;font-size:10.5px;color:var(--ink-3)}
+.mo-line .q{font:400 11.5px/1 var(--ui);color:var(--ink-3);flex:0 0 auto}
+.mo-line .v{font-size:12.5px;flex:0 0 auto}
+.mo-tot{margin-top:14px;padding-top:12px;border-top:1px solid var(--line);display:flex;flex-direction:column;gap:7px}
+.mo-tot > div{display:flex;align-items:baseline;gap:10px;font:400 12px/1 var(--ui);color:var(--ink-3)}
+.mo-tot > div b{margin-left:auto;color:var(--ink);font-size:12.5px}
+.mo-tot .grand{padding-top:9px;border-top:1px solid var(--line);color:var(--ink)}
+.mo-tot .grand b{font-size:16px}
+
+.card-ft{display:flex;align-items:center;gap:10px;padding:12px 20px;border-top:1px solid var(--line)}
+.tab em{font-style:normal;margin-left:6px;opacity:.62;font-size:.86em}
+
+@media (max-width:430px){
+  .mo-panel{width:100vw}
+  .mo-table{min-width:560px}
+  .aria-dock{width:calc(100vw - 20px);max-height:calc(100dvh - 150px)}
+}
+
+/* ═══ Aria as a rail (inbox only) ═══
+   Centred above the dock, the 596px panel lands on the composer — and the
+   band between composer (ends 868) and dock (starts 876) is 8px, so height
+   alone cannot resolve it. In the one view with a composer, Aria sits beside
+   the work as a full-height rail instead of over it. */
+body.aria-rail{--aria-w:420px}
+body.aria-rail .aria-dock{
+  left:auto;right:0;top:0;bottom:0;
+  transform:none;
+  width:min(var(--aria-w,420px),100vw);
+  max-height:none;
+  border-radius:var(--r-xl) 0 0 var(--r-xl);
+}
+body.aria-rail .aria-dock.open{transform:none}
+/* Reserve the rail's width on the whole region — bar included, or the top-bar
+   controls (Filters, the Ask Aria trigger itself) stay covered — and drop the
+   context column from the grid so the remaining tracks actually recompute. */
+body.aria-rail .main{padding-right:var(--aria-w,420px)}
+body.aria-rail .body{grid-template-columns:minmax(0,330px) minmax(0,1fr)}
+body.aria-rail .body > .col:last-child{display:none}
+
+@media (max-width:834px){
+  body.aria-rail{--aria-w:360px}
+  body.aria-rail .body{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:430px){
+  /* Full-bleed rail: reserving space would leave nothing to work in. */
+  body.aria-rail{--aria-w:0px}
+  body.aria-rail .aria-dock{width:100vw;border-radius:0}
+}
+
+/* Tables fill their card; shrink-to-fit leaves dead space at the right. */
+.card-bd > table{width:100%}
+.mo-table th:last-child,.mo-table td:last-child{text-align:right;white-space:nowrap}
+.mo-table td:first-child,.mo-table th:first-child{white-space:nowrap}
+
+/* ═══ Brand credit — bookends the rail opposite the lockup ═══ */
+.rail-cred{
+  margin-top:auto;padding:14px 12px 10px;
+  display:flex;flex-direction:column;gap:4px;
+  border-top:1px solid rgba(255,255,255,.09);
+}
+.rail-cred .w{
+  font:500 10.5px/1 var(--ui);letter-spacing:.16em;color:rgba(242,242,239,.72);
+}
+.rail-cred .w i{font-style:normal;color:var(--accent)}
+.rail-cred .s{font:400 9.5px/1.3 var(--ui);color:rgba(242,242,239,.40);letter-spacing:.04em}
+body.rail-off .rail-cred{display:none}
+
+/* Top-bar brand: states the platform once, then yields to the page title. */
+.bar-brand{
+  display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;
+  font:500 10.5px/1 var(--ui);letter-spacing:.14em;text-transform:uppercase;
+  color:var(--ink-3);padding-right:14px;margin-right:2px;
+  border-right:1px solid var(--line);white-space:nowrap;
+}
+.bar-brand i{font-style:normal;color:var(--accent-ink,var(--ink-3));opacity:.6}
+@media (max-width:834px){ .bar-brand{display:none} }
+
+/* ═══ Queue: selection, bulk actions, row actions ═══ */
+.ck{
+  appearance:none;width:15px;height:15px;flex:0 0 auto;cursor:pointer;
+  border:1.5px solid var(--line-2);border-radius:4px;background:var(--card);
+  display:grid;place-items:center;transition:background .15s,border-color .15s;
+}
+.ck:checked{background:var(--rail);border-color:var(--rail)}
+.ck:checked::after{content:"";width:7px;height:4px;border-left:1.5px solid var(--accent);
+  border-bottom:1.5px solid var(--accent);transform:rotate(-45deg) translateY(-1px)}
+.ck:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.bulkbar{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;row-gap:8px;
+  padding:11px 18px;background:var(--rail);color:#F2F2EF;
+  border-top:1px solid rgba(255,255,255,.09);
+}
+.bulkbar .n{font:500 11.5px/1 var(--ui);letter-spacing:.04em;white-space:nowrap}
+.bulkbar .btn{background:rgba(255,255,255,.10);border-color:rgba(255,255,255,.16);color:#F2F2EF}
+.bulkbar .btn:hover{background:rgba(255,255,255,.18)}
+.bulkbar .btn.p{background:var(--accent);border-color:var(--accent);color:#2A2A22}
+
+.rowacts{display:flex;align-items:center;gap:6px;flex:0 0 auto}
+.rowacts .btn:not(.p){opacity:0;transition:opacity .15s}
+.q-row:hover .rowacts .btn,.rowacts:focus-within .btn{opacity:1}
+
+.sel{
+  height:29px;padding:0 26px 0 10px;border-radius:8px;flex:0 0 auto;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);
+  font:400 11.5px/1 var(--ui);cursor:pointer;
+  appearance:none;
+  background-image:linear-gradient(45deg,transparent 50%,var(--ink-3) 50%),linear-gradient(135deg,var(--ink-3) 50%,transparent 50%);
+  background-position:calc(100% - 14px) 13px,calc(100% - 9px) 13px;
+  background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+}
+.sel:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+@media (max-width:834px){ .rowacts .btn:not(.p){display:none} }
+
+/* Inline search field for card headers. */
+.srch{
+  height:29px;min-width:0;flex:0 1 240px;padding:0 11px;border-radius:8px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);
+  font:400 11.5px/1 var(--ui);outline:none;
+}
+.srch::placeholder{color:var(--ink-3)}
+.srch:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.card-hd{flex-wrap:wrap;row-gap:8px}
+.mo-table td:nth-child(2),.mo-table th:nth-child(2){white-space:nowrap}
+@media (max-width:834px){ .srch{flex:1 1 100%;order:9} }
+
+/* Rail lockup: wordmark over descriptor, optically centred on the tile. */
+.brandmark .bt{display:flex;flex-direction:column;gap:3px;min-width:0;font:500 13px/1 var(--ui);letter-spacing:.01em}
+.brandmark .bt small{font:400 9px/1 var(--ui);letter-spacing:.10em;text-transform:uppercase;color:#8B8B84;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.brandmark .bm{width:30px;height:30px;border-radius:10px;font-size:10px}
+
+/* Analytics control bar — period, segment, export. */
+.an-bar{
+  display:flex;align-items:center;gap:7px;flex-wrap:wrap;row-gap:8px;
+  padding:12px 16px;margin-bottom:var(--gr-gap);
+  border-radius:var(--r-lg,18px);border:1px solid var(--line);background:var(--panel);
+}
+@media (max-width:834px){ .an-bar{padding:10px 12px} }
+
+/* Rail icons are sized by the rail, not by whichever map they came from.
+   CIcon glyphs carry no .ic class, so without this an svg fills its flex box. */
+.rail-i > svg,.rail-brand > svg,.rail-min > svg,.rs > svg{width:14px;height:14px;flex:0 0 auto}
+.rail-brand .m > svg{width:13px;height:13px}
+
+/* ═══ Nav flyout lives on the dock ═══
+   The rail folds away entirely when minimised (grid 0 1fr + visibility:hidden),
+   so a rail-hovered flyout is unreachable by construction — the two conditions
+   were mutually exclusive. The dock IS the navigation in that state. */
+.rail .mega{display:none !important}
+.qdock .qb{position:relative}
+.qdock .qb > .mega{
+  left:50%;right:auto;top:auto;bottom:calc(100% + 12px);
+  transform:translateX(-50%);
+  max-width:min(260px,calc(100vw - 32px));
+}
+.qdock .qb:hover > .mega,
+.qdock .qb:focus-visible > .mega{display:flex !important}
+.qdock .qb > .mega::before{left:50%;right:auto;top:auto;bottom:-5px;margin-left:-5px}
+.mega-t em{font-style:normal;margin-left:8px;opacity:.5;font-size:.86em}
+/* Edge buttons: keep the flyout inside the viewport. */
+.qdock .qb:first-of-type > .mega{left:0;transform:none}
+.qdock .qb:first-of-type > .mega::before{left:22px;margin-left:0}
+.qdock .qb:last-of-type > .mega{left:auto;right:0;transform:none}
+.qdock .qb:last-of-type > .mega::before{left:auto;right:22px;margin-left:0}
+.qdock .qb > .mega{flex-direction:column;gap:6px;text-align:left}
+.mega-t,.mega-n,.mega-p{display:block}
+.qdock .qb > .mega{display:flex !important;visibility:hidden;opacity:0;pointer-events:none}
+@media (max-width:1023px){ .qdock .qb > .mega{visibility:hidden !important;opacity:0 !important} }
+.qdock .qb:hover > .mega,
+.qdock .qb:focus-visible > .mega{visibility:visible;opacity:1;pointer-events:auto}
+
+/* ═══ Toast — every action says what it did ═══ */
+.toast{position:fixed;left:50%;bottom:88px;transform:translateX(-50%);z-index:900;
+  display:flex;align-items:center;gap:9px;max-width:min(520px,calc(100vw - 32px));
+  padding:11px 17px;border-radius:999px;background:#141413;color:#F4F4F1;
+  font:400 12.5px/1.35 var(--ui);box-shadow:0 18px 44px -14px rgba(0,0,0,.5)}
+.toast .d{width:6px;height:6px;border-radius:50%;background:var(--accent);flex:0 0 6px}
+@media (max-width:1023px){.toast{bottom:calc(74px + env(safe-area-inset-bottom,0px))}}
+
+/* ── very narrow consoles · 240–359px ─────────────────────
+   An operations console at 300px is a compromise either way; the choice here
+   is legible single-column cards with scrollable tables over a squeezed grid. */
+@media (max-width:359px){
+  .content{padding:14px 10px 94px !important}
+  .gcard{padding:15px 15px 13px}
+  .gwrap{grid-template-columns:minmax(0,1fr) !important;--gr-gap:10px}
+  .gcard[class*="c"]{grid-column:auto !important}
+  .card-hd h2{font-size:14px}
+  .card-hd .n{display:none}
+  .qdock{left:8px;right:8px;padding:6px}
+  .qdock .qb .lbl{display:none}
+  .tscroll > *{min-width:560px}
+  table{font-size:11.5px}
+  .btn.sm{padding:0 7px;font-size:11px}
+  .topbar{padding:8px 10px;gap:6px}
+}
+@media (max-width:280px){
+  .content{padding:12px 8px 92px !important}
+  .gcard{padding:12px 12px 11px}
+}
+/* nothing may escape the frame */
+html,body{overflow-x:hidden}
+.app,.body,.content,.pageview{max-width:100%}
+img,svg,video,canvas{max-width:100%}
+
+/* Knowledge base: index + reader side by side, stacked once the reader would
+   be narrower than the macro it has to display. */
+@media (max-width:1100px){ .kb-split{grid-template-columns:minmax(0,1fr) !important} .kb-split > .card:last-child{position:static !important} }
+
+/* Admin two-column pages stack once the narrow column would starve. */
+@media (max-width:1100px){ .ship-split,.set-grid{grid-template-columns:minmax(0,1fr) !important} }
+
+/* ── part 2: reference Admin shell ── */
+:root{
+  --bg:#EDEDEB; --panel:#FFFFFF; --panel-2:#F6F6F4; --panel-3:#ECECE9;
+  --line:#E6E6E3; --line-2:#D6D6D2;
+  --ink:#141413; --ink-2:#5C5C56; --ink-3:#66665E;
+  --rail:#26262B; --rail-2:#33333A;
+  --accent:#E9F260; --blue:#5A5A66; --green:#5F6B2E; --amber:#6E5F0F; --red:#8A5A4C; --purple:#7A7A88;
+  --ui:'Outfit','Helvetica Neue',ui-sans-serif,system-ui,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --card:var(--panel-2); --accent-soft:rgba(233,242,96,.16); --accent-line:rgba(233,242,96,.55);
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--ui);-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:0;background:transparent;color:inherit}
+input,select,textarea{font-family:inherit;color:inherit}
+*:focus-visible{outline:2px solid var(--blue);outline-offset:1px}
+
+.stage{position:relative;width:100%;height:100dvh;display:block;overflow:hidden;background:#E8E8E4;padding:0;max-width:100%}
+
+/* ── Responsive shell. Wide tables scroll inside their card rather than
+   forcing the whole page sideways. ── */
+.card{min-width:0}
+.card > table{min-width:760px}
+.card:has(> table){overflow-x:auto}
+@media (max-width:1279px){
+  .stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,180px),1fr))}
+}
+@media (max-width:1023px){
+  .bar{flex-wrap:wrap;row-gap:8px;height:auto;padding:10px 12px}
+  .bar .crumb{flex-basis:100%}
+  .subnav{overflow-x:auto}
+  .drawer{width:min(92vw,520px)}
+}
+@media (max-width:767px){
+  .content{padding:16px 14px 104px}
+  .stats{grid-template-columns:repeat(auto-fit,minmax(min(100%,150px),1fr))}
+  .card-hd{flex-wrap:wrap;row-gap:6px}
+  .drawer{width:100%}
+}
+.app{width:100%;max-width:100%;height:100%;display:grid;grid-template-columns:minmax(0,236px) minmax(0,1fr);background:var(--bg);border-radius:20px;overflow:hidden;box-shadow:none}
+
+/* Rail */
+.rail{background:var(--rail);color:#EDEDEA;display:flex;flex-direction:column;padding:18px 12px 12px;overflow-y:auto;overflow-x:hidden;margin:12px 0 12px 12px;border-radius:26px}
+.rail::-webkit-scrollbar{width:0}
+.rail > div:not(.rb):not(.rme){display:flex;flex-direction:column;gap:2px}
+.rb{display:flex;align-items:center;gap:10px;padding:2px 6px 18px;min-width:0}
+.rb .m{width:30px;height:30px;border-radius:10px;background:var(--accent);color:#26262B;display:grid;place-items:center;font:500 10.5px/1 var(--ui);flex:0 0 auto}
+.rb .t{font:500 13px/1 var(--ui);white-space:nowrap;letter-spacing:.01em}
+.rb .t small{display:block;font:400 9.5px/1 var(--ui);color:#87877F;margin-top:4px;letter-spacing:.14em}
+.rs{font:400 8.5px/1 var(--ui);letter-spacing:.18em;color:#6E6E66;padding:14px 10px 6px}
+.ri{position:relative;display:flex;align-items:center;gap:10px;width:100%;height:36px;padding:0 10px;border-radius:10px;font:400 11.5px/1 var(--ui);letter-spacing:-.005em;color:#BDBDB6;transition:background .15s,color .15s;text-align:left}
+.ri > svg{flex:0 0 auto}
+.ri .nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ri:hover{background:var(--rail-2);color:#fff}
+.ri.on{background:var(--accent);color:#26262B}
+.ri .lbl{display:none}
+.ri .ct{margin-left:auto;font:400 9.75px/1 var(--mono);color:#87877F;flex:0 0 auto}
+.ri.on .ct{color:rgba(38,38,43,.62)}
+.ri .warn{margin-left:auto;width:6px;height:6px;border-radius:50%;background:var(--amber);flex:0 0 auto}
+.ri .ct + .warn{margin-left:7px}
+.rme{margin-top:auto;display:flex;align-items:center;gap:10px;padding:13px 10px 2px;border-top:1px solid #33332F}
+.rme .av{width:31px;height:31px;border-radius:50%;background:var(--accent);color:#26262B;display:grid;place-items:center;font:500 10px/1 var(--ui);flex:0 0 auto}
+.rme .who{font:400 12px/1.25 var(--ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rme .who small{display:block;font:400 9.75px/1 var(--ui);color:#87877F;margin-top:3px}
+
+/* Main */
+.main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+.bar{height:56px;flex:0 0 auto;display:flex;align-items:center;gap:10px;padding:0 20px;background:transparent}
+.bar h1{font:500 15px/1 var(--ui);margin:0;white-space:nowrap}
+.bar .crumb{font:500 11.5px/1 var(--ui);color:var(--ink-3);white-space:nowrap}
+.content{flex:1;overflow-y:auto;padding:4px 14px 108px;min-height:0}
+.content::-webkit-scrollbar{width:10px}
+.content::-webkit-scrollbar-thumb{background:var(--line-2);border:3px solid var(--bg);border-radius:10px}
+
+/* Primitives */
+.card{background:var(--panel);border:0;border-radius:26px;overflow:hidden;box-shadow:none}
+.card-hd{display:flex;align-items:center;gap:9px;padding:18px 20px 12px;border:0}
+.card-hd h2{font:500 13px/1 var(--ui);margin:0;white-space:nowrap}
+.card-hd .n{font:500 11px/1 var(--ui);color:var(--ink-3);white-space:nowrap}
+.sect{font:500 10.5px/1 var(--ui);letter-spacing:.14em;color:var(--ink-3)}
+
+.btn{height:31px;padding:0 13px;border-radius:12px;font:500 11.5px/1 var(--ui);display:inline-flex;align-items:center;gap:6px;white-space:nowrap;width:max-content;border:1px solid var(--line-2);background:var(--panel);transition:background .15s,border-color .15s}
+.btn:hover{background:var(--panel-2);border-color:var(--ink-3)}
+.btn.p{background:var(--accent);color:#26262B;border-color:var(--accent);font-weight:500}
+.btn.p:hover{background:#DFE850;border-color:#DFE850}
+.btn.g{background:var(--green);color:#fff;border-color:var(--green)}
+.btn.r{background:var(--red);color:#fff;border-color:var(--red)}
+.btn.sm{height:26px;padding:0 10px;font-size:11px;border-radius:11px}
+
+/* ── Detail drawer ── */
+.drawer{position:fixed;right:0;top:0;bottom:0;width:min(480px,100%);z-index:72;
+  background:var(--panel);border-left:1px solid var(--line);display:flex;flex-direction:column;
+  box-shadow:-26px 0 64px -16px rgba(10,10,10,.36)}
+.drawer-hd{flex:0 0 auto;display:flex;align-items:flex-start;justify-content:space-between;gap:10px;
+  padding:15px 18px;border-bottom:1px solid var(--line)}
+.drawer-bd{flex:1;min-height:0;overflow-y:auto;padding:15px 18px 24px}
+.drawer-bd::-webkit-scrollbar{width:9px}
+.drawer-bd::-webkit-scrollbar-thumb{background:var(--line-2);border-radius:9px;border:3px solid var(--panel)}
+.lbl{font:400 10px/1 var(--ui);letter-spacing:.13em;text-transform:uppercase;color:var(--ink-3)}
+.chip.n{background:var(--panel-2);color:var(--ink-2);border-color:var(--line-2)}
+
+/* ── Staff presence ── */
+.pstrip{display:flex;align-items:center;gap:5px;flex-wrap:wrap}
+.pstrip .p{position:relative;width:28px;height:28px;border-radius:50%;background:var(--panel-2);
+  border:1px solid var(--line);display:grid;place-items:center;font:500 10px/1 var(--ui);
+  color:var(--ink-2);cursor:default}
+.pstrip .p i{position:absolute;right:-1px;bottom:-1px;width:9px;height:9px;border-radius:50%;
+  border:1.5px solid var(--panel)}
+
+.chip{padding:4px 8px;border-radius:7px;font:500 9.5px/1 var(--ui);background:var(--panel-2);color:var(--ink-2);border:1px solid var(--line);white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+.chip.mono{font-family:var(--mono);font-weight:500}
+.chip.b{background:rgba(44,95,168,.1);color:var(--blue);border-color:rgba(44,95,168,.2)}
+.chip.g{background:rgba(10,127,74,.1);color:var(--green);border-color:rgba(10,127,74,.2)}
+.chip.a{background:rgba(194,135,12,.12);color:var(--amber);border-color:rgba(194,135,12,.22)}
+.chip.r{background:rgba(192,57,43,.1);color:var(--red);border-color:rgba(192,57,43,.2)}
+.chip.p{background:rgba(107,79,160,.1);color:var(--purple);border-color:rgba(107,79,160,.2)}
+.chip.k{background:var(--accent);color:#26262B;border-color:var(--accent)}
+
+/* Tables */
+table{width:100%;border-collapse:collapse}
+thead th{font:500 9.5px/1 var(--ui);letter-spacing:.1em;color:var(--ink-3);text-align:left;padding:9px 12px;border-bottom:1px solid var(--line);background:var(--panel);white-space:nowrap;position:sticky;top:0;z-index:1}
+thead th.r{text-align:right}
+tbody td{padding:10px 12px;border-bottom:1px solid var(--line);font:500 12px/1.4 var(--ui);vertical-align:middle}
+tbody td.mono{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+tbody td.r{text-align:right;font-weight:500}
+tbody tr:hover{background:var(--panel-2)}
+tbody tr.sel{background:rgba(44,95,168,.06)}
+.cb{width:15px;height:15px;border-radius:4px;border:1.5px solid var(--line-2);background:var(--panel);display:grid;place-items:center;cursor:pointer;flex:0 0 auto}
+.cb.on{background:var(--ink);border-color:var(--ink);color:#fff}
+
+.bulk{display:flex;align-items:center;gap:9px;padding:9px 15px;background:rgba(44,95,168,.07);border-bottom:1px solid rgba(44,95,168,.2)}
+
+/* Stat tiles */
+.stats{display:grid;grid-template-columns:1.5fr 1fr 1fr;grid-auto-rows:1fr;gap:14px}
+.stats > .stat:first-child{grid-row:span 2;display:flex;flex-direction:column;justify-content:space-between}
+.stats > .stat:first-child .v{font-size:clamp(31px,3.61vw,52px)}
+.stat{background:var(--panel);border:0;border-radius:26px;padding:22px;box-shadow:none}
+.stat .l{font:500 9.5px/1 var(--ui);letter-spacing:.12em;color:var(--ink-3)}
+.stat .v{font:300 clamp(19px,2.22vw,32px)/1 var(--ui);letter-spacing:-.03em;margin-top:11px}
+.stat .d{font:500 10.5px/1 var(--ui);margin-top:7px;display:inline-flex;gap:4px;align-items:center}
+.stat .d.up{color:var(--green)} .stat .d.dn{color:var(--red)} .stat .d.flat{color:var(--ink-3)}
+
+/* Bars / sparks */
+.plot{position:relative;padding:16px 0 0;margin-top:4px}
+.plot .gl{position:absolute;left:0;right:0;height:1px;background:var(--line);opacity:.65}
+.bars{position:relative;display:flex;align-items:flex-end;gap:6px;height:212px;border-bottom:1px solid var(--line-2);padding:0 2px}
+.bars i{flex:1;background:var(--line-2);border-radius:4px 4px 0 0;min-height:3px;transition:height .4s cubic-bezier(.2,.9,.25,1)}
+.bars i.hi{background:var(--accent)}
+.bx{display:flex;gap:5px;margin-top:7px}
+.bx span{flex:1;text-align:center;font:500 9px/1 var(--mono);color:var(--ink-3)}
+.prog{height:5px;border-radius:99px;background:var(--panel-3);overflow:hidden}
+.prog i{display:block;height:100%;border-radius:99px}
+
+.fld{height:31px;padding:0 10px;border-radius:6px;border:1px solid var(--line-2);background:var(--panel);font:500 12px/1 var(--ui);outline:none;width:100%}
+.fld:focus{border-color:var(--blue)}
+.row{display:flex;align-items:center;gap:9px;padding:11px 15px;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.sw{width:38px;height:22px;border-radius:99px;position:relative;flex:0 0 auto;transition:background .2s}
+.sw i{position:absolute;top:3px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .2s cubic-bezier(.2,.9,.25,1);box-shadow:0 1px 2px rgba(0,0,0,.3)}
+.ic{width:14px;height:14px;flex:0 0 auto;display:inline-block}
+.dot{width:7px;height:7px;border-radius:99px;flex:0 0 auto;display:inline-block}
+.dot.r{background:var(--red)} .dot.a{background:var(--amber)}
+.dot.b{background:var(--blue)} .dot.g{background:var(--green)}
+.tfoot{display:flex;align-items:center;gap:9px;padding:10px 15px;border-top:1px solid var(--line);background:var(--panel-2)}
+.tfoot .n{font:500 11px/1 var(--ui);color:var(--ink-2);white-space:nowrap}
+.pg{display:flex;gap:3px;margin-left:auto}
+.pg button{min-width:25px;height:25px;padding:0 6px;border-radius:5px;border:1px solid var(--line-2);background:var(--panel);font:500 11px/1 var(--mono)}
+.pg button:hover{background:var(--panel-3)}
+.pg button.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+.pg button:disabled{opacity:.4;cursor:default}
+.empty{padding:38px 20px;text-align:center}
+.empty h3{font:500 13px/1.3 var(--ui);margin:0}
+.empty p{font:500 11.5px/1.6 var(--ui);color:var(--ink-2);margin:7px 0 0;max-width:380px;margin-inline:auto}
+/* ═══════════ Legacy shell → GCard parity (airier, same glass) ═══════════
+   Sections other than the dashboard were built on .card/.stat/table before
+   GCard existed. Rather than fork the markup, these make them render in the
+   same shared language: same radius, same glass, same padding scale. */
+.card{
+  background:var(--glass-bg,rgba(255,255,255,.62));
+  -webkit-backdrop-filter:blur(26px) saturate(190%) brightness(1.04);
+  backdrop-filter:blur(26px) saturate(190%) brightness(1.04);
+  border:0;border-radius:26px;overflow:hidden;position:relative;
+  box-shadow:0 1px 0 rgba(255,255,255,.5) inset, 0 12px 34px -22px rgba(20,20,19,.22);
+}
+.card-hd{
+  display:flex;align-items:baseline;gap:10px;
+  padding:26px 30px 16px;border:0;position:relative;z-index:1;
+}
+.card-hd h2{font:400 16px/1.15 var(--ui);letter-spacing:-.015em;margin:0;white-space:nowrap}
+.card-hd .n{font:400 11.5px/1 var(--ui);color:var(--ink-3);white-space:nowrap}
+
+/* Stat tiles: uniform, no ad-hoc first-child promotion */
+.stats{
+  display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-auto-rows:150px;gap:18px
+}
+.stats > .stat:first-child{grid-row:auto;display:flex;flex-direction:column;justify-content:flex-end}
+.stats > .stat:first-child .v{font-size:clamp(28px,2.6vw,38px)}
+.stat{
+  background:var(--glass-bg,rgba(255,255,255,.62));
+  -webkit-backdrop-filter:blur(26px) saturate(190%) brightness(1.04);
+  backdrop-filter:blur(26px) saturate(190%) brightness(1.04);
+  border:0;border-radius:26px;padding:26px 30px 28px;
+  display:flex;flex-direction:column;justify-content:flex-end;gap:6px;
+  box-shadow:0 1px 0 rgba(255,255,255,.5) inset, 0 12px 34px -22px rgba(20,20,19,.22);
+}
+.stat .l{font:500 10.5px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
+.stat .v{font:300 clamp(26px,2.3vw,32px)/1 var(--ui);letter-spacing:-.025em;margin-top:0;font-variant-numeric:tabular-nums}
+.stat .d{font:400 11.5px/1.4 var(--ui)}
+
+/* Tables: airier rows, sticky head that matches the glass */
+thead th{
+  font:500 10.5px/1 var(--ui);letter-spacing:.1em;text-transform:uppercase;
+  color:var(--ink-3);padding:13px 30px;background:rgba(255,255,255,.55);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  border-bottom:1px solid var(--line)
+}
+tbody td{padding:15px 30px;border-bottom:1px solid rgba(20,20,19,.055);font:400 13px/1.45 var(--ui)}
+tbody td.mono{font-family:var(--mono);font-size:12px}
+tbody td.r{font-weight:400;font-variant-numeric:tabular-nums}
+tbody tr{transition:background .16s ease}
+tbody tr:hover{background:rgba(20,20,19,.03)}
+tbody tr:last-child td{border-bottom:0}
+
+/* Chips a touch softer to suit the airier rows */
+.chip{padding:5px 9px;border-radius:8px;font:500 10px/1 var(--ui);letter-spacing:.04em}
+
+/* Section stacks get the same rhythm as the dashboard grid */
+.content > * > .stats{margin-bottom:0}

@@ -3,24 +3,33 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Raw Aroma Chem · Production Portal</title>
+  <title>Factory · Raw Aroma Chem</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#EDEDEB">
-  <link rel="icon" href="/icon.svg">
-  <!-- ALEMBIC visual contract, vendored verbatim (web/ui-contract/CONTRACT_HASH pins the version
-       U0 generated it from). Do not hand-edit alembic-tokens.css — regenerate + re-vendor instead. -->
+  <!-- UX-D: the one icon set every ALEMBIC and RawProd surface uses (ALEMBIC release/ui/BRAND_ASSETS.md). -->
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
+  <!-- Reference console design layer (rac-console.css, vendored verbatim from the owner reference)
+       then the ALEMBIC visual contract (web/ui-contract/CONTRACT_HASH pins its version; do not
+       hand-edit alembic-tokens.css — regenerate + re-vendor instead), then the Factory layer. -->
   <link rel="stylesheet" href="/ui-contract/fonts/outfit.css">
   <link rel="stylesheet" href="/ui-contract/fonts/jetbrains-mono.css">
+  <link rel="stylesheet" href="/ui-contract/rac-console.css">
   <link rel="stylesheet" href="/ui-contract/alembic-tokens.css">
   <link rel="stylesheet" href="/ui-contract/shell.css">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body { min-height: 100%; }
-    body { background: var(--bg); font-family: var(--font-ui); -webkit-font-smoothing: antialiased; }
-  </style>
+  <!-- UX-E: the Ask Aria panel (vanilla port of ALEMBIC's AriaPanel), vendored from ALEMBIC
+       release/ui/aria/ — same DOM and classes as every other staff console. -->
+  <link rel="stylesheet" href="/ui-contract/aria-panel.css">
+  <link rel="stylesheet" href="/logo/brand.css">
 </head>
 <body>
-  <div id="app" class="app"></div>
+  <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body> so
+       it paints before shell.js runs; it lifts once #app has content. -->
+  <script src="/rac-preload.js" data-mount="#app" data-logo="/logo/raw-logo@3x.png" data-fonts="/ui-contract/fonts/"></script>
+  <div class="stage" id="root"><div id="app" class="app"></div></div>
   <script src="/qrcode.js"></script>
   <!-- Split from the former monolithic app.js (mechanical, no behaviour change) so parallel
        UI-parity lanes stop colliding. Plain classic scripts (no bundler): shell.js declares the

@@ -366,111 +366,257 @@
     return keys.slice(0, 6);
   }
 
+  /* ---------------- reference shell kit (vanilla port of rac-console.jsx) ----------------
+   * The Admin/Agent reference (rawprod-lanes/reference/admin/d6c51180.javascript, rac-console.jsx)
+   * defines the shell as React components: BrandMark, QuickDock, GCard, ExpandSheet, the rail
+   * toggle and usePageEnter. This console is plain classic scripts, so each is ported as a string
+   * builder or a small wiring function with the same class names and the same behaviour; the
+   * styling is rac-console.css itself (vendored verbatim, web/ui-contract/rac-console.css). */
+  var CI = { // the reference's CIcon glyphs used by the chrome (16px grid, 1.6–1.9 stroke)
+    menu: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>',
+    collapse: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M13.5 6.5 8 12l5.5 5.5"/><path d="M19 5v14"/></svg>',
+    cmd: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M9 6.6a2.6 2.6 0 1 0-2.6 2.6H9V6.6zM15 6.6a2.6 2.6 0 1 1 2.6 2.6H15V6.6zM9 17.4a2.6 2.6 0 1 1-2.6-2.6H9v2.6zM15 17.4a2.6 2.6 0 1 0 2.6-2.6H15v2.6z"/><rect x="9" y="9.2" width="6" height="5.6"/></svg>',
+    expand: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" aria-hidden="true"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></svg>',
+    x: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg>',
+    bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6.4 9.4a5.6 5.6 0 1 1 11.2 0c0 4.6 1.9 5.6 1.9 5.6H4.5s1.9-1 1.9-5.6"/><path d="M10.2 18.4a1.9 1.9 0 0 0 3.6 0"/></svg>',
+    search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>',
+    arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>',
+    spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l1.7 6 5.9.7-4.4 4 1.3 5.8L12 15.9 7.5 18.9l1.3-5.8-4.4-4 5.9-.7z"/></svg>'
+  };
+  window.RA_CI = CI; // ws-*.js dialogs use the same close glyph
+  // BrandMark — the lockup, one builder so it can't drift.
+  function brandMark(sub, onInk, compact) {
+    // UX-D (release/ui/BRAND_ASSETS.md): the RAW logo, not a letter tile — reversed art on the ink
+    // rail, colour art on light glass; logo/brand.css fixes the height per context.
+    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (compact ? '<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">' : (onInk ? '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' : '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="66" height="30" alt="">')) +
+      (compact ? '' : '<span class="bt">Alembic' + (sub ? '<small>' + sub + '</small>' : '') + '</span>') + '</span>';
+  }
+  // GCard — one card shell so every panel is the same shape: glass, lift, title + caption, the
+  // top-right expand affordance, body, optional foot. `span`/`rows` are the 12-col grid classes.
+  var _gcSeq = 0, _gcBodies = {};
+  function gCard(o) {
+    var id = 'gc' + (_gcSeq++);
+    _gcBodies[id] = { title: o.title || '', meta: o.meta || '', body: o.detail || o.body };
+    var tone = o.tone === 'accent' ? ' glass-accent' : '';
+    return '<div class="glass lift gcard ' + (o.span || 'c4') + ' ' + (o.rows || 'r1') + tone + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + '>' +
+      ((o.title || o.expand !== false) ? '<div class="gcard-hd"><div class="ttl">' +
+        (o.title ? '<h3 class="t-h2">' + o.title + '</h3>' : '') + (o.meta ? '<p class="t-cap">' + o.meta + '</p>' : '') + '</div>' +
+        (o.expand === false ? '' : '<button type="button" class="xp" data-expand="' + id + '" aria-label="Expand ' + escHtml(o.title || 'panel') + '">' + CI.expand + '</button>') +
+      '</div>' : '') +
+      '<div class="gcard-bd' + (o.top ? ' top' : '') + '">' + o.body + '</div>' +
+      (o.foot ? '<div class="gcard-ft">' + o.foot + '</div>' : '') + '</div>';
+  }
+  // ExpandSheet — what the expand affordance opens: the same card, at reading size, in the
+  // reference's glass sheet (openSheet below carries the focus trap / Escape / restore).
+  function wireExpand(root) {
+    [].forEach.call((root || document).querySelectorAll('[data-expand]'), function (b) {
+      b.onclick = function () {
+        var d = _gcBodies[b.getAttribute('data-expand')]; if (!d) return;
+        openSheet({ tag: 'div', title: d.title, meta: d.meta, cls: 'xp-wide', body: '<div class="stack-base">' + d.body + '</div>' });
+      };
+    });
+  }
+  // usePageEnter — route entrance: the resting state is correct and the offset is an additive
+  // attribute removed on a timer, so a stalled timeline degrades to no motion.
+  function pageEnter(el, dir) {
+    if (!el || !dir) return;
+    el.setAttribute('data-enter', dir);
+    setTimeout(function () { el.setAttribute('data-settling', ''); el.removeAttribute('data-enter'); }, 20);
+    setTimeout(function () { el.removeAttribute('data-settling'); }, 460);
+  }
+  // Go-to palette (⌘/): every destination this role holds, filterable, Enter to go.
+  function openPalette() {
+    if ($('ra-cmdk')) { closePalette(); return; }
+    var R = ROLES[st.role]; if (!R) return;
+    var wrap = document.createElement('div'); wrap.id = 'ra-cmdk';
+    wrap.innerHTML = '<div class="xp-scrim open" data-cmdk-x></div>' +
+      '<div class="glass glass-deep cmdk" role="dialog" aria-modal="true" aria-label="Go to">' +
+        '<input id="ra-cmdk-q" type="text" placeholder="Go to…" aria-label="Go to" autocomplete="off">' +
+        '<ul id="ra-cmdk-l" role="listbox"></ul></div>';
+    document.body.appendChild(wrap);
+    var q = $('ra-cmdk-q'), list = $('ra-cmdk-l'), idx = 0, rows = [];
+    function paint() {
+      var t = q.value.trim().toLowerCase();
+      rows = R.nav.filter(function (n) { return !t || n[1].toLowerCase().indexOf(t) >= 0; });
+      if (idx >= rows.length) idx = 0;
+      list.innerHTML = rows.map(function (n, i) {
+        return '<li><button type="button" data-go="' + n[0] + '" class="' + (i === idx ? 'on' : '') + '">' + icon(n[2], 15) + n[1] +
+          (R.nav.indexOf(n) < 9 ? '<span class="sc">⌘' + (R.nav.indexOf(n) + 1) + '</span>' : '') + '</button></li>';
+      }).join('') || '<li class="loading" style="padding:var(--s-base)">No match</li>';
+      [].forEach.call(list.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { go(b.getAttribute('data-go')); }; });
+    }
+    function go(k) { closePalette(); navTo(k); }
+    q.oninput = function () { idx = 0; paint(); };
+    q.onkeydown = function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); idx = Math.min(rows.length - 1, idx + 1); paint(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); idx = Math.max(0, idx - 1); paint(); }
+      else if (e.key === 'Enter' && rows[idx]) { e.preventDefault(); go(rows[idx][0]); }
+      else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+    };
+    wrap.querySelector('[data-cmdk-x]').onclick = closePalette;
+    paint(); q.focus();
+  }
+  function closePalette() { var w = $('ra-cmdk'); if (w) w.remove(); }
+  function navTo(k) {
+    var R = ROLES[st.role]; if (!R || !R.nav.some(function (n) { return n[0] === k; })) return;
+    if (st.nav === k) return;
+    st.nav = k; st.search = '';
+    if (window.innerWidth <= 1023) st.drawer = false;
+    shell();
+  }
+
+  /* ---------------- Ask Aria (UX-E) ----------------
+   * The panel is ALEMBIC's own (ui-contract/aria-panel.js, AlembicAria.mount — the vanilla port of
+   * AriaPanel, same DOM/classes/states), opened from the top bar's "Ask Aria" and the dock's
+   * "Ask Aria · ⌘K", exactly as ALEMBIC Admin/Agent open it.
+   *
+   * WHERE THE ANSWERS COME FROM — the documented choice (coordinator brief, UX-C). Aria answers
+   * through ALEMBIC's POST /api/v1/copilot/ask, which needs an ALEMBIC staff session. This console
+   * holds a RawProd session only (the identity bridge hands ALEMBIC's assertion to RawProd, never
+   * the other way), its CSP is connect-src 'self', and no RawProd vhost proxies to ALEMBIC — there
+   * is no /main/ route in infra/aws/nginx. A cross-origin call would therefore be refused on every
+   * deployment, and a proxy would still arrive without ALEMBIC credentials. So the panel opens in
+   * an honest "Aria answers in ALEMBIC" state: every question gets that one plain answer, shown as
+   * a refusal (never as a fact), and nothing is invented locally. Wiring a real answer path needs
+   * a server-side RawProd→ALEMBIC copilot bridge with its own auth — backend work, not UI. */
+  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var _aria = null;
+  function ariaContext() {
+    var R = ROLES[st.role]; var it = R && R.nav.filter(function (n) { return n[0] === st.nav; })[0];
+    return 'Factory · ' + (it ? it[1] : 'Dashboard');
+  }
+  // Fetched the first time Aria opens, as ALEMBIC's AriaCoPilot lazy-loads its panel: nothing of
+  // it is on first paint, and index.html keeps loading only the split modules (ui-parity-check §18).
+  var _ariaLoading = null;
+  function loadAria() {
+    if (typeof AlembicAria !== 'undefined') return Promise.resolve();
+    if (_ariaLoading) return _ariaLoading;
+    _ariaLoading = new Promise(function (ok, no) {
+      var sc = document.createElement('script'); sc.src = '/ui-contract/aria-panel.js';
+      sc.onload = ok; sc.onerror = function () { _ariaLoading = null; no(new Error('aria')); };
+      document.head.appendChild(sc);
+    });
+    return _ariaLoading;
+  }
+  function ariaPanel() {
+    if (_aria) return _aria;
+    _aria = AlembicAria.mount({
+      context: ariaContext(),
+      prompts: ['Where can I ask Aria?'],
+      ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: ARIA_HERE, cited: [] }); },
+      parent: document.body,
+    });
+    // The panel's fixed greeting promises answers from orders, stock and enquiries; here it says
+    // where Aria answers instead. Re-applied whenever the panel repaints its empty state.
+    var fix = function () { var p = _aria.element.querySelector('.aria-empty > p'); if (p && p.textContent !== ARIA_HERE) p.textContent = ARIA_HERE; };
+    new MutationObserver(fix).observe(_aria.element, { childList: true, subtree: true }); fix();
+    return _aria;
+  }
+  function toggleAria() {
+    loadAria().then(function () { var a = ariaPanel(); a.setContext(ariaContext()); a.toggle(); })
+      .catch(function () { toast('Aria didn\'t load. Try again.', 'bad'); });
+  }
+
   /* ---------------- render: shell + data view ---------------- */
-  // Shell chrome, corrected to ALEMBIC's ACTUAL rendered grammar — a top bar + a floating/docked
-  // bottom command dock, with the rail off-canvas by DEFAULT at every width (see shell.css's own
-  // header comment + ALEMBIC_GUIDE_CORRECTIONS.md; not the permanently-visible rail column the
-  // original PORTING_GUIDE.md §Shell reading produced). Nav items are NOT filtered client-side
-  // beyond "what this session's permission-driven ROLES entry contains" — same rule ALEMBIC's own
-  // guide states (server enforces per-action authorization; the rail/dock just reflect what the
-  // signed-in session's role set was granted). The dock (`.qdock`) carries the SAME `R.nav` set as
-  // the rail — `data-nav` on its buttons reuses wireShell()'s existing `[data-nav]` click wiring —
-  // so every route the rail could reach, the dock can too; `HOT` just picks which ones keep a
-  // labelled segment in the phone tab-bar variant (shell.css `@media (max-width:1023px)`).
+  // The reference Admin/Agent shell, 1:1: a rail (collapsed by default — body.rail-off — so the
+  // floating dock is the navigation), a top bar (platform brand, page title, page actions), the
+  // region, the floating glass dock (brand tile, rail toggle, destinations with ⌘1–9, command
+  // palette). Nav items are NOT filtered client-side beyond "what this session's permission-driven
+  // ROLES entry contains" — the server enforces per-action authorization. The dock carries the
+  // SAME `R.nav` set as the rail; below 1024 it becomes the reference's tab bar, keeping the
+  // first destinations (HOT) plus "Sections", which opens the rail as a drawer.
   function shell() {
     $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
+    var prevIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st._prevNav);
+    var curIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st.nav);
     var navHtml = R.nav.map(function (n) {
       var on = st.nav === n[0];
       // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
-      // target/action steps use to locate this real nav button (web/tutorial.js) — mirrors
-      // ALEMBIC's own one-attribute convention (data-tutorial-target). Inert otherwise.
+      // target/action steps use to locate this real nav button (web/tutorial.js).
       return '<button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
-        '<span class="ic">' + icon(n[2], 14) + '</span><span class="nm">' + n[1] + '</span></button>';
+        icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>';
     }).join('');
-    // The four destinations kept as labelled segments in the phone tab bar (ALEMBIC's DOCK_HOT —
-    // admin-console.jsx: "the five destinations an owner actually reaches for" / "dashboard is the
-    // landing screen..."). Every role's dashboard is first in R.nav (unshift, above), so this is
-    // "dashboard + the role's own top three" rather than a hand-curated list per role.
-    var HOT = {}; R.nav.slice(0, 4).forEach(function (n) { HOT[n[0]] = 1; });
+    var HOT = {}; R.nav.slice(0, 3).forEach(function (n) { HOT[n[0]] = 1; });
     var dockHtml =
-      '<button id="ra-dock-toggle" class="qb dock-toggle hot" aria-label="Show navigation" title="Sections">' +
-        icon('panel', 17) + '<span class="nm">Sections</span></button><span class="sep"></span>' +
-      R.nav.map(function (n) {
+      '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
+      '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="Show navigation" aria-pressed="false">' + CI.menu + '<span class="kb">Sections<span class="kc"> · ⌘\\</span></span></button>' +
+      '<span class="sep"></span>' +
+      R.nav.map(function (n, i) {
         var on = st.nav === n[0];
-        return '<button data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
-          ' title="' + n[1] + '" aria-label="' + n[1] + '"' + (on ? ' aria-current="page"' : '') + '>' +
-          icon(n[2], 17) + '<span class="nm">' + n[1] + '</span></button>';
-      }).join('');
-    // Workspace switcher: multi-role staff get a <select> in the topbar and switch with no second
-    // login (addendum §5/§8) — st.role changes, ROLES[newRole] re-renders the same shell. ALEMBIC
-    // has no directly-cited equivalent chrome (rac-console.jsx's consoles are one role each); this
-    // stays a RawProd composition from ALEMBIC primitives, in the topbar next to the section title.
+        return '<button type="button" data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
+          ' aria-label="' + n[1] + '" aria-pressed="' + on + '"' + (on ? ' aria-current="page"' : '') + '>' +
+          icon(n[2], 17) + '<span class="kb">' + n[1] + (i < 9 ? '<span class="kc"> · ⌘' + (i + 1) + '</span>' : '') + '</span></button>';
+      }).join('') +
+      '<span class="sep"></span>' +
+      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Aria">' + CI.cmd + '<span class="kb">Ask Aria<span class="kc"> · ⌘K</span></span></button>';
+    // Workspace switcher: multi-role staff switch workspaces with no second login (addendum
+    // §5/§8) — a RawProd composition in the top bar next to the page title.
     var roles = (session && session.availableRoles) || [st.role];
     var switcher = roles.length > 1 ? (
-      '<div class="wsw" title="Switch workspace"><select id="ra-wsw">' +
+      '<div class="wsw" title="Switch workspace"><select id="ra-wsw" aria-label="Workspace">' +
         roles.map(function (r) { return '<option value="' + r + '"' + (r === st.role ? ' selected' : '') + '>' + (ROLES[r] ? ROLES[r].label : r) + '</option>'; }).join('') +
       '</select></div>'
     ) : '';
     $('app').innerHTML =
-      '<nav class="rail" id="ra-side">' +
-        '<button class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + icon('panel', 16) + '</button>' +
-        '<button class="rb">' +
-          '<span class="m">' + icon('droplet', 16) + '</span>' +
-          '<span class="t">Raw Aroma Chem<small>PRODUCTION</small></span></button>' +
+      '<nav class="rail" id="ra-side" aria-label="Factory navigation">' +
+        '<button type="button" class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + CI.collapse + '</button>' +
+        '<button type="button" class="rb" id="ra-home" style="padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%" aria-label="Dashboard">' +
+          brandMark('Factory', true) + '</button>' +
         '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div>' + navHtml + '</div></div>' +
         '<div class="rme">' +
           '<span class="av">' + initials + '</span>' +
           '<span class="who">' + R.user + '<small>' + R.label + '</small></span>' +
-          '<button id="ra-logout" title="Sign out" aria-label="Sign out">' + icon('logout', 14) + '</button>' +
+          '<button type="button" class="rail-min" id="ra-logout" title="Sign out" aria-label="Sign out" style="position:static;margin-left:auto">' + icon('logout', 13) + '</button>' +
         '</div>' +
       '</nav>' +
       '<div id="ra-drawer-bg" class="rail-scrim"></div>' +
       '<div class="main">' +
-        '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline — showing the last data loaded. Nothing you do here is queued for later; actions need the secure channel and will tell you if they cannot reach it.</span></div>' +
+        '<div id="ra-net-banner" class="net-banner"><span class="dot"></span><span>Offline. Showing the last data loaded; changes won\'t save until you reconnect.</span></div>' +
         '<div class="bar">' +
-          '<span class="bar-brand">RAW AROMA CHEM<i>·</i>' + R.dept + '</span>' +
+          '<span class="bar-brand">Alembic<i>·</i>RawAromaChem</span>' +
           '<h1 id="ra-title">' + R.label + '</h1>' +
+          '<span style="flex:1"></span>' +
           switcher +
+          '<button type="button" class="gbtn acc" id="ra-aria" aria-label="Ask Aria">' + CI.spark + ' Ask Aria</button>' +
           '<div style="position:relative">' +
-            '<button id="ra-bell" class="xp" title="Alerts" aria-label="Alerts" style="position:relative">' + icon('bell', 14) +
-              '<span id="ra-bell-badge" class="chip r" style="display:none;position:absolute;top:-8px;right:-8px;min-width:16px;height:16px;padding:0 3px;justify-content:center"></span></button>' +
-            '<div id="ra-bell-pop" class="card" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div style="padding:14px;text-align:center;color:var(--ink-3);font:var(--w-med) var(--t-cap)/1 var(--font-mono)">LOADING…</div></div>' +
+            '<button type="button" id="ra-bell" class="gbtn" title="Alerts" aria-label="Alerts">' + CI.bell +
+              '<span id="ra-bell-badge" class="t-num" style="display:none"></span></button>' +
+            '<div id="ra-bell-pop" class="glass glass-deep" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div class="loading" style="padding:var(--s-snug)">Loading…</div></div>' +
           '</div>' +
         '</div>' +
-        '<div class="content"><section id="ra-view"></section></div>' +
+        '<div class="content"><section class="pageview" id="ra-view"></section></div>' +
       '</div>' +
-      '<div class="qdock" id="ra-dock" role="navigation" aria-label="Sections">' + dockHtml + '</div>';
+      '<button type="button" class="dock-handle" id="ra-dock-handle" aria-label="Show quick access dock"><i></i></button>' +
+      '<div class="glass glass-deep qdock" id="ra-dock" role="toolbar" aria-label="Quick access">' + dockHtml + '</div>';
     wireShell();
+    if (prevIdx >= 0 && curIdx >= 0 && prevIdx !== curIdx) pageEnter($('ra-view'), curIdx > prevIdx ? 'r' : 'l');
+    st._prevNav = st.nav;
     loadView();
     loadAlerts();
     // G4: WelcomePanel-equivalent — offer the current workspace's tutorial once, only when no
-    // progress row of any status exists yet for it (see web/tutorial.js). Defensive `typeof`
-    // for the same reason as loadTutorialView above.
+    // progress row of any status exists yet for it (see web/tutorial.js).
     if (typeof tutorialMaybeShowWelcome === 'function') tutorialMaybeShowWelcome();
   }
 
   // COMPONENT_PARITY_MATRIX.json "Card (glass / GCard, dashboard KPI surfaces)" simplified to the
   // flat `.stat` tile admin.css also defines — see ALEMBIC_VISUAL_CONTRACT.json shadows.
   // admin_card_shadow (flat by design). Caller wraps these in a `.stats` grid.
+  // UX-C: one tile shape everywhere (label over figure) — the list-view band and the dashboard
+  // band used to render two different tiles.
   function kpi(ic, value, lab) {
-    return '<div class="stat"><span class="ic" style="color:var(--accent)">' + icon(ic, 18) + '</span>' +
-      '<div class="v">' + value + '</div><div class="l">' + lab + '</div></div>';
+    return '<div class="stat"><span class="l" style="display:inline-flex;align-items:center;gap:var(--s-tight)">' + icon(ic, 12) + lab + '</span>' +
+      '<span class="v">' + value + '</span></div>';
   }
 
-  /* ================= rich dashboards (the original mockup designs, real DB data) ================= */
-  // Olfactive family palette (the mockup's CLS) — ALEMBIC has no such categorical palette of its
-  // own (this is RawProd dashboard content, not a shell primitive), so this reuses ALEMBIC's own
-  // semantic tokens rather than inventing new hex values: no dark mode variant needed either, now
-  // that ALEMBIC's single fixed palette has replaced the old light/dark skin system.
+  /* ================= role dashboards (real DB data from /v1/dashboard) ================= */
+  // Olfactive family palette — ALEMBIC has no categorical palette of its own, so this reuses its
+  // semantic tokens rather than inventing new hex values.
   var CLS = { natural: ['var(--green)', 'Natural'], aroma: ['var(--blue)', 'Aroma chem'], base: ['var(--amber)', 'Base'], solvent: ['var(--purple)', 'Solvent'] };
   function clsCol(k) { var c = CLS[k] || CLS.aroma; return c[0]; }
   // U3b: real ALEMBIC GCard (console.css:172-196, "Uniform card grid") — a .gwrap 12-col grid
-  // row of .gcard.glass surfaces, replacing the ad-hoc shimmed card() this used to call. `span`
-  // is one of the c3.._c12 utility classes (shell.css "U3b" block); omit it for a plain,
-  // non-grid-item card (e.g. a single zone tile inside .gwrap-auto).
-  function gcard(inner, span) { return '<div class="gcard glass' + (span ? ' ' + span : '') + '"><div class="gcard-bd">' + inner + '</div></div>'; }
-  function badge(ic, txt) { return '<div style="display:inline-flex;align-items:center;gap:7px;font-family:\'JetBrains Mono\',monospace;font-size:9.5px;letter-spacing:.16em;font-weight:700;color:var(--t3)"><span style="display:grid;place-items:center;width:24px;height:24px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent)">' + icon(ic, 13) + '</span>' + txt + '</div>'; }
+  // row of .gcard.glass surfaces. `span` is one of the c3.._c12 utility classes (shell.css "U3b"
+  // block); omit it for a plain, non-grid-item card (e.g. a single zone tile inside .gwrap-auto).
   function relTime(ts) {
     if (!ts) return ''; var t = Date.parse(String(ts).replace(' ', 'T')); if (isNaN(t)) return '';
     var s = Math.max(1, Math.round((Date.now() - t) / 1000));
@@ -478,145 +624,98 @@
     var h = Math.round(m / 60); if (h < 24) return h + 'h ago'; var d = Math.round(h / 24);
     return d === 1 ? 'Yesterday' : d + 'd ago';
   }
-  // Deterministic mini bar-chart (the kpiBars motif) — stable per value, decorative chrome.
-  // U3: markup ported to ALEMBIC's HTML bar-series primitive (.bseries/.bcol, console.css:284-289
-  // via web/ui-contract/shell.css "U3" block) instead of ad-hoc <i> divs — same visual result
-  // (7 bars, last one accent-highlighted), real primitive classes.
-  function miniBars(seed) {
-    var s = (Math.abs(Math.round(seed)) || 3) % 9973 + 7, out = '';
-    for (var i = 0; i < 7; i++) { s = (s * 48271) % 2147483647 || 7; var h = 5 + (s % 18); out += '<div class="bcol' + (i === 6 ? ' hi' : '') + '"><span style="height:' + h + 'px"></span></div>'; }
-    return '<div class="bseries" style="height:24px;margin-top:14px">' + out + '</div>';
-  }
-  // U3b: real "KPI tiles" — the .stats/.stat grid + tile already ported to this stylesheet
-  // (matches release/ui/reference/admin-shell-1440.png's ORDERS/ORDER BOOK/CATALOGUE/LOTS row:
-  // .l uppercase label, .v big figure), plus U3's .bseries sparkline underneath. `chip` is kept
-  // as a param for call-site compatibility but is never populated by kpiSet() — no fake badges.
-  function kpiRich(ic, value, lab, chip, seed) {
-    return '<div class="stat"><span class="l" style="display:inline-flex;align-items:center;gap:6px">' + icon(ic, 12) + lab + '</span>' +
-      '<span class="v">' + value + '</span>' + miniBars(seed) + '</div>';
-  }
-  // SVG ring gauge / donut. U3: svg + track/value circles now carry the real ALEMBIC chart
-  // classes (.chart, .arc-track, .arc-val — console.css:260-280 via shell.css "U3" block) instead
-  // of inline stroke/fill; only the per-call dynamic bits (color, dasharray) stay inline.
+  // UX-C: the per-tile sparkline (miniBars) was a deterministic pseudo-random strip seeded from the
+  // figure itself — decoration dressed as data — so the dashboard KPI band is now the same flat
+  // tile as every list view (kpi(), above). `chip`/`seed` stay as ignored params for call sites.
+  function kpiRich(ic, value, lab) { return kpi(ic, value, lab); }
+  // SVG ring gauge / donut. U3: svg + track/value circles carry the real ALEMBIC chart classes
+  // (.chart, .arc-track, .arc-val — console.css:260-280 via shell.css "U3" block); only the
+  // per-call dynamic bits (color, dasharray) stay inline.
   function ring(pct, center, sub, color) {
     var C = 2 * Math.PI * 52, dash = (C * Math.max(0, Math.min(100, pct)) / 100).toFixed(1) + ' ' + C.toFixed(1);
-    return '<div style="position:relative;width:140px;height:140px;margin:0 auto"><svg class="chart" width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)">' +
+    return '<div style="position:relative;width:140px;height:140px;margin:0 auto"><svg class="chart" width="140" height="140" viewBox="0 0 140 140" style="transform:rotate(-90deg)" aria-hidden="true">' +
       '<circle class="arc-track" cx="70" cy="70" r="52"/>' +
       '<circle class="arc-val" cx="70" cy="70" r="52" stroke="' + (color || 'var(--accent)') + '" stroke-dasharray="' + dash + '"/></svg>' +
-      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><div style="font-size:26px;font-weight:800;letter-spacing:-.02em">' + center + '</div>' +
-      '<div style="font-size:10px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3);text-transform:uppercase">' + (sub || '') + '</div></div></div>';
+      '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center"><div class="ring-c">' + center + '</div>' +
+      '<div class="ring-s">' + (sub || '') + '</div></div></div>';
   }
-  // The three-card hero band (mockup buildCelox): INSIGHT · PIPELINE SIGNALS · OUTPUT(donut).
-  var NOTE = {
-    superadmin: 'Every run is tied to its real product here — and only here. Below the vault, codes go anonymous.',
-    procurement: 'Purchasing is tracking to plan — supplier lead times are holding and reorders are clearing on time.',
-    receiving: 'Inbound is flowing — most deliveries matched their POs on the first pass with no holds raised.',
-    qc: 'Quality is on target — the pass rate holds near threshold with a short retest queue.',
-    production: 'Manufacturing is tracking to plan — orders are moving through pick, mix and QC with no CAPA overdue.',
-    compounding: 'Compounding is tracking to schedule — mixing sessions are progressing against masked worksheets.',
-    filling: 'Filling output is steady — bulk lots are feeding the line with no shortfalls.',
-    packaging: 'Packaging is keeping pace — finished-goods batches are sealing and labelling on schedule.',
-    admin: 'Access is healthy — active users are stable and roles are fully defined.',
-    warehouse: 'Storage is balanced — themed zones are within capacity with flammables held apart.',
-    sales: 'Order fulfilment is on track — finished-goods stock is covering demand and dispatches are clearing to plan.'
-  };
   function gaugeFor(p, role) {
     if (role === 'production') return [p.planActual.pct, 'Plan attainment'];
     if (role === 'qc') return [p.counts.qcPassRate, 'Pass rate'];
     if (role === 'warehouse') return [p.counts.zoneCapAvg, 'Capacity'];
     if (role === 'admin') return [p.counts.usersTotal ? Math.round(p.counts.usersActive / p.counts.usersTotal * 100) : 0, 'Active users'];
-    return [p.planActual.pct, 'Planned & actual'];
+    return [p.planActual.pct, 'Plan vs actual'];
   }
-  function heroBand(p, role, kset) {
-    var hero = kset[0], sig = [kset[1], kset[2], kset[3]];
+  // UX-C: the old three-card "hero band" (headline figure · three signals · gauge) repeated the
+  // four KPI tiles directly above it, and its headline card carried a canned sentence per role
+  // ("Purchasing is tracking to plan — supplier lead times are holding…") that no data backed.
+  // What it added — the gauge — now sits beside the role's activity panel instead.
+  function gaugeCard(p, role) {
     var g = gaugeFor(p, role), gc = g[0] >= 70 ? 'var(--accent)' : (g[0] >= 40 ? 'var(--amber)' : 'var(--red)');
-    var insightIn =
-      badge('activity', 'INSIGHT') +
-      '<div style="font-size:40px;font-weight:800;letter-spacing:-.03em;margin:16px 0 2px">' + hero[1] + '</div>' +
-      '<div style="font-size:13px;color:var(--t2);font-weight:700">' + hero[2] + '</div>' +
-      '<p style="font-size:12.5px;line-height:1.55;color:var(--t3);margin:14px 0 0">' + (NOTE[role] || NOTE.superadmin) + '</p>' +
-      miniBars((hero[1] + '').length * 31 + 5);
-    var rows = sig.map(function (m, i) {
-      var dot = ['var(--red)', 'var(--amber)', 'var(--accent)'][i];
-      return '<div style="display:flex;align-items:center;gap:11px;padding:9px 0;border-bottom:1px solid var(--border)">' +
-        '<i style="width:8px;height:8px;border-radius:var(--r-sm);background:' + dot + ';flex:none"></i>' +
-        '<div style="flex:1;font-size:13px;font-weight:600;color:var(--t2)">' + m[2] + '</div>' +
-        '<div style="font-size:16px;font-weight:800">' + m[1] + '</div></div>';
-    }).join('');
-    var signalsIn = badge('alert', 'PIPELINE SIGNALS') + '<div style="margin-top:14px">' + rows + '</div>';
-    var outputIn = badge('layers', 'OUTPUT') + '<div style="margin:16px 0 4px">' + ring(g[0], g[0] + '%', g[1], gc) + '</div>' +
-      '<div style="display:flex;gap:10px;margin-top:6px">' +
-      [kset[1], kset[2]].map(function (m, i) { return '<div style="flex:1;background:var(--well);box-shadow:var(--ins-sm);border-radius:var(--r-md);padding:10px 12px"><div style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.1em;color:var(--t3)">' + ['TOP', 'MED'][i] + '</div><div style="font-size:13px;font-weight:800;margin-top:2px">' + m[1] + '</div><div style="font-size:10.5px;color:var(--t3)">' + m[2] + '</div></div>'; }).join('') +
-      '</div>';
-    // Procurement asked to drop the (redundant) PIPELINE SIGNALS card → 2-card band there.
-    // U3b: real ALEMBIC .gwrap 12-col grid (console.css:172-183, shell.css "U3b" block) replaces
-    // the old ad-hoc data-grid/applyDashCols JS stack — .gwrap already collapses to one card per
-    // row at <=1023, so tablet/phone single-column is CSS-native, no resize listener needed.
-    if (role === 'procurement') return '<div class="gwrap">' + gcard(insightIn, 'c6') + gcard(outputIn, 'c6') + '</div>';
-    return '<div class="gwrap">' + gcard(insightIn, 'c4') + gcard(signalsIn, 'c4') + gcard(outputIn, 'c4') + '</div>';
+    return gCard({ title: g[1], span: 'c4', body: '<div style="margin:auto 0">' + ring(g[0], g[0] + '%', '', gc) + '</div>' });
   }
-  // Side panel — donut / bars / feed / pipeline (mockup buildSide), real data.
+  // Side panel — donut / bars / feed / pipeline, real data.
   function sideDonut(p) {
     var q = p.qc, tot = q.pass + q.fail, pct = tot ? Math.round(q.pass / tot * 100) : 0;
     var legend = [['Pass', q.pass, 'var(--green)'], ['Fail', q.fail, 'var(--red)'], ['Pending', q.pending, 'var(--amber)']].map(function (l) {
-      return '<div style="display:flex;align-items:center;gap:9px;padding:7px 0"><i style="width:9px;height:9px;border-radius:var(--r-sm);background:' + l[2] + '"></i><div style="flex:1;font-size:13px;color:var(--t2);font-weight:600">' + l[0] + '</div><div style="font-weight:800">' + l[1] + '</div></div>';
+      return '<div class="kv"><i class="sw-dot" style="background:' + l[2] + '"></i><span class="k">' + l[0] + '</span><span class="v">' + l[1] + '</span></div>';
     }).join('');
-    return '<div style="margin:6px 0 10px">' + ring(pct, pct + '%', 'Pass', 'var(--green)') + '</div>' + legend;
+    return '<div style="margin:var(--s-tight) 0 var(--s-snug)">' + ring(pct, pct + '%', 'Pass', 'var(--green)') + '</div>' + legend;
   }
   function sideBars(items) {
     return items.map(function (it) {
-      return '<div style="padding:9px 0"><div style="display:flex;justify-content:space-between;font-size:12.5px;margin-bottom:7px"><span style="font-weight:700;color:var(--t2)">' + it.label + '</span><span style="font-weight:800">' + it.pct + '%</span></div>' +
-        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + it.pct + '%;height:100%;background:' + clsCol(it.cls) + ';border-radius:var(--r-sm)"></i></div></div>';
+      return '<div style="padding:var(--s-tight) 0"><div class="kv" style="border:0;padding:0 0 var(--s-tight)"><span class="k">' + it.label + '</span><span class="v">' + it.pct + '%</span></div>' +
+        '<div class="meter"><i style="width:' + it.pct + '%;background:' + clsCol(it.cls) + '"></i></div></div>';
     }).join('');
   }
   function sidePipe(items) {
     var max = Math.max.apply(null, items.map(function (i) { return i[1]; })) || 1;
     return items.map(function (it) {
-      return '<div style="display:flex;align-items:center;gap:11px;padding:6px 0"><div style="width:86px;font-size:12px;font-weight:700;color:var(--t2);flex:none">' + it[0] + '</div>' +
-        '<div style="flex:1;height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + Math.round(it[1] / max * 100) + '%;height:100%;background:var(--accent);opacity:.85;border-radius:var(--r-sm)"></i></div>' +
-        '<div style="width:26px;text-align:right;font-weight:800;font-size:13px">' + it[1] + '</div></div>';
+      return '<div class="kv" style="border:0"><span class="k" style="flex:0 0 96px">' + it[0] + '</span>' +
+        '<div class="meter" style="flex:1"><i style="width:' + Math.round(it[1] / max * 100) + '%;background:var(--accent)"></i></div>' +
+        '<span class="v" style="min-width:28px;text-align:right">' + it[1] + '</span></div>';
     }).join('');
   }
   function sideFeed(items) {
-    if (!items.length) return '<div style="color:var(--t3);font-size:13px;padding:20px 0">No recent activity.</div>';
+    if (!items.length) return '<div class="empty" style="padding:var(--s-base) 0"><p>No recent activity.</p></div>';
     return items.map(function (it) {
-      return '<div style="display:flex;gap:11px;padding:10px 0;border-bottom:1px solid var(--border)"><i style="width:8px;height:8px;border-radius:50%;background:' + it.dot + ';margin-top:5px;flex:none"></i>' +
-        '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--t1);line-height:1.4">' + it.text + '</div><div style="font-size:11px;color:var(--t3);margin-top:2px">' + relTime(it.ts) + '</div></div></div>';
+      return '<div class="kv" style="align-items:flex-start"><i class="sw-dot" style="background:' + it.dot + ';margin-top:6px"></i>' +
+        '<div style="flex:1;min-width:0"><div style="font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink)">' + it.text + '</div><div style="font:var(--w-reg) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);margin-top:var(--s-hair)">' + relTime(it.ts) + '</div></div></div>';
     }).join('');
   }
   function sidePanel(p, role) {
     var spec = {
-      superadmin: ['Production pipeline', 'Units in flight across the floor', sidePipe(p.pipeline)],
+      superadmin: ['Pipeline', 'In progress', sidePipe(p.pipeline)],
       procurement: ['Spend by supplier', 'Share of PO value', sideBars(p.spendByVendor)],
-      qc: ['Batch results', "Today's testing outcomes", sideDonut(p)],
-      receiving: ['Dock activity', 'Inbound, latest first', sideFeed(p.feed)],
-      filling: ['Line activity', 'Filling line, latest first', sideFeed(p.feed)],
-      packaging: ['Packaging activity', 'Finished goods, latest first', sideFeed(p.feed)],
-      admin: ['Audit log', 'Recent governance events', sideFeed(p.feed)],
-      production: ['Production pipeline', 'Units in flight across the floor', sidePipe(p.pipeline)],
-      compounding: ['Mixing room', 'Recent activity', sideFeed(p.feed)],
-      sales: ['Dispatch activity', 'Orders & dispatches, latest first', sideFeed(p.feed)]
+      qc: ['Batch results', 'Today', sideDonut(p)],
+      receiving: ['Dock activity', 'Latest first', sideFeed(p.feed)],
+      filling: ['Line activity', 'Latest first', sideFeed(p.feed)],
+      packaging: ['Packaging activity', 'Latest first', sideFeed(p.feed)],
+      admin: ['Audit log', 'Latest first', sideFeed(p.feed)],
+      production: ['Pipeline', 'In progress', sidePipe(p.pipeline)],
+      compounding: ['Mixing room', 'Latest first', sideFeed(p.feed)],
+      sales: ['Dispatch activity', 'Latest first', sideFeed(p.feed)]
     }[role] || ['Activity', 'Latest first', sideFeed(p.feed)];
-    return '<div class="card"><div class="card-hd"><h2>' + spec[0] + '</h2><span class="n">' + spec[1] + '</span></div><div class="card-bd">' + spec[2] + '</div></div>';
+    return gCard({ title: spec[0], meta: spec[1], span: role === 'superadmin' ? 'c4' : 'c8', top: true, body: '<div>' + spec[2] + '</div>' });
   }
-  // Super-Admin chain of custody — the REAL 24-step flow grouped into 10 stages, with the formula-
-  // vault masking boundary in its true position (after Formula Selection). Flex layout (no absolute
+  // Super-Admin chain of custody — the 24-step flow grouped into 10 stages, with the formula-vault
+  // masking boundary in its true position (after Formula Selection). Flex layout (no absolute
   // coords) so it stays correct + responsive. Data is live from /v1/dashboard.flow.
   var FLOW_PRE = [['stockPlanning', 'Stock planning', 'list'], ['procurement', 'Procurement', 'clipboard'], ['receiving', 'Receiving', 'truck'], ['qc', 'Quality control', 'flask'], ['storage', 'Inventory storage', 'box']];
   var FLOW_POST = [['compounding', 'Compounding', 'beaker'], ['productionQc', 'Production QC', 'activity'], ['packaging', 'Packaging', 'pkg'], ['salesDispatch', 'Sales & dispatch', 'truck']];
-  var ARROW_R = '<span style="display:grid;place-items:center;color:var(--t3);flex:none;align-self:center"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>';
-  var ARROW_D = '<div style="display:flex;justify-content:center;padding:3px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
+  var ARROW_R = '<span style="display:grid;place-items:center;color:var(--ink-3);flex:none;align-self:center" aria-hidden="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></span>';
+  var ARROW_D = '<div style="display:flex;justify-content:center;padding:var(--s-hair) 0;color:var(--ink-3)" aria-hidden="true"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
   function stageCard(num, name, ic, stage, masked) {
     stage = stage || { count: 0, codes: [] };
     var codes = (stage.codes || []).map(function (c) {
-      return '<div style="display:flex;flex-direction:column;padding:3px 0"><span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + (masked ? 'var(--t2)' : 'var(--accent)') + '">' + c.code + '</span><span style="font-size:10px;color:var(--t3)">' + c.sub + '</span></div>';
-    }).join('') || '<div style="font-size:11px;color:var(--t3);padding:3px 0">—</div>';
-    return '<div style="flex:1;min-width:152px;background:var(--surface);border:1px solid var(--cbord);backdrop-filter:var(--cblur);border-radius:var(--r-md);box-shadow:var(--rai-sm);padding:12px 13px">' +
-      '<div style="display:flex;align-items:center;gap:7px;margin-bottom:8px">' +
-      '<span style="width:21px;height:21px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent);display:grid;place-items:center;font-size:11px;font-weight:800;flex:none">' + num + '</span>' +
-      '<span style="display:grid;place-items:center;color:var(--t2);flex:none">' + icon(ic, 14) + '</span>' +
-      '<span style="font-weight:700;font-size:12.5px;flex:1;line-height:1.1;letter-spacing:-.01em">' + name + '</span>' +
-      '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3);flex:none">' + stage.count + '</span></div>' + codes + '</div>';
+      return '<div style="display:flex;flex-direction:column;padding:3px 0"><span style="font:var(--w-med) var(--t-cap)/1.3 var(--font-mono);color:' + (masked ? 'var(--ink-2)' : 'var(--accent-ink)') + '">' + c.code + '</span><span style="font:var(--w-reg) var(--t-micro)/1.3 var(--font-ui);color:var(--ink-3)">' + c.sub + '</span></div>';
+    }).join('') || '<div style="font:var(--w-reg) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);padding:3px 0">—</div>';
+    return '<div style="flex:1;min-width:152px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s-snug)">' +
+      '<div style="display:flex;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-tight)">' +
+      '<span style="width:22px;height:22px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font:var(--w-med) var(--t-micro)/1 var(--font-ui);flex:none">' + num + '</span>' +
+      '<span style="display:grid;place-items:center;color:var(--ink-2);flex:none">' + icon(ic, 14) + '</span>' +
+      '<span style="font:var(--w-med) var(--t-cap)/1.15 var(--font-ui);flex:1">' + name + '</span>' +
+      '<span style="font:var(--w-reg) var(--t-micro)/1 var(--font-mono);color:var(--ink-3);flex:none">' + stage.count + '</span></div>' + codes + '</div>';
   }
   function flowRow(metas, p, start, masked) {
     var parts = [];
@@ -624,34 +723,29 @@
       parts.push(stageCard(start + i, m[1], m[2], p.flow[m[0]], masked));
       if (i < metas.length - 1) parts.push(ARROW_R);
     });
-    return '<div style="display:flex;align-items:stretch;gap:7px;flex-wrap:wrap">' + parts.join('') + '</div>';
+    return '<div style="display:flex;align-items:stretch;gap:var(--s-tight);flex-wrap:wrap">' + parts.join('') + '</div>';
   }
   function flowGraph(p) {
     var rev = p.reveal.product, fv = p.flow.formula || { count: 0, codes: [] };
     var fcodes = (fv.codes || []).map(function (c) { return c.code; }).join(' · ');
-    var sub = rev ? ('selects ' + (fcodes || 'the formula') + ' — everything below shows aliases only') : ('protected — ' + fv.count + ' formulas sealed');
-    var vault = '<div style="display:flex;align-items:center;gap:13px;background:var(--accent);color:#26262B;border-radius:var(--r-md);padding:14px 18px;box-shadow:var(--rai-sm)">' +
-      '<span style="width:40px;height:40px;border-radius:var(--r-md);background:rgba(255,255,255,.18);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
-      '<div style="flex:1;min-width:0"><div style="display:flex;align-items:center;gap:9px;flex-wrap:wrap"><span style="font-weight:800;font-size:14px">6 · Formula selection</span><span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;letter-spacing:.12em;opacity:.85">VAULT · MASKING BOUNDARY</span></div>' +
-      '<div style="font-size:11.5px;opacity:.92;margin-top:2px">' + sub + '</div></div>' +
-      '<span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;opacity:.85;flex:none">' + fv.count + ' formulas</span></div>';
-    function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:10px;margin:4px 0"><span style="font-size:10px;font-family:\'JetBrains Mono\',monospace;color:' + col + ';letter-spacing:.12em;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--border)"></div></div>'; }
-    return '<div class="card"><div class="card-hd"><h2>Chain of custody</h2><span class="n">The real 24-step flow · stock planning &rarr; customer delivery</span>' +
-      '<span style="margin-left:auto;font-family:\'JetBrains Mono\',monospace;font-size:10px;color:var(--accent);border:1px solid var(--accent-soft);border-radius:var(--r-sm);padding:4px 9px;flex:none">' + (rev ? 'IDENTITY VISIBLE' : 'ANONYMISED') + '</span></div>' +
-      '<div class="card-bd">' +
-      divider('IDENTITY VISIBLE', 'var(--t3)') +
+    var sub = rev ? ('Selects ' + (fcodes || 'the formula') + '. Aliases only below this point.') : (fv.count + ' formulas sealed');
+    var vault = '<div style="display:flex;align-items:center;gap:var(--s-snug);background:var(--accent);color:var(--ink);border-radius:var(--r-md);padding:var(--s-snug) var(--s-base)">' +
+      '<span style="width:40px;height:40px;border-radius:var(--r-md);background:rgba(255,255,255,.35);display:grid;place-items:center;flex:none">' + icon('lock', 20) + '</span>' +
+      '<div style="flex:1;min-width:0"><div style="font:var(--w-med) var(--t-h3)/1.2 var(--font-ui)">6 · Formula selection</div>' +
+      '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);margin-top:var(--s-hair)">' + sub + '</div></div>' +
+      '<span style="font:var(--w-reg) var(--t-micro)/1 var(--font-mono);flex:none">' + fv.count + ' formulas</span></div>';
+    function divider(txt, col) { return '<div style="display:flex;align-items:center;gap:var(--s-tight);margin:var(--s-tight) 0"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);color:' + col + ';letter-spacing:var(--ls-wide);text-transform:uppercase;flex:none">' + txt + '</span><div style="flex:1;height:1px;background:var(--line)"></div></div>'; }
+    return gCard({ title: 'Chain of custody', meta: 'Stock planning to delivery · ' + (rev ? 'identity visible' : 'anonymised'), span: 'c12', top: true, body: '<div>' +
+      divider('Identity visible', 'var(--ink-3)') +
       flowRow(FLOW_PRE, p, 1, false) +
       ARROW_D + vault + ARROW_D +
-      divider('&#128274; ANONYMISED — ALIASES ONLY', 'var(--accent)') +
+      divider('Aliases only', 'var(--ink-3)') +
       flowRow(FLOW_POST, p, 7, true) +
-      '<div style="font-size:10.5px;color:var(--t3);margin-top:12px;line-height:1.5">1 stock planning &middot; 2 procurement (PR&rarr;RFQ&rarr;quote&rarr;PO) &middot; 3 receiving (gate&rarr;GRN&rarr;batch) &middot; 4 QC &middot; 5 storage &middot; 6 formula vault &middot; 7 compounding (pick&rarr;issue&rarr;mix&rarr;oil) &middot; 8 production QC &middot; 9 packaging (fill&rarr;FG) &middot; 10 sales &amp; dispatch.</div>' +
-      '</div></div>';
+      '</div>' });
   }
   function runsTable(p) {
-    // U3b: real Data table grammar (shell.css thead th/tbody td, COMPONENT_PARITY_MATRIX.json
-    // "Data table") — bare <table> inside .card-bd picks up sticky header/hover/mono styling for
-    // free, no more per-cell inline styles. .tscroll (shell.css "U3b" block) lets a wide table
-    // scroll inside its own card instead of pushing the page wide.
+    // U3b: real Data table grammar (shell.css thead th/tbody td) inside .card-bd; .tscroll lets a
+    // wide table scroll inside its own card instead of pushing the page wide.
     var head = ['Run', 'Product', 'Stage', 'Batch', 'Target', 'Status'].map(function (h) { return '<th>' + h + '</th>'; }).join('');
     var body = p.runs.map(function (r) {
       return '<tr><td class="mono">' + r.run + '</td>' +
@@ -661,34 +755,30 @@
         '<td>' + r.target + '</td>' +
         '<td>' + fmt('status', r.status) + '</td></tr>';
     }).join('');
-    return '<div class="card"><div class="card-hd"><h2>Master run index</h2></div><div class="card-bd tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div></div>';
+    return gCard({ title: 'Master runs', meta: p.runs.length + ' runs', span: 'c8', top: true, body: '<div class="tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' });
   }
-  // Warehouse floor zone map (mockup buildWarehouse), real zones + rack counts + batch occupancy.
+  // Warehouse floor zone map — real zones + rack counts + batch occupancy.
   function warehouseMap(p) {
-    // U3b: zone tiles are a dynamic-length collection (however many zones this tenant has
-    // seeded), so they sit in .gwrap-auto (shell.css "U3b" block — an auto-fit track built on
-    // the same .gwrap gap/card language) as .gcard.glass surfaces rather than a fixed c-span.
+    // U3b: zone tiles are a dynamic-length collection, so they sit in .gwrap-auto as .gcard.glass
+    // surfaces rather than a fixed c-span.
     var zones = p.zones.map(function (z) {
       var capCol = z.capPct >= 85 ? 'var(--red)' : (z.capPct >= 65 ? 'var(--amber)' : 'var(--accent)');
-      var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--well)') + ';box-shadow:' + (on ? 'none' : 'var(--ins-sm)') + '"></i>'; }
-      return gcard(
-        '<div style="display:flex;align-items:center;gap:9px;margin-bottom:3px"><i style="width:11px;height:11px;border-radius:var(--r-sm);background:' + clsCol(z.cls) + '"></i><div style="font-weight:800;font-size:14.5px;flex:1">' + z.name + '</div>' + (z.code === 'Z4' ? '<span style="font-size:9px;font-family:\'JetBrains Mono\',monospace;color:var(--red);border:1px solid var(--red);border-radius:var(--r-sm);padding:2px 6px">FLAMMABLE</span>' : '') + '</div>' +
-        '<div style="font-size:11.5px;color:var(--t3);margin-bottom:12px">' + z.racks + ' racks · ' + z.batches + ' batches stored</div>' +
-        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px;margin-bottom:12px">' + cells + '</div>' +
-        '<div style="display:flex;justify-content:space-between;font-size:11.5px;margin-bottom:6px"><span style="color:var(--t3);font-weight:600">Capacity used</span><span style="font-weight:800;color:' + capCol + '">' + z.capPct + '%</span></div>' +
-        '<div style="height:9px;border-radius:var(--r-sm);background:var(--well);box-shadow:var(--ins-sm);overflow:hidden"><i style="display:block;width:' + z.capPct + '%;height:100%;background:' + capCol + ';border-radius:var(--r-sm)"></i></div>'
-      );
+      var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--panel-3)') + '"></i>'; }
+      return gCard({ span: 'c4', title: z.name, meta: z.racks + ' racks · ' + z.batches + ' batches', body:
+        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px" aria-hidden="true">' + cells + '</div>' +
+        '<div class="kv" style="border:0;padding:0"><span class="k">Capacity used</span><span class="v" style="color:' + (capCol === 'var(--accent)' ? 'var(--ink)' : capCol) + '">' + z.capPct + '%</span></div>' +
+        '<div class="meter"><i style="width:' + z.capPct + '%;background:' + capCol + '"></i></div>' +
+        (z.code === 'Z4' ? '<span class="chip r" style="align-self:flex-start">Flammable</span>' : '')
+      });
     }).join('');
-    var workSeed = p.counts.skusStored * 7 + p.counts.invOnHand;
-    var bars = ''; var s = workSeed; for (var i = 0; i < 14; i++) { s = (s * 48271) % 2147483647 || 11; var h = 14 + (s % 46); bars += '<i style="flex:1;border-radius:var(--r-sm) 3px 0 0;height:' + h + 'px;background:var(--accent);opacity:.82"></i>'; }
-    var workload = gcard(badge('activity', 'STORAGE WORKLOAD') + '<div style="display:flex;align-items:flex-end;gap:4px;height:74px;margin:16px 0 4px">' + bars + '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:10px;font-family:\'JetBrains Mono\',monospace;color:var(--t3)"><span>06:00</span><span>12:00</span><span>18:00</span></div>', 'c6');
-    var floorSummary = '<div class="card c6"><div class="card-hd"><h2>Floor summary</h2><span class="n">Live totals across the warehouse</span></div><div class="card-bd">' +
-      [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Total racks', p.counts.racks]].map(function (r) {
-        return '<div style="display:flex;justify-content:space-between;padding:9px 0;border-bottom:1px solid var(--border)"><span style="font-size:13px;color:var(--t2);font-weight:600">' + r[0] + '</span><span style="font-weight:800;font-size:15px">' + r[1] + '</span></div>';
-      }).join('') + '</div></div>';
-    return '<div class="gwrap-auto" style="margin-bottom:16px">' + zones + '</div>' +
-      '<div class="gwrap">' + workload + floorSummary + '</div>';
+    // UX-C: the "Storage workload" bar chart beside this card was pseudo-random bars under a fixed
+    // 06:00/12:00/18:00 axis — no hourly data exists behind it — so it is gone; the floor summary
+    // (real counts) now spans the row.
+    var floorSummary = gCard({ title: 'Floor summary', span: 'c12', top: true, body: '<div>' +
+      [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Racks', p.counts.racks]].map(function (r) {
+        return '<div class="kv"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>';
+      }).join('') + '</div>' });
+    return '<div class="gwrap">' + zones + '</div><div class="gwrap">' + floorSummary + '</div>';
   }
   // Per-role KPI set (4 cards) computed from the real counts payload.
   function kpiSet(p, role) {
@@ -709,15 +799,15 @@
     return (S[role] || S.superadmin).map(function (k) { var v = String(k[1]); return [k[0], v, k[2], '', (parseInt(v, 10) || v.length) * 13 + 3]; });
   }
   async function loadDashboard() {
-    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING · ENCRYPTED CHANNEL…</div>';
+    var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
     var res;
-    try { res = await tunnel('/v1/dashboard'); } catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
-    if (res.status === 403) { V.innerHTML = errBox('Your role does not have a dashboard yet.'); return; }
+    try { res = await tunnel('/v1/dashboard'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
+    if (res.status === 403) { V.innerHTML = errBox('No dashboard for this role yet.'); return; }
     var p = res.json && res.json.data;
-    if (!p) { V.innerHTML = errBox('No dashboard data returned.'); return; }
+    if (!p) { V.innerHTML = errBox('The dashboard came back empty.'); return; }
     st.dash = p;
     var role = st.role, kset = kpiSet(p, role);
-    var kpis = '<div class="stats" style="margin-bottom:16px">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
+    var kpis = '<div class="stats">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
     // "My work" — the role's actionable queue at the top of the home (tap a tile to jump to the screen that resolves it)
     var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.json && ar.json.data; } catch (e) {}
     var html = myWorkPanel(ad) + kpis;
@@ -725,31 +815,37 @@
       html += warehouseMap(p);
     } else if (role === 'superadmin') {
       // U3b: .gwrap c8/c4 (shell.css "U3b" block) — real GCard grid row, collapsing to one
-      // card per row at <=1023 on its own (see heroBand comment); no data-grid/applyDashCols.
-      html += '<div style="margin-bottom:16px">' + heroBand(p, role, kset) + '</div>' + '<div style="margin-bottom:16px">' + flowGraph(p) + '</div>' +
-        '<div class="gwrap"><div class="c8">' + runsTable(p) + '</div><div class="c4">' + sidePanel(p, role) + '</div></div>';
+      // card per row at <=1023 on its own; no data-grid/applyDashCols.
+      html += '<div class="gwrap">' + flowGraph(p) + '</div>' +
+        '<div class="gwrap">' + runsTable(p) + sidePanel(p, role) + '</div>';
     } else {
-      html += '<div style="margin-bottom:16px">' + heroBand(p, role, kset) + '</div>' + sidePanel(p, role);
+      html += '<div class="gwrap">' + sidePanel(p, role) + gaugeCard(p, role) + '</div>';
     }
     V.innerHTML = html;
+    wireExpand(V);
     [].forEach.call(document.querySelectorAll('#ra-view [data-work-nav]'), function (el) {
-      el.onclick = function () { st.nav = el.getAttribute('data-work-nav'); st.search = ''; shell(); };
+      el.onclick = function () { navTo(el.getAttribute('data-work-nav')); };
     });
   }
   // The role's actionable queue: clickable tiles from the role-filtered alerts.
   function myWorkPanel(ad) {
     var alerts = (ad && ad.alerts) || [];
     var inner;
-    if (!alerts.length) inner = '<div style="color:var(--t3);font-size:13px;padding:4px 2px">All clear — nothing needs your action right now &#10003;</div>';
-    else inner = '<div style="display:flex;gap:12px;flex-wrap:wrap">' + alerts.map(function (a) {
-      var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent)');
+    if (!alerts.length) inner = '<p style="margin:0;font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3)">Nothing needs action.</p>';
+    else inner = '<div style="display:flex;gap:var(--s-snug);flex-wrap:wrap">' + alerts.map(function (a) {
+      // Low severity used to print in --accent (#E9F260) on a near-white tile — ~1.2:1. Its ink
+      // counterpart keeps the same hue family at a readable contrast.
+      var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent-ink)');
       var nk = alertNavKey(a.kind);
-      return '<div ' + (nk ? 'data-work-nav="' + nk + '"' : '') + ' style="flex:1;min-width:168px;background:var(--well);border-radius:var(--r-md);padding:13px 15px;' + (nk ? 'cursor:pointer' : '') + '"><div style="display:flex;align-items:center;justify-content:space-between"><span style="font-size:10.5px;font-weight:800;letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font-weight:800;font-size:20px;color:' + col + '">' + a.count + '</span></div><div style="font-size:11.5px;color:var(--t3);margin-top:3px">' + a.sub + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div></div>';
+      var tag = nk ? 'button type="button"' : 'div';
+      return '<' + tag + (nk ? ' data-work-nav="' + nk + '"' : '') + ' class="work-tile" style="flex:1;min-width:168px;text-align:left;border-radius:var(--r-md);padding:var(--s-snug)">' +
+        '<div style="display:flex;align-items:center;justify-content:space-between;gap:var(--s-tight)"><span style="font:var(--w-med) var(--t-micro)/1.2 var(--font-ui);letter-spacing:.06em;text-transform:uppercase;color:' + col + '">' + a.title + '</span><span style="font:var(--w-med) var(--t-h1)/1 var(--font-ui);color:' + col + '">' + a.count + '</span></div>' +
+        '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);margin-top:var(--s-hair)">' + a.sub + (nk ? ' &rsaquo;' : '') + '</div></' + (nk ? 'button' : 'div') + '>';
     }).join('') + '</div>';
     // U3b: real .card/.card-hd/.card-bd grammar for the outer panel; the hover feedback on a
     // clickable tile moves from inline onmouseover/onmouseout box-shadow swaps (the legacy
     // --ins-sm/--rai-sm shim) to a plain CSS rule on [data-work-nav] (shell.css "U3b" block).
-    return '<div class="card" style="margin-bottom:16px"><div class="card-hd"><h2>My work</h2><span class="n">what needs your attention · tap to act</span></div><div class="card-bd">' + inner + '</div></div>';
+    return '<div class="gwrap strip" style="margin-bottom:var(--gr-gap)">' + gCard({ title: 'My work', meta: alerts.length ? alerts.length + ' queues need action' : '', span: 'c12', expand: false, body: inner }) + '</div>';
   }
   /* ---------------- flow actions: existing POST routes wired to per-row buttons ---------------- */
   // The role must hold the permission (owner/super_admin hold all) AND the row must be in the
@@ -777,8 +873,8 @@
         raConfirm('Revoke this role assignment? It takes effect on the user\'s next sign-in / token refresh.', function () {
           tunnel('/v1/user-roles/' + (r.userRoleMappingId != null ? r.userRoleMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
             if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-            toast('Revoked ✓', 'good'); loadView();
-          }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+            toast('Revoked', 'good'); loadView();
+          }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
         }, { title: 'Revoke role assignment', confirmLabel: 'Revoke', tone: 'bad' });
       } }
     ],
@@ -787,8 +883,8 @@
         raConfirm('Revoke this permission from the role?', function () {
           tunnel('/v1/role-permissions/' + (r.rolePermissionMappingId != null ? r.rolePermissionMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
             if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-            toast('Revoked ✓', 'good'); loadView();
-          }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+            toast('Revoked', 'good'); loadView();
+          }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
         }, { title: 'Revoke permission', confirmLabel: 'Revoke', tone: 'bad' });
       } }
     ],
@@ -800,8 +896,8 @@
         var id = r.stockReservationId != null ? r.stockReservationId : guessId(r);
         tunnel('/v1/masters/reservations/' + id, { method: 'PATCH', body: { status: 'RELEASED' } }).then(function (res) {
           if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
-          toast('Released ✓', 'good'); loadView();
-        }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+          toast('Released', 'good'); loadView();
+        }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
       } }
     ],
     '/v1/purchase-requests': [
@@ -997,9 +1093,11 @@
     scrim.className = 'xp-scrim open'; if (o.scrimId) scrim.id = o.scrimId;
     var titleId = 'ra-sheet-t' + (_sheetSeq++);
     var tag = o.tag || 'div';
-    scrim.innerHTML = '<' + tag + (o.id ? ' id="' + o.id + '"' : '') + ' class="xp-sheet' + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + ' role="dialog" aria-modal="true" aria-labelledby="' + titleId + '">' +
-      '<div class="xp-sheet-hd"><h2 id="' + titleId + '">' + o.title + '</h2><button type="button" class="xp" data-sheet-x aria-label="Close">&times;</button></div>' +
-      '<div class="xp-sheet-bd">' + o.body + '</div>' +
+    // Reference ExpandSheet markup: a glass-deep sheet (display gated on .open only), a t-h1 title
+    // with an optional t-cap line, and the reference's × control.
+    scrim.innerHTML = '<' + tag + (o.id ? ' id="' + o.id + '"' : '') + ' class="glass glass-deep xp-sheet open' + (o.cls ? ' ' + o.cls : '') + '"' + (o.style ? ' style="' + o.style + '"' : '') + ' role="dialog" aria-modal="true" aria-labelledby="' + titleId + '">' +
+      '<div class="xp-sheet-hd"><div style="flex:1;min-width:0"><h2 class="t-h1" id="' + titleId + '">' + o.title + '</h2>' + (o.meta ? '<p class="t-cap" style="margin-top:6px">' + o.meta + '</p>' : '') + '</div><button type="button" class="xp" data-sheet-x aria-label="Close">' + CI.x + '</button></div>' +
+      '<div class="xp-sheet-bd form">' + o.body + '</div>' +
     '</' + tag + '>';
     document.body.appendChild(scrim); setTheme();
     var sheet = scrim.firstElementChild;
@@ -1038,7 +1136,7 @@
     var tone = opts.tone === 'good' ? 'g' : (opts.tone === 'accent' ? 'p' : 'r');
     var m = openSheet({
       id: 'ra-confirm', tag: 'div', style: 'max-width:380px', title: opts.title || 'Confirm',
-      body: '<div style="font-size:13.5px;color:var(--ink-2);line-height:1.5">' + escHtml(message) + '</div>' +
+      body: '<div style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-2)">' + escHtml(message) + '</div>' +
         '<div style="display:flex;gap:8px;margin-top:4px">' +
           '<button type="button" class="btn" data-confirm-no style="flex:1;justify-content:center">Cancel</button>' +
           '<button type="button" class="btn ' + tone + '" data-confirm-yes style="flex:1;justify-content:center">' + escHtml(opts.confirmLabel || 'Confirm') + '</button>' +
@@ -1066,7 +1164,7 @@
       return true;
     }).map(function (k) {
       return '<div><div class="sect" style="margin-bottom:4px">' + label(k) + '</div><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui);color:var(--ink);word-break:break-word">' + fmt(k, row[k], row) + '</div></div>';
-    }).join('') || '<div style="color:var(--ink-3);font-size:12px">No details.</div>';
+    }).join('') || '<div style="color:var(--ink-3);font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui)">No details.</div>';
     return '<div class="fgrid">' + cells + '</div>' + (cfg.items ? '<div class="sect" style="margin:16px 0 6px">Line items</div><div class="ra-ditems">Loading…</div>' : '');
   }
   function loadRowDetailItems(cfg, id, box) {
@@ -1075,9 +1173,9 @@
       if (!box.parentNode) return;
       if (!mine.length) { box.textContent = 'No line items recorded.'; return; }
       var cols = cfg.items.cols;
-      box.innerHTML = '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse"><thead><tr>' +
-        cols.map(function (c) { return '<th style="text-align:left;font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3);padding:6px 8px;border-bottom:1px solid var(--line)">' + label(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-        mine.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td style="padding:8px 8px;border-bottom:1px solid var(--line);font-size:12.5px;color:var(--ink);white-space:nowrap">' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
+      box.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' +
+        cols.map(function (c) { return '<th>' + label(c) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        mine.map(function (r) { return '<tr>' + cols.map(function (c) { return '<td>' + fmt(c, r[c]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>';
     }).catch(function () { if (box.parentNode) box.textContent = 'Could not load line items.'; });
   }
   // Toggle the inline detail row under `tr` (only one open at a time — keeps dense tables legible).
@@ -1113,8 +1211,8 @@
       else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '" class="fld">'; }
       return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l) + ctrl + '</label>';
     }).join('');
-    var body = rows + '<div id="ra-eerr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-      '<button type="submit" class="btn p" id="ra-esave" style="width:100%;justify-content:center;height:40px">Save changes</button>';
+    var body = rows + '<div id="ra-eerr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" class="btn p" id="ra-esave" style="width:100%;justify-content:center;height:var(--ch-touch-floor-coarse-pointer)">Save</button>';
     var m = openSheet({ id: 'ra-eform', tag: 'form', style: 'max-width:440px', title: cfg.title, body: body });
     var ov = m.sheet;
     // prefill current values (via JS so quotes/markup in data can't break the form)
@@ -1134,9 +1232,9 @@
       var save = ov.querySelector('#ra-esave'); save.disabled = true; save.textContent = 'Saving…';
       var editUrl = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
       tunnel(editUrl, { method: 'PATCH', body: body2 }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save changes'; ov.querySelector('#ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
-        m.close(); toast('Saved ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Save changes'; ov.querySelector('#ra-eerr').textContent = 'Could not reach the secure channel.'; });
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save'; ov.querySelector('#ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
+        m.close(); toast('Saved', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save'; ov.querySelector('#ra-eerr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
   function toggleActive(endpoint, cfg, row) {
@@ -1149,8 +1247,8 @@
       var url = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
       tunnel(url, { method: 'PATCH', body: body }).then(function (res) {
         if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
-        toast(verb + 'd ✓', 'good'); loadView();
-      }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        toast(verb + 'd', 'good'); loadView();
+      }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     }, { title: verb + ' record', confirmLabel: verb, tone: active ? 'bad' : 'good' });
   }
   // generic status transition via the guarded edit registry (maturation, etc.).
@@ -1158,8 +1256,8 @@
     var id = row[idKey] != null ? row[idKey] : guessId(row);
     tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: status } }).then(function (res) {
       if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || (verb + ' failed'), 'bad'); return; }
-      toast(verb + ' ✓', 'good'); loadView();
-    }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+      toast(verb + '', 'good'); loadView();
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   // workflow reject — send a PR/PO back (status → REJECTED). Approvals were one-way before.
   function rejectDoc(resource, idKey, row) {
@@ -1168,8 +1266,8 @@
     raConfirm('Reject this ' + noun + '? This sends it back and cannot be undone from here.', function () {
       tunnel('/v1/masters/' + resource + '/' + id, { method: 'PATCH', body: { status: 'REJECTED' } }).then(function (res) {
         if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Reject failed', 'bad'); return; }
-        toast('Rejected ✓', 'good'); loadView();
-      }).catch(function () { toast('Could not reach the secure channel', 'bad'); });
+        toast('Rejected', 'good'); loadView();
+      }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     }, { title: 'Reject ' + noun, confirmLabel: 'Reject', tone: 'bad' });
   }
 
@@ -1188,20 +1286,20 @@
       }).join('');
     }
     function open(extra) {
-      var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print', 'bad'); return; }
+      var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print.', 'bad'); return; }
       var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + docTitle + '</title><style>' +
         'body{font-family:Arial,Helvetica,sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto}' +
-        'h1{font-size:14px;letter-spacing:.16em;color:#141413;margin:0}h2{font-size:20px;margin:4px 0}.sub{color:#66665E;font-size:12px}' +
+        'h1{font-size:14px;letter-spacing:.16em;color:#141413;margin:0;font-weight:600}h2{font-size:20px;margin:4px 0}.sub{color:#66665E;font-size:12px}' +
         'hr{border:none;border-top:2px solid #E6E6E3;margin:14px 0}table{width:100%;border-collapse:collapse;margin-top:8px}' +
         'td{padding:7px 10px;border-bottom:1px solid #E6E6E3;font-size:13px}.k{color:#66665E;width:42%;font-weight:600}.v{font-weight:700}' +
         '.sec{margin-top:20px;font-size:11px;letter-spacing:.1em;color:#66665E;font-weight:800}' +
         '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #D6D6D2;padding-top:6px;font-size:12px;color:#66665E;width:210px;text-align:center}' +
         '@media print{.noprint{display:none}}</style></head><body>' +
-        '<h1>RAW AROMACHEM</h1><div class="sub">Formula-Protected Perfume-Oil Manufacturing Platform</div><hr>' +
+        '<h1>RAW AROMA CHEM</h1><hr>' +
         '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
         '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
         '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
-        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#E9F260;color:#141413;border:none;border-radius:var(--r-sm);font-weight:700;cursor:pointer;font-size:14px">Print / Save PDF</button></div>' +
+        '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#E9F260;color:#141413;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px">Print</button></div>' +
         '</body></html>';
       w.document.write(html); w.document.close();
     }
@@ -1233,9 +1331,9 @@
     // Disabled action: plain-language reason via `title` (desktop hover) + a visible inline hint
     // on touch, where hover tooltips don't fire (addendum §9/§10).
     if (opts.disabled) {
-      return '<button class="ra-act" disabled aria-disabled="true" title="' + escHtml(opts.reason || '') + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;font-family:inherit;color:var(--ink-3);background:var(--panel-2);white-space:nowrap;opacity:.7">' + label + '<span class="act-hint">' + escHtml(opts.reason || '') + '</span></button>';
+      return '<button class="ra-act" disabled aria-disabled="true" title="' + escHtml(opts.reason || '') + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);background:var(--panel-2);white-space:nowrap">' + label + '<span class="act-hint">' + escHtml(opts.reason || '') + '</span></button>';
     }
-    return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font-size:12px;font-weight:700;cursor:pointer;font-family:inherit;color:' + (fg || '#fff') + ';background:' + bg + ';box-shadow:var(--rai-sm);white-space:nowrap">' + label + '</button>';
+    return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);cursor:pointer;color:' + (fg || '#fff') + ';background:' + bg + ';white-space:nowrap">' + label + '</button>';
   }
   function rowActionsCell(endpoint, r) {
     var out = [];
@@ -1248,7 +1346,7 @@
       // everywhere else in this stylesheet. Mirrors bg's own branches exactly (not just
       // `a.tone` truthy) -- tone:'accent' is a real, truthy value distinct from bad/warn/good
       // that also renders on --accent and was missed by a plain truthy check.
-      var fg = (a.tone === 'bad' || a.tone === 'warn' || a.tone === 'good') ? '#fff' : 'var(--accent-ink)';
+      var fg = (a.tone === 'bad' || a.tone === 'warn' || a.tone === 'good') ? '#fff' : 'var(--ink)';
       var k = 'ra' + (_actSeq++); _acts[k] = { a: a, r: r };
       out.push(actBtn(k, a.label, bg, fg));
     });
@@ -1272,7 +1370,7 @@
       var kP = 'ra' + (_actSeq++); _acts[kP] = { a: { label: 'Print', run: function (row) { printDoc(endpoint, row); } }, r: r };
       out.push(actBtn(kP, 'Print', 'var(--well)', 'var(--t1)'));
     }
-    if (!out.length) return '<span style="color:var(--t3);font-size:11px">—</span>';
+    if (!out.length) return '<span style="color:var(--ink-3)">—</span>';
     return out.join('');
   }
   // COMPONENT_PARITY_MATRIX.json "Toast" (console.css:1471-1476 / admin-console.jsx setToast,
@@ -1295,8 +1393,8 @@
           var body = a.prepare ? await a.prepare(r) : (a.body || {});
           var res = await tunnel(a.path(r), { method: 'POST', body: body });
           if (res.status >= 400) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast((res.json && res.json.error && res.json.error.message) || ('Action failed (' + res.status + ')'), 'bad'); return; }
-          toast(old + ' done ✓', 'good'); loadView();
-        } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Could not reach the secure channel', 'bad'); }
+          toast('Done', 'good'); loadView();
+        } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Can\'t connect. Try again.', 'bad'); }
       };
     });
   }
@@ -1647,8 +1745,8 @@
       else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' class="fld">'; }
       return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl + '</label>';
     }).join('');
-    var body = rows + '<div id="ra-merr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:40px">Create</button>';
+    var body = rows + '<div id="ra-merr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:var(--ch-touch-floor-coarse-pointer)">Create</button>';
     var m = openSheet({ id: 'ra-cform', tag: 'form', style: 'max-width:440px', title: cfg.title, body: body });
     var ov = m.sheet;
     cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
@@ -1671,8 +1769,8 @@
       var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        m.close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Could not reach the secure channel.'; });
+        m.close(); st.search = ''; toast('Created', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
 
@@ -1710,8 +1808,8 @@
     var headerRows = cfg.header.map(function (f) { return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl(f, 'h') + '</label>'; }).join('');
     var body = headerRows +
       '<div style="display:flex;align-items:center;gap:10px;margin:6px 0 0"><div class="sect" style="flex:1">Line items</div><button type="button" id="ra-addline" class="btn sm">+ Add line</button></div>' +
-      '<div id="ra-lines"></div><div id="ra-merr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:40px">Create</button>';
+      '<div id="ra-lines"></div><div id="ra-merr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" class="btn p" id="ra-msave" style="width:100%;justify-content:center;height:var(--ch-touch-floor-coarse-pointer)">Create</button>';
     var m = openSheet({ id: 'ra-cform', tag: 'form', style: 'max-width:560px', title: cfg.title, body: body });
     var ov = m.sheet;
     var linesEl = ov.querySelector('#ra-lines');
@@ -1737,8 +1835,8 @@
       var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
         if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
-        m.close(); st.search = ''; toast(cfg.title + ' created ✓', 'good'); loadView();
-      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Could not reach the secure channel.'; });
+        m.close(); st.search = ''; toast('Created', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
 
@@ -1758,33 +1856,32 @@
     return step(null);
   }
   function openTrace(fg) {
-    var body = '<div style="font-size:12px;color:var(--ink-3)">Customer → finished good → oil batch → raw materials → vendor</div>' +
-      '<div id="ra-trace" style="color:var(--ink-3);font-size:13px;padding:24px 0;text-align:center;font-family:\'JetBrains Mono\',monospace">TRACING…</div>';
+    var body = '<div id="ra-trace" class="loading" style="padding:var(--s-base) 0">Tracing…</div>';
     var m = openSheet({ id: 'ra-trace-sheet', tag: 'div', style: 'max-width:560px', title: 'Traceability', body: body });
     var ov = m.sheet;
-    var down = '<div style="display:flex;justify-content:center;padding:2px 0"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M6 13l6 6 6-6"/></svg></div>';
+    var down = ARROW_D;
     function step(ic, title, sub, accent) {
-      return '<div style="display:flex;align-items:center;gap:12px;background:' + (accent ? 'var(--accent)' : 'var(--panel-2)') + ';' + (accent ? 'color:var(--accent-ink);' : '') + 'border-radius:var(--r-md);padding:12px 15px">' +
-        '<span style="width:34px;height:34px;border-radius:var(--r-sm);background:' + (accent ? 'rgba(255,255,255,.35)' : 'var(--panel-3)') + ';color:' + (accent ? 'inherit' : 'var(--accent)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
-        '<div style="flex:1;min-width:0"><div style="font-weight:800;font-size:13.5px">' + title + '</div><div style="font-size:11.5px;' + (accent ? 'opacity:.85' : 'color:var(--ink-3)') + '">' + sub + '</div></div></div>';
+      return '<div style="display:flex;align-items:center;gap:var(--s-snug);background:' + (accent ? 'var(--accent)' : 'var(--panel-2)') + ';color:var(--ink);border-radius:var(--r-md);padding:var(--s-snug)">' +
+        '<span style="width:34px;height:34px;border-radius:var(--r-sm);background:' + (accent ? 'rgba(255,255,255,.35)' : 'var(--panel-3)') + ';color:' + (accent ? 'inherit' : 'var(--accent-ink)') + ';display:grid;place-items:center;flex:none">' + icon(ic, 17) + '</span>' +
+        '<div style="flex:1;min-width:0"><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui)">' + title + '</div><div style="font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);color:' + (accent ? 'var(--ink-2)' : 'var(--ink-3)') + '">' + sub + '</div></div></div>';
     }
     tunnel('/v1/trace/finished-good/' + fg.finishedGoodBatchId).then(function (res) {
       var el = ov.querySelector('#ra-trace');
       if (res.status >= 400 || !res.json || !res.json.data) { if (el) el.textContent = (res.json && res.json.error && res.json.error.message) || 'Trace unavailable.'; return; }
       var t = res.json.data;
       var mats = (t.materials || []).map(function (m2) {
-        return '<div style="display:flex;align-items:center;gap:8px;padding:9px 12px;background:var(--panel-2);border-radius:var(--r-sm);margin-bottom:7px;flex-wrap:wrap">' +
-          '<span style="font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:var(--accent)">' + m2.material + '</span>' +
-          '<span style="color:var(--ink-3);font-size:11px">&larr; batch ' + m2.rmBatch + '</span><span style="color:var(--ink-3);font-size:11px">&larr; ' + m2.grn + '</span>' +
-          '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:5px;font-size:11.5px;font-weight:700">' + icon('truck', 13) + m2.vendor + '</span></div>';
-      }).join('') || '<div style="color:var(--ink-3);font-size:12px;padding:6px 0">No upstream materials linked.</div>';
-      var custStep = t.customer ? (step('users', 'Customer · ' + t.customer.name, t.customer.soNumber ? ('Sales order ' + t.customer.soNumber) : 'shipped to', false) + down) : '';
+        return '<div style="display:flex;align-items:center;gap:var(--s-tight);padding:var(--s-tight) var(--s-snug);background:var(--panel-2);border-radius:var(--r-sm);margin-bottom:var(--s-tight);flex-wrap:wrap;font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui)">' +
+          '<span style="font:var(--w-med) var(--t-cap)/1.3 var(--font-mono);color:var(--accent-ink)">' + m2.material + '</span>' +
+          '<span style="color:var(--ink-3)">&larr; batch ' + m2.rmBatch + '</span><span style="color:var(--ink-3)">&larr; ' + m2.grn + '</span>' +
+          '<span style="margin-left:auto;display:inline-flex;align-items:center;gap:var(--s-tight);font-weight:var(--w-med)">' + icon('truck', 13) + m2.vendor + '</span></div>';
+      }).join('') || '<div style="color:var(--ink-3);font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);padding:var(--s-tight) 0">No upstream materials linked.</div>';
+      var custStep = t.customer ? (step('users', 'Customer · ' + t.customer.name, t.customer.soNumber ? ('Sales order ' + t.customer.soNumber) : 'Shipped to', false) + down) : '';
       if (el) el.outerHTML = '<div id="ra-trace">' +
         custStep +
         step('pkg', 'Finished good · ' + t.finishedGood.batch, t.finishedGood.product + ' · ' + t.finishedGood.sku, true) + down +
-        step('droplet', 'Oil batch · ' + (t.oilBatch ? t.oilBatch.batch : '—'), 'the compounded juice', false) + down +
-        '<div class="sect" style="margin:8px 0 9px">Raw materials → vendor</div>' + mats + '</div>';
-    }).catch(function () { var el = ov.querySelector('#ra-trace'); if (el) el.textContent = 'Could not reach the secure channel.'; });
+        step('droplet', 'Oil batch · ' + (t.oilBatch ? t.oilBatch.batch : '—'), 'Compounded oil', false) + down +
+        '<div class="sect" style="margin:var(--s-tight) 0 var(--s-snug)">Raw materials</div>' + mats + '</div>';
+    }).catch(function () { var el = ov.querySelector('#ra-trace'); if (el) el.textContent = 'Can\'t connect. Try again.'; });
   }
 
   async function loadView() {
@@ -1797,19 +1894,19 @@
     // reference) so a build that dropped tutorial.js degrades to an honest message instead of a
     // ReferenceError. RA_VIEWS/registerViews (this file's window.RA hook) is NOT wired into this
     // render path yet (see that var's own comment above) — this is the real dispatch.
-    if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials are not available in this build.')); }
+    if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials aren\'t available in this build.')); }
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
     if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
-    var V = $('ra-view'); V.innerHTML = '<div style="padding:60px;text-align:center;color:var(--ink-3);font-family:var(--font-mono);font-size:var(--t-cap)">LOADING · ENCRYPTED CHANNEL…</div>';
+    var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
     var masked = item[4] === true;
     var res;
     try { res = await tunnel(item[3] + '?limit=100'); }
-    catch (e) { V.innerHTML = errBox('Could not reach the secure channel.'); return; }
-    if (res.status === 403) { V.innerHTML = errBox('Your role does not have access to this data.'); return; }
+    catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
+    if (res.status === 403) { V.innerHTML = errBox('Your role doesn\'t have access to this.'); return; }
     // RP-PROC-007: a route can exist but be honestly unavailable (e.g. a feature whose backing
     // table isn't provisioned yet) — surface that message instead of silently falling through to
     // "No records yet", which would wrongly imply the table is just empty.
-    if (res.status >= 400) { V.innerHTML = errBox((res.json && res.json.error && res.json.error.message) || ('This is not available right now (status ' + res.status + ').')); return; }
+    if (res.status >= 400) { V.innerHTML = errBox((res.json && res.json.error && res.json.error.message) || ('Not available right now (' + res.status + ').')); return; }
     var rows = (res.json && res.json.data) || [];
     // Portal-audit WS1: the envelope hoists a page's nextCursor into meta.cursor — keep it so the
     // list can page past the first 100 rows via "Load more" (previously rows >100 were unreachable).
@@ -1820,10 +1917,11 @@
     var cols = columns(rows, item[3]);
     var byStatus = {}; rows.forEach(function (r) { var s = (r.status || r.overallResult || '').toString().toLowerCase(); if (s) byStatus[s] = (byStatus[s] || 0) + 1; });
     var sKeys = Object.keys(byStatus);
-    var kpis = kpi(item[2], String(rows.length), 'Total ' + item[1].toLowerCase()) +
-      (sKeys[0] ? kpi('activity', String(byStatus[sKeys[0]]), label(sKeys[0])) : kpi('grid', '—', 'Live')) +
-      (sKeys[1] ? kpi('flask', String(byStatus[sKeys[1]]), label(sKeys[1])) : kpi('layers', cols.length ? String(cols.length) : '—', 'Fields')) +
-      kpi('lock', masked ? 'Masked' : 'Live', masked ? 'Alias-protected' : 'DB source of truth');
+    // UX-C: total + up to three real status counts. The filler tiles ("Live", a count of table
+    // columns as "Fields", "DB source of truth") said nothing about the records; masking is
+    // already shown by the "Aliases only" chip on the table card itself.
+    var kpis = kpi(item[2], String(rows.length), 'Total') +
+      sKeys.slice(0, 3).map(function (k, i) { return kpi(['activity', 'flask', 'layers'][i], String(byStatus[k]), label(k)); }).join('');
     var kpiBand = '<div class="stats">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
@@ -1832,14 +1930,14 @@
     // only after its own preceding target step already navigated to the right workspace/view.
     var newBtn = canNew ? '<button id="ra-new" data-tutorial-target="ra-new-record" class="btn p">+ New</button>' : '';
     if (!rows.length && !st.search.trim()) {
-      V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3><p>This table is empty in the database. It fills as the ' + item[1].toLowerCase() + ' module is used.</p>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
+      V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
       var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
       return;
     }
     var shell = '<div class="card">' +
-      '<div class="card-hd"><h2>' + item[1] + '</h2>' + (masked ? '<span class="chip k mono">ALIASES ONLY</span>' : '') +
+      '<div class="card-hd"><h2>' + item[1] + '</h2>' + (masked ? '<span class="chip k">Aliases only</span>' : '') +
       '<span class="n" id="ra-count"></span>' +
-      '<input id="ra-search" class="fld" value="' + st.search.replace(/"/g, '') + '" placeholder="Search…" style="max-width:220px;margin-left:auto">' + newBtn + '</div>' +
+      '<input id="ra-search" class="fld" value="' + st.search.replace(/"/g, '') + '" placeholder="Search" aria-label="Search" style="max-width:220px;margin-left:auto">' + newBtn + '</div>' +
       '<div id="ra-results"></div></div>';
     V.innerHTML = kpiBand + shell;
     paintResults();
@@ -1874,7 +1972,7 @@
     var cnt = $('ra-count'); if (cnt) cnt.textContent = shown.length + ' of ' + v.rows.length;
     var el = $('ra-results'); if (!el) return;
     if (!shown.length) {
-      el.innerHTML = '<div class="empty"><h3>No results for "' + escHtml(st.search.trim()) + '"</h3><p>' + v.rows.length + ' record' + (v.rows.length === 1 ? '' : 's') + ' loaded — none match your search.</p><button id="ra-clear" class="btn" style="margin-top:var(--s-snug)">Clear search</button></div>';
+      el.innerHTML = '<div class="empty"><h3>No results for "' + escHtml(st.search.trim()) + '"</h3><button id="ra-clear" class="btn" style="margin:var(--s-snug) auto 0">Clear search</button></div>';
       var cl = $('ra-clear'); if (cl) cl.onclick = function () { st.search = ''; var s = $('ra-search'); if (s) { s.value = ''; s.focus(); } paintResults(); };
       return;
     }
@@ -1891,7 +1989,7 @@
       (hasActions ? '<td class="r">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
-    var more = (v.cursor && !q) ? '<div class="tfoot" style="justify-content:center"><button id="ra-more" class="btn sm">Load more · ' + v.rows.length + ' loaded</button></div>' : '';
+    var more = (v.cursor && !q) ? '<div class="tfoot" style="justify-content:center"><button id="ra-more" class="btn sm">Load more</button></div>' : '';
     el.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     wireActions();
     if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) {
@@ -1952,7 +2050,7 @@
   }
   // NotBuilt-style: state the specific reason, per PORTING_GUIDE.md §Empty/error/loading — never a
   // generic spinner. Callers already pass a specific message (RP-PROC-007 etc.); this just frames it.
-  function errBox(m) { return '<div class="card notbuilt"><h2>This could not be loaded</h2><p>' + m + '</p></div>'; }
+  function errBox(m) { return '<div class="card notbuilt"><h2>Couldn\'t load</h2><p>' + m + '</p></div>'; }
 
   // Module 12 dashboard alerts — fill the header bell from /v1/alerts (real, role-filtered counts).
   // Map an alert kind → the nav key of the screen that resolves it, for the CURRENT role.
@@ -1972,13 +2070,13 @@
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
       var d = res.json && res.json.data; if (!d) return;
-      var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
+      var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'inline'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
-      pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS · tap to act</div>' + d.alerts.map(function (a) {
-        var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent)');
+      pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div class="sect" style="padding:var(--s-tight) var(--s-tight) var(--s-snug)">Alerts</div>' + d.alerts.map(function (a) {
+        var col = a.severity === 'high' ? 'var(--red)' : (a.severity === 'med' ? 'var(--amber)' : 'var(--accent-ink)');
         var nk = alertNavKey(a.kind);
-        return '<div ' + (nk ? 'data-alert-nav="' + nk + '"' : '') + ' style="display:flex;align-items:center;gap:11px;padding:9px 11px;border-radius:var(--r-sm);' + (nk ? 'cursor:pointer' : '') + '"' + (nk ? ' onmouseover="this.style.background=\'var(--well)\'" onmouseout="this.style.background=\'transparent\'"' : '') + '><span style="width:9px;height:9px;border-radius:50%;background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font-weight:700;font-size:13px">' + a.title + (nk ? ' <span style="color:var(--accent);font-weight:800">&rsaquo;</span>' : '') + '</div><div style="font-size:11px;color:var(--t3)">' + a.sub + '</div></div><span style="font-weight:800;font-size:14px;color:' + col + '">' + a.count + '</span></div>';
-      }).join('')) : '<div style="padding:20px;text-align:center;color:var(--t3);font-size:12.5px">No alerts &#10003;</div>';
+        return '<div ' + (nk ? 'data-alert-nav="' + nk + '" ' : '') + ' style="display:flex;align-items:center;gap:var(--s-snug);padding:var(--s-tight) var(--s-snug);border-radius:var(--r-sm);' + (nk ? 'cursor:pointer' : '') + '"><span class="sw-dot" style="width:8px;height:8px;border-radius:var(--r-pill);background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui)">' + a.title + (nk ? ' &rsaquo;' : '') + '</div><div style="font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);color:var(--ink-3)">' + a.sub + '</div></div><span style="font:var(--w-med) var(--t-h3)/1 var(--font-ui);color:' + col + '">' + a.count + '</span></div>';
+      }).join('')) : '<div class="loading" style="padding:var(--s-base)">No alerts</div>';
       [].forEach.call(pop.querySelectorAll('[data-alert-nav]'), function (el) {
         el.onclick = function (e) { e.stopPropagation(); st.nav = el.getAttribute('data-alert-nav'); st.search = ''; pop.style.display = 'none'; shell(); };
       });
@@ -1992,38 +2090,66 @@
     shell();
   }
   function wireShell() {
-    [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
-    $('ra-logout').onclick = function () { session = null; st.role = null; try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { navTo(b.getAttribute('data-nav')); }; });
+    var home = function () { navTo(ROLES[st.role].nav[0][0]); };
+    if ($('ra-home')) $('ra-home').onclick = home;
+    if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
+    $('ra-logout').onclick = function () { if (_aria) { _aria.destroy(); _aria = null; } session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }
-    // .rail-min (ALEMBIC's own primitive) sits INSIDE .rail, so — now the rail is off-canvas at
-    // every width, not just mobile — it only ever CLOSES the sheet; the dock's "Sections" pill
-    // (#ra-dock-toggle, always visible in .qdock) is the one control that OPENS it, at any width.
+    // The rail's own .rail-min only closes it; the dock's toggle opens and closes it (desktop:
+    // body.rail-off folds the grid track; phone: body.rail-open slides it in as a drawer).
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = false; applyResponsive(); };
     var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
+    var handle = $('ra-dock-handle'); if (handle) handle.onclick = function () { document.body.classList.remove('dock-away'); };
+    if ($('ra-aria')) $('ra-aria').onclick = toggleAria;
+    if ($('ra-aria-dock')) $('ra-aria-dock').onclick = toggleAria;
+    if (_aria) { _aria.setContext(ariaContext()); }
     applyResponsive();
     applyNetBanner();
   }
   if (!window.__raRailKeyWired) {
     window.__raRailKeyWired = true;
-    document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); } });
+    // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
+    // go-to palette; Escape closes.
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && _aria && _aria.isOpen()) { _aria.close(); return; }
+      if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); return; }
+      if (!st.role || !(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'k' || e.key === 'K') { e.preventDefault(); toggleAria(); return; }
+      if (e.key === '/') { e.preventDefault(); openPalette(); return; }
+      if (e.key === '\\') { e.preventDefault(); st.drawer = !st.drawer; applyResponsive(); return; }
+      var i = parseInt(e.key, 10), R = ROLES[st.role];
+      if (i >= 1 && i <= 9 && R && R.nav[i - 1]) { e.preventDefault(); navTo(R.nav[i - 1][0]); }
+    });
+    // Dock retract (reference QuickDock): while the desktop rail is open the dock steps out of the
+    // way at rest and returns when the pointer nears the bottom edge. With the rail folded the dock
+    // IS the navigation, so rac-console.css pins it (body.rail-off .qdock).
+    var awayT = null;
+    document.addEventListener('mousemove', function (e) {
+      if (!st.role) return;
+      if (e.clientY > window.innerHeight - 64) { clearTimeout(awayT); document.body.classList.remove('dock-away'); }
+      else if (!document.body.classList.contains('dock-away') && st.drawer && window.innerWidth > 1023) {
+        clearTimeout(awayT); awayT = setTimeout(function () { if (st.drawer) document.body.classList.add('dock-away'); }, 2400);
+      }
+    }, { passive: true });
   }
-  // The rail is an off-canvas sheet at EVERY width now (ALEMBIC parity — see shell.css's header
-  // comment): `body.rail-open` slides it in over the content, `#ra-drawer-bg` dims behind it, and
-  // `inert`/`aria-hidden` keep it out of the tab order and off-screen-reader while shut — the same
-  // pairing ALEMBIC's own ConsoleHost.jsx uses for its rail (`inert={rail?undefined:''} aria-hidden=
-  // {rail?undefined:'true'}`). CSS (not inline styles) owns position/transform at every breakpoint.
+  // Rail state, as the reference's useRailToggle: desktop folds the grid track (body.rail-off,
+  // the default), phone opens an off-canvas drawer (body.rail-open). `inert`/`aria-hidden` keep a
+  // closed rail out of the tab order and off the screen reader.
   function applyResponsive() {
-    var open = !!st.drawer;
-    document.body.classList.toggle('rail-open', open);
-    var bg = $('ra-drawer-bg'); if (bg) bg.classList.toggle('show', open);
+    var open = !!st.drawer, phone = window.innerWidth <= 1023;
+    document.body.classList.toggle('rail-off', !phone && !open);
+    document.body.classList.toggle('rail-open', phone && open);
+    if (!open) document.body.classList.remove('dock-away');
     var side = $('ra-side');
     if (side) {
       if (open) { side.removeAttribute('inert'); side.removeAttribute('aria-hidden'); }
       else { side.setAttribute('inert', ''); side.setAttribute('aria-hidden', 'true'); }
     }
+    var t = $('ra-dock-toggle'); if (t) { t.setAttribute('aria-pressed', String(open)); t.setAttribute('aria-label', open ? 'Hide navigation' : 'Show navigation'); }
   }
   // Truthful offline/degraded banner (addendum §13): says exactly what it is — the last data
   // loaded — and never implies anything typed while offline is queued for later replay, because
@@ -2048,21 +2174,17 @@
   // `enterPortal` and everything downstream of it is unchanged. `backend/cluster-org/src/auth/
   // auth.service.ts` refuses `/auth/login` unconditionally once APP_ENV=prod.
   //
-  // Composed from ALEMBIC primitives (.card + .btn.p), same reasoning the original password
-  // screen's own comment gave: per addendum §1 ("where ALEMBIC has no exact equivalent, compose
-  // from ALEMBIC primitives") this uses the shared card/button grammar rather than a new style.
+  // UX-C: the same sign-in card as web-platform/platform.js and web-vault/vault.js (.login-wrap/
+  // .login-card, web/ui-contract/shell.css) — console name, one line, one button.
   function showLogin() {
     $('app').className = '';
     $('app').innerHTML =
-      '<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;padding:var(--s-base)">' +
-      '<div class="card" style="width:100%;max-width:380px;padding:var(--s-open) var(--s-loose);text-align:center">' +
-        '<div style="width:52px;height:52px;border-radius:var(--r-lg);background:var(--accent);color:var(--accent-ink);display:grid;place-items:center;margin:0 auto var(--s-base)">' + icon('droplet', 22) + '</div>' +
-        '<div style="font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.18em;color:var(--ink-3);font-weight:var(--w-med)">RAW AROMA CHEM</div>' +
-        '<h1 style="font:var(--w-light) var(--t-fig)/var(--lh-fig) var(--font-ui);margin:6px 0 8px;letter-spacing:var(--ls-tight)">Production Portal</h1>' +
-        '<p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-base)">Sign in once on ALEMBIC, then choose "Open Factory" — no separate password. Your role is assigned by an administrator; you see only what it allows.</p>' +
-        '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p" style="width:100%;justify-content:center;height:var(--s-open);text-decoration:none' + (ALEMBIC_CONSOLE_URL ? '' : ';opacity:.5;pointer-events:none') + '">Sign in via ALEMBIC &rarr;</a>' +
-        '<div id="lerr" style="min-height:18px;font:var(--w-med) var(--t-cap)/1.3 var(--font-ui);color:var(--red);text-align:left;margin:var(--s-tight) 0">' + (ALEMBIC_CONSOLE_URL ? '' : 'This build has no ALEMBIC console configured (window.ALEMBIC_CONSOLE_URL is unset).') + '</div>' +
-        '<div style="margin-top:var(--s-snug);font-family:var(--font-mono);font-size:var(--t-micro);letter-spacing:.08em;color:var(--ink-3)">&#128274; END-TO-END ENCRYPTED CHANNEL</div>' +
+      '<div class="login-wrap"><div class="login-card">' +
+        '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
+        '<h1 class="mark">Factory</h1>' +
+        '<p class="sub">Raw Aroma Chem production.</p>' +
+        '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
+        '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in isn\'t set up for this build.') + '</div>' +
       '</div></div>';
   }
 
@@ -2105,10 +2227,10 @@
       if (res.status < 400 && d && d.accessToken && enterPortal(d)) return;
       showLogin();
       var le = $('lerr');
-      if (le) le.textContent = (res.json && res.json.error && res.json.error.message) || 'Could not complete sign-in from ALEMBIC.';
+      if (le) le.textContent = (res.json && res.json.error && res.json.error.message) || 'Sign-in didn\'t complete. Try again.';
     }).catch(function () {
       showLogin();
-      var le = $('lerr'); if (le) le.textContent = 'Cannot establish a secure connection.';
+      var le = $('lerr'); if (le) le.textContent = 'Can\'t connect. Try again.';
     });
   }
 

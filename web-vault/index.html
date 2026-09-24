@@ -3,12 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Formula Vault · Raw Aroma Chem</title>
+  <title>Vault · Raw Aroma Chem</title>
   <!-- Deliberately NO <link rel="manifest">, NO theme-color/apple-mobile-web-app tags, NO
        service-worker registration anywhere in this page or vault.js. §109.4: "Vault Console
        is NOT a PWA." vault.js also actively unregisters any SW previously registered for
        this origin/scope, in case a stray one exists from local dev testing. -->
-  <link rel="icon" href="data:,">
+  <!-- UX-D: the shared favicon only. Still NO manifest, NO apple-touch/app tags and NO service
+       worker -- §109.4, Vault is not a PWA. -->
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
        same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
@@ -17,13 +22,17 @@
        CSP is enough with no font-origin allowance at all. -->
   <link rel="stylesheet" href="/fonts/outfit.css">
   <link rel="stylesheet" href="/fonts/jetbrains-mono.css">
+  <link rel="stylesheet" href="/rac-console.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
   <link rel="stylesheet" href="/vault.css">
-  <link rel="stylesheet" href="/alembic-tokens.css">
-  <link rel="stylesheet" href="/vault.css">
+  <link rel="stylesheet" href="/logo/brand.css">
+  <!-- UX-E: the Ask Aria panel's styles; its script is fetched the first time Aria opens. -->
+  <link rel="stylesheet" href="/aria-panel.css">
 </head>
 <body>
-  <div id="root"></div>
+  <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body>. -->
+  <script src="/rac-preload.js" data-mount="#root" data-logo="/logo/raw-logo@3x.png" data-fonts="/fonts/"></script>
+  <div class="stage" id="root"></div>
   <script src="/vault.js"></script>
 </body>
 </html>

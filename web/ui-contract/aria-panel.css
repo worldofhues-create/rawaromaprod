@@ -1,0 +1,221 @@
+/* ═══════════════ Ask Aria: the one panel for every staff console ═══════════════
+ *
+ * UX-E. The stylesheet for `apps/web/lib/console/aria-panel.jsx` (React,
+ * mounted by Admin, Agent and Content Studio) and for the vanilla port in
+ * `release/ui/aria/aria-panel.js` (RawProd Factory, Platform and Vault). Both
+ * write the SAME DOM and class names, so this one file styles both and
+ * RawProd vendors it verbatim. `release/ui/ARIA_REFERENCE_MAP.md` has the
+ * mount API and the class list.
+ *
+ * Source of truth: the reference Agent console (rac-console.jsx's
+ * `AriaCoPilot` and the `.aria-*` block of its template). The first block is
+ * that reference, byte for byte where it can be. The rest are the states the
+ * reference showed inline or did not have: cited answers, the error line, the
+ * expanded (rail) module and the answer reveal.
+ *
+ * DEPENDENCIES, kept to the shell's own: the `.glass .glass-deep` surface and
+ * the `.gbtn` / `.xp` / `.t-h3` / `.t-cap` / `.t-micro` classes come from
+ * console.css (ALEMBIC) or ui-contract/rac-console.css (RawProd). Every token
+ * carries a fallback, so a host that lacks one still renders the panel.
+ */
+
+/* ── the reference block ─────────────────────────────────────────────────── */
+/* Visibility is carried by `display` ALONE. The old rule left opacity:0 and
+   pointer-events:none in the base state and only restored display on .open,
+   so the panel mounted invisible and unclickable. */
+.aria-dock{
+  position:fixed;left:50%;transform:translateX(-50%);
+  bottom:calc(18px + 56px + 12px);
+  width:min(420px,calc(100vw - 32px));
+  z-index:530;
+  border-radius:var(--r-xl, 26px);flex-direction:column;max-height:calc(100dvh - 190px);
+  display:none;
+  font-family:var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));
+  color:var(--ink, #141413);
+}
+/* A host with no `.glass` surface still gets the reference's frosted panel. */
+.aria-dock:not(.glass){
+  background:rgba(247,247,244,.9);
+  -webkit-backdrop-filter:blur(26px) saturate(1.7);backdrop-filter:blur(26px) saturate(1.7);
+  box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07)), 0 24px 60px -18px rgba(20,20,19,.32);
+}
+.aria-dock.open{display:flex;opacity:1;pointer-events:auto;transform:translateX(-50%);
+  animation:ariaDockIn .32s cubic-bezier(.2,.9,.25,1) both}
+@keyframes ariaDockIn{
+  from{opacity:0;transform:translateX(-50%) translateY(12px) scale(.985)}
+  to{opacity:1;transform:translateX(-50%) translateY(0) scale(1)}
+}
+.aria-hd{display:flex;align-items:center;gap:var(--s-tight, 8px);padding:var(--s-base, 20px) var(--s-base, 20px) var(--s-snug, 12px);flex:0 0 auto}
+.aria-orb{
+  width:28px;height:28px;border-radius:50%;flex:0 0 auto;
+  background:conic-gradient(from 0deg, var(--accent, #E9F260), #C8D43A, #EFF7A0, var(--accent, #E9F260));
+  box-shadow:0 0 0 2px rgba(255,255,255,.8), 0 0 16px var(--accent-glow, rgba(233,242,96,.40));
+  animation:orbSpin 7s linear infinite;
+}
+@keyframes orbSpin{to{transform:rotate(360deg)}}
+/* Thinking: the orb quickens and breathes while an answer is on its way. */
+.aria-dock.is-thinking .aria-orb{animation:orbSpin 1.6s linear infinite, orbGlow 1.6s ease-in-out infinite}
+@keyframes orbGlow{
+  0%,100%{box-shadow:0 0 0 2px rgba(255,255,255,.8), 0 0 12px var(--accent-glow, rgba(233,242,96,.40))}
+  50%{box-shadow:0 0 0 2px rgba(255,255,255,.9), 0 0 26px var(--accent, #E9F260)}
+}
+.aria-bd{flex:1;overflow-y:auto;padding:0 var(--s-base, 20px) var(--s-snug, 12px);display:flex;flex-direction:column;gap:var(--s-tight, 8px);
+  overscroll-behavior:contain}
+.aria-bd::-webkit-scrollbar{width:5px}
+.aria-bd::-webkit-scrollbar-thumb{background:rgba(20,20,19,.16);border-radius:4px}
+.acard{
+  border-radius:var(--r-md, 14px);padding:var(--s-snug, 12px);
+  background:rgba(255,255,255,.66);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
+  transition:box-shadow .22s, transform .22s;
+}
+.acard:hover{box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55)), 0 6px 16px -8px rgba(20,20,19,.2);transform:translateY(-1px)}
+.acard.applied{background:var(--accent-soft, rgba(233,242,96,.16));box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
+.aria-ft{flex:0 0 auto;padding:var(--s-snug, 12px) var(--s-base, 20px) var(--s-base, 20px);display:flex;gap:var(--s-tight, 8px)}
+.aria-in{
+  flex:1;min-width:0;height:36px;border-radius:var(--r-pill, 999px);border:0;outline:none;padding:0 var(--s-snug, 12px);
+  background:rgba(255,255,255,.8);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
+  font:var(--w-reg, 400) var(--t-body, 13.5px)/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink, #141413);
+}
+.aria-in:focus{box-shadow:0 0 0 1.5px var(--accent-line, rgba(233,242,96,.55))}
+/* thinking shimmer */
+.think{display:inline-flex;gap:3px;align-items:center}
+.think i{width:5px;height:5px;border-radius:50%;background:var(--ink-3, #66665E);animation:thinkB 1.1s ease-in-out infinite}
+.think i:nth-child(2){animation-delay:.16s} .think i:nth-child(3){animation-delay:.32s}
+@keyframes thinkB{0%,100%{opacity:.25;transform:translateY(0)}50%{opacity:1;transform:translateY(-3px)}}
+
+/* Aria empty state: the greeting and the questions it can answer. */
+.aria-empty{padding:var(--s-base, 20px) 2px}
+.aria-empty p{margin:0 0 var(--s-base, 20px);font:400 13.5px/1.6 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-empty .lbl{display:block;margin-bottom:var(--s-snug, 12px);font:500 10px/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3, #66665E)}
+.aria-empty .prompts{display:flex;flex-direction:column;gap:6px}
+.aria-empty .prompts button{
+  text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;
+  background:var(--surf-2, var(--panel-2, #F1F1EE));border:1px solid var(--gl-hair, rgba(20,20,19,.07));
+  font:400 13px/1.4 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink, #141413);transition:background .18s,border-color .18s,transform .18s;
+}
+.aria-empty .prompts button:hover{background:#fff;border-color:var(--line-2, rgba(20,20,19,.14));transform:translateX(2px)}
+.aria-empty .prompts button:focus-visible{outline:2px solid var(--accent-line, rgba(233,242,96,.55));outline-offset:2px}
+
+/* ── header controls ─────────────────────────────────────────────────────── */
+.aria-hd .aria-ttl{flex:1;min-width:0}
+.aria-hd .aria-ttl .t-cap{margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.aria-hd .aria-acts{display:flex;gap:6px;flex:0 0 auto}
+
+/* ── the transcript ──────────────────────────────────────────────────────── */
+.aria-line{display:flex;flex-direction:column;max-width:86%;align-self:flex-start;
+  animation:ariaLineIn .26s cubic-bezier(.2,.9,.25,1) both}
+.aria-line.me{align-self:flex-end;align-items:flex-end}
+@keyframes ariaLineIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.aria-bub{
+  padding:9px 12px;border-radius:13px;white-space:pre-wrap;overflow-wrap:anywhere;
+  background:rgba(255,255,255,.78);color:var(--ink, #141413);
+  box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
+  font:var(--w-reg, 400) var(--t-body, 13.5px)/1.5 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));
+}
+.aria-line.me .aria-bub{background:rgba(20,20,19,.9);color:#F4F4F1;box-shadow:none}
+/* A refusal is an answer: said plainly, marked so it does not read as a fact. */
+.aria-line.is-refusal .aria-bub{box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07)), inset 2px 0 0 var(--amber, #6E5F0F)}
+.aria-line.is-failed .aria-bub{background:rgba(192,57,43,.06);color:var(--ink, #141413);
+  box-shadow:0 0 0 .5px rgba(192,57,43,.28), inset 2px 0 0 var(--red, #734A3F)}
+/* The answer, revealed: the bubble wipes open top to bottom, line by line,
+   over --aria-t (0.25-0.9 s, set per answer from its length). The text is in
+   the DOM from the first frame; this is presentation only. The citations
+   follow once the wipe has landed. */
+.aria-line.is-fresh:not(.me) .aria-bub{animation:ariaWipe var(--aria-t, .5s) cubic-bezier(.3,.7,.3,1) both}
+@keyframes ariaWipe{
+  from{clip-path:inset(0 0 max(0px, calc(100% - 2.2em)) 0 round 13px)}
+  to{clip-path:inset(0 0 0 0 round 13px)}
+}
+.aria-line.is-fresh .aria-meta{animation:ariaLineIn .3s ease both;animation-delay:var(--aria-t, .5s)}
+
+/* Where an answer came from, and the records it rests on. */
+.aria-meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:6px}
+.aria-src{font:var(--w-med, 500) var(--t-micro, 10px)/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E)}
+.aria-fact{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 8px;border-radius:var(--r-pill, 999px);
+  background:rgba(255,255,255,.72);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
+  font:var(--w-med, 500) 11px/1.2 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink-2, #5C5C56);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aria-fact i{width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--accent, #E9F260);box-shadow:0 0 0 .5px rgba(90,100,16,.35)}
+.aria-fact.is-reg i{background:var(--amber, #6E5F0F)}
+.aria-retry{margin-top:6px;align-self:flex-start}
+
+/* ── the expanded module: Aria as a full-height rail ──────────────────────── */
+/* Centred above the dock, the panel lands on whatever is working there (the
+   Agent inbox composer in the reference). Expanded, Aria sits beside the work
+   as a full-height rail and the page makes room for it. */
+body.aria-rail{--aria-w:420px}
+body.aria-rail .aria-dock,
+.aria-dock.is-rail{
+  left:auto;right:0;top:0;bottom:0;
+  transform:none;
+  width:min(var(--aria-w,420px),100vw);
+  max-height:none;
+  border-radius:var(--r-xl, 26px) 0 0 var(--r-xl, 26px);
+}
+body.aria-rail .aria-dock.open,
+.aria-dock.is-rail.open{transform:none;animation-name:ariaRailIn}
+@keyframes ariaRailIn{from{opacity:0;transform:translateX(24px)}to{opacity:1;transform:translateX(0)}}
+/* Reserve the rail's width on the whole region, bar included, or the top-bar
+   controls (the Ask Aria trigger itself) stay covered; and drop the context
+   column from the Agent inbox grid so the remaining tracks recompute. */
+body.aria-rail .main{padding-right:var(--aria-w,420px)}
+body.aria-rail .body{grid-template-columns:minmax(0,330px) minmax(0,1fr)}
+body.aria-rail .body > .col:last-child{display:none}
+.aria-dock.is-rail .aria-line{max-width:92%}
+/* The quick dock re-centres in the space the rail leaves, so no part of it
+   sits under the rail (the ALEMBIC admin dock is wider than the reference's).
+   Desktop only: below 1024 the dock is a full-width tab bar. */
+@media (min-width:1024px){
+  body.aria-rail .qdock{left:calc((100vw - var(--aria-w,420px)) / 2)}
+}
+
+@media (max-width:834px){
+  body.aria-rail{--aria-w:360px}
+  body.aria-rail .body{grid-template-columns:minmax(0,1fr)}
+}
+@media (max-width:430px){
+  .aria-dock{width:calc(100vw - 20px);max-height:calc(100dvh - 150px)}
+  /* Full-bleed rail: reserving space would leave nothing to work in. */
+  body.aria-rail{--aria-w:0px}
+  body.aria-rail .aria-dock,
+  .aria-dock.is-rail{width:100vw;border-radius:0}
+}
+
+/* ── thumbs: the 44px floor on a coarse pointer ───────────────────────────── */
+@media (pointer: coarse){
+  .aria-dock .xp,.aria-dock .gbtn,.aria-empty .prompts button,
+  .aria-dock .aria-threads-btn{min-height:44px;min-width:44px}
+  .aria-in{height:44px}
+}
+
+/* ── New chat · History · Projects (lib/console/aria-threads.jsx) ────────── */
+.aria-threads-bar{display:flex;align-items:center;gap:6px;padding:0 var(--s-base, 20px) var(--s-snug, 12px);flex:0 0 auto;flex-wrap:wrap}
+.aria-threads-btn{height:28px;padding:0 12px;border-radius:var(--r-pill, 999px);border:0;cursor:pointer;
+  background:rgba(255,255,255,.72);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));color:var(--ink-2, #5C5C56);
+  font:var(--w-med, 500) 12px/1 var(--ui, var(--font-ui, system-ui, sans-serif));white-space:nowrap;transition:box-shadow .18s, background .18s}
+.aria-threads-btn:hover{color:var(--ink, #141413);box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
+.aria-threads-btn.on{background:var(--accent-soft, rgba(233,242,96,.16));color:var(--ink, #141413);box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
+.aria-threads-proj{margin-left:auto;font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-3, #66665E);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aria-threads-drawer{display:flex;flex-direction:column;gap:8px;animation:ariaLineIn .22s ease both}
+.aria-threads-group{display:flex;flex-direction:column;gap:4px}
+.aria-threads-lbl{font:600 10.5px/1.2 var(--ui, var(--font-ui, system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E);margin-top:4px}
+.aria-threads-note{font:400 12.5px/1.5 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-row{display:flex;align-items:center;gap:4px;padding:4px;border-radius:var(--r-md, 14px);background:rgba(255,255,255,.6);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07))}
+.aria-threads-row.on{background:var(--accent-soft, rgba(233,242,96,.16));box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
+.aria-threads-title{flex:1;min-width:0;text-align:left;border:0;background:transparent;cursor:pointer;padding:4px 6px;
+  font:500 12.5px/1.35 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink, #141413);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aria-threads-title em{display:block;font-style:normal;font-size:11px;color:var(--ink-3, #66665E);overflow:hidden;text-overflow:ellipsis}
+.aria-threads-mini{border:0;background:transparent;cursor:pointer;padding:4px 6px;border-radius:8px;font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-mini:hover{background:rgba(20,20,19,.06);color:var(--ink, #141413)}
+.aria-threads-select{max-width:96px;height:24px;border-radius:8px;border:0;box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));background:rgba(255,255,255,.8);font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-input{width:100%;box-sizing:border-box;border-radius:10px;border:0;outline:none;padding:7px 10px;
+  background:rgba(255,255,255,.85);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));font:400 12.5px/1.4 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink, #141413);resize:vertical}
+.aria-threads-input:focus{box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
+.aria-threads-form{display:flex;flex-direction:column;gap:6px;margin-top:6px}
+
+/* Motion off: the panel still opens, answers still land; nothing travels.
+   (reduced-motion.css collapses everything globally; this names the loops.) */
+@media (prefers-reduced-motion: reduce){
+  .aria-dock.open,.aria-line,.aria-threads-drawer,.aria-orb,.aria-dock.is-thinking .aria-orb,.think i,
+  .aria-line.is-fresh:not(.me) .aria-bub,.aria-line.is-fresh .aria-meta{animation:none}
+}

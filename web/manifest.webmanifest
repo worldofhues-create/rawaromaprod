@@ -1,7 +1,7 @@
 {
-  "name": "Raw Aroma Chem · Production Portal",
-  "short_name": "Raw Aroma",
-  "description": "Formula-protected manufacturing portal — each role sees only what it's allowed to know.",
+  "name": "Factory · Raw Aroma Chem",
+  "short_name": "Factory",
+  "description": "Raw Aroma Chem production.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -9,7 +9,9 @@
   "background_color": "#EDEDEB",
   "theme_color": "#EDEDEB",
   "icons": [
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
-    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

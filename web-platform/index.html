@@ -3,10 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Platform Operations · Raw Aroma Chem</title>
+  <title>Platform · Raw Aroma Chem</title>
   <link rel="manifest" href="/manifest.webmanifest">
   <meta name="theme-color" content="#26262B">
-  <link rel="icon" href="/icon.svg">
+  <!-- UX-D: the one icon set every ALEMBIC and RawProd surface uses (ALEMBIC release/ui/BRAND_ASSETS.md). -->
+  <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
+  <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
+  <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
        same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
@@ -15,13 +20,17 @@
        CSP is enough with no font-origin allowance at all. -->
   <link rel="stylesheet" href="/fonts/outfit.css">
   <link rel="stylesheet" href="/fonts/jetbrains-mono.css">
+  <link rel="stylesheet" href="/rac-console.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
   <link rel="stylesheet" href="/platform.css">
-  <link rel="stylesheet" href="/alembic-tokens.css">
-  <link rel="stylesheet" href="/platform.css">
+  <link rel="stylesheet" href="/logo/brand.css">
+  <!-- UX-E: the Ask Aria panel's styles; its script is fetched the first time Aria opens. -->
+  <link rel="stylesheet" href="/aria-panel.css">
 </head>
 <body>
-  <div id="root"></div>
+  <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body>. -->
+  <script src="/rac-preload.js" data-mount="#root" data-logo="/logo/raw-logo@3x.png" data-fonts="/fonts/"></script>
+  <div class="stage" id="root"></div>
   <script src="/platform.js"></script>
 </body>
 </html>
