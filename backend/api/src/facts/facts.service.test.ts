@@ -281,3 +281,47 @@ test("material_availability: on-hand minus only ACTIVE reservations", async () =
   assert.equal(Number(matches[0]!.reservedQty), 30);
   assert.equal(Number(matches[0]!.availableQty), 70);
 });
+
+/* Golden journey lane/j2 — the blockers say WHERE the unissued material is, by document
+ * number only: a quarantined incoming batch surfaces FIRST as a qc_hold, and the
+ * material_shortage detail names the open PO rather than implying nothing was ordered. */
+test("production_requirement_status: quarantined incoming batch is a leading qc_hold; shortage names the open PO", async () => {
+  const sql = testClient();
+  const productionOrderId = randomUUID();
+  const materialId = randomUUID();
+  const tag = randomUUID().slice(0, 8).toUpperCase();
+  const orderRef = `RAC-J2-${tag}`;
+
+  await sql`insert into production.production_order (production_order_id, status) values (${productionOrderId}, 'PLANNING')`;
+  await sql`
+    insert into production.production_order_ingredients (production_order_id, material_id, required_qty, issued_qty)
+    values (${productionOrderId}, ${materialId}, 1, false)`;
+  const [po] = await sql`
+    insert into procurement.purchase_order (po_number, status) values (${`PO-J2-${tag}`}, 'ACKNOWLEDGED')
+    returning purchase_order_id`;
+  await sql`
+    insert into procurement.purchase_order_items (purchase_order_id, material_id, ordered_qty)
+    values (${po!.purchase_order_id}, ${materialId}, 1)`;
+  await sql`
+    insert into bridge.production_requirement
+      (alembic_requirement_id, org_id, correlation_id, order_ref, mapped_sku, qty, uom, needed_by, production_order_id)
+    values (${randomUUID()}, ${randomUUID()}, ${randomUUID()}, ${orderRef}, 'FSKU-1', 1, 'kg', now() + interval '7 days', ${productionOrderId})`;
+
+  // Waiting for material: only the shortage, and it names the PO.
+  let data = await facts.resolve("production_requirement_status", { orderRef });
+  let blockers = data!.blockers as Array<{ kind: string; detail: string }>;
+  assert.equal(blockers[0]!.kind, "material_shortage");
+  assert.match(blockers[0]!.detail, new RegExp(`on order: PO-J2-${tag} \\(ACKNOWLEDGED\\)`));
+
+  // Received into quarantine: the QC hold now leads, by batch number.
+  await sql`
+    insert into inventory.rm_batch_master (material_id, batch_number, received_qty, status)
+    values (${materialId}, ${`RMB-J2-${tag}`}, 1, 'QUARANTINE')`;
+  data = await facts.resolve("production_requirement_status", { orderRef });
+  blockers = data!.blockers as Array<{ kind: string; detail: string }>;
+  assert.equal(blockers[0]!.kind, "qc_hold");
+  assert.match(blockers[0]!.detail, new RegExp(`RMB-J2-${tag}.*QC quarantine`));
+  assert.equal(blockers[1]!.kind, "material_shortage");
+  // No material identity crosses the wire.
+  assert.doesNotMatch(JSON.stringify(data), new RegExp(materialId));
+});

@@ -213,9 +213,23 @@ export class FactsService {
          where production_order_id = ${productionOrderId}
            and coalesce(issued_qty, false) = false`) as Array<{ c: number }>;
       if ((shortage?.c ?? 0) > 0) {
+        /* Golden journey lane/j2: "not yet issued" alone told ALEMBIC's ARIA nothing about
+           WHY, and its fixed next-action ("raise a stock requirement") was wrong once the
+           automation had already raised one and procurement had it on order. Say where the
+           material actually is — in incoming-QC quarantine, on a PO, on a PR, or on the shelf
+           awaiting issue — by document number only (never a material name: this payload
+           crosses to ALEMBIC). */
+        const where = await this.unissuedMaterialWhereabouts(productionOrderId);
+        if (where.quarantinedBatches.length > 0) {
+          blockers.push({
+            kind: "qc_hold",
+            detail: `incoming material batch ${where.quarantinedBatches.join(", ")} received and held in QC quarantine`
+              + " (incoming inspection pending) — it cannot be issued until QC passes it",
+          });
+        }
         blockers.push({
           kind: "material_shortage",
-          detail: `${shortage!.c} ingredient line(s) not yet issued`,
+          detail: `${shortage!.c} ingredient line(s) not yet issued${where.summary ? ` — ${where.summary}` : ""}`,
         });
       }
 
@@ -244,7 +258,54 @@ export class FactsService {
       }
     }
 
+    // Most actionable first: a QC hold on material already in the building outranks the
+    // generic "not yet issued" it causes.
+    blockers.sort((a, b) => (a.kind === "qc_hold" ? 0 : 1) - (b.kind === "qc_hold" ? 0 : 1));
     return { ...pr, productionOrderStatus, blockers };
+  }
+
+  /** Where the not-yet-issued ingredients of a production order actually are (lane/j2):
+   *  quarantined RM batches (by batch number), open POs, open PRs, or unreserved stock on the
+   *  shelf. Document numbers only — no material identity leaves this method. */
+  private async unissuedMaterialWhereabouts(
+    productionOrderId: string,
+  ): Promise<{ quarantinedBatches: string[]; summary: string }> {
+    const unissued = this.sql`
+      select material_id from production.production_order_ingredients
+       where production_order_id = ${productionOrderId}
+         and coalesce(issued_qty, false) = false and material_id is not null`;
+    const quarantined = (await this.sql`
+      select batch_number from inventory.rm_batch_master
+       where material_id in (${unissued}) and status = 'QUARANTINE'
+       order by created_dt asc limit 5`) as Array<{ batch_number: string | null }>;
+    const openPos = (await this.sql`
+      select distinct po.po_number, po.status from procurement.purchase_order po
+        join procurement.purchase_order_items poi on poi.purchase_order_id = po.purchase_order_id
+       where poi.material_id in (${unissued})
+         and upper(coalesce(po.status, '')) in ('DRAFT','PENDING_L2_APPROVAL','APPROVED','ISSUED','ACKNOWLEDGED')
+       order by po.po_number limit 5`) as Array<{ po_number: string | null; status: string | null }>;
+    const openPrs = (await this.sql`
+      select distinct pr.pr_number, pr.status from procurement.purchase_request pr
+        join procurement.purchase_request_items pri on pri.purchase_request_id = pr.purchase_request_id
+       where pri.material_id in (${unissued})
+         and upper(coalesce(pr.status, '')) in ('DRAFT','SUBMITTED','APPROVED')
+       order by pr.pr_number limit 5`) as Array<{ pr_number: string | null; status: string | null }>;
+    const [onShelf] = (await this.sql`
+      select count(*)::int c from production.production_order_ingredients poi
+       where poi.production_order_id = ${productionOrderId}
+         and coalesce(poi.issued_qty, false) = false
+         and coalesce(poi.required_qty, 0) <= (
+           select coalesce(sum(ib.quantity_on_hand), 0) from inventory.inventory_batch ib
+            where ib.material_id = poi.material_id)`) as Array<{ c: number }>;
+
+    const parts: string[] = [];
+    if ((onShelf?.c ?? 0) > 0) parts.push(`${onShelf!.c} line(s) in stock, awaiting pick/issue`);
+    if (openPos.length > 0) parts.push(`on order: ${openPos.map((p) => `${p.po_number} (${p.status})`).join(", ")}`);
+    else if (openPrs.length > 0) parts.push(`purchase request ${openPrs.map((p) => `${p.pr_number} (${p.status})`).join(", ")}`);
+    return {
+      quarantinedBatches: quarantined.map((q) => q.batch_number ?? "(unnumbered)"),
+      summary: parts.join("; "),
+    };
   }
 
   /** Material availability by name/code prefix — on-hand minus every ACTIVE reservation
