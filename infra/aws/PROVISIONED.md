@@ -161,8 +161,10 @@ ALEMBIC health was 200 before and after every step. No secret value is in git or
 ## Go-live prep (step 4)
 - SSM SecureString, created (values never printed): `/rawaroma/alembic/rawprod-assertion-signing-key` (Ed25519 pkcs8 DER b64 = ALEMBIC's
   `ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY`), `/rawaroma/rawprod/assertion-verify-key` (spki DER b64 = `ALEMBIC_ASSERTION_VERIFY_KEY`),
-  `/rawaroma/bridge/hmac` (32 bytes hex), `/rawaroma/rawprod/JWT_SECRET` and `/rawaroma/vault/JWT_SECRET` (kept separate on purpose, so a factory token is not a vault token),
-  and `/rawaroma/rawprod/cf-origin-secret`.
+  `/rawaroma/bridge/hmac` (32 bytes hex), `/rawaroma/rawprod/JWT_SECRET`, and `/rawaroma/rawprod/cf-origin-secret`. **Lane FIXV (2026-09-24)
+  P0 decision:** vault-api verifies RawProd-issued JWTs, so it MUST use this SAME `/rawaroma/rawprod/JWT_SECRET` — there is no separate
+  `/rawaroma/vault/JWT_SECRET` param anymore (the one that briefly existed here was retired; `render-env.sh`'s vault case now reads the
+  rawprod param directly). See "Lane FIXV" below for the full account.
   ALEMBIC still has to load the signing key into its own config, and the bridge HMAC goes into the bridge connector config through Admin (self-service). Both are P0/ALEMBIC steps.
 - Env files, rendered by `/usr/local/lib/rawaroma/render-env.sh app|vault` (source `infra/aws/env/render-env.sh`), are root 0600:
   app `/etc/rawprod/api.env` and `migrate.env` (SKIP_TARGETS=formula); vault `/etc/rawprod/vault.env` and `vault-migrate.env` (SKIP_TARGETS=main). No value is empty.
@@ -259,7 +261,8 @@ before and after every step. nginx got a graceful reload gated by `nginx -t`. No
 `/rawaroma/demo/password` (owner-published demo credential), `/rawaroma/demo/origin-secret`,
 `/rawaroma/demo/alembic/{DB_PASSWORD_owner,DB_PASSWORD_app,SECRET_KEYS,rawprod-assertion-signing-key}`,
 `/rawaroma/demo/rawprod/{DB_PASSWORD_owner,DB_PASSWORD_app,JWT_SECRET,assertion-verify-key}` (a new Ed25519 pair, not the prod pair),
-`/rawaroma/demo/vault/{DB_PASSWORD_owner,DB_PASSWORD_app,JWT_SECRET}` and `/rawaroma/demo/vault/FORMULA_KMS_KEY_ID` (String),
+`/rawaroma/demo/vault/{DB_PASSWORD_owner,DB_PASSWORD_app}` and `/rawaroma/demo/vault/FORMULA_KMS_KEY_ID` (String) — no
+`/rawaroma/demo/vault/JWT_SECRET` (retired, lane FIXV: vault-demo-api reads `/rawaroma/demo/rawprod/JWT_SECRET` instead),
 `/rawaroma/demo/{alembic-url,factory-url}` (String).
 
 ## Runtime (installed, **disabled, not started**)
@@ -286,20 +289,75 @@ Each demo unit has MemoryMax set (450M/450M/500M/400M) and CPUWeight=50, so the 
   Verified: on-box, no header gives 403, the wrong site gives 403 and the right one gives 200. /healthz returns 200 on both URLs. The factory placeholder `/` returns 200. ALEMBIC `/api/*` returns 502 because the app is not deployed (expected). A direct connection to :8444 from the internet times out.
 
 ## Reset: `infra/aws/demo/reset-demo.sh ssm` (or `vault`, then `app`, on the boxes)
-It recreates vault_demo, then alembic_demo and rawprod_demo. It then runs the ALEMBIC migrate with the grant move, ALEMBIC `pnpm demo:seed`, writes the tenant-id, and runs `create-demo-account.mjs --user demo --mark-tenant-demo`
-(the password comes from SSM on stdin; demo access stays **OFF** until Admin turns on `demo.access_enabled`). After that come the RawProd migrate and the RawProd `pnpm demo:seed`, and finally the units that were enabled are restarted. It refuses to run until
-/srv/alembic-demo/app and /srv/rawprod-demo/app are deployed (checked: it refuses today).
+It recreates vault_demo (migrate, then `pnpm demo:seed:vault` — the formula VAULT PHASE, on the vault box, see "Lane FIXV"
+below), then alembic_demo and rawprod_demo. It then runs the ALEMBIC migrate with the grant move, ALEMBIC `pnpm demo:seed`,
+writes the tenant-id, and runs `create-demo-account.mjs --user demo --mark-tenant-demo`
+(the password comes from SSM on stdin; demo access stays **OFF** until Admin turns on `demo.access_enabled`). After that come
+the RawProd migrate and `pnpm demo:seed:factory` (the FACTORY PHASE, on the app box — never touches vault_demo), and finally
+the units that were enabled are restarted. It refuses to run until /srv/alembic-demo/app and /srv/rawprod-demo/app are
+deployed (checked: it refuses today).
 
 ## Deploy (P0, one step once the RC is chosen)
 Put the RC artifact into /srv/alembic-demo/app and /srv/rawprod-demo/app (on both boxes), owned by the demo users. Then run `reset-demo.sh ssm`, then
 `systemctl enable --now alembic-demo-api.socket alembic-demo-api alembic-demo-web rawprod-demo-api` (app) and `vault-demo-api` (vault). Re-run `install-box.sh app` to copy the factory static files.
 
 ## Open items for P0 / owner
-1. **Formula seed path.** The RawProd seed writes formulas to FORMULA_DATABASE_URL, and the app box cannot reach vault-pg. Reset therefore refuses with `FORMULA_TARGET=vault` until there is a path
-   (for example a 5432 rule from alembic-web to rawprod-vault-db, which is a prod-vault SG change and was not made). `FORMULA_TARGET=local` puts the formula schema into rawprod_demo instead; that is an explicit opt-in.
-2. **Seeded formulas vs the demo KMS key.** `demo-seed.ts` seals with EnvKmsAdapter (FORMULA_KEK derived from a label), and vault-api in NODE_ENV=production accepts only AWS KMS. The demo vault-api will
-   therefore not decrypt seeded formulas until the seed can use `FORMULA_KMS_KEY_ID`. This is an app-code item.
-3. The demo vault JWT_SECRET is kept separate from the demo RawProd one, mirroring prod. vault-api.service's header says the two must be equal, and prod has the same contradiction. Decide it once for both.
+1. ~~**Formula seed path.**~~ **Resolved, lane FIXV (2026-09-24)** — see "Lane FIXV" below. `FORMULA_TARGET` no longer exists.
+2. ~~**Seeded formulas vs the demo KMS key.**~~ **Resolved, lane FIXV** — see "Lane FIXV" below.
+3. ~~The demo vault JWT_SECRET is kept separate from the demo RawProd one...~~ **Resolved, lane FIXV** — see "Lane FIXV" below.
 4. ALEMBIC `ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY` is set in the demo api.env (demo pair). Prod has not loaded its own key yet.
 - Cost: about $1/mo for the KMS key, $0 for SSM Standard, a few cents for HTTP APIs, and the extra DBs are free on the existing instances. **≈ $1–2/mo.**
 - Delete path: disable the units, `aws apigatewayv2 delete-api` s6sc99wp4g and b41jjd8l48, detach and delete sg-061d01a9c5b2e04ee, DROP the 3 DBs and 6 roles, schedule deletion of the demo key, delete role rawprod-vault-demo and `/rawaroma/demo/*`.
+
+---
+
+# Lane FIXV (2026-09-24): demo formula seed split (factory/vault), seed-time KMS, JWT alignment
+
+Code only (`scripts/demo-seed*.ts`, `backend/cluster-masterdata`, `backend/cluster-formula`, `infra/aws/demo/reset-demo.sh`,
+`infra/aws/env/render-env.sh`, `infra/aws/demo/render-demo-env.sh`, `infra/aws/demo/apply-aws.sh`,
+`infra/aws/systemd/vault-api.service`, `infra/aws/DEPLOY_AWS.md`). No service was started, no SSM value was changed by this
+lane (existing `/rawaroma/demo/vault/JWT_SECRET` and `/rawaroma/demo/vault/DB_PASSWORD_*` params are simply unread now, not
+deleted — safe to prune whenever P0 next touches that namespace).
+
+## 1. Formula seed now runs on the vault box (Open item 1, resolved)
+`scripts/demo-seed.ts` is split into two independent phases:
+- **Factory phase** (`scripts/demo-seed-factory.ts`, `pnpm demo:seed:factory`) — everything in `rawprod_demo`. Opens no
+  connection of any kind to `vault_demo`/vault-pg.
+- **Vault phase** (`scripts/demo-seed-vault.ts`, `pnpm demo:seed:vault`) — seals the 2 demo formulas straight into
+  `vault_demo`, through the real vault-main services (`VaultService`/`FormulasService`/`ApprovalsService`), the same classes
+  `backend/api/src/vault-main.ts`'s `VaultAppModule` wires in `VAULT_MODE=true`. Opens no connection of any kind to
+  `rawprod_demo`.
+
+Neither phase queries the other. Instead both derive the ids that cross the box/database boundary (material ids sealed
+inside formula ingredients; the formula/version ids `packaging.product_master`/production orders reference) from the SAME
+pure, deterministic, sha256-based function of the entity's own business-key code — `scripts/demo-seed-shared.ts`'s
+`demoMaterialId`/`demoFormulaId`/`demoFormulaVersionId`. Two small, additive, script-only escape hatches make this possible
+without touching either service's public HTTP contract: `MaterialService.createMaterial` and
+`FormulasService.createFormula`/`createVersion` each gained an optional trailing id-override parameter, never part of the
+Zod-validated DTO and therefore never reachable from any HTTP caller — see those methods' own doc comments.
+
+The factory phase's own production/picking demo story (`PlanningService.createOrder` → `FORMULA_LOOKUP.getPickList`,
+`PickingService.resolveManufacturingInstruction` → `VAULT_PORT`) still needs an answer to "what's in this formula version" —
+answered locally, with zero network call, by `demo-seed.ts`'s `buildStaticFormulaPort`: the same deterministic ingredient
+function the vault phase seals, replayed locally, with alias resolution against the factory's own (real, local)
+`masterdata` schema. `reset-demo.sh` runs the vault box first and the app box second purely as a convenience (it mirrors the
+script's own DB-recreate ordering) — order does not affect correctness.
+
+`infra/aws/demo/reset-demo.sh`'s `FORMULA_TARGET=vault|local` choice (and the `VPG:5432` reachability probe it used to
+refuse on) is gone entirely — the factory phase never needs a formula database connection, so there is nothing left to
+choose between.
+
+## 2. Seed-time KMS follows FORMULA_KMS_KEY_ID (Open item 2, resolved)
+`scripts/demo-seed.ts`'s `resolveSeedKmsAdapter(config, kmsClient?)` picks `AwsKmsAdapter` whenever `FORMULA_KMS_KEY_ID` is
+set (as it is in `vault.env`/`rawprod-demo/vault.env`: `alias/rawprod-demo-vault-envelope` via role `rawprod-vault-demo`),
+falling back to `EnvKmsAdapter` only when it isn't (test runs, which set `FORMULA_KEK` instead). The demo vault-api can now
+decrypt what the seed writes. Tests: `scripts/__tests__/demo-seed-kms.test.ts` — `resolveSeedKmsAdapter` selection, plus an
+end-to-end "seed with a mocked KMS client, then decrypt with a fresh `VaultService`+`AwsKmsAdapter` pointed at the same
+mock" round trip standing in for "vault-main in prod mode reads what the seed wrote".
+
+## 3. vault-api and its paired rawprod-api now share one JWT_SECRET (Open item 3, resolved)
+`infra/aws/env/render-env.sh` (prod) and `infra/aws/demo/render-demo-env.sh` (demo) both render `vault.env`'s `JWT_SECRET`
+from the SAME SSM param as their paired `api.env` (`/rawaroma/rawprod/JWT_SECRET` / `/rawaroma/demo/rawprod/JWT_SECRET`) —
+not a separate `/rawaroma/{vault,demo/vault}/JWT_SECRET` copy that could silently drift. `infra/aws/demo/apply-aws.sh` no
+longer creates that now-unused demo param. `vault-api.service`'s header and `DEPLOY_AWS.md`'s env table are updated to
+state this as a fact, not a "should probably" hedge.

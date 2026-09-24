@@ -34,7 +34,10 @@ put /rawaroma/demo/rawprod/DB_PASSWORD_app rnd
 put /rawaroma/demo/rawprod/JWT_SECRET hex32
 put /rawaroma/demo/vault/DB_PASSWORD_owner rnd
 put /rawaroma/demo/vault/DB_PASSWORD_app rnd
-put /rawaroma/demo/vault/JWT_SECRET hex32   # kept separate from the demo RawProd JWT_SECRET, mirroring prod
+# No /rawaroma/demo/vault/JWT_SECRET: P0 decision (2026-09-24, lane FIXV) — vault-api verifies
+# RawProd-issued JWTs and must use the SAME signing key as rawprod-demo's, so
+# render-demo-env.sh's vault case reads /rawaroma/demo/rawprod/JWT_SECRET directly instead of a
+# separate copy that could drift out of sync (prod's render-env.sh does the same).
 # demo ALEMBIC -> demo RawProd assertion key pair (Ed25519, pkcs8/spki DER base64), never the prod pair
 if ! aws ssm get-parameter --name /rawaroma/demo/alembic/rawprod-assertion-signing-key >/dev/null 2>&1; then
   openssl genpkey -algorithm ed25519 -outform DER -out "$tmp/k.der" 2>/dev/null

@@ -73,7 +73,10 @@ FORMULA_KMS_KEY_ID=$(g /rawaroma/demo/vault/FORMULA_KMS_KEY_ID)
 FORMULA_KMS_REGION=us-west-2
 AWS_CONFIG_FILE=/etc/rawprod-demo/aws-config
 AWS_SDK_LOAD_CONFIG=1
-JWT_SECRET=$(g /rawaroma/demo/vault/JWT_SECRET)
+# P0 decision (2026-09-24, lane FIXV): mirrors prod's render-env.sh — vault-api verifies
+# RawProd-issued JWTs, so it MUST use the SAME signing key as rawprod-demo's api.env. Reads the
+# demo rawprod JWT_SECRET param directly; /rawaroma/demo/vault/JWT_SECRET is retired.
+JWT_SECRET=$(g /rawaroma/demo/rawprod/JWT_SECRET)
 ALEMBIC_ASSERTION_ISSUER=alembic
 ALEMBIC_ASSERTION_AUDIENCE=rawprod
 ALEMBIC_ASSERTION_VERIFY_KEY=$(g /rawaroma/demo/rawprod/assertion-verify-key)
