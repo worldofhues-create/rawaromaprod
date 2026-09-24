@@ -191,3 +191,38 @@ ALEMBIC health was 200 before and after every step. No secret value is in git or
 ## INFRA2 monthly cost delta (approximate)
 CloudWatch: 22 alarms (~$2.2, the first 10 are free), about 15 custom metrics (~$4.5), agent mem/disk (~$0.6), logs <1 GB (~$0.5).
 CloudTrail S3 plus CWL ingestion ~$1. Weekly vault drill ~$0.05. CloudFront, once live, is pay-per-use (~$1 at this traffic). **Total ≈ $10/mo.**
+
+---
+
+# Lane OPS1 (2026-09-24): ALEMBIC backup fix, interim API Gateway front door
+
+## ALEMBIC nightly backup (host-only, details and repo diff in `ALEMBIC_OPS_CHANGES.md`)
+- Root cause: `alembic-backup.timer` was **disabled**, so it never ran at night. The single manual run on 09-21 failed because the unit had no `PGSSLROOTCERT`
+  (the URL uses verify-full, and libpq defaulted to ~/.postgresql/root.crt).
+- Fix: drop-in `alembic-backup.service.d/10-ops1-sslroot-s3.conf` (PGSSLROOTCERT=/etc/alembic/certs/rds-global-bundle.pem, plus ExecStartPost for an
+  S3 offsite copy through `/usr/local/lib/rawaroma/alembic-backup-s3.sh`), and the timer is enabled (daily 19:00 UTC).
+- Proof: `s3://alembic-backups-859485559854-usw2/alembic/pg_dump/alembic-20260924T005944Z.pgc` (426,681 B, pg_restore --list OK).
+  No bucket lifecycle exists for `alembic/`. Local retention is 14 by count; S3 keeps everything until P0 sets a rule.
+
+## Interim HTTPS front door: API Gateway HTTP APIs (`infra/aws/apigw/apply.sh`, idempotent)
+| Console | ApiId | URL |
+|---|---|---|
+| factory (web/) | izcqrmad81 | https://izcqrmad81.execute-api.us-west-2.amazonaws.com/ |
+| platform (web-platform/) | 4f8gxugmq8 | https://4f8gxugmq8.execute-api.us-west-2.amazonaws.com/ |
+- Decision: **two APIs, not one API with /platform/**. Both consoles use root-absolute paths (`/shell.js`, `/platform.js`, `/manifest.webmanifest`)
+  and both register `/sw.js`. A /platform/ prefix would break the assets and make the two service workers collide. Each API therefore sits at its host root (`$default` stage,
+  auto-deploy, throttle 100 rps / burst 200).
+- Routes `ANY /` and `ANY /{proxy+}` use HTTP_PROXY to `https://raw.huecycle.in:8443/{proxy}`. The request mapping overwrites `X-Origin-Verify` (value from SSM
+  `/rawaroma/rawprod/cf-origin-secret`, never printed; readable by anyone with apigateway:GET) and `X-RawProd-Site: factory|platform`.
+  HTTP APIs have no cache, so /rpc, /crypto/*, /v1/*, /auth/* are never cached, and nginx also sends no-store. /sw.js is served `no-cache`.
+- Origin TLS: API Gateway HTTP integrations need a publicly trusted cert. The origin reuses the raw.huecycle.in Let's Encrypt cert, so no self-signed cert or sslip.io name was needed.
+- Origin vhost: the static root is chosen by `X-RawProd-Site`, which maps to `/var/www/rawprod-cf/{factory,platform}`. These are copies (no build/, dotfiles or md) made by
+  `cloudfront/install-origin.sh` from `/srv/rawprod/app` **@195fa66**. Re-run it after each RawProd deploy. With no header, the root falls back to the placeholder (CloudFront later).
+- SG `sg-0eb2c2a212fa82207` `rawprod-apigw-origin`: 8443 from the 14 `API_GATEWAY` us-west-2 CIDRs in ip-ranges.json, no egress. It is attached to
+  i-04e7dc4e5edcc1ff7 next to alembic-web and rawprod-cf-origin, with no restart. There is no AWS-managed prefix list for API Gateway, so re-run apply.sh when the ranges change.
+  The secret header remains the real gate, because the ranges are shared with other API Gateway customers.
+- Verified: /healthz is 200 on both URLs, `/` and the assets are 200, `/build/build.py` is 404, and `/rpc` is 502 (rawprod-api not started, as designed). A direct hit on
+  35.82.209.155:8443 / raw.huecycle.in:8443 from the internet times out. On-box without the header it is 403. ALEMBIC stayed 200 and alembic-api/web stayed active throughout.
+  The vault is untouched and closed.
+- Cost: HTTP API $1.00 per million requests plus data out, so ≈ $0–1/mo at this traffic. S3 dumps ≈ 0.4 MB/day, a few cents per month. SG is free.
+- Delete when CloudFront is live: `aws apigatewayv2 delete-api --api-id izcqrmad81` (and 4f8gxugmq8). Then detach and delete sg-0eb2c2a212fa82207.
