@@ -30,6 +30,9 @@ export const ERROR_CODES = [
   'FEATURE_DEGRADED',
   // internal service-to-service bridge (PB-03 remainder — main app box <-> Vault EC2)
   'INTERNAL_BRIDGE_UNAUTHORIZED',
+  // tutorial engine (G4) — client's cached lesson totalSteps/version is stale against the
+  // server-side registry (see backend/api/src/tutorial/tutorial.service.ts).
+  'TUTORIAL_STALE_VERSION',
 ] as const;
 
 export const errorCode = z.enum(ERROR_CODES);

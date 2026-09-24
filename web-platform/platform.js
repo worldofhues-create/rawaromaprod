@@ -213,6 +213,11 @@
     { id: 'providers', label: 'Provider health', icon: 'activity' },
     { id: 'deploy', label: 'Deployment / build', icon: 'tag' },
     { id: 'support', label: 'Audit & support', icon: 'clipboard' },
+    // G4: in-app tutorial. No `need` — screenTutorial() itself decides which lessons (if any)
+    // the signed-in session may see (same fine-grained per-permission gate as web/tutorial.js);
+    // an account with zero visible lessons still gets an honest empty state, same as every other
+    // "unavailable" card this console already renders.
+    { id: 'tutorial', label: 'Tutorials', icon: 'clipboard' },
   ];
 
   // Topbar + floating dock, rail off-canvas by default (ALEMBIC parity correction — see
@@ -224,7 +229,9 @@
     var visible = NAV.filter(function (n) { return !n.need || hasPerm(n.need); });
     var HOT = {}; visible.slice(0, 4).forEach(function (n) { HOT[n.id] = 1; });
     var navButtons = visible.map(function (n) {
-      return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
+      // data-tutorial-target="platform-nav-<id>" (G4): the one dedicated attribute the tutorial
+      // runner's target steps use to locate this real nav button.
+      return h('button', { class: 'ri' + (n.id === activeView ? ' on' : ''), 'data-tutorial-target': 'platform-nav-' + n.id, onclick: function () { location.hash = '#/' + n.id; } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
     });
     var rail = h('nav', { class: 'rail' }, [
       h('button', { class: 'rail-toggle', 'aria-label': 'Hide navigation', onclick: function () { rail.classList.remove('open'); } }, [icon(ICONS.menu, 16)]),
@@ -332,7 +339,7 @@
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['New state']), state]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason (min 3 chars, mandatory)']), reason]));
       body.appendChild(err);
-      var submit = h('button', { class: 'btn p' }, ['Save']);
+      var submit = h('button', { class: 'btn p', 'data-tutorial-target': 'platform-flag-save' }, ['Save']);
       submit.addEventListener('click', async function () {
         if (reason.value.trim().length < 3) { err.textContent = 'A reason is required.'; return; }
         try {
@@ -445,6 +452,182 @@
     }
   }
 
+  /* ── tutorials (G4): self-service, fetched from the tutorial engine's own registry ───────── */
+  var TUTORIAL_TRACK = 'platform';
+  var tutorialLessons = null, tutorialProgress = null;
+  function tutorialLessonPerms(lesson) {
+    var perms = [];
+    (lesson.steps || []).forEach(function (s) { if (s.permission) perms.push(s.permission); });
+    return perms;
+  }
+  // Hides a lesson ENTIRELY unless every permission its action/verify steps name is held — the
+  // fine-grained gate ALEMBIC's own port lacked (ticket G4); this console's own `hasPerm` is its
+  // `can()`-equivalent (see this file's own header comment).
+  function tutorialVisibleLessons() {
+    return (tutorialLessons || []).filter(function (l) {
+      return l.track === TUTORIAL_TRACK && tutorialLessonPerms(l).every(hasPerm);
+    });
+  }
+  function tutorialProgressFor(lessonId) {
+    return (tutorialProgress || []).filter(function (p) { return p.lessonId === lessonId && p.role === TUTORIAL_TRACK; })[0] || null;
+  }
+  function tutorialUpsertProgress(row) {
+    if (!row) return;
+    tutorialProgress = tutorialProgress || [];
+    for (var i = 0; i < tutorialProgress.length; i++) {
+      if (tutorialProgress[i].lessonId === row.lessonId && tutorialProgress[i].role === row.role) { tutorialProgress[i] = row; return; }
+    }
+    tutorialProgress.push(row);
+  }
+  function tutorialPost(lessonId, event) {
+    return api('/v1/tutorial/progress/' + encodeURIComponent(lessonId), { method: 'POST', body: { role: TUTORIAL_TRACK, event: event } });
+  }
+  var _tutHlEl = null;
+  function tutorialClearHighlight() {
+    if (_tutHlEl) { _tutHlEl.style.boxShadow = ''; _tutHlEl.style.zIndex = ''; _tutHlEl = null; }
+  }
+  // Same real spotlight trick as web/tutorial.js's tutorialHighlight — an oversized second
+  // box-shadow dims the viewport while the targeted element stays a "hole."
+  function tutorialHighlight(targetAttr) {
+    tutorialClearHighlight();
+    if (!targetAttr) return null;
+    var el = document.querySelector('[data-tutorial-target="' + targetAttr + '"]');
+    if (!el) return null;
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch (e) {}
+    if (!el.style.position) el.style.position = 'relative';
+    el.style.zIndex = '999';
+    el.style.boxShadow = '0 0 0 3px var(--accent), 0 0 0 6000px rgba(20,20,19,.55)';
+    _tutHlEl = el;
+    return el;
+  }
+  function tutorialGetPath(obj, path) {
+    if (!path) return obj;
+    var cur = obj, parts = path.split('.');
+    for (var i = 0; i < parts.length; i++) { if (cur === null || cur === undefined) return undefined; cur = cur[parts[i]]; }
+    return cur;
+  }
+  function tutorialPollVerify(check, onDone) {
+    var stopped = false, haveBaseline = false, baseline = null, startedAt = Date.now();
+    var pollMs = check.pollMs || 1500, timeoutMs = check.timeoutMs || 30000;
+    function passes(json) {
+      var val = tutorialGetPath(json, check.assert.path);
+      switch (check.assert.op) {
+        case 'exists': return Array.isArray(val) ? val.length > 0 : (val !== undefined && val !== null && val !== '');
+        case 'equals': return JSON.stringify(val) === JSON.stringify(check.assert.value);
+        case 'matches': try { return new RegExp(check.assert.pattern).test(val === undefined ? '' : String(val)); } catch (e) { return false; }
+        case 'changed':
+          if (!haveBaseline) { baseline = JSON.stringify(val); haveBaseline = true; return false; }
+          return JSON.stringify(val) !== baseline;
+        default: return false;
+      }
+    }
+    function tick() {
+      if (stopped) return;
+      if (Date.now() - startedAt > timeoutMs) { onDone(false); return; }
+      tunnel(check.path, { method: check.method || 'GET' }).then(function (res) {
+        if (stopped) return;
+        var pass = res.status < 400 && passes(res.json || {});
+        if (pass) { onDone(true); return; }
+        setTimeout(tick, pollMs);
+      }).catch(function () { if (!stopped) setTimeout(tick, pollMs); });
+    }
+    tick();
+    return function stop() { stopped = true; };
+  }
+  var _tutRunnerStop = null;
+  function tutorialOpenRunner(lesson, progressRow) {
+    if (_tutRunnerStop) { _tutRunnerStop(); _tutRunnerStop = null; }
+    var idx = Math.min(progressRow.stepIndex, lesson.steps.length - 1);
+    var step = lesson.steps[idx];
+    var target = (step.kind === 'target' || step.kind === 'action') ? step.target : null;
+    tutorialHighlight(target);
+    openDialog(step.title || lesson.title, function (body, close) {
+      body.appendChild(h('div', { class: 'sub', style: 'margin-bottom:8px' }, ['Step ' + (idx + 1) + ' of ' + lesson.steps.length]));
+      body.appendChild(h('p', { style: 'color:var(--ink-2)' }, [step.body]));
+      if (step.kind === 'action' && step.safety === 'confirm-required') {
+        body.appendChild(h('p', { style: 'color:var(--red);font-size:12.5px' }, ['This action cannot be undone — the dialog it opens will ask you to confirm it before it happens.']));
+      }
+      var verifyNote = null;
+      if (step.kind === 'verify') {
+        verifyNote = h('div', { class: 'sub' }, ['Watching for the change…']);
+        body.appendChild(verifyNote);
+      }
+      var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
+        h('button', { class: 'btn', onclick: function () {
+          close(); tutorialClearHighlight();
+          if (_tutRunnerStop) { _tutRunnerStop(); _tutRunnerStop = null; }
+          tutorialPost(lesson.id, { type: 'dismiss' }).then(function (row) { tutorialUpsertProgress(row); }).catch(function () {});
+        } }, ['Close']),
+      ]);
+      if (step.kind !== 'verify') {
+        actions.appendChild(h('button', { class: 'btn p', onclick: function () {
+          close();
+          tutorialPost(lesson.id, { type: 'advance', tutorialVersion: lesson.version }).then(function (row) {
+            tutorialUpsertProgress(row);
+            if (row.status === 'completed') { tutorialClearHighlight(); toast(lesson.title + ' — tutorial complete.'); return; }
+            tutorialOpenRunner(lesson, row);
+          }).catch(function (e) { toast(e.message, true); });
+        } }, [idx + 1 >= lesson.steps.length ? 'Finish' : 'Next']));
+      }
+      body.appendChild(actions);
+      if (step.kind === 'verify') {
+        _tutRunnerStop = tutorialPollVerify(step.check, function (passed) {
+          if (!passed) { if (verifyNote) verifyNote.textContent = 'Still waiting — you can keep going, or close and resume later from Tutorials.'; return; }
+          if (verifyNote) verifyNote.textContent = 'Confirmed.';
+          tutorialPost(lesson.id, { type: 'advance', tutorialVersion: lesson.version }).then(function (row) {
+            tutorialUpsertProgress(row);
+            close(); tutorialClearHighlight();
+            if (row.status === 'completed') { toast(lesson.title + ' — tutorial complete.'); return; }
+            tutorialOpenRunner(lesson, row);
+          }).catch(function (e) { toast(e.message, true); });
+        });
+      }
+    });
+  }
+  function tutorialStartOrResume(lesson) {
+    tutorialPost(lesson.id, { type: 'start' }).then(function (row) { tutorialUpsertProgress(row); tutorialOpenRunner(lesson, row); }).catch(function (e) { toast(e.message, true); });
+  }
+  async function screenTutorial() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('tutorial', content);
+    try {
+      tutorialLessons = await api('/v1/tutorial/lessons');
+      tutorialProgress = await api('/v1/tutorial/progress');
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Tutorials could not be loaded', e.message));
+      return;
+    }
+    content.innerHTML = '';
+    var lessons = tutorialVisibleLessons();
+    if (!lessons.length) {
+      content.appendChild(notBuilt('No tutorials available', 'Your account holds no permission any Platform Operations tutorial needs.'));
+    } else {
+      lessons.forEach(function (l) {
+        var prog = tutorialProgressFor(l.id);
+        var status = prog ? prog.status : 'not_started';
+        var label = status === 'completed' ? 'Replay' : (status === 'in_progress' ? 'Resume' : 'Start');
+        content.appendChild(h('div', { class: 'card' }, [
+          h('div', { class: 'card-hd' }, [h('h2', {}, [l.title]), h('span', { class: 'chip ' + (status === 'completed' ? 'g' : status === 'in_progress' ? 'b' : 'n') }, [status.replace(/_/g, ' ')])]),
+          h('p', { style: 'color:var(--ink-3);margin:0 0 12px' }, [l.summary]),
+          h('button', { class: 'btn p', onclick: function () { tutorialStartOrResume(l); } }, [label]),
+        ]));
+      });
+    }
+    content.appendChild(h('div', { class: 'card' }, [
+      h('button', { class: 'btn', style: 'color:var(--red)', onclick: function () {
+        openDialog('Reset all tutorial progress?', function (body, close) {
+          body.appendChild(h('p', { style: 'color:var(--ink-2)' }, ['This clears your tutorial progress across every workspace and cannot be undone.']));
+          body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
+            h('button', { class: 'btn', onclick: close }, ['Cancel']),
+            h('button', { class: 'btn p', onclick: function () {
+              api('/v1/tutorial/reset', { method: 'POST' }).then(function () { close(); toast('Tutorial progress reset.'); tutorialProgress = []; screenTutorial(); }).catch(function (e) { toast(e.message, true); });
+            } }, ['Reset all']),
+          ]));
+        });
+      } }, ['Reset all my tutorial progress']),
+    ]));
+  }
+
   async function render() {
     if (!session.token) {
       if (await tryConsumeAssertion()) { render(); return; }
@@ -453,6 +636,7 @@
     }
     var v = currentView();
     if (v === 'flags') return screenFlags();
+    if (v === 'tutorial') return screenTutorial();
     if (v === 'tenants') return screenTenants();
     if (v === 'providers') return screenProviders();
     if (v === 'deploy') return screenDeploy();

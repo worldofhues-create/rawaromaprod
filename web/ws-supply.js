@@ -22,7 +22,7 @@
       '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Priority') + '<select id="ra-rp" class="fld"><option>HIGH</option><option>MEDIUM</option><option>LOW</option></select></label>' +
       '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Required by', true) + '<input id="ra-rd" class="fld" type="date"></label>' +
       '<div id="ra-rerr" role="alert" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-      '<button type="submit" class="btn p" id="ra-rsave" style="width:100%;justify-content:center;height:40px">Raise requirement</button>' +
+      '<button type="submit" class="btn p" id="ra-rsave" data-tutorial-target="procurement-raise-requirement-submit" style="width:100%;justify-content:center;height:40px">Raise requirement</button>' +
       '<div style="font-size:11px;color:var(--ink-3);text-align:center">Vendor is chosen later at RFQ / quotation / PO.</div>' +
       '</div></form>';
     document.body.appendChild(scrim); setTheme();

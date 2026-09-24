@@ -56,6 +56,7 @@ import { BridgeModule } from './bridge/bridge.module.js';
 import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
 import { MaterialFactsModule } from './vault-bridge/material-facts.module.js';
+import { TutorialModule } from './tutorial/tutorial.module.js';
 
 @Module({
   imports: [
@@ -94,6 +95,7 @@ import { MaterialFactsModule } from './vault-bridge/material-facts.module.js';
     // search only, InternalBridgeGuard-signed, @Public); the Vault's own plaintext formula
     // routes are never mounted here (FormulaModule stays VAULT_MODE=false in this process).
     MaterialFactsModule,
+    TutorialModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up

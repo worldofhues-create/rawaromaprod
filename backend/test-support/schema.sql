@@ -13,6 +13,8 @@ create schema if not exists quality;
 create schema if not exists procurement;
 create schema if not exists masterdata;
 create schema if not exists bridge;
+-- G4 (lane F3): platform.tutorial_progress — see below.
+create schema if not exists platform;
 -- RP-POLICY (lane F8): iam — org + user + the new approval_matrix policy table (§87).
 create schema if not exists iam;
 
@@ -1239,6 +1241,22 @@ create table if not exists procurement.stock_requirement (
   requirement_source varchar(255),
   priority varchar(255),
   status varchar(30),
+-- G4 (lane F3): platform.tutorial_progress — TutorialService (backend/api/src/tutorial/
+-- tutorial.service.ts), matching scripts/migrations/2026-09-24-tutorial-system.sql column-for-
+-- column (this harness uses gen_random_uuid() rather than that migration's uuidv7() default —
+-- same convention every other table in this file already follows; the column itself is a plain
+-- uuid either way).
+create table if not exists platform.tutorial_progress (
+  tutorial_progress_id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references iam.user_master (user_id),
+  role varchar(60) not null,
+  lesson_id varchar(120) not null,
+  status varchar(30) not null default 'not_started',
+  step_index integer not null default 0,
+  tutorial_version integer not null default 1,
+  started_at timestamptz,
+  completed_at timestamptz,
+  last_seen_at timestamptz,
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now(),
   created_by varchar(255),
@@ -1321,3 +1339,13 @@ create table if not exists platform.notification_log (
   created_dt timestamptz not null default now(),
   updated_dt timestamptz not null default now()
 );
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'tutorial_progress_user_role_lesson_uq'
+  ) then
+    alter table platform.tutorial_progress
+      add constraint tutorial_progress_user_role_lesson_uq unique (user_id, role, lesson_id);
+  end if;
+end $$;
+create index if not exists tutorial_progress_user_idx on platform.tutorial_progress (user_id);

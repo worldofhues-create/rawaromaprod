@@ -61,6 +61,12 @@ import {
   CAPABILITY_PERMISSIONS,
 } from './ra-roles.js';
 import { RA_PERMISSIONS } from './ra-permissions.js';
+// G4 (lane F3, tutorial engine): imports the ACTUAL lesson objects the tutorial runner and the
+// backend registry both read (backend/api/src/tutorial/tutorial-lessons.ts) — never a hand-
+// duplicated copy, so this export can't drift from what the app really offers. See that file's
+// own header for why it has zero NestJS/DB dependencies and is safe to import from a plain
+// Node script like this one.
+import { TUTORIAL_LESSONS, lessonPermissions } from '../backend/api/src/tutorial/tutorial-lessons.js';
 
 const ALL_PERMISSIONS = [...RA_PERMISSIONS, ...CAPABILITY_PERMISSIONS];
 
@@ -196,6 +202,23 @@ const out = {
   manufacturingInstructionRoles: [...MANUFACTURING_INSTRUCTION_ROLES].sort(),
   manualContinuityPermission: MANUAL_CONTINUITY_PERMISSION,
   manualContinuityRoles: [...MANUAL_CONTINUITY_ROLES].sort(),
+  // G4: one entry per in-app tutorial lesson, sourced from the SAME lesson objects the runner
+  // renders (see the import above) — every action/verify step's permission is guaranteed to be
+  // a live, current permission string (already asserted against RA_PERMISSIONS in
+  // backend/api/src/tutorial/__tests__/tutorial-lessons.test.ts), which is what lets ALEMBIC
+  // compute a UNMAPPED_TUTORIAL_FEATURES count of 0 for RawProd.
+  tutorialLessons: TUTORIAL_LESSONS.map((lesson) => ({
+    id: lesson.id,
+    track: lesson.track,
+    console: lesson.console,
+    workspace: lesson.workspace,
+    title: lesson.title,
+    version: lesson.version,
+    actions: lesson.steps
+      .map((step) => ({ stepId: step.id, permission: 'permission' in step ? step.permission : undefined }))
+      .filter((entry): entry is { stepId: string; permission: string } => Boolean(entry.permission)),
+    allPermissions: lessonPermissions(lesson),
+  })),
   // Replaces ALEMBIC's hand-maintained undecorated-route exemption table -- every controller
   // method with an HTTP decorator, its access decision, and (for the non-static decisions) the
   // verified reason string from the source. `decision: 'none'` should never appear here:

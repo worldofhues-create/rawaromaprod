@@ -314,6 +314,7 @@
     menu: 'M3 6h18M3 12h18M3 18h18',
     alert: 'M12 9v4M12 17h.01M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z',
     plus: 'M12 5v14M5 12h14',
+    help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5M12 17h.01',
   };
 
   function toast(msg, bad) {
@@ -373,6 +374,58 @@
     return h('span', { class: 'chip ' + tone }, [status || 'UNKNOWN']);
   }
   function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
+
+  /* ---------------------------------------------------------------------------------------
+   * 3b. "How to use the Vault" — ticket G4's how-to for this console. Deliberately the ONLY
+   * tutorial-related thing this console gets: a STATIC, read-only help panel. No lesson
+   * runner, no ACTION dispatch, no VERIFY polling (which would mean an automated script
+   * touching real formula data), no progress persistence, no fetch, no localStorage/
+   * sessionStorage/IndexedDB — every word below is a hardcoded string built with the same
+   * `h()` DOM builder every other screen in this file uses (never innerHTML), reusing the
+   * existing `openDialog` true-modal primitive. This keeps every constraint in this file's own
+   * header (§109.4: no manifest/SW/caching, formula data never leaves this page, no analytics)
+   * intact — a how-to panel has nothing to do with any of those, so it changes none of them.
+   * --------------------------------------------------------------------------------------- */
+  function howToSection(title, lines) {
+    return h('div', { style: 'margin-bottom:16px' }, [
+      h('h3', { style: 'margin:0 0 6px;font-size:13.5px' }, [title]),
+      h('div', { style: 'display:flex;flex-direction:column;gap:6px' },
+        lines.map(function (line) { return h('p', { style: 'margin:0;color:var(--ink-2);font-size:13px;line-height:1.5' }, [line]); })),
+    ]);
+  }
+  function openVaultHowTo() {
+    openDialog('How to use the Formula Vault', function (body) {
+      body.appendChild(howToSection('What this console is', [
+        'A separate, non-installable console for Formula Vault access only — it shares no code, ' +
+          'storage, or session with the factory portal. Reloading this page ends your session by ' +
+          'design; sign in again from ALEMBIC’s "Open Vault" link.',
+        'You only ever see what your own role and per-formula access grant — a formulator sees the ' +
+          'formulas they authored or were granted; a vault approver sees what is submitted for review.',
+      ]));
+      body.appendChild(howToSection('Formulas', [
+        'The Formulas screen lists formulas you can see, each with its versions and lifecycle ' +
+          'status (DRAFT → VERSIONED → REVIEW → APPROVED → LOCKED, or REJECTED/ARCHIVED/SUPERSEDED).',
+        'Open a formula to see its versions, ingredients, and history. Ingredient percentages and ' +
+          'other protected content stay hidden until you explicitly reveal them.',
+      ]));
+      body.appendChild(howToSection('Revealing plaintext', [
+        'Revealing a formula’s real ingredients/percentages always asks for a reason first. Every ' +
+          'reveal — who, why, and when — is written to the access-audit trail; that record cannot be ' +
+          'edited or deleted from here.',
+        'Screenshots or exports of revealed content are the account holder’s own responsibility — ' +
+          'the secure-zone banner is a deterrent, not a technical control.',
+      ]));
+      body.appendChild(howToSection('Approvals (vault approver)', [
+        'A submitted version can be approved, rejected, or (once approved) locked. A formula’s own ' +
+          'author cannot approve or reject their own submission — this is enforced by the backend, ' +
+          'not just hidden here.',
+      ]));
+      body.appendChild(howToSection('Audit screens', [
+        'Access audit and Manufacturing audit (where your role holds formula:actual:read) show the ' +
+          'trail of who revealed what, and where a coded/masked manufacturing instruction was resolved.',
+      ]));
+    });
+  }
 
   /* ---------------------------------------------------------------------------------------
    * 4. router — ids only in the hash, never formula content.
@@ -442,6 +495,7 @@
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
         h('span', { class: 'who' }, [session.email]),
+        h('button', { class: 'btn sm', onclick: openVaultHowTo, 'aria-label': 'How to use the Vault', title: 'How to use the Vault' }, [icon(ICONS.help, 14)]),
         h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
       ]),
     ]);

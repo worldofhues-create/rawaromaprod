@@ -97,7 +97,7 @@
           '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Vehicle number</span><input id="ra-dv" type="text" placeholder="e.g. TN-22-0001" class="fld"></label>' +
           '<label style="display:flex;flex-direction:column;gap:5px"><span style="font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:var(--ls-wide);text-transform:uppercase;color:var(--ink-3)">Dispatch date</span><input id="ra-dd" type="date" value="' + new Date().toISOString().slice(0, 10) + '" class="fld"></label>' +
           '<div id="ra-derr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-          '<button type="submit" id="ra-dsave" class="btn p" style="width:100%;justify-content:center">Dispatch</button>' +
+          '<button type="submit" id="ra-dsave" data-tutorial-target="dispatch-submit" class="btn p" style="width:100%;justify-content:center">Dispatch</button>' +
           // Irreversible-action language up front (Addendum §10) — no separate hidden reason.
           '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);text-align:center">Dispatching commits stock and cannot be undone from this screen.</div>'
         : '<div class="empty"><h3>Nothing to dispatch yet</h3><p>No finished-good stock is available to dispatch. Produce or release stock first, then try again.</p></div>');
@@ -177,7 +177,7 @@
       '<div id="ra-qlines" style="display:flex;flex-direction:column;gap:8px"></div>' +
       '<button type="button" id="ra-qadd" class="btn sm" style="align-self:flex-start">+ Add parameter</button>' +
       '<div id="ra-qerr" style="min-height:16px;font-size:12.5px;color:var(--red);font-weight:600"></div>' +
-      '<button type="submit" id="ra-qsave" class="btn p" style="width:100%;justify-content:center">Save results</button>';
+      '<button type="submit" id="ra-qsave" data-tutorial-target="qc-record-results-submit" class="btn p" style="width:100%;justify-content:center">Save results</button>';
     var d = openMfgSheet('Record QC results', '<form id="ra-qform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>', '640px');
     var linesEl = d.sheet.querySelector('#ra-qlines');
     function paramOptions() { return '<option value="">Parameter…</option>' + params.map(function (p) { var v = p.qcParameterId != null ? p.qcParameterId : guessId(p); return v ? '<option value="' + v + '">' + (p.parameterName || p.parameterCode || String(v).slice(0, 8)) + '</option>' : ''; }).join(''); }
