@@ -157,7 +157,7 @@
     logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
     menu: 'M3 6h18M3 12h18M3 18h18',
   };
-  function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); setTimeout(function () { t.remove(); }, 3400); }
+  function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); } setTimeout(function () { t.remove(); }, 3400); }
   var dialogRoot = null;
   function closeDialog() { if (dialogRoot) { dialogRoot.remove(); dialogRoot = null; } }
   function openDialog(title, bodyFn) {
@@ -245,6 +245,7 @@
         h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
       ]),
     ]);
+    var rme = rail.querySelector('.rme'); if (window.RaSound && rme) RaSound.mountToggle(rme, rme.lastChild, 'btn sm');
     var banner = h('div', { class: 'platform-banner' }, [
       h('span', { class: 'dot' }), h('span', {}, ['PLATFORM OPERATIONS']), h('span', { class: 'vault-mark' }, ['INTERNAL']),
       h('span', {}, ['— no tenant business data or Formula Vault plaintext is ever available in this console.']),

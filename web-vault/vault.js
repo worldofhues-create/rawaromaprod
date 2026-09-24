@@ -322,6 +322,7 @@
   function toast(msg, bad) {
     var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]);
     document.body.appendChild(t);
+    if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); }
     setTimeout(function () { t.remove(); }, 3400);
   }
 
@@ -501,6 +502,7 @@
         h('button', { class: 'btn sm', style: 'margin-left:auto', onclick: logout, 'aria-label': 'Sign out' }, [icon(ICONS.logout, 14)]),
       ]),
     ]);
+    var rme = rail.querySelector('.rme'); if (window.RaSound && rme) RaSound.mountToggle(rme, rme.lastChild, 'btn sm');
     var banner = h('div', { class: 'secure-banner' }, [
       h('span', { class: 'dot' }),
       h('span', {}, ['FORMULA VAULT']),

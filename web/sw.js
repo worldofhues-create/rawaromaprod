@@ -5,9 +5,9 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v85';
+const CACHE = 'ra-shell-v87';
 const SHELL = [
-  '/', '/index.html', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
+  '/', '/index.html', '/sound.js', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
   '/qrcode.js', '/manifest.webmanifest', '/icon.svg',
   // ALEMBIC visual contract (ui-contract/) — vendored tokens/fonts/shell CSS. Bumped past the old
   // /fonts/*.woff2 (Urbanist) precache entries, which index.html no longer references.

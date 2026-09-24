@@ -1282,6 +1282,7 @@
     var t = document.createElement('div'); t.className = 'toast' + (tone === 'bad' ? ' bad' : tone === 'good' ? ' good' : '');
     t.innerHTML = '<span class="d"></span>' + escHtml(msg);
     document.body.appendChild(t);
+    if (window.RaSound) { if (tone === 'bad') RaSound.play('alert'); else if (tone === 'good') RaSound.play('success'); else RaSound.cue(msg); }
     setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, 1900);
   }
   function wireActions() {
@@ -1972,6 +1973,11 @@
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
       var d = res.json && res.json.data; if (!d) return;
+      // A count that went UP since the last look is news; the first load is not.
+      if (window.RaSound && loadAlerts.seen != null && d.total > loadAlerts.seen) {
+        RaSound.play((d.alerts || []).some(function (a) { return a.severity === 'high'; }) ? 'alert' : 'notify');
+      }
+      loadAlerts.seen = d.total;
       var badge = $('ra-bell-badge'); if (badge) { if (d.total > 0) { badge.textContent = d.total > 99 ? '99+' : d.total; badge.style.display = 'grid'; } else { badge.style.display = 'none'; } }
       var pop = $('ra-bell-pop'); if (!pop) return;
       pop.innerHTML = (d.alerts && d.alerts.length) ? ('<div style="font-family:\'JetBrains Mono\',monospace;font-size:9px;letter-spacing:.12em;color:var(--t3);padding:6px 10px 8px">ALERTS · tap to act</div>' + d.alerts.map(function (a) {
@@ -1993,6 +1999,7 @@
   }
   function wireShell() {
     [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { if (st.nav === b.getAttribute('data-nav') && !st.drawer) return; st.nav = b.getAttribute('data-nav'); st.search = ''; st.drawer = false; shell(); }; });
+    if (window.RaSound) RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), '', 'border:none;background:var(--rail-2);color:#EDEDEA;width:30px;height:30px;border-radius:var(--r-sm);cursor:pointer;display:grid;place-items:center;flex:0 0 auto');
     $('ra-logout').onclick = function () { session = null; st.role = null; try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };

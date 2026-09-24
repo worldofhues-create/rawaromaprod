@@ -4,9 +4,9 @@
  * network-only and falls straight through, same principle as the factory PWA's sw.js but
  * simpler (this console has no offline-write workflow to support at all — it's read-mostly
  * platform telemetry, not factory operations). */
-const CACHE = 'platform-shell-v6';
+const CACHE = 'platform-shell-v8';
 const SHELL = [
-  '/', '/index.html', '/platform.css', '/alembic-tokens.css', '/platform.js', '/manifest.webmanifest', '/icon.svg',
+  '/', '/index.html', '/platform.css', '/alembic-tokens.css', '/sound.js', '/platform.js', '/manifest.webmanifest', '/icon.svg',
   // Vendored fonts (no longer fetched from fonts.googleapis.com/fonts.gstatic.com — see index.html).
   '/fonts/outfit.css', '/fonts/jetbrains-mono.css',
   '/fonts/outfit-300-latin.woff2', '/fonts/outfit-300-latin-ext.woff2',
