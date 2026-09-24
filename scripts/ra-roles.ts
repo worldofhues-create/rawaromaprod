@@ -111,7 +111,17 @@ export const PLATFORM_OPS_PERMISSION = 'platformops:console:read';
  * quantities), NOT `filling` (downstream of compounding, never touches raw material weighing),
  * and no other role. */
 export const MANUFACTURING_INSTRUCTION_PERMISSION = 'production:manufacturing_instruction:read';
-export const MANUFACTURING_INSTRUCTION_ROLES = ['production', 'compounding'];
+// LANE D1 (owner addendum 2026-09-24): the demo `showcase` role sees "coded instructions only" —
+// this read IS the coded instruction (masked material + quantity), so it is the one formula-derived
+// read the showcase gets. It can hold a session only in a RAWPROD_ENVIRONMENT=demo deployment
+// (AuthService), against that deployment's own demo data.
+export const MANUFACTURING_INSTRUCTION_ROLES = ['production', 'compounding', 'showcase'];
+
+/** LANE D1 — the demo showcase role. READS ONLY (asserted by db-seed.ts): no write, no `iam:*`,
+ * no `formula:*` (not even metadata), no `vault:*`, no Platform Ops, and no
+ * `masterdata:material:reveal` — so every material identity it sees is alias-masked, and the one
+ * formula-derived thing it can read is the coded manufacturing instruction. */
+export const SHOWCASE_ROLE = 'showcase';
 
 /** G1/PB-08 (FINAL_OS §2.3/§41, ledger PB-08) — RawProd must not be an independent commercial-
  * order writer. Sales orders should originate from the ALEMBIC bridge; POST /v1/sales-orders,
@@ -503,6 +513,23 @@ export const ROLES: RoleDef[] = [
     select: oneOf('platform:flag:write', 'iam:user_master:read', PLATFORM_OPS_PERMISSION),
     sampleEmail: 'platform.admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PLATFORM_ADMIN_PASSWORD',
+  },
+  {
+    // LANE D1 — Demo showcase. See SHOWCASE_ROLE above. Signs in ONLY through an ALEMBIC demo
+    // assertion, ONLY when RAWPROD_ENVIRONMENT=demo, and never refreshes (AuthService). Its
+    // passwordEnv is deliberately a variable no deployment sets: it is never a password account,
+    // and AuthService.login refuses the role even if a password were somehow stored.
+    code: SHOWCASE_ROLE,
+    name: 'Demo Showcase',
+    view: 'showcase',
+    select: (p) =>
+      isRead(p) &&
+      !p.startsWith('iam:') &&
+      !p.startsWith('formula:') &&
+      !p.startsWith('vault:') &&
+      !p.startsWith('platformops:'),
+    sampleEmail: 'demo@demo.alembic.invalid',
+    passwordEnv: 'BOOTSTRAP_SHOWCASE_PASSWORD_NEVER_SET',
   },
 ];
 

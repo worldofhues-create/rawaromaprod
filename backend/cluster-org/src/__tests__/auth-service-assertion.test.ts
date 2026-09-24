@@ -541,3 +541,95 @@ test('production refuses ALEMBIC sign-in while target/tenant binding is unconfig
   await assert.rejects(() => svc.loginWithAssertion(signAssertion(claimsFor(email))),
     /must be set in production/);
 });
+
+/* ── LANE D1: THE DEMO ENVIRONMENT ─────────────────────────────────────────
+ * The `showcase` role (scripts/ra-roles.ts) holds a RawProd session ONLY in a
+ * RAWPROD_ENVIRONMENT=demo deployment, ONLY from a demo ALEMBIC's assertion, and never
+ * refreshes. `role_code` is unique, so every test shares one `showcase` role row. */
+
+async function showcaseRoleId(): Promise<string> {
+  const found = (await db.select({ id: roleMaster.roleId }).from(roleMaster)
+    .where(eq(roleMaster.roleCode, 'showcase')).limit(1))[0];
+  if (found) return found.id;
+  const roleId = uuidv7();
+  await db.insert(roleMaster).values({
+    roleId, roleCode: 'showcase', roleName: 'Demo Showcase', status: 'ACTIVE',
+    createdBy: 'test', updatedBy: 'test',
+  });
+  return roleId;
+}
+
+async function makeShowcaseUser(email: string): Promise<string> {
+  const userId = await makeActiveUser({ email });
+  await db.insert(userRoleMapping).values({
+    userRoleMappingId: uuidv7(), userId, roleId: await showcaseRoleId(), status: 'ACTIVE',
+    createdBy: 'test', updatedBy: 'test',
+  });
+  return userId;
+}
+
+test('LANE D1 — a PRODUCTION RawProd refuses a demo assertion outright (WRONG_ENVIRONMENT)', async () => {
+  const email = `demo-${sid()}@demo.alembic.invalid`;
+  await makeShowcaseUser(email);
+  const svc = makeService(); // RAWPROD_ENVIRONMENT unset = production
+  const token = signAssertion(claimsFor(email, { env: 'demo', roles: ['showcase'] }));
+  await assert.rejects(() => svc.loginWithAssertion(token), (err: any) => {
+    assert.equal(err.code, 'AUTH_ASSERTION_INVALID');
+    assert.match(err.message, /production deployment/);
+    return true;
+  });
+});
+
+test('LANE D1 — a PRODUCTION RawProd refuses the showcase role even on a production assertion', async () => {
+  const email = `demo-${sid()}@demo.alembic.invalid`;
+  await makeShowcaseUser(email);
+  const svc = makeService({ RAWPROD_ENVIRONMENT: 'production' });
+  const token = signAssertion(claimsFor(email, { env: 'production', roles: ['showcase'] }));
+  await assert.rejects(() => svc.loginWithAssertion(token), (err: any) => {
+    assert.equal(err.code, 'AUTH_FORBIDDEN');
+    assert.match(err.message, /Demo access is not available/);
+    return true;
+  });
+});
+
+test('LANE D1 — a DEMO RawProd accepts the demo showcase, and its session never refreshes', async () => {
+  const email = `demo-${sid()}@demo.alembic.invalid`;
+  await makeShowcaseUser(email);
+  const svc = makeService({ RAWPROD_ENVIRONMENT: 'demo' });
+  const token = signAssertion(claimsFor(email, { env: 'demo', roles: ['showcase'] }));
+  const result = await svc.loginWithAssertion(token);
+  assert.ok(result.accessToken);
+  const claims = await new JwtService(testConfig()).verifyAccess(result.accessToken);
+  assert.deepEqual(claims.roles, ['showcase']);
+  await assert.rejects(() => svc.refresh(result.refreshToken), (err: any) => {
+    assert.equal(err.code, 'AUTH_TOKEN_INVALID');
+    assert.match(err.message, /Demo sessions do not refresh/);
+    return true;
+  });
+});
+
+test('LANE D1 — a DEMO RawProd refuses a production ALEMBIC assertion', async () => {
+  const email = `admin-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const svc = makeService({ RAWPROD_ENVIRONMENT: 'demo' });
+  const token = signAssertion(claimsFor(email)); // no env claim = production
+  await assert.rejects(() => svc.loginWithAssertion(token), (err: any) => {
+    assert.equal(err.code, 'AUTH_ASSERTION_INVALID');
+    return true;
+  });
+});
+
+test('LANE D1 — the showcase role never signs in with a password, in any environment', async () => {
+  const email = `demo-${sid()}@demo.alembic.invalid`;
+  const userId = await makeShowcaseUser(email);
+  const argon2 = await import('argon2');
+  await db.update(userMaster).set({ passwordHash: await argon2.hash('raw123456', { type: argon2.argon2id }) })
+    .where(eq(userMaster.userId, userId));
+  for (const env of ['production', 'demo']) {
+    const svc = makeService({ RAWPROD_ENVIRONMENT: env, PASSWORD_LOGIN_ENABLED: 'true' });
+    await assert.rejects(() => svc.login(email, 'raw123456'), (err: any) => {
+      assert.equal(err.code, 'AUTH_FORBIDDEN');
+      return true;
+    });
+  }
+});

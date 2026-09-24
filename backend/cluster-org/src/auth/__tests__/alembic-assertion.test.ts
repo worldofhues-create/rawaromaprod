@@ -213,3 +213,44 @@ test('no expectedTenantId configured skips the tenant check entirely', () => {
   const out = verify(sign(baseClaims({ tenant_id: 'whatever', org_id: 'whatever' })));
   assert.equal(out.ok, true);
 });
+
+/* ── LANE D1: THE DEMO ENVIRONMENT ─────────────────────────────────────────
+ * A demo ALEMBIC stamps `env: 'demo'`; a production one stamps `env: 'production'` (or, from
+ * before the claim existed, nothing). This deployment accepts only its OWN environment's
+ * assertions — `expectedEnvironment` is RAWPROD_ENVIRONMENT, absent meaning production. */
+
+test('LANE D1 — a production RawProd REFUSES a demo assertion (WRONG_ENVIRONMENT)', () => {
+  const token = sign(baseClaims({ env: 'demo', roles: ['showcase'] }));
+  for (const extra of [{}, { expectedEnvironment: 'production' }]) {
+    const out = verify(token, NOW, extra);
+    assert.equal(out.ok, false);
+    if (out.ok) return;
+    assert.equal(out.refusal, 'WRONG_ENVIRONMENT');
+  }
+});
+
+test('LANE D1 — a demo RawProd accepts a demo assertion and carries env through', () => {
+  const out = verify(sign(baseClaims({ env: 'demo', roles: ['showcase'] })), NOW,
+    { expectedEnvironment: 'demo' });
+  assert.equal(out.ok, true);
+  if (!out.ok) return;
+  assert.equal(out.claims.env, 'demo');
+});
+
+test('LANE D1 — a demo RawProd REFUSES a production assertion, with or without the claim', () => {
+  for (const claims of [baseClaims({ env: 'production' }), baseClaims()]) {
+    const out = verify(sign(claims), NOW, { expectedEnvironment: 'demo' });
+    assert.equal(out.ok, false);
+    if (out.ok) return;
+    assert.equal(out.refusal, 'WRONG_ENVIRONMENT');
+  }
+});
+
+test('LANE D1 — an absent env claim is production (backward compatible), an unknown one is MALFORMED', () => {
+  const absent = verify(sign(baseClaims()));
+  assert.equal(absent.ok, true);
+  if (absent.ok) assert.equal(absent.claims.env, 'production');
+  const odd = verify(sign(baseClaims({ env: 'Demo' })), NOW, { expectedEnvironment: 'demo' });
+  assert.equal(odd.ok, false);
+  if (!odd.ok) assert.equal(odd.refusal, 'MALFORMED');
+});
