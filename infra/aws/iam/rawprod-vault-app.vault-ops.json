@@ -1,0 +1,89 @@
+{
+ "Version": "2012-10-17",
+ "Statement": [
+  {
+   "Sid": "SharedParams",
+   "Effect": "Allow",
+   "Action": [
+    "ssm:GetParameter",
+    "ssm:GetParameters"
+   ],
+   "Resource": [
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/rawprod/DATABASE_URL",
+    "arn:aws:ssm:us-west-2:859485559854:parameter/rawaroma/rawprod/assertion-verify-key"
+   ]
+  },
+  {
+   "Sid": "Metrics",
+   "Effect": "Allow",
+   "Action": "cloudwatch:PutMetricData",
+   "Resource": "*",
+   "Condition": {
+    "StringLike": {
+     "cloudwatch:namespace": "RawAroma/*"
+    }
+   }
+  },
+  {
+   "Sid": "Logs",
+   "Effect": "Allow",
+   "Action": [
+    "logs:CreateLogGroup",
+    "logs:CreateLogStream",
+    "logs:PutLogEvents",
+    "logs:DescribeLogStreams",
+    "logs:PutRetentionPolicy"
+   ],
+   "Resource": "arn:aws:logs:us-west-2:859485559854:log-group:/rawaroma/*"
+  },
+  {
+   "Sid": "LogsDescribe",
+   "Effect": "Allow",
+   "Action": "logs:DescribeLogGroups",
+   "Resource": "*"
+  },
+  {
+   "Sid": "DrillDescribe",
+   "Effect": "Allow",
+   "Action": [
+    "rds:DescribeDBInstances",
+    "rds:DescribeDBSnapshots",
+    "rds:DescribeDBInstanceAutomatedBackups"
+   ],
+   "Resource": "*"
+  },
+  {
+   "Sid": "DrillRestore",
+   "Effect": "Allow",
+   "Action": [
+    "rds:RestoreDBInstanceToPointInTime",
+    "rds:AddTagsToResource"
+   ],
+   "Resource": [
+    "arn:aws:rds:us-west-2:859485559854:db:vault-pg",
+    "arn:aws:rds:us-west-2:859485559854:db:vault-drill-*",
+    "arn:aws:rds:us-west-2:859485559854:subgrp:rawprod-vault-private",
+    "arn:aws:rds:us-west-2:859485559854:pg:rawprod-vault-pg16",
+    "arn:aws:rds:us-west-2:859485559854:og:*",
+    "arn:aws:rds:us-west-2:859485559854:auto-backup:*"
+   ]
+  },
+  {
+   "Sid": "DrillTeardown",
+   "Effect": "Allow",
+   "Action": [
+    "rds:DeleteDBInstance",
+    "rds:ModifyDBInstance"
+   ],
+   "Resource": "arn:aws:rds:us-west-2:859485559854:db:vault-drill-*"
+  },
+  {
+   "Sid": "DrillEvidence",
+   "Effect": "Allow",
+   "Action": [
+    "s3:PutObject"
+   ],
+   "Resource": "arn:aws:s3:::alembic-backups-859485559854-usw2/restore-drills/*"
+  }
+ ]
+}

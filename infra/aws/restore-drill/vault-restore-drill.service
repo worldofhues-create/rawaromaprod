@@ -1,0 +1,12 @@
+[Unit]
+Description=RawAroma G7 weekly restore drill (vault)
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/rawaroma/vault-drill.sh
+StandardOutput=append:/var/log/rawprod/restore-drill.log
+StandardError=append:/var/log/rawprod/restore-drill.log
+TimeoutStartSec=2h
+PrivateTmp=true
+NoNewPrivileges=true
