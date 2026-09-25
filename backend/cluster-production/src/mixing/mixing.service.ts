@@ -56,6 +56,7 @@ import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/back
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
+import { unweighedLineCount } from '../weighing/weighing.service.js';
 import { paginate, type Page } from '../_helpers.js';
 import type {
   AbortMixingSession,
@@ -165,6 +166,19 @@ export class MixingService {
       throw new ConflictException(
         `Mixing session cannot be completed from status ${current} (must be IN_PROGRESS).`,
       );
+    }
+
+    /* OPS-GREEN Act L (lane ops-factory): WEIGH comes before MIX. A session cannot be completed
+     * while any coded-instruction line of its order has no ACCEPTED (in-tolerance) reading —
+     * POST /v1/mixing-sessions/:id/weighings (weighing.service.ts). */
+    if (session.productionOrderId) {
+      const unweighed = await unweighedLineCount(this.db, sessionId, session.productionOrderId);
+      if (unweighed > 0) {
+        throw new ConflictException(
+          `Mixing session ${sessionId} cannot be completed: ${unweighed} instruction line(s) have no accepted weighing `
+            + '(POST /v1/mixing-sessions/:id/weighings).',
+        );
+      }
     }
 
     const row = (

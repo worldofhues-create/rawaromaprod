@@ -1535,3 +1535,42 @@ begin
   end if;
 end $$;
 create index if not exists tutorial_progress_user_idx on platform.tutorial_progress (user_id);
+
+-- OPS-GREEN Act L (lane ops-factory): scripts/migrations/2026-09-25-factory-weighing-labels.sql
+create table if not exists production.weighing_record (
+  weighing_record_id uuid primary key default gen_random_uuid(),
+  production_order_id uuid not null,
+  secure_mixing_session_id uuid not null references production.secure_mixing_session (secure_mixing_session_id),
+  sequence_no integer not null,
+  floor_code varchar(100) not null,
+  target_qty numeric(18,4) not null,
+  uom varchar(30),
+  gross_qty numeric(18,4) not null,
+  tare_qty numeric(18,4) not null,
+  net_qty numeric(18,4) not null,
+  tolerance_pct numeric(6,3) not null,
+  within_tolerance boolean not null,
+  scale_ref varchar(100),
+  weighed_by uuid,
+  weighed_dt timestamptz not null default now(),
+  status varchar(30) not null,
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists weighing_record_accepted_uq
+  on production.weighing_record (secure_mixing_session_id, sequence_no) where status = 'ACCEPTED';
+create table if not exists packaging.fg_label_record (
+  fg_label_record_id uuid primary key default gen_random_uuid(),
+  finished_good_batch_id uuid not null references packaging.finished_good_batch_master (finished_good_batch_id),
+  label_count integer not null,
+  label_content jsonb not null,
+  applied_by uuid,
+  applied_dt timestamptz not null default now(),
+  status varchar(30) not null default 'APPLIED',
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);

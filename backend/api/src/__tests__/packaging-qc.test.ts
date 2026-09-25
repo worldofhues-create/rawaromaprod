@@ -31,6 +31,9 @@ async function freshFgBatch(producedQty: number) {
   await sql`insert into packaging.finished_good_batch_master
     (finished_good_batch_id, batch_number, produced_qty, status)
     values (${id}, ${'QC-' + id}, ${producedQty}, 'ACTIVE')`;
+  // OPS-GREEN Act L: a label check can only PASS on a labelled batch (fg-label.service.ts).
+  await sql`insert into packaging.fg_label_record (finished_good_batch_id, label_count, label_content, status)
+    values (${id}, 1, ${JSON.stringify({ batchNumber: 'QC-' + id })}::jsonb, 'APPLIED')`;
   return id;
 }
 

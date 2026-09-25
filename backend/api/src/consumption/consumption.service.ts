@@ -80,12 +80,13 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
 
       // Issued lines: the batch actually taken + the planned quantity (from the pick list).
       const lines = (await tx`
-        select mii.inventory_batch_id::text as inv_batch, mpli.picked_qty::text as qty
+        select mii.inventory_batch_id::text as inv_batch, mpli.picked_qty::text as qty,
+               mi.production_order_id::text as order_id
         from production.material_issue mi
         join production.material_issue_item mii on mii.material_issue_id = mi.material_issue_id
         left join production.material_pick_list_items mpli
           on mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id
-        where mi.material_issue_id = ${issueId}`) as Array<{ inv_batch: string | null; qty: string | null }>;
+        where mi.material_issue_id = ${issueId}`) as Array<{ inv_batch: string | null; qty: string | null; order_id: string | null }>;
 
       let applied = 0;
       for (const l of lines) {
@@ -99,6 +100,17 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
           insert into inventory.inventory_event_history
             (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, remarks, status)
           values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} to production`}, 'ACTIVE')`;
+        // OPS-GREEN Act L (lane ops-factory): reserve -> pick -> issue. The RM reservation the
+        // planner held on THIS batch for THIS production order is consumed by the issue, in the
+        // same transaction as the debit — otherwise it outlives the stock it reserved and every
+        // later reservation on the batch reads on-hand minus a hold that no longer exists.
+        if (l.order_id) {
+          await tx`
+            update inventory.stock_reservation
+               set released_dt = now(), status = 'CONSUMED', updated_by = 'consumption:material_issue', updated_dt = now()
+             where inventory_batch_id = ${l.inv_batch} and reserved_for_document_id = ${l.order_id}
+               and released_dt is null`;
+        }
         applied++;
       }
       await tx`update inventory.material_issue_applied set item_count = ${applied} where material_issue_id = ${issueId}`;

@@ -31,6 +31,8 @@ import { MixingController } from './mixing/mixing.controller.js';
 import { MixingService } from './mixing/mixing.service.js';
 import { BatchController } from './batch/batch.controller.js';
 import { BatchService } from './batch/batch.service.js';
+import { WeighingController } from './weighing/weighing.controller.js';
+import { WeighingService } from './weighing/weighing.service.js';
 import { ProductionLookupService } from './production-lookup.service.js';
 import { PRODUCTION_LOOKUP } from './public-api.js';
 import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js';
@@ -43,6 +45,7 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
     PickingController,
     MixingController,
     BatchController,
+    WeighingController,
   ],
   providers: [
     {
@@ -54,6 +57,7 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
     PickingService,
     MixingService,
     BatchService,
+    WeighingService,
     ProductionLookupService,
     { provide: PRODUCTION_LOOKUP, useExisting: ProductionLookupService },
   ],
