@@ -47,7 +47,7 @@ const envOf = (b: Box, p: string) => {
   const out = new Map<string, string>();
   for (const l of readFileSync(join(b.root, p), 'utf8').split('\n')) {
     const m = /^([A-Z_][A-Z0-9_]*)=(.*)$/.exec(l);
-    if (m) out.set(m[1], m[2]);
+    if (m) out.set(m[1] as string, m[2] as string); // both groups always participate in a match
   }
   return out;
 };
@@ -329,7 +329,7 @@ for (const [target, src, www, cc, vc] of [
 }
 
 test('install-static: a missing source tree is refused and the live root is left alone', () => {
-  const files = { ...webTrees('srv/rawprod-demo/app'), 'var/www/rawprod-demo-cf/vault/index.html': 'LIVE' };
+  const files: Record<string, string> = { ...webTrees('srv/rawprod-demo/app'), 'var/www/rawprod-demo-cf/vault/index.html': 'LIVE' };
   delete files['srv/rawprod-demo/app/web-vault/index.html'];
   delete files['srv/rawprod-demo/app/web-vault/vault.js'];
   const { b, r } = installStatic('demo', files);
@@ -404,7 +404,7 @@ test('nginx: every proxy_pass upstream and limit_req zone resolves', () => {
 
 test('nginx: every include resolves to a repo file, an ALEMBIC snippet, certbot, or a rendered secret', () => {
   for (const { f, m } of matches(/^\s*include\s+([^;\s]+);/gm)) {
-    const p = m[1];
+    const p = m[1] ?? ''; // '' matches no allowed prefix, so a group that did not participate fails below
     if (p.startsWith('/etc/letsencrypt/') || RENDERED_SECRETS.includes(p)) continue;
     if (p.startsWith('/etc/nginx/alembic/')) { assert.ok(ALEMBIC_SNIPPETS.includes(p.slice(19)), `${f}: ${p}`); continue; }
     assert.ok(p.startsWith('/etc/nginx/rawprod/') && existsSync(join(ROOT, 'infra/aws/nginx', p.slice(19))), `${f}: ${p}`);
