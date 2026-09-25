@@ -34,10 +34,10 @@
  * `procurement.purchase_order` — award/PO approval remains a human/policy decision (§19).
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { uuidv7 } from '@core/data-kernel';
 import type { Sql, TransactionSql } from 'postgres';
-import { AUTO_RFQ_ENABLED, AUTOMATION_POLL_MS, RULE, SYSTEM_ACTOR } from './automation.constants.js';
+import { AUTO_RFQ_ENABLED, AUTOMATION_POLL_MS, RULE, SYSTEM_ACTOR, autoNumberSuffix } from './automation.constants.js';
 import { runIdempotent } from './ledger.js';
 
 const EVENT_TYPE = 'production.order.created';
@@ -155,7 +155,7 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
     // One stock_requirement per short material.
     const stockRequirementIdByMaterial = new Map<string, string>();
     for (const s of short) {
-      const stockRequirementId = randomUUID();
+      const stockRequirementId = uuidv7();
       await tx`
         insert into procurement.stock_requirement
           (stock_requirement_id, material_id, required_qty, uom_id, requirement_source, priority, status, created_by, updated_by)
@@ -185,8 +185,8 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
     const rfqIds: string[] = [];
     for (const [vendorKey, items] of groups) {
       const vendorId = vendorKey === 'UNMAPPED' ? null : vendorKey;
-      const purchaseRequestId = randomUUID();
-      const prNumber = `PR-AUTO-${purchaseRequestId.slice(0, 8).toUpperCase()}`;
+      const purchaseRequestId = uuidv7();
+      const prNumber = `PR-AUTO-${autoNumberSuffix(purchaseRequestId)}`;
       const firstStockReq = stockRequirementIdByMaterial.get(items[0]!.materialId) ?? null;
       await tx`
         insert into procurement.purchase_request
@@ -199,26 +199,26 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
         await tx`
           insert into procurement.purchase_request_items
             (purchase_request_item_id, purchase_request_id, material_id, required_qty, uom_id, status, created_by, updated_by)
-          values (${randomUUID()}, ${purchaseRequestId}, ${item.materialId}, ${item.shortQty}, ${item.uomId}, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
+          values (${uuidv7()}, ${purchaseRequestId}, ${item.materialId}, ${item.shortQty}, ${item.uomId}, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
         `;
       }
 
       if (AUTO_RFQ_ENABLED) {
-        const rfqId = randomUUID();
+        const rfqId = uuidv7();
         await tx`
           insert into procurement.rfq_master (rfq_id, rfq_number, purchase_request_id, rfq_date, status, created_by, updated_by)
-          values (${rfqId}, ${'RFQ-AUTO-' + rfqId.slice(0, 8).toUpperCase()}, ${purchaseRequestId}, current_date, 'DRAFT', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
+          values (${rfqId}, ${'RFQ-AUTO-' + autoNumberSuffix(rfqId)}, ${purchaseRequestId}, current_date, 'DRAFT', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
         `;
         for (const item of items) {
           await tx`
             insert into procurement.rfq_items (rfq_item_id, rfq_id, material_id, required_qty, uom_id, status, created_by, updated_by)
-            values (${randomUUID()}, ${rfqId}, ${item.materialId}, ${item.shortQty}, ${item.uomId}, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
+            values (${uuidv7()}, ${rfqId}, ${item.materialId}, ${item.shortQty}, ${item.uomId}, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
           `;
         }
         if (vendorId) {
           await tx`
             insert into procurement.rfq_vendor_mappings (rfq_vendor_mapping_id, rfq_id, vendor_id, is_selected_vendor, status, created_by, updated_by)
-            values (${randomUUID()}, ${rfqId}, ${vendorId}, false, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
+            values (${uuidv7()}, ${rfqId}, ${vendorId}, false, 'ACTIVE', ${SYSTEM_ACTOR}, ${SYSTEM_ACTOR})
           `;
         }
         rfqIds.push(rfqId);

@@ -35,8 +35,8 @@ import {
   NotImplementedException,
 } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
-import { randomUUID } from 'node:crypto';
 
 const NEG_WRITE_PERM = 'procurement:quotation_items:write';
 
@@ -272,7 +272,7 @@ export class ProcAnalyticsService {
          and (coalesce(gi.rejected_qty,0) > 0 or coalesce(gi.damaged_qty,0) > 0 or gi.variance_type in ('SHORT','DAMAGED'))`) as Array<Record<string, unknown>>;
     if (!lines.length) throw new BadRequestException('This GRN has no rejected/short/damaged lines to replace');
 
-    const poId = randomUUID();
+    const poId = uuidv7();
     const poNumber = 'PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-R' + String(Date.now()).slice(-5);
     let total = 0;
     const items = lines.map((l) => {
@@ -298,7 +298,7 @@ export class ProcAnalyticsService {
     for (const it of items) {
       await this.sql`
         insert into procurement.purchase_order_items (purchase_order_item_id, purchase_order_id, material_id, ordered_qty, uom_id, rate, amount, status, created_by, updated_by, created_dt, updated_dt)
-        values (${randomUUID()}, ${poId}, ${(it.materialId as string) ?? null}, ${String(it.qty)}, ${(it.uomId as string) ?? null}, ${String(it.rate)}, ${String(it.amount)}, 'ACTIVE', ${principal.userId}, ${principal.userId}, now(), now())`;
+        values (${uuidv7()}, ${poId}, ${(it.materialId as string) ?? null}, ${String(it.qty)}, ${(it.uomId as string) ?? null}, ${String(it.rate)}, ${String(it.amount)}, 'ACTIVE', ${principal.userId}, ${principal.userId}, now(), now())`;
     }
     return { purchaseOrderId: poId, poNumber, replacementOfPoId: grn.purchase_order_id, lines: items.length, totalAmount: total };
   }

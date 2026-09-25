@@ -34,6 +34,19 @@ import {
 } from './automation.constants.js';
 import { runIdempotent } from './ledger.js';
 
+/**
+ * A timestamp column as ISO-8601, whichever shape the driver hands back. The shared PG_CLIENT pool is
+ * also wrapped by Drizzle (DrizzleModule's IAM_DB / PLATFORM_DB), and drizzle-orm's postgres-js driver
+ * swaps that client's timestamp/timestamptz/date parsers for a pass-through — so in the running API
+ * these raw queries get `updated_dt` as Postgres text ('2026-09-24 10:00:00.123+00'), not a Date, and
+ * `.toISOString()` threw ("automation alerts scan failed: r.updated_dt.toISOString is not a function",
+ * seen on the demo), which aborted the whole scan: no QC-HOLD, PR or PO alert was ever raised.
+ */
+export function isoOf(v: Date | string): string {
+  const d = v instanceof Date ? v : new Date(v);
+  return Number.isNaN(d.getTime()) ? String(v) : d.toISOString();
+}
+
 @Injectable()
 export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(AutomationAlertsService.name);
@@ -75,7 +88,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
          and updated_dt <= now() - (${QC_HOLD_ALERT_HOURS} || ' hours')::interval
        order by updated_dt asc
        limit 100
-    `) as unknown as Array<{ id: string; rm_batch_id: string | null; updated_dt: Date }>;
+    `) as unknown as Array<{ id: string; rm_batch_id: string | null; updated_dt: Date | string }>;
     for (const r of rows) {
       await this.raise(
         RULE.ALERT_QC_HOLD_AGE,
@@ -84,7 +97,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
         'ALERT',
         'role:qc',
         `QC HOLD unresolved for over ${QC_HOLD_ALERT_HOURS}h`,
-        `Incoming QC inspection ${r.id} (RM batch ${r.rm_batch_id ?? 'unknown'}) has been on HOLD since ${r.updated_dt.toISOString()}, past the ${QC_HOLD_ALERT_HOURS}h threshold. Re-test or disposition it.`,
+        `Incoming QC inspection ${r.id} (RM batch ${r.rm_batch_id ?? 'unknown'}) has been on HOLD since ${isoOf(r.updated_dt)}, past the ${QC_HOLD_ALERT_HOURS}h threshold. Re-test or disposition it.`,
         { qcInspectionId: r.id, rmBatchId: r.rm_batch_id },
       );
     }
@@ -98,7 +111,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
          and updated_dt <= now() - (${PR_OVERDUE_HOURS} || ' hours')::interval
        order by updated_dt asc
        limit 100
-    `) as unknown as Array<{ id: string; pr_number: string | null; updated_dt: Date }>;
+    `) as unknown as Array<{ id: string; pr_number: string | null; updated_dt: Date | string }>;
     for (const r of rows) {
       await this.raise(
         RULE.ALERT_PR_OVERDUE,
@@ -107,7 +120,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
         'ALERT',
         'role:procurement',
         `Purchase request pending approval > ${PR_OVERDUE_HOURS}h`,
-        `Purchase request ${r.pr_number ?? r.id} has been SUBMITTED since ${r.updated_dt.toISOString()}, past the ${PR_OVERDUE_HOURS}h threshold, with no approval decision. Approve or reject it.`,
+        `Purchase request ${r.pr_number ?? r.id} has been SUBMITTED since ${isoOf(r.updated_dt)}, past the ${PR_OVERDUE_HOURS}h threshold, with no approval decision. Approve or reject it.`,
         { purchaseRequestId: r.id, prNumber: r.pr_number },
       );
     }
@@ -121,7 +134,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
          and updated_dt <= now() - (${PO_OVERDUE_HOURS} || ' hours')::interval
        order by updated_dt asc
        limit 100
-    `) as unknown as Array<{ id: string; po_number: string | null; updated_dt: Date }>;
+    `) as unknown as Array<{ id: string; po_number: string | null; updated_dt: Date | string }>;
     for (const r of rows) {
       await this.raise(
         RULE.ALERT_PO_OVERDUE,
@@ -130,7 +143,7 @@ export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {
         'ALERT',
         'role:procurement',
         `Purchase order awaiting approval > ${PO_OVERDUE_HOURS}h`,
-        `Purchase order ${r.po_number ?? r.id} has been pending since ${r.updated_dt.toISOString()}, past the ${PO_OVERDUE_HOURS}h threshold. Approve, reject, or escalate it.`,
+        `Purchase order ${r.po_number ?? r.id} has been pending since ${isoOf(r.updated_dt)}, past the ${PO_OVERDUE_HOURS}h threshold. Approve, reject, or escalate it.`,
         { purchaseOrderId: r.id, poNumber: r.po_number },
       );
     }

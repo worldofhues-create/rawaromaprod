@@ -18,10 +18,13 @@
 #   constants                   non-secret facts: the vault box's private address, the hostnames
 #
 # Live capture (lane cfg-rp, read-only SSM 2026-09-25): every secret this renders was checked equal to its SSM
-# parameter ON the box (compared there, never printed). The one value a re-render would still have changed was the
-# app box's FORMULA_KMS_KEY_ID: the box runs with alias/rawprod-vault-envelope, and `carry` read the key ARN from
-# /rawaroma/vault/FORMULA_KMS_KEY_ID instead (the app role CAN read it). Same KMS key (the alias targets
-# 83c66cf8-...), but a different string -- so it is now the alias, as live.
+# parameter ON the box (compared there, never printed).
+#
+# RC7: the app box's FORMULA_DATABASE_URL / FORMULA_KMS_KEY_ID / FORMULA_KMS_REGION are retired. Since RC6's vault
+# port the main box never composes FormulaModule (backend/api/src/app.module.ts; main-box-no-formula-db.test.ts), so
+# nothing there reads them -- it reaches the Vault only over VAULT_API_INTERNAL_URL + INTERNAL_BRIDGE_KEY. The vault
+# box keeps all three. migrate.env now names the app role (DB_APP_ROLE, the user of the app's own DATABASE_URL) so a
+# migration can grant it what the owner creates (scripts/migrations/2026-09-26-automation-app-role-grants.sql).
 # RENDER_ROOT (test-only) prefixes every path this script reads or writes, so
 # backend/api/src/__tests__/infra-live-capture.test.ts can run it for real against a sandbox. Empty on a box.
 set -euo pipefail
@@ -43,7 +46,6 @@ git_sha(){ git -c safe.directory="$E$1" -C "$E$1" rev-parse HEAD 2>/dev/null || 
 umask 077; install -d -m 755 "$E/etc/rawprod"
 put(){ local f=$E$1; local t; t=$(mktemp "$E/etc/rawprod/.envXXXX"); cat > "$t"; chmod 600 "$t"; [ "$(id -u)" != 0 ] || chown root:root "$t"; mv -f "$t" "$f"; echo "rendered $1 ($(wc -l < "$f") lines)"; }
 VAULT_PRIVATE=172.31.51.157      # the vault box; also infra/aws/nginx/rawvault.conf's upstream
-VAULT_PG=vault-pg.creos6e6ye38.us-west-2.rds.amazonaws.com:5432
 COMMON="NODE_ENV=production
 APP_ENV=prod
 PORT=4100
@@ -59,10 +61,12 @@ app)
   IBK=$(g /rawaroma/bridge/internal-bridge-key)
   SHA=$(git_sha /srv/rawprod/app /etc/rawprod/api.env)
   TENANT=$(g /rawaroma/rawprod/ALEMBIC_ASSERTION_TENANT_ID)
-  # The KMS key id is not a secret: the alias the app box runs with (the vault box renders the key ARN from SSM).
-  KMS=alias/rawprod-vault-envelope
   KEK=$(g /rawaroma/rawprod/bridge-hmac-kek)
   DBURL=$(g /rawaroma/rawprod/DATABASE_URL)
+  # The app role is the user of the app's own URL (scheme://USER[:password]@host/db) -- one source, no second
+  # copy of the name to drift. Not a secret; an empty one stops the render rather than skip the grant migration.
+  APPROLE=${DBURL#*://}; case $APPROLE in *@*) APPROLE=${APPROLE%%@*}; APPROLE=${APPROLE%%:*} ;; *) APPROLE="" ;; esac
+  [ -n "$APPROLE" ] || { echo "render-env: no role name in /rawaroma/rawprod/DATABASE_URL; refusing to render" >&2; exit 1; }
   JWT=$(g /rawaroma/rawprod/JWT_SECRET)
   VERIFY=$(g /rawaroma/rawprod/assertion-verify-key)
   MIGURL=$(g /rawaroma/rawprod/MIGRATE_DATABASE_URL)
@@ -76,13 +80,10 @@ RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform,vault
 CORS_ORIGINS=https://rawfactory.huecycle.in,https://rawplatform.huecycle.in
 # The worker (outbox publisher, bridge relay, schedulers) runs in this process: there is no separate worker unit.
 RUN_WORKER_IN_PROCESS=true
-# Vault calls go over the private network to vault-api, signed with the key both boxes share.
+# Vault calls go over the private network to vault-api, signed with the key both boxes share. This box holds no
+# FORMULA_* key at all: it never opens the vault database or the envelope key (RC7).
 VAULT_API_INTERNAL_URL=http://$VAULT_PRIVATE:4100
 INTERNAL_BRIDGE_KEY=$IBK
-# The app box never holds the vault DB password: the URL is present (config shape), unusable alone.
-FORMULA_DATABASE_URL=postgres://ra_vault@$VAULT_PG/vault?sslmode=require
-FORMULA_KMS_KEY_ID=$KMS
-FORMULA_KMS_REGION=us-west-2
 # Seals/opens the bridge connector's HMAC secret at rest (backend/api/src/bridge/secret-box.ts).
 BRIDGE_HMAC_KEK=$KEK
 GIT_SHA=$SHA
@@ -92,6 +93,7 @@ NODE_ENV=production
 PGSSLROOTCERT=/etc/rawprod/rds-global-bundle.pem
 DATABASE_URL=$MIGURL
 SKIP_TARGETS=formula
+DB_APP_ROLE=$APPROLE
 X
   ;;
 vault)

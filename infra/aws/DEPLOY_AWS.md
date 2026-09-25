@@ -146,8 +146,8 @@ pnpm exec tsx scripts/db-seed.ts; unset BOOTSTRAP_OWNER_PASSWORD
 
 | File | Used by | Must set |
 |---|---|---|
-| `api.env` | `rawprod-api.service` | `DATABASE_URL` (rawprod_app role), `FORMULA_DATABASE_URL` (until PB-03 lands — see §6), `JWT_SECRET`, `CORS_ORIGINS=https://rawfactory.huecycle.in,https://rawplatform.huecycle.in`, `PORT=4100`, `NODE_ENV=production`, `APP_ENV=prod`, `RUN_WORKER_IN_PROCESS=true` |
-| `migrate.env` | `rawprod-migrate.service` | `DATABASE_URL` (rawprod_owner role, DDL), `SKIP_TARGETS=formula` |
+| `api.env` | `rawprod-api.service` | `DATABASE_URL` (rawprod_app role), no `FORMULA_*` key (RC7: the main box reaches the Vault only over `VAULT_API_INTERNAL_URL`), `JWT_SECRET`, `CORS_ORIGINS=https://rawfactory.huecycle.in,https://rawplatform.huecycle.in`, `PORT=4100`, `NODE_ENV=production`, `APP_ENV=prod`, `RUN_WORKER_IN_PROCESS=true` |
+| `migrate.env` | `rawprod-migrate.service` | `DATABASE_URL` (rawprod_owner role, DDL), `SKIP_TARGETS=formula`, `DB_APP_ROLE=rawprod_app` (RC7: the role grant migrations grant to, e.g. `2026-09-26-automation-app-role-grants.sql`) |
 | `vault.env` | `vault-api.service` | `DATABASE_URL` (interim — see §6), `FORMULA_DATABASE_URL` (ra_vault role, vault-pg), `FORMULA_KEK` or a KMS adapter once PB-03 lands, `JWT_SECRET` (P0 decision 2026-09-24: the SAME signing key as `api.env`, ALWAYS — rendered from the same `/rawaroma/rawprod/JWT_SECRET` SSM param, not a separate copy; vault-api verifies RawProd-issued JWTs, so a mismatched key would reject every caller), `PORT=4100` |
 | `vault-migrate.env` | `vault-migrate.service` | `FORMULA_DATABASE_URL` (ra_vault_owner role, vault-pg), `SKIP_TARGETS=main` — **no `DATABASE_URL`** |
 

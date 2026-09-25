@@ -13,6 +13,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { BRIDGE_DB, bridgeSchema, type BridgeDb } from './bridge.tokens.js';
 import { openSecret } from './secret-box.js';
@@ -313,7 +314,7 @@ export class ImporterService {
           insert into packaging.finished_goods_batch_consumption
             (finished_goods_batch_consumption_id, finished_good_batch_id, consumed_for_document_id,
              consumed_qty, uom_id, consumed_dt, status, created_by, updated_by)
-          values (gen_random_uuid(), ${r.fg_id}, ${aggregateId}::uuid, ${take}, ${r.uom_id}, now(),
+          values (${uuidv7()}, ${r.fg_id}, ${aggregateId}::uuid, ${take}, ${r.uom_id}, now(),
                   'ACTIVE', 'bridge:alembic', 'bridge:alembic')`);
         consumed += take;
         remaining -= take;

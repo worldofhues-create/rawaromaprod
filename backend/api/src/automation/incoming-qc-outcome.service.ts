@@ -26,10 +26,10 @@
  * `procurement.vendor_credit_reason_master` (insert-if-missing, one fixed reason row).
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { uuidv7 } from '@core/data-kernel';
 import type { Sql, TransactionSql } from 'postgres';
-import { AUTOMATION_POLL_MS, RULE, SYSTEM_ACTOR } from './automation.constants.js';
+import { AUTOMATION_POLL_MS, RULE, SYSTEM_ACTOR, autoNumberSuffix } from './automation.constants.js';
 import { runIdempotent } from './ledger.js';
 
 const PASSED = 'quality.qc.passed';
@@ -128,7 +128,7 @@ export class IncomingQcOutcomeService implements OnModuleInit, OnModuleDestroy {
       return { decision: 'SKIPPED' as const, reason: 'RM batch is not QUARANTINE (already released/rejected, or never quarantined)' };
     }
 
-    const inventoryBatchId = randomUUID();
+    const inventoryBatchId = uuidv7();
     await tx`
       insert into inventory.inventory_batch
         (inventory_batch_id, rm_batch_id, material_id, storage_location_id, quantity_on_hand, uom_id, status, created_by, updated_by)
@@ -215,8 +215,8 @@ export class IncomingQcOutcomeService implements OnModuleInit, OnModuleDestroy {
     `) as unknown as Array<{ amount: string | null }>;
     const amount = priced[0]?.amount ?? null;
 
-    const creditNoteId = randomUUID();
-    const creditNoteNumber = `CN-AUTO-${creditNoteId.slice(0, 8).toUpperCase()}`;
+    const creditNoteId = uuidv7();
+    const creditNoteNumber = `CN-AUTO-${autoNumberSuffix(creditNoteId)}`;
     await tx`
       insert into procurement.vendor_credit_note
         (vendor_credit_note_id, vendor_id, grn_id, vendor_credit_reason_id, credit_note_number, credit_note_date, amount, status, created_by, updated_by)

@@ -54,3 +54,17 @@ export const RULE = {
   ALERT_PR_OVERDUE: 'alert_pr_overdue',
   ALERT_PO_OVERDUE: 'alert_po_overdue',
 } as const;
+
+/**
+ * The human-readable suffix of an automation-drafted document number (PR-AUTO-…, RFQ-AUTO-…,
+ * CN-AUTO-…), taken from the TAIL of the row's uuidv7 id. Row ids here are uuidv7 — the tables'
+ * own default, which the id-ordered lists ("newest first") rely on — and a uuidv7's HEAD is its
+ * millisecond timestamp: the first 8 hex of two ids minted within the same ~65 s are identical, so
+ * a head-derived number would collide on purchase_request_pr_number_uq / rfq_master_rfq_number_uq /
+ * vendor_credit_note_number_uq (two vendor groups in one shortage run are minted in the same
+ * millisecond). The last 12 hex are 16 counter bits + 32 random bits — the same suffix
+ * cluster-inventory's RM batch numbers use (grn.service.ts shortId).
+ */
+export function autoNumberSuffix(id: string): string {
+  return id.replace(/-/g, '').slice(-12).toUpperCase();
+}

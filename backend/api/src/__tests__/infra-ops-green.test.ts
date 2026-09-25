@@ -43,16 +43,19 @@ test('render-env app: renders every key the production app box runs with', () =>
   const body = rendered(arm(s, 'app'), '/etc/rawprod/api.env');
   const k = keys(body);
   for (const key of ['ALEMBIC_ASSERTION_TENANT_ID', 'INTERNAL_BRIDGE_KEY', 'VAULT_API_INTERNAL_URL',
-    'RUN_WORKER_IN_PROCESS', 'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION',
+    'RUN_WORKER_IN_PROCESS',
     'RAWPROD_ASSERTION_EXPECTED_TARGETS', 'BRIDGE_HMAC_KEK', 'GIT_SHA', 'DATABASE_URL', 'JWT_SECRET',
     'ALEMBIC_ASSERTION_VERIFY_KEY', 'CORS_ORIGINS']) {
     assert.ok(k.has(key), `api.env lacks ${key}`);
   }
+  // RC7: the main box reads no FORMULA_* key since RC6's vault port (it never composes FormulaModule).
+  for (const key of ['FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION']) {
+    assert.equal(k.has(key), false, `api.env still renders the retired ${key}`);
+  }
   assert.match(body, /^RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform,vault$/m);
   assert.match(body, /^RUN_WORKER_IN_PROCESS=true$/m);
   assert.match(body, /^VAULT_API_INTERNAL_URL=http:\/\/\$VAULT_PRIVATE:4100$/m);
-  // No vault password on the app box: user@host, never user:password@host.
-  assert.match(body, /^FORMULA_DATABASE_URL=postgres:\/\/ra_vault@\$VAULT_PG\/vault\?sslmode=require$/m);
+  assert.match(rendered(arm(s, 'app'), '/etc/rawprod/migrate.env'), /^DB_APP_ROLE=\$APPROLE$/m, 'migrate.env names the app role');
   assert.match(arm(s, 'app'), /KEK=\$\(g \/rawaroma\/rawprod\/bridge-hmac-kek\)/);
   assert.match(arm(s, 'app'), /IBK=\$\(g \/rawaroma\/bridge\/internal-bridge-key\)/);
 });
@@ -64,7 +67,8 @@ test('render-env vault: VAULT_MODE, no DATABASE_URL, the rawvault CORS origin, a
   assert.match(body, /^VAULT_MODE=true$/m);
   assert.equal(k.has('DATABASE_URL'), false, 'the vault box must not hold the main RawProd DATABASE_URL');
   assert.match(body, /^CORS_ORIGINS=https:\/\/rawvault\.huecycle\.in$/m);
-  for (const key of ['INTERNAL_BRIDGE_KEY', 'ALEMBIC_ASSERTION_TENANT_ID', 'FORMULA_DATABASE_URL', 'GIT_SHA']) {
+  for (const key of ['INTERNAL_BRIDGE_KEY', 'ALEMBIC_ASSERTION_TENANT_ID', 'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID',
+    'FORMULA_KMS_REGION', 'GIT_SHA']) {
     assert.ok(k.has(key), `vault.env lacks ${key}`);
   }
   assert.match(body, /^\$AUDIT$/m, 'FORMULA_AUDIT_HMAC_WRAPPED must be carried, never dropped');
@@ -76,17 +80,24 @@ test('render-demo-env app: the demo RawProd API gets the keys it ran with from a
   const body = rendered(a, '/etc/rawprod-demo/api.env');
   const k = keys(body);
   for (const key of ['ALEMBIC_ASSERTION_TENANT_ID', 'VAULT_API_INTERNAL_URL',
-    'FORMULA_DATABASE_URL', 'BRIDGE_HMAC_KEK', 'GIT_SHA']) {
+    'BRIDGE_HMAC_KEK', 'GIT_SHA']) {
     assert.ok(k.has(key), `demo api.env lacks ${key}`);
   }
-  assert.match(body, /^\$RP_KMS$/m, 'FORMULA_KMS_KEY_ID line');
+  // RC7: retired from the demo app box too; the demo vault box keeps them (below).
+  for (const key of ['FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION']) {
+    assert.equal(k.has(key), false, `demo api.env still renders the retired ${key}`);
+  }
+  assert.doesNotMatch(a, /RP_KMS/, 'no FORMULA_KMS_KEY_ID is read for the demo app box any more');
   // Lane cfg-rp (live 2026-09-25): the demo runs WITHOUT the in-process worker, so the render carries
   // RUN_WORKER_IN_PROCESS from the box (\$RP_WORKER) instead of introducing it; infra-live-capture.test.ts runs it.
   assert.match(body, /^\$RP_WORKER$/m, 'RUN_WORKER_IN_PROCESS is carried, not introduced');
   assert.match(body, /^VAULT_API_INTERNAL_URL=http:\/\/\$VAULT_PRIVATE:4111$/m);
-  assert.match(body, /^FORMULA_DATABASE_URL=postgres:\/\/vault_demo_app@\$VPG\/vault_demo\?sslmode=require$/m);
   assert.match(a, /rm -f "(\$E)?\$RP_EXTRA"/, 'the hand-placed api.extra.env is retired once its keys are rendered');
-  assert.match(rendered(arm(s, 'vault'), '/etc/rawprod-demo/vault.env'), /^\$V_AUDIT$/m);
+  const vaultBody = rendered(arm(s, 'vault'), '/etc/rawprod-demo/vault.env');
+  assert.match(vaultBody, /^\$V_AUDIT$/m);
+  for (const key of ['FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION']) {
+    assert.ok(keys(vaultBody).has(key), `demo vault.env lacks ${key}`);
+  }
 });
 
 test('no render script prints a value', () => {
@@ -118,7 +129,12 @@ test('nginx: the live console-config / vault-config injection and the rawvault v
 
   const vault = read('infra/aws/nginx/rawvault.conf');
   assert.match(vault, /server_name rawvault\.huecycle\.in;/);
-  assert.match(vault, /location \/main\/ \{[^}]*proxy_pass http:\/\/rawprod_api_cf\/;/);
+  // RC7: /main/ reaches the main API only at the console tunnel's two paths, everything else under it is a 404
+  // (was: all of /main/ proxied to the whole API). Selection-level proof: nginx-vault-main-channel.test.ts.
+  assert.match(vault, /location = \/main\/crypto\/handshake \{[^}]*proxy_pass http:\/\/rawprod_api_cf\/crypto\/handshake;/);
+  assert.match(vault, /location = \/main\/rpc \{[^}]*proxy_pass http:\/\/rawprod_api_cf\/rpc;/);
+  assert.match(vault, /location \^~ \/main\/ \{[^}]*return 404;/);
+  assert.doesNotMatch(vault, /proxy_pass http:\/\/rawprod_api_cf\/;/, 'the whole main API is no longer proxied');
   assert.match(vault, /location = \/vault-config\.js/);
   assert.match(vault, /sub_filter '<script src="\/vault\.js"><\/script>' '<script src="\/vault-config\.js"><\/script><script src="\/vault\.js"><\/script>';/);
   assert.match(vault, /upstream rawvault_api_private \{ server 172\.31\.51\.157:4100;/);

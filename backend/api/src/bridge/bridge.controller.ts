@@ -25,10 +25,21 @@ import { bridge as bridgeContracts } from '@core/contracts';
 import { z } from 'zod';
 import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
-import { RequirementsQueueService } from './requirements-queue.service.js';
+import { RequirementsQueueService, type RequirementsPage } from './requirements-queue.service.js';
 import { OutboxAdminService } from './outbox-admin.service.js';
 
 type ConfigureBridgeBody = z.infer<typeof bridgeContracts.configureBridgeRequest>;
+
+/** GET /v1/bridge/requirements. `unlinked` keeps its old reading (only the string 'true' narrows);
+ * `limit` is clamped to 1..200 by the service, as before (default 50). */
+export const requirementsQuery = z.object({
+  unlinked: z.string().optional(),
+  limit: z.preprocess((v) => (v === '' ? undefined : v), z.coerce.number().int().optional()),
+  cursor: z.string().uuid().optional(),
+  orderRef: z.string().trim().min(1).max(100).optional(),
+  alembicRequirementId: z.string().uuid().optional(),
+});
+export type RequirementsQueryParams = z.infer<typeof requirementsQuery>;
 
 @Controller()
 export class BridgeController {
@@ -40,11 +51,19 @@ export class BridgeController {
   ) {}
 
   /* lane/j2 — the planner's incoming-requirements queue (see requirements-queue.service.ts).
-   * `?unlinked=true` narrows to requirements no production order has claimed yet. */
+   * `?unlinked=true` narrows to requirements no production order has claimed yet. RC7: a cursor
+   * page like every other list (`meta.cursor` -> `?cursor=`), and `?orderRef=` /
+   * `?alembicRequirementId=` narrow it to one ALEMBIC order / one requirement. */
   @Permissions('production:production_order:read')
   @Get('v1/bridge/requirements')
-  listRequirements(@Query('unlinked') unlinked?: string, @Query('limit') limit?: string) {
-    return this.queue.list({ unlinkedOnly: unlinked === 'true', limit: limit ? Number(limit) : undefined });
+  listRequirements(@Query(new ZodValidationPipe(requirementsQuery)) query: RequirementsQueryParams): Promise<RequirementsPage> {
+    return this.queue.page({
+      unlinkedOnly: query.unlinked === 'true',
+      limit: query.limit,
+      cursor: query.cursor,
+      orderRef: query.orderRef,
+      alembicRequirementId: query.alembicRequirementId,
+    });
   }
 
   /* PUBLIC per the JwtAuthGuard's own meaning of the word (backend-kernel/src/

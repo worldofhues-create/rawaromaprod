@@ -89,6 +89,9 @@ const demoAppBox = (apiExtra = '', extraOverride?: string) => box({
 }, DEMO_PARAMS);
 
 // Key sets read from the live boxes (key NAMES; the rawprod-demo set is the running process's environment).
+// RC7 retires FORMULA_DATABASE_URL / FORMULA_KMS_KEY_ID / FORMULA_KMS_REGION from both APP boxes' api.env (the main
+// API never composes FormulaModule since RC6's vault port, so nothing there reads them); both vault boxes keep them.
+const FORMULA_KEYS = ['FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION'];
 const LIVE = {
   alembicDemoApi: ['ALEMBIC_ENVIRONMENT', 'DATABASE_URL_APP', 'ALEMBIC_TENANT_ID', 'NODE_EXTRA_CA_CERTS', 'ALEMBIC_DB_CA_FILE',
     'ALEMBIC_PUBLIC_WEB_ORIGIN', 'ALEMBIC_CORS_ORIGINS', 'ALEMBIC_BEDROCK_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE',
@@ -97,7 +100,7 @@ const LIVE = {
     'ALEMBIC_ACCOUNT_MAIL_DROP', 'ALEMBIC_REF_PREFIX'],
   rawprodDemoApi: ['ALEMBIC_ASSERTION_AUDIENCE', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_TENANT_ID',
     'ALEMBIC_ASSERTION_VERIFY_KEY', 'APP_ENV', 'AWS_EC2_METADATA_DISABLED', 'BRIDGE_HMAC_KEK', 'CORS_ORIGINS', 'DATABASE_URL',
-    'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'GIT_SHA', 'JWT_ACCESS_TTL', 'JWT_SECRET', 'NODE_ENV',
+    'GIT_SHA', 'JWT_ACCESS_TTL', 'JWT_SECRET', 'NODE_ENV',
     'PGSSLROOTCERT', 'PORT', 'RAWPROD_ASSERTION_EXPECTED_TARGETS', 'RAWPROD_ENVIRONMENT', 'VAULT_API_INTERNAL_URL',
     'RUN_WORKER_IN_PROCESS'],
   rawprodDemoVault: ['NODE_ENV', 'APP_ENV', 'RAWPROD_ENVIRONMENT', 'JWT_ACCESS_TTL', 'PORT', 'VAULT_MODE', 'PGSSLROOTCERT',
@@ -107,7 +110,7 @@ const LIVE = {
   rawprodApi: ['NODE_ENV', 'APP_ENV', 'PORT', 'PGSSLROOTCERT', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_AUDIENCE',
     'DATABASE_URL', 'JWT_SECRET', 'ALEMBIC_ASSERTION_VERIFY_KEY', 'RAWPROD_ASSERTION_EXPECTED_TARGETS',
     'ALEMBIC_ASSERTION_TENANT_ID', 'INTERNAL_BRIDGE_KEY', 'VAULT_API_INTERNAL_URL', 'RUN_WORKER_IN_PROCESS', 'CORS_ORIGINS',
-    'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'BRIDGE_HMAC_KEK', 'GIT_SHA'],
+    'BRIDGE_HMAC_KEK', 'GIT_SHA'],
   rawprodVault: ['NODE_ENV', 'APP_ENV', 'PORT', 'PGSSLROOTCERT', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_AUDIENCE',
     'VAULT_MODE', 'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'JWT_SECRET',
     'ALEMBIC_ASSERTION_VERIFY_KEY', 'RAWPROD_ASSERTION_EXPECTED_TARGETS', 'ALEMBIC_ASSERTION_TENANT_ID',
@@ -182,7 +185,8 @@ test('render-demo-env app: rawprod-demo api.env is the running key set, targets 
     assert.equal(e.has('INTERNAL_BRIDGE_KEY'), false, 'the demo (and the demo vault) run without an internal bridge key');
     assert.equal(e.get('CORS_ORIGINS'), 'https://fgw.execute-api.invalid');
     assert.equal(e.get('ALEMBIC_ASSERTION_TENANT_ID'), TENANT);
-    assert.equal(e.get('FORMULA_KMS_KEY_ID'), '034c5485-02cb-4aad-b944-ff08a9b33f1e');
+    // RC7: the box's api.extra.env still holds FORMULA_KMS_KEY_ID; the render drops it (and every FORMULA_* key).
+    for (const k of FORMULA_KEYS) assert.equal(e.has(k), false, `the demo app box must not carry ${k}`);
     assert.equal(e.get('VAULT_API_INTERNAL_URL'), 'http://172.31.51.157:4111');
     assert.equal(e.get('GIT_SHA'), '27db65039baf3de44d017167caf4b59fafd778f4');
     assert.equal(existsSync(join(b.root, 'etc/rawprod-demo/api.extra.env')), false, 'api.extra.env retired');
@@ -294,8 +298,8 @@ const PROD_PARAMS: Record<string, string> = {
   '/rawaroma/vault/MIGRATE_FORMULA_DATABASE_URL': 'postgres://ra_vault_owner:pw@vault.invalid/vault',
 };
 
-test('render-env app: the live production key set; targets incl. vault; KEK from SSM; the KMS alias it runs with', () => {
-  const b = box({ 'etc/rawprod/api.env': 'GIT_SHA=27db65039baf3de44d017167caf4b59fafd778f4\n' }, PROD_PARAMS);
+test('render-env app: the live production key set; targets incl. vault; KEK from SSM; no FORMULA_* key', () => {
+  const b = box({ 'etc/rawprod/api.env': 'GIT_SHA=27db65039baf3de44d017167caf4b59fafd778f4\nFORMULA_KMS_KEY_ID=alias/rawprod-vault-envelope\n' }, PROD_PARAMS);
   try {
     const r = run(b, 'infra/aws/env/render-env.sh', 'app');
     assert.equal(r.status, 0, r.stderr);
@@ -303,7 +307,8 @@ test('render-env app: the live production key set; targets incl. vault; KEK from
     sameSet(e.keys(), LIVE.rawprodApi, '/etc/rawprod/api.env');
     assert.equal(e.get('RAWPROD_ASSERTION_EXPECTED_TARGETS'), 'factory,platform,vault');
     assert.equal(e.get('BRIDGE_HMAC_KEK'), PROD_PARAMS['/rawaroma/rawprod/bridge-hmac-kek']);
-    assert.equal(e.get('FORMULA_KMS_KEY_ID'), 'alias/rawprod-vault-envelope');
+    // RC7: retired from the app box, even when the file being replaced still has one.
+    for (const k of FORMULA_KEYS) assert.equal(e.has(k), false, `the app box must not carry ${k}`);
     assert.equal(e.get('CORS_ORIGINS'), 'https://rawfactory.huecycle.in,https://rawplatform.huecycle.in');
     assert.equal(e.get('RUN_WORKER_IN_PROCESS'), 'true');
     assert.equal(e.get('GIT_SHA'), '27db65039baf3de44d017167caf4b59fafd778f4');
@@ -320,8 +325,32 @@ test('render-env vault: the live production vault key set, rawvault CORS', () =>
     sameSet(e.keys(), LIVE.rawprodVault, '/etc/rawprod/vault.env');
     assert.equal(e.get('CORS_ORIGINS'), 'https://rawvault.huecycle.in');
     assert.equal(e.get('FORMULA_KMS_KEY_ID'), PROD_PARAMS['/rawaroma/vault/FORMULA_KMS_KEY_ID']);
+    for (const k of FORMULA_KEYS) assert.ok(e.get(k), `the vault box keeps ${k}`);
     noSecretPrinted(r, b);
   } finally { rmSync(b.root, { recursive: true, force: true }); }
+});
+
+test('render-env app: migrate.env names the app role (DB_APP_ROLE) from the app DATABASE_URL, for the grant migration', () => {
+  const b = box({}, PROD_PARAMS);
+  try {
+    const r = run(b, 'infra/aws/env/render-env.sh', 'app');
+    assert.equal(r.status, 0, r.stderr);
+    const m = envOf(b, 'etc/rawprod/migrate.env');
+    sameSet(m.keys(), ['NODE_ENV', 'PGSSLROOTCERT', 'DATABASE_URL', 'SKIP_TARGETS', 'DB_APP_ROLE'], '/etc/rawprod/migrate.env');
+    assert.equal(m.get('DB_APP_ROLE'), 'rawprod_app');
+    assert.equal(m.get('DATABASE_URL'), PROD_PARAMS['/rawaroma/rawprod/MIGRATE_DATABASE_URL'], 'migrations still run as the owner');
+    assert.equal(m.get('SKIP_TARGETS'), 'formula');
+    noSecretPrinted(r, b);
+  } finally { rmSync(b.root, { recursive: true, force: true }); }
+  // An app URL with no user in it stops the render before any file is written.
+  const nouser = box({}, { ...PROD_PARAMS, '/rawaroma/rawprod/DATABASE_URL': 'postgres://db.invalid/rawprod' });
+  try {
+    const r = run(nouser, 'infra/aws/env/render-env.sh', 'app');
+    assert.notEqual(r.status, 0);
+    assert.match(r.stderr, /no role name in \/rawaroma\/rawprod\/DATABASE_URL/);
+    assert.equal(existsSync(join(nouser.root, 'etc/rawprod/api.env')), false);
+    assert.equal(existsSync(join(nouser.root, 'etc/rawprod/migrate.env')), false);
+  } finally { rmSync(nouser.root, { recursive: true, force: true }); }
 });
 
 // ── static roots and their config JS ─────────────────────────────────────────────────────────────
@@ -468,7 +497,12 @@ test('nginx: rawdemovault.conf is the live demo vault vhost', () => {
   const v = read('infra/aws/nginx/rawdemovault.conf');
   assert.match(v, /server_name rawdemovault\.huecycle\.in;/);
   assert.match(v, /upstream rawdemovault_api_private \{ server 172\.31\.51\.157:4111;/);
-  assert.match(v, /location \/main\/ \{[^}]*proxy_pass http:\/\/rawprod_demo_api\/;/);
+  // RC7: /main/ reaches the main API only at the console tunnel's two paths, everything else under it is a 404
+  // (was: all of /main/ proxied to the whole API). Selection-level proof: nginx-vault-main-channel.test.ts.
+  assert.match(v, /location = \/main\/crypto\/handshake \{[^}]*proxy_pass http:\/\/rawprod_demo_api\/crypto\/handshake;/);
+  assert.match(v, /location = \/main\/rpc \{[^}]*proxy_pass http:\/\/rawprod_demo_api\/rpc;/);
+  assert.match(v, /location \^~ \/main\/ \{[^}]*return 404;/);
+  assert.doesNotMatch(v, /proxy_pass http:\/\/rawprod_demo_api\/;/, 'the whole main API is no longer proxied');
   assert.match(v, /root \/var\/www\/rawprod-demo-cf\/vault;/);
   assert.match(v, /sub_filter '<script src="\/vault\.js"><\/script>' '<script src="\/vault-config\.js"><\/script><script src="\/vault\.js"><\/script>';/);
   for (const loc of v.match(/location[^{]*\{[^}]*\}/g) ?? []) {

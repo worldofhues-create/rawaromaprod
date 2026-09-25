@@ -17,8 +17,8 @@
  * already moved past), and INSERTs into `quality.qc_inspections`. Nothing else.
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { AUTOMATION_POLL_MS, RULE, SYSTEM_ACTOR } from './automation.constants.js';
 import { runIdempotent } from './ledger.js';
@@ -92,7 +92,7 @@ export class QuarantineIntakeService implements OnModuleInit, OnModuleDestroy {
           return { decision: 'SKIPPED', reason: 'RM batch is not in ACTIVE status (already progressed by another flow)' };
         }
 
-        const qcInspectionId = randomUUID();
+        const qcInspectionId = uuidv7();
         await tx`
           insert into quality.qc_inspections
             (qc_inspection_id, rm_batch_id, overall_result, status, created_by, updated_by)

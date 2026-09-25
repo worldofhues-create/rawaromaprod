@@ -25,6 +25,9 @@
 #                                    RUN_WORKER_IN_PROCESS=true (always -- the demo outbox and automations need it)
 #   /etc/rawprod-demo/vault.env      CORS_ORIGINS also admits https://rawdemovault.huecycle.in (infra/aws/nginx/
 #                                    rawdemovault.conf)
+# RC7: rawprod-demo's api.env no longer carries FORMULA_DATABASE_URL / FORMULA_KMS_KEY_ID / FORMULA_KMS_REGION. Since
+# RC6's vault port the main (app-box) API never composes FormulaModule and reads none of them; it reaches the demo
+# Vault only over VAULT_API_INTERNAL_URL. The demo vault box's vault.env keeps all three.
 # RENDER_ROOT (test-only) prefixes every path this script reads or writes, so
 # backend/api/src/__tests__/infra-live-capture.test.ts can run it for real against a sandbox. Empty on a box.
 set -euo pipefail
@@ -105,10 +108,6 @@ PGSSLROOTCERT=/etc/alembic/certs/rds-global-bundle.pem
 X
   # Read into variables first (a failed $(g ...) inside a heredoc renders empty instead of failing).
   RP_EXTRA=/etc/rawprod-demo/api.extra.env
-  # The app role is granted /rawaroma/demo/vault/DB_PASSWORD_app only, not the KMS key id (not a secret):
-  # read it where granted, else carry the value the demo runs with.
-  RP_KMS=$(opt FORMULA_KMS_KEY_ID /rawaroma/demo/vault/FORMULA_KMS_KEY_ID /etc/rawprod-demo/api.env "$RP_EXTRA")
-  [ -n "$RP_KMS" ] || { echo "render-demo-env: no FORMULA_KMS_KEY_ID in SSM (readable) or on the box" >&2; exit 1; }
   # BRIDGE_HMAC_KEK opens every bridge secret the demo has ALREADY sealed, so a render must give back the KEK the demo
   # runs with, never the one a parameter happens to hold. Live 2026-09-25: the demo runs with the production KEK
   # (/rawaroma/rawprod/bridge-hmac-kek) and /rawaroma/demo/rawprod/bridge-hmac-kek EXISTS WITH A DIFFERENT VALUE --
@@ -155,11 +154,8 @@ RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform,vault
 CORS_ORIGINS=$FURL
 AWS_EC2_METADATA_DISABLED=true
 $RP_WORKER
+# The demo Vault is reached only through its API: no FORMULA_* key on the app box (RC7).
 VAULT_API_INTERNAL_URL=http://$VAULT_PRIVATE:4111
-# No vault password on the app box (the prod rule): the URL is present, unusable alone.
-FORMULA_DATABASE_URL=postgres://vault_demo_app@$VPG/vault_demo?sslmode=require
-$RP_KMS
-FORMULA_KMS_REGION=us-west-2
 BRIDGE_HMAC_KEK=$RP_KEK
 GIT_SHA=$RP_SHA
 $RP_IBK

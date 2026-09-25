@@ -3,7 +3,7 @@
  * filename, each file split into per-connection blocks by "-- @target: <name>" marker comments
  * (mirrors scripts/db-push.ts's schema routing: `formula` -> the vault's own
  * FORMULA_DATABASE_URL connection, everything else -> DATABASE_URL). Run:
- *   DATABASE_URL=postgres://... [FORMULA_DATABASE_URL=...] pnpm db:migrate
+ *   DATABASE_URL=postgres://... [FORMULA_DATABASE_URL=...] [DB_APP_ROLE=<app role>] pnpm db:migrate
  *
  * ON AN EMPTY DATABASE THIS PRODUCES THE FULL CURRENT SCHEMA — every statement in every
  * migration file is idempotent (IF NOT EXISTS / ADD COLUMN IF NOT EXISTS / a guarded DO block),
@@ -102,6 +102,14 @@ const SKIP_TARGETS = new Set(
     .filter(Boolean),
 );
 
+/** DB_APP_ROLE — the DML-only role the API itself connects as (prod: rawprod_app), which the
+ * migrating OWNER role must grant on anything it creates outside the provisioning-time grants.
+ * Every block sees it as the transaction-local setting `rawprod.app_role` ('' when unset), so a
+ * migration grants to it by parameter rather than by a hardcoded, environment-specific name — see
+ * scripts/migrations/2026-09-26-automation-app-role-grants.sql. */
+export const APP_ROLE_SETTING = 'rawprod.app_role';
+const APP_ROLE = (process.env.DB_APP_ROLE ?? '').trim();
+
 async function applyBlock(file: string, blockIndex: number, target: string, rawSql: string): Promise<'applied' | 'skipped' | 'skipped-by-config' | 'empty'> {
   if (SKIP_TARGETS.has(target)) return 'skipped-by-config';
 
@@ -140,6 +148,7 @@ async function applyBlock(file: string, blockIndex: number, target: string, rawS
   // work) or applied-but-unrecorded (harmless here only because every statement is ALSO
   // independently idempotent; still not a state to leave lying around on purpose).
   await sql.begin(async (tx) => {
+    await tx`select set_config(${APP_ROLE_SETTING}, ${APP_ROLE}, true)`;
     await tx.unsafe(statements);
     await tx`insert into public.schema_migrations (id) values (${id})`;
   });
