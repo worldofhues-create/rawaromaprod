@@ -94,7 +94,7 @@ const LIVE = {
     'ALEMBIC_PUBLIC_WEB_ORIGIN', 'ALEMBIC_CORS_ORIGINS', 'ALEMBIC_BEDROCK_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE',
     'AWS_SDK_LOAD_CONFIG', 'AWS_EC2_METADATA_DISABLED', 'ALEMBIC_SECRET_KEYS', 'ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY',
     'ALEMBIC_JANITOR_MS', 'ALEMBIC_LOOPS_MS', 'ALEMBIC_PUBLIC_ORIGIN', 'ALEMBIC_BRIDGE_SWEEP_MS', 'ALEMBIC_STAFF_MAIL_DROP',
-    'ALEMBIC_ACCOUNT_MAIL_DROP'],
+    'ALEMBIC_ACCOUNT_MAIL_DROP', 'ALEMBIC_REF_PREFIX'],
   rawprodDemoApi: ['ALEMBIC_ASSERTION_AUDIENCE', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_TENANT_ID',
     'ALEMBIC_ASSERTION_VERIFY_KEY', 'APP_ENV', 'AWS_EC2_METADATA_DISABLED', 'BRIDGE_HMAC_KEK', 'CORS_ORIGINS', 'DATABASE_URL',
     'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'GIT_SHA', 'JWT_ACCESS_TTL', 'JWT_SECRET', 'NODE_ENV',
@@ -131,6 +131,21 @@ test('render-demo-env app: ALEMBIC demo api.env is the live one -- 4 demo origin
     assert.equal(e.get('ALEMBIC_RAWPROD_ASSERTION_SIGNING_KEY'), DEMO_PARAMS['/rawaroma/demo/alembic/rawprod-assertion-signing-key']);
     assert.match(e.get('DATABASE_URL_APP') ?? '', /^postgres:\/\/alembic_demo_app:a-app-pw%2F%2B%3D@/, 'password url-encoded');
     noSecretPrinted(r, b);
+  } finally { rmSync(b.root, { recursive: true, force: true }); }
+});
+
+test('render-demo-env app: the ALEMBIC demo api.env carries ALEMBIC_REF_PREFIX=DEMO, never production\'s RAC', () => {
+  // Set live 2026-09-25. ALEMBIC reads it at boot; without it the demo's NEFT proforma rail is OFF and
+  // POST /orders/:number/proforma refuses. DEMO, so a demo payment reference can never be mistaken for a
+  // production one (RAC, rendered by the alembic repo's ops/deploy/render-env.sh).
+  const b = demoAppBox();
+  try {
+    const r = run(b, 'infra/aws/demo/render-demo-env.sh', 'app');
+    assert.equal(r.status, 0, r.stderr);
+    const text = readFileSync(join(b.root, 'etc/alembic-demo/api.env'), 'utf8');
+    assert.equal(envOf(b, 'etc/alembic-demo/api.env').get('ALEMBIC_REF_PREFIX'), 'DEMO');
+    assert.equal(text.split('\n').filter((l) => l.startsWith('ALEMBIC_REF_PREFIX=')).length, 1);
+    assert.doesNotMatch(text, /^ALEMBIC_REF_PREFIX=RAC$/m);
   } finally { rmSync(b.root, { recursive: true, force: true }); }
 });
 
@@ -450,4 +465,27 @@ test('every script this lane touched is valid bash', () => {
     const r = spawnSync('bash', ['-n', join(ROOT, f)], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }
+});
+
+test('DEPLOY_AWS.md makes scripts/db-seed.ts a REQUIRED prod+demo bootstrap step, with the env the script reads', () => {
+  // The IAM tables were empty in BOTH environments until 2026-09-25: migrate creates them, nothing ran the seed.
+  const doc = read('infra/aws/DEPLOY_AWS.md');
+  const sec = doc.slice(doc.indexOf('## 4a. IAM bootstrap seed'), doc.indexOf('## 5. Env files'));
+  assert.ok(sec.length > 200, 'the §4a IAM bootstrap section is missing');
+  assert.match(sec, /`scripts\/db-seed\.ts` is REQUIRED \(prod AND demo\)/);
+  for (const v of ['RAWPROD_ENVIRONMENT', 'BOOTSTRAP_OWNER_EMAIL', 'BOOTSTRAP_OWNER_PASSWORD', 'DATABASE_URL']) {
+    assert.match(sec, new RegExp('`' + v + '`'), `§4a does not document ${v}`);
+  }
+  assert.match(sec, /random, per run, never stored/);
+  assert.match(sec, /openssl rand/);
+  assert.match(sec, /unset BOOTSTRAP_OWNER_PASSWORD/);
+  assert.match(sec, /`production`/);
+  assert.match(sec, /`demo`/);
+  assert.match(doc, /IAM bootstrap seed \(§4a\) — required/, 'the install order does not point at §4a');
+  // The doc names what the script actually reads, and the values the config schema accepts.
+  const seed = read('scripts/db-seed.ts');
+  for (const v of ['RAWPROD_ENVIRONMENT', 'BOOTSTRAP_OWNER_EMAIL', 'BOOTSTRAP_OWNER_PASSWORD', 'DATABASE_URL']) {
+    assert.match(seed, new RegExp('process\\.env\\.' + v + '\\b'), `db-seed.ts no longer reads ${v}`);
+  }
+  assert.match(read('backend/backend-kernel/src/config/config.schema.ts'), /RAWPROD_ENVIRONMENT: z\.enum\(\['production', 'demo'\]\)/);
 });

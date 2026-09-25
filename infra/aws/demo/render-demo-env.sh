@@ -15,7 +15,9 @@
 # Live capture (lane cfg-rp, read-only SSM 2026-09-25; key NAMES and non-secret values only, every secret checked
 # equal to its SSM parameter ON the box without printing it). A re-render now reproduces what the demo runs:
 #   /etc/alembic-demo/api.env        ALEMBIC_CORS_ORIGINS = the 4 demo origins + the API Gateway origin,
-#                                    ALEMBIC_PUBLIC_ORIGIN, ALEMBIC_BRIDGE_SWEEP_MS, ALEMBIC_{STAFF,ACCOUNT}_MAIL_DROP
+#                                    ALEMBIC_PUBLIC_ORIGIN, ALEMBIC_BRIDGE_SWEEP_MS, ALEMBIC_{STAFF,ACCOUNT}_MAIL_DROP,
+#                                    ALEMBIC_REF_PREFIX=DEMO (set live 2026-09-25; without it the demo API boots with
+#                                    the NEFT proforma rail OFF. Production's RAC is the alembic repo's render-env.sh)
 #   /etc/alembic-demo/web-build.env  NEXT_PUBLIC_RAWPROD_{FACTORY,PLATFORM,VAULT}_ORIGIN (read by ALEMBIC's
 #                                    ops/deploy/deploy-sha.sh at build time; public, mode 644)
 #   /etc/rawprod-demo/api.env        RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform,vault; BRIDGE_HMAC_KEK is the
@@ -81,6 +83,7 @@ ALEMBIC_PUBLIC_ORIGIN=$DEMO_STORE
 ALEMBIC_BRIDGE_SWEEP_MS=60000
 ALEMBIC_STAFF_MAIL_DROP=/srv/alembic-demo/var/maildrop
 ALEMBIC_ACCOUNT_MAIL_DROP=/srv/alembic-demo/var/account-maildrop
+ALEMBIC_REF_PREFIX=DEMO
 X
   # Build-time origins for ALEMBIC's RawProd console links (deploy-sha.sh takes only NEXT_PUBLIC_* lines from it).
   # Public, and 644 like the file the demo was built with.

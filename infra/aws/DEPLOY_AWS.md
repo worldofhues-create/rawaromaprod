@@ -54,6 +54,8 @@ no ALEMBIC processes to collide with.
 4. `mkdir -p /etc/rawprod /srv/rawprod` and write `api.env`, `migrate.env` (§5 below).
 5. Copy `infra/aws/systemd/{rawprod-migrate,rawprod-api}.service` to `/etc/systemd/system/`,
    `systemctl daemon-reload`, `systemctl enable --now rawprod-migrate.service rawprod-api.service`.
+   Then run the **IAM bootstrap seed (§4a) — required**: without it the `iam` tables stay empty and
+   no role can do anything. The demo box needs the same seed against `rawprod_demo`.
 6. Copy `infra/aws/nginx/rawprod-main.conf` and `infra/aws/nginx/security-headers-{factory,platform}.conf`
    to `/etc/nginx/rawprod/` (create the dir), symlink `rawprod-main.conf` into
    `sites-enabled/`, `certbot --nginx -d rawfactory.huecycle.in -d rawplatform.huecycle.in`,
@@ -94,6 +96,48 @@ To regenerate `scripts/migrations/0000-0013*.sql` after a Drizzle schema change:
 `node --import @swc-node/register/esm-register scripts/gen-schema-migrations.mjs`, review the
 diff, commit. `0014+` (the former `create-*.cjs` scripts' schema DDL) and
 `2026-09-24-ui-parity.sql` are hand-maintained.
+
+## 4a. IAM bootstrap seed — `scripts/db-seed.ts` is REQUIRED (prod AND demo)
+
+`pnpm db:migrate` creates the `iam` tables and leaves them **empty**. Until `scripts/db-seed.ts`
+has run against a database, `iam.permission_master`, `iam.role_master` and
+`iam.role_permission_mapping` hold nothing: no role holds any permission, every guarded route
+refuses, and an ALEMBIC-assertion sign-in lands on roles that do not exist. **Both environments
+ran like that until 2026-09-25** — nothing in the bootstrap ran the seed (`deploy.sh`, the migrate
+units and the demo's `reset-demo.sh` still do not), and it was run by hand on both that day.
+
+So it is a required bootstrap step, **after the first migrate, on every RawProd main database**
+(`rawprod` for production, `rawprod_demo` for the demo). It is idempotent: re-running inserts any
+permission a newer release added (`RA_PERMISSIONS` + `CAPABILITY_PERMISSIONS`) and the grants
+that follow from it, and refuses (throws, writes nothing further) if any grant would breach the
+§107/§108/§113 invariants. Re-run it after a deploy that adds permissions.
+
+Its environment, and nothing else:
+
+| Variable | Production | Demo |
+|---|---|---|
+| `DATABASE_URL` | the OWNER url from `/etc/rawprod/migrate.env` (DDL/DML on `iam`) | the owner url from `/etc/rawprod-demo/migrate.env` — refuse unless it names `rawprod_demo` |
+| `RAWPROD_ENVIRONMENT` | `production` | `demo` — the only value under which the seed provisions the passwordless `showcase` account |
+| `BOOTSTRAP_OWNER_EMAIL` | the owner's real address (the `owner` user row; defaults to the sample `owner@rawaroma.local` if unset, which is wrong for a real deployment) | the demo owner address (2026-09-25: `owner@demo.rawprod.local`) |
+| `BOOTSTRAP_OWNER_PASSWORD` | **random, per run, never stored**: `$(openssl rand -base64 36)` in the shell that runs the seed, `unset` straight after | same |
+| `BOOTSTRAP_{ADMIN,FLOOR,QC,PROCUREMENT,RECEIVING,…}_PASSWORD` | **unset** — each one that is set creates a sample `*@rawaroma.local` login with that password | unset |
+| `PGSSLROOTCERT` / `NODE_EXTRA_CA_CERTS` | the RDS bundle, as `migrate.env` has it | same |
+
+Why the owner password is random and thrown away: people sign in to RawProd through an ALEMBIC
+assertion, not a RawProd password, and the seed refuses to run without *some* owner password. A
+value nobody knows keeps the owner row's password login unusable. It is never written to SSM, an
+env file, a log or a shell history, and each re-run replaces it with another random value (the
+seed resets an existing user's hash), so re-running is safe.
+
+```
+# on the app box, as root, from /srv/rawprod/app (demo: /srv/rawprod-demo/app with the demo files)
+set -a; . /etc/rawprod/migrate.env; set +a
+export RAWPROD_ENVIRONMENT=production BOOTSTRAP_OWNER_EMAIL=<owner address>
+export BOOTSTRAP_OWNER_PASSWORD="$(openssl rand -base64 36)"
+pnpm exec tsx scripts/db-seed.ts; unset BOOTSTRAP_OWNER_PASSWORD
+# verify: role_master / permission_master / role_permission_mapping are non-zero, and
+# formula:actual:read is held by formulator and vault_approver ONLY
+```
 
 ## 5. Env files (`/etc/rawprod/*.env`, root-only, never in git)
 
@@ -195,7 +239,8 @@ same nginx authenticator as raw.huecycle.in; `certbot.timer` renews. Change proc
 - Env files: `infra/aws/env/render-env.sh app|vault` and `infra/aws/demo/render-demo-env.sh app|vault` render every key
   the boxes run with (INTERNAL_BRIDGE_KEY from `/rawaroma/bridge/internal-bridge-key`, both roles granted). Lane cfg-rp
   (2026-09-25) re-read the live files and made a re-render reproduce them: the ALEMBIC demo's CORS origins, public
-  origin, bridge sweep, mail drops and `web-build.env`; the demo RawProd targets incl. vault; the demo vault CORS incl.
+  origin, bridge sweep, mail drops, `ALEMBIC_REF_PREFIX=DEMO` (set live 2026-09-25; the proforma rail is off
+  without it) and `web-build.env`; the demo RawProd targets incl. vault; the demo vault CORS incl.
   rawdemovault. The demo's BRIDGE_HMAC_KEK, RUN_WORKER_IN_PROCESS and INTERNAL_BRIDGE_KEY follow what the demo RUNS
   with (production KEK; no worker; no bridge key) -- a parameter appearing in SSM never switches them.
   `backend/api/src/__tests__/infra-live-capture.test.ts` runs both scripts against a sandbox. ALEMBIC PRODUCTION's
