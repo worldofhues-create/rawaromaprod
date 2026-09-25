@@ -80,7 +80,8 @@ export class FactsController {
         boundary: `'${factKind}' is not a fact ARIA may resolve.`,
         permittedNextAction: "ask for one of the published fact kinds "
           + "(production requirement status, material availability, PO/GRN status, "
-          + "QC status, FG/ATP, dispatch status)",
+          + "QC status, FG/ATP, dispatch status, production blockers, late POs, factory "
+          + "status, batch quarantine)",
       };
     }
 

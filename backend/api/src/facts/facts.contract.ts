@@ -23,6 +23,15 @@ export const FACT_KINDS = [
   "qc_status",
   "fg_atp",
   "dispatch_status",
+  /* OPS-GREEN §16 (lane ARIA) — the four operating questions the seven kinds above could not
+     answer: "which material blocks production", "which PO is late", "what is the factory
+     status", "why is this batch quarantined". Same discipline as the seven: document numbers
+     and states only, never a material identity joined to a production order (that pairing IS
+     the formula, and it stays in the Vault). */
+  "production_blockers",
+  "po_late",
+  "factory_status",
+  "batch_quarantine",
 ] as const;
 export type FactKind = (typeof FACT_KINDS)[number];
 
@@ -38,6 +47,10 @@ export const FACT_KIND_PERMISSION: Readonly<Record<FactKind, string>> = {
   qc_status: "quality:qc_inspections:read",
   fg_atp: "packaging:finished_good_batch_master:read",
   dispatch_status: "sales:dispatch_master:read",
+  production_blockers: "production:production_order:read",
+  po_late: "procurement:purchase_order:read",
+  factory_status: "production:production_order:read",
+  batch_quarantine: "quality:qc_inspections:read",
 };
 
 /* Plain substring matches, not word-bounded: fact kinds are snake_case
