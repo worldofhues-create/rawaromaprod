@@ -66,7 +66,7 @@ export class FgLabelService {
       const rows = await tx`
         insert into packaging.fg_label_record
           (finished_good_batch_id, label_count, label_content, applied_by, applied_dt, status, created_by, updated_by)
-        values (${finishedGoodBatchId}, ${labelCount}, ${JSON.stringify(content)}::jsonb, ${principal.userId}, now(),
+        values (${finishedGoodBatchId}, ${labelCount}, ${JSON.stringify(content)}::text::jsonb, ${principal.userId}, now(),
                 'APPLIED', ${principal.userId}, ${principal.userId})
         returning ${tx.unsafe(COLS)}`;
       await tx`
