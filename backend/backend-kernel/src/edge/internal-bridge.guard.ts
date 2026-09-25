@@ -57,6 +57,7 @@ export class InternalBridgeGuard implements CanActivate {
 
     const signature = header(request, 'x-internal-signature');
     const timestamp = header(request, 'x-internal-timestamp');
+    const nonce = header(request, 'x-internal-nonce');
     if (!signature || !timestamp) {
       throw DomainError.unauthorized(
         'INTERNAL_BRIDGE_UNAUTHORIZED',
@@ -71,6 +72,7 @@ export class InternalBridgeGuard implements CanActivate {
         path: request.url ?? '/',
         body: request.rawBody ?? '',
         timestamp,
+        ...(nonce ? { nonce } : {}),
       },
       signature,
     );

@@ -164,6 +164,6 @@ export class WriteAuditInterceptor implements NestInterceptor {
       insert into ${this.sql(row.schema)}.audit_events
         (actor_id, action, entity_type, entity_id, after, request_id, ip)
       values (${actor}, ${row.action}, ${row.entityType}, ${row.entityId},
-              ${row.after ? this.sql.json(row.after as never) : null}, ${req.requestId ?? null}, ${req.ip ?? null})`;
+              ${row.after ? JSON.stringify(row.after) : null}::jsonb, ${req.requestId ?? null}, ${req.ip ?? null})`;
   }
 }
