@@ -178,7 +178,11 @@ test('M4: a thrown apply leaves no inbound_event row, and the retry of the same 
   const original = target.applyFulfilled;
   target.applyFulfilled = async () => { throw new Error('boom mid-apply'); };
   try {
-    await assert.rejects(() => send(ev), /boom mid-apply/);
+    // OPS_GREEN §17: an unexpected apply fault no longer escapes as a 500; it is a 503 marked
+    // transient, so ALEMBIC retries it on backoff (bounded) rather than for ever.
+    const r = await send(ev);
+    assert.equal(r.status, 503);
+    assert.equal(r.body.permanent, false);
   } finally {
     target.applyFulfilled = original;
   }

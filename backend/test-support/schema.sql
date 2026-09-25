@@ -1332,6 +1332,38 @@ create table if not exists bridge.outbox (
   seq bigint generated always as identity
 );
 
+-- OPS_GREEN §17 (P1): bridge.outbox_delivery — backoff + dead-letter state beside bridge.outbox
+-- (packages/data-bridge/src/schema/outbox-delivery.ts, scripts/migrations/0023_adhoc_bridge_outbox_delivery.sql),
+-- and bridge.audit_events (@core/data-kernel auditTable()) the relay's park/replay/discard write.
+create table if not exists bridge.outbox_delivery (
+  outbox_id uuid primary key,
+  attempts integer not null default 0,
+  next_attempt_at timestamptz not null default now(),
+  last_error text,
+  last_http_status integer,
+  parked_at timestamptz,
+  parked_reason varchar(20),
+  discarded_at timestamptz,
+  discarded_by varchar(255),
+  discard_reason text,
+  updated_at timestamptz not null default now()
+);
+create table if not exists bridge.audit_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  before jsonb,
+  after jsonb,
+  request_id text,
+  ip text,
+  occurred_at timestamptz not null default now(),
+  chain_seq bigint,
+  prev_hash text,
+  row_hash text
+);
+
 -- bridge.connector_config — self-service outbound webhook URL + sealed HMAC secret (security
 -- review R1 #4/#5 tests exercise ConfigAdminService/BridgeController against this table).
 create table if not exists bridge.connector_config (

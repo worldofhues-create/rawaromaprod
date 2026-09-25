@@ -10,7 +10,7 @@
  * RawProd, not ALEMBIC, is the authority on whether the factory SKU exists. A miss emits
  * `ProductionRequirementRejectedMapping`, never a silent accept.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
 import { PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
@@ -19,6 +19,7 @@ import { openSecret } from './secret-box.js';
 import { verifyBody } from './signing.js';
 import {
   validateEnvelope, INBOUND_FROM_ALEMBIC, decideInbound, decideAcceptance,
+  validateInboundPayload, isPermanentDbError, BRIDGE_CODES,
   type LocalStatus, type BridgeEnvelope,
 } from './contract.js';
 
@@ -27,13 +28,26 @@ const { productionRequirement, inboundEvent, connectorConfig, outbox } = bridgeS
 /** The transaction handle every apply step runs on (M4: one tx per inbound event). */
 type Tx = Parameters<Parameters<BridgeDb['transaction']>[0]>[0];
 
+/* OPS_GREEN §17 (P1 poison event). Every refusal carries `permanent` and a
+ * machine-readable `code` (docs/bridge/EVENT_CONTRACT.md, "DLQ /
+ * reconciliation"): 400 + permanent:true for an event that can never apply
+ * (ALEMBIC parks it after one attempt), 503 + permanent:false for a fault that
+ * may clear (ALEMBIC retries on backoff, bounded), 401 + permanent:false for a
+ * signature/configuration fault. A 500 no longer escapes this handler. */
 export interface ImportResult {
   readonly status: number;
-  readonly body: { readonly outcome: string; readonly detail?: string };
+  readonly body: {
+    readonly outcome: string;
+    readonly detail?: string;
+    readonly permanent?: boolean;
+    readonly code?: string;
+  };
 }
 
 @Injectable()
 export class ImporterService {
+  private readonly logger = new Logger(ImporterService.name);
+
   constructor(
     @Inject(BRIDGE_DB) private readonly db: BridgeDb,
     @Inject(PG_CLIENT) private readonly sql: Sql,
@@ -46,15 +60,50 @@ export class ImporterService {
 
     // Fail closed: no configured/openable secret verifies nothing, ever.
     if (!secret || !verifyBody(rawBody, secret, signatureHeader)) {
-      return { status: 401, body: { outcome: 'signature_invalid' } };
+      return { status: 401, body: { outcome: 'signature_invalid', permanent: false, code: BRIDGE_CODES.signatureInvalid } };
     }
 
     let parsed: unknown;
-    try { parsed = JSON.parse(rawBody); } catch { return { status: 400, body: { outcome: 'bad_json' } }; }
+    try { parsed = JSON.parse(rawBody); } catch {
+      return { status: 400, body: { outcome: 'bad_json', permanent: true, code: BRIDGE_CODES.badJson } };
+    }
 
     const v = validateEnvelope(parsed, INBOUND_FROM_ALEMBIC);
-    if (!v.ok) return { status: 400, body: { outcome: 'bad_envelope', detail: v.problems.join(',') } };
+    if (!v.ok) {
+      return { status: 400, body: {
+        outcome: 'bad_envelope', detail: v.problems.join(','), permanent: true,
+        code: v.problems.includes('unknown_type') ? BRIDGE_CODES.unknownType : BRIDGE_CODES.invalidEnvelope,
+      } };
+    }
     const env = v.envelope;
+
+    // The payload against its type's contract, BEFORE anything is recorded: a Created
+    // event with no parseable `needed_by` used to reach `new Date(String(undefined))`
+    // and surface as a 500 that ALEMBIC retried for ever.
+    const payloadProblems = validateInboundPayload(env.type, env.payload);
+    if (payloadProblems.length > 0) {
+      return { status: 400, body: {
+        outcome: 'bad_payload', detail: payloadProblems.join(','), permanent: true,
+        code: BRIDGE_CODES.invalidPayload,
+      } };
+    }
+
+    try {
+      return await this.apply(env);
+    } catch (err) {
+      // Defence in depth: the database refusing the VALUES (SQLSTATE 22/23) is as
+      // permanent as a failed validation; anything else may clear on its own.
+      const code = typeof err === 'object' && err !== null ? String((err as { code?: unknown }).code ?? '') : '';
+      this.logger.warn(`bridge inbound ${env.type} ${env.eventId} not applied (sqlstate ${code || 'n/a'}): `
+        + `${err instanceof Error ? err.message.slice(0, 200) : 'unknown error'}`);
+      if (isPermanentDbError(err)) {
+        return { status: 400, body: { outcome: 'unappliable', permanent: true, code: BRIDGE_CODES.unappliable } };
+      }
+      return { status: 503, body: { outcome: 'transient_error', permanent: false, code: BRIDGE_CODES.transient } };
+    }
+  }
+
+  private async apply(env: BridgeEnvelope): Promise<ImportResult> {
 
     // M4: dedupe-insert, decide, apply and mark-processed are ONE transaction. If the apply
     // throws, the inbound_event row rolls back with it, so ALEMBIC's retry of the same
