@@ -15,8 +15,8 @@
 # ── ROLE: WHICH HOST THIS SCRIPT THINKS IT IS ────────────────────────────────────────────────
 # ONE script, run on either EC2 the plan defines — RAWPROD_ROLE picks which systemd units and
 # which health checks apply. RAWPROD_ROLE=main (default) manages rawprod-migrate/rawprod-api and
-# checks the factory+platform static roots + /health through nginx; RAWPROD_ROLE=vault manages
-# vault-migrate/vault-api and checks only /health (the vault console is allow-listed — see
+# checks the API's /health directly plus the factory+platform consoles over HTTPS (see health());
+# RAWPROD_ROLE=vault manages vault-migrate/vault-api and checks only /health (the vault console is allow-listed — see
 # infra/aws/nginx/vault-allowlist.conf.placeholder — so this script, run locally on that box,
 # talks to 127.0.0.1 directly rather than through the public hostname).
 #
@@ -30,7 +30,7 @@
 # scripts/db-migrate.ts's own `${file}#${blockIndex}#${target}`.
 set -euo pipefail
 
-RAWPROD_DEPLOY_WRAPPER_VERSION="1"
+RAWPROD_DEPLOY_WRAPPER_VERSION="2"
 ROLE="${RAWPROD_ROLE:-main}"
 
 APP="${RAWPROD_APP_DIR:-/srv/rawprod/app}"
@@ -64,16 +64,33 @@ status() {
   done
 }
 
+# HEALTH, checked where each thing actually answers (OPS_GREEN §17).
+#
+# The API directly on 127.0.0.1:$API_PORT/health — no proxy in the way. The static consoles over
+# HTTPS with the real hostname: port 80 on this box only ever answers `301 -> https` for every
+# huecycle.in name (infra/aws/nginx/huecycle-hosts.conf), so the old `curl -H Host: ... http://
+# 127.0.0.1/` got a 301, health() failed on every deploy, and DEPLOYED_SHA was never written.
+# `--resolve NAME:443:127.0.0.1` sends SNI and Host for NAME to this box's own nginx, so the
+# certificate is VERIFIED for that name (no -k) and the vhost that serves the public is the one
+# checked. Overridable for a box serving other names.
+FACTORY_HOST="${RAWPROD_FACTORY_HOST:-rawfactory.huecycle.in}"
+PLATFORM_HOST="${RAWPROD_PLATFORM_HOST:-rawplatform.huecycle.in}"
+
+site_code() { # host -> HTTP status of GET https://host/ served by THIS box's nginx
+  curl -s -o /dev/null -w '%{http_code}' --max-time 10 \
+    --resolve "$1:443:127.0.0.1" "https://$1/" || echo 000
+}
+
 health() {
   local api
   api=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 "http://127.0.0.1:$API_PORT/health" || echo 000)
-  echo "  api :$API_PORT/health : $api"
+  echo "  api 127.0.0.1:$API_PORT/health : $api"
   if [ "$ROLE" = main ]; then
     local factory platform
-    factory=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rawfactory.huecycle.in' http://127.0.0.1/ || echo 000)
-    platform=$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H 'Host: rawplatform.huecycle.in' http://127.0.0.1/ || echo 000)
-    echo "  nginx factory / : $factory"
-    echo "  nginx platform /: $platform"
+    factory=$(site_code "$FACTORY_HOST")
+    platform=$(site_code "$PLATFORM_HOST")
+    echo "  https://$FACTORY_HOST/  : $factory"
+    echo "  https://$PLATFORM_HOST/ : $platform"
     [ "$api" = "200" ] && [ "$factory" = "200" ] && [ "$platform" = "200" ]
   else
     [ "$api" = "200" ]

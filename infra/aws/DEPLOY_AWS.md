@@ -174,4 +174,16 @@ same nginx authenticator as raw.huecycle.in; `certbot.timer` renews. Change proc
 - rawfactory / rawplatform: static from `/var/www/rawprod-cf/{factory,platform}`, API `/rpc|/crypto/|/v1/|/auth/|/health` → 127.0.0.1:4100 (no-store).
 - rawdemofactory / rawdemoplatform: static from `/var/www/rawprod-demo-cf/{factory,platform}` (install-box.sh), API → :4110.
 - On a RawProd web deploy, refresh those copy dirs; nothing in this file changes.
-- Vault has no public name (no rawvault / rawdemovault vhost, by design).
+- rawvault (owner decision 2026-09-24): its own vhost `infra/aws/nginx/rawvault.conf` → `sites-enabled/zz-rawvault.conf`
+  (loads after rawprod-cf-origin.conf, reuses `upstream rawprod_api_cf`). Static `/var/www/rawprod-cf/vault`; `/auth/`,
+  `/rpc|/crypto/|/v1/` and `/health` → vault box `172.31.51.157:4100` over the private network; `/main/` → the MAIN
+  RawProd API on this box (sign-in channel, prefix stripped). rawdemovault still has no public name.
+- Browser config (OPS_GREEN §17, recorded from live 2026-09-25): every static console gets `console-config.js`
+  (`window.ALEMBIC_CONSOLE_URL`) injected by `sub_filter` ahead of `shell.js`/`platform.js`; rawvault gets
+  `vault-config.js` (`window.MAIN_API='/main'`) ahead of `vault.js`. Sources: `infra/aws/nginx/static-config/`
+  (README.txt there has the install targets). A web deploy that refreshes `/var/www/rawprod-cf/vault` must re-install
+  `vault-config.js`.
+- Env files: `infra/aws/env/render-env.sh app|vault` and `infra/aws/demo/render-demo-env.sh app|vault` render every key
+  the boxes run with (INTERNAL_BRIDGE_KEY from `/rawaroma/bridge/internal-bridge-key`, both roles granted).
+- `deploy.sh` health: API at `127.0.0.1:4100/health`, consoles over HTTPS with `--resolve <host>:443:127.0.0.1`
+  (port 80 only redirects), so a good deploy records `/srv/rawprod/DEPLOYED_SHA`.

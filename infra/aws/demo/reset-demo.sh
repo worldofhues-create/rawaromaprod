@@ -106,7 +106,12 @@ install -m 644 /dev/null /etc/alembic-demo/tenant-id; printf '%s\n' "$TID" > /et
 "$LIB/render-demo-env.sh" app >/dev/null
 
 log "demo account"
-( envf /etc/alembic-demo/migrate.env; export ALEMBIC_ENVIRONMENT=demo ALEMBIC_TENANT_ID="$TID"
+# ALEMBIC_DB_CA_FILE: create-demo-account.mjs opens its pool through @alembic/db, which refuses
+# (and never silently downgrades) a verify-full DATABASE_URL with no CA bundle named. migrate.env
+# carries NODE_EXTRA_CA_CERTS/PGSSLROOTCERT for node-pg-migrate/psql but not this one, so the step
+# failed on a fresh reset (OPS_GREEN §17). Same bundle api.env already points the demo API at.
+( envf /etc/alembic-demo/migrate.env
+  export ALEMBIC_ENVIRONMENT=demo ALEMBIC_TENANT_ID="$TID" ALEMBIC_DB_CA_FILE=/etc/alembic/certs/rds-global-bundle.pem
   cd /srv/alembic-demo/app
   aws ssm get-parameter --region us-west-2 --name /rawaroma/demo/password --with-decryption --query Parameter.Value --output text \
     | runuser -u alembic-demo -- /usr/bin/node ops/scripts/create-demo-account.mjs --user demo --mark-tenant-demo )
