@@ -271,3 +271,30 @@ test("S3 item 5: a SUSPENDED bound user resolves to no permissions, even holding
   assert.equal(status, 403);
   assert.equal(result.reason, "forbidden");
 });
+
+/* OPS-GREEN §16 (lane ARIA): the four new operating fact kinds are re-checked against RawProd's
+   OWN grants exactly like the seven before them — a bound caller without the permission gets
+   403, one holding it gets the data. */
+test("OPS-GREEN: factory_status / po_late / batch_quarantine / production_blockers enforce their permission", async () => {
+  const cases = [
+    ["factory_status", "production:production_order:read", {}],
+    ["production_blockers", "production:production_order:read", {}],
+    ["po_late", "procurement:purchase_order:read", {}],
+    ["batch_quarantine", "quality:qc_inspections:read", { batchNumber: `NOPE-${randomUUID().slice(0, 6)}` }],
+  ] as const;
+  for (const [factKind, permissionCode, params] of cases) {
+    const denied = await makeBoundCaller({ roleCode: `og-none-${randomUUID()}` });
+    const refused = await call({ factKind, params, caller: { staffId: denied, roles: ["admin"] } }, SECRET);
+    assert.equal(refused.status, 403, `${factKind} without ${permissionCode}`);
+    assert.match(String(refused.result.boundary), new RegExp(permissionCode));
+
+    const allowed = await makeBoundCaller({ roleCode: `og-${randomUUID()}`, permissionCode });
+    const ok = await call({ factKind, params, caller: { staffId: allowed, roles: [] } }, SECRET);
+    if (factKind === "batch_quarantine") {
+      assert.equal(ok.status, 404, "an unknown batch is not_found, never an invented reason");
+      assert.equal(ok.result.reason, "not_found");
+    } else {
+      assert.equal(ok.result.ok, true, factKind);
+    }
+  }
+});

@@ -14,6 +14,7 @@
  * fail-closed state rather than a guess dressed up as an answer.
  */
 import { Inject, Injectable } from "@nestjs/common";
+import { PO_OVERDUE_HOURS } from "../automation/automation.constants.js";
 import { eq, lt } from "drizzle-orm";
 import type { Sql } from "postgres";
 import { PG_CLIENT } from "@core/backend-kernel";
@@ -171,6 +172,14 @@ export class FactsService {
         return params.batchNumber ? this.fgAtp(params.batchNumber) : null;
       case "dispatch_status":
         return params.soNumber ? this.dispatchStatus(params.soNumber) : null;
+      case "production_blockers":
+        return this.productionBlockers(params.orderRef);
+      case "po_late":
+        return this.poLate(params.poNumber);
+      case "factory_status":
+        return this.factoryStatus();
+      case "batch_quarantine":
+        return params.batchNumber ? this.batchQuarantine(params.batchNumber) : null;
       default: {
         /* Unreachable while `kind` stays a `FactKind` — assigning it to `never` here is a
            compile error the moment a new member is added to `FACT_KINDS` without this
@@ -468,4 +477,222 @@ export class FactsService {
 
     return { ...so, dispatches };
   }
+
+  /* ── OPS-GREEN §16 (lane ARIA) ─────────────────────────────────────────────────────────
+   *
+   * Four read-only facts for the operating questions ARIA must answer from authority. Each one
+   * reuses a rule RawProd already owns rather than stating a second one: the blocker
+   * whereabouts are `unissuedMaterialWhereabouts` (golden journey lane/j2), the approval
+   * overdue threshold is `PO_OVERDUE_HOURS` (the G3 alert scan's own constant), and a batch's
+   * quarantine is read off `rm_batch_master.status` / the QC tables the inspection service
+   * writes. NO MATERIAL IDENTITY IS JOINED TO A PRODUCTION ORDER in any payload below -- that
+   * pairing is formula composition and stays in the Vault. */
+
+  /** "Which material blocks production?" Open production orders with un-issued ingredient
+   *  lines, and where that material is (quarantine batch / PO / PR / on the shelf), by
+   *  document number only. `orderRef` narrows to one ALEMBIC order; absent, the ten oldest
+   *  blocked production orders. Null when an order ref was named and is not on file. */
+  private async productionBlockers(orderRef?: string): Promise<Record<string, unknown> | null> {
+    const rows = (orderRef
+      ? await this.sql`
+          select po.production_order_id as "productionOrderId", po.status, pr.order_ref as "orderRef",
+                 pr.needed_by as "neededBy"
+            from bridge.production_requirement pr
+            join production.production_order po on po.production_order_id = pr.production_order_id
+           where pr.order_ref = ${orderRef}
+           order by pr.created_dt desc
+           limit 1`
+      : await this.sql`
+          select po.production_order_id as "productionOrderId", po.status,
+                 (select pr.order_ref from bridge.production_requirement pr
+                   where pr.production_order_id = po.production_order_id
+                   order by pr.created_dt desc limit 1) as "orderRef",
+                 (select pr.needed_by from bridge.production_requirement pr
+                   where pr.production_order_id = po.production_order_id
+                   order by pr.created_dt desc limit 1) as "neededBy"
+            from production.production_order po
+           where upper(coalesce(po.status, '')) not in ('COMPLETED', 'CANCELLED', 'CLOSED')
+             and exists (select 1 from production.production_order_ingredients i
+                          where i.production_order_id = po.production_order_id
+                            and coalesce(i.issued_qty, false) = false)
+           order by po.created_dt asc
+           limit 10`) as Array<{
+            productionOrderId: string; status: string | null; orderRef: string | null; neededBy: Date | null;
+          }>;
+    if (orderRef && rows.length === 0) return null;
+
+    const blocked: Array<Record<string, unknown>> = [];
+    for (const r of rows) {
+      const [lines] = (await this.sql`
+        select count(*)::int c from production.production_order_ingredients
+         where production_order_id = ${r.productionOrderId}
+           and coalesce(issued_qty, false) = false`) as Array<{ c: number }>;
+      if ((lines?.c ?? 0) === 0) continue;
+      const where = await this.unissuedMaterialWhereabouts(r.productionOrderId);
+      blocked.push({
+        /* The production order has no human number of its own; the ALEMBIC order it was raised
+           for is the code both sides quote, and the short id is the fallback a RawProd operator
+           can still search by. */
+        productionOrder: r.orderRef ?? `PRD-${r.productionOrderId.slice(0, 8)}`,
+        orderRef: r.orderRef,
+        status: r.status,
+        neededBy: r.neededBy,
+        unissuedLines: lines!.c,
+        quarantinedBatches: where.quarantinedBatches,
+        whereabouts: where.summary,
+      });
+    }
+    return { scope: orderRef ? "order" : "factory", blocked };
+  }
+
+  /** "Which PO is late?" Two lateness rules, both already RawProd's: DELIVERY late -- an
+   *  approved/issued/acknowledged PO past the vendor's accepted delivery date (else the PR's
+   *  expected date) with no GRN against it; APPROVAL late -- a PO still awaiting approval past
+   *  `PO_OVERDUE_HOURS`, the same threshold the G3 alert scan raises on. `poNumber` narrows to
+   *  one PO (null when unknown); absent, up to ten of each, oldest first. */
+  private async poLate(poNumber?: string): Promise<Record<string, unknown> | null> {
+    if (poNumber) {
+      const [exists] = (await this.sql`
+        select 1 as one from procurement.purchase_order where po_number = ${poNumber} limit 1`) as Array<{ one: number }>;
+      if (!exists) return null;
+    }
+    const byPo = poNumber ?? null;
+    const deliveryLate = (await this.sql`
+      select po.po_number as "poNumber", po.status,
+             coalesce(ack.accepted_delivery_date, req.expected_delivery_date) as "dueDate",
+             (current_date - coalesce(ack.accepted_delivery_date, req.expected_delivery_date))::int as "daysLate",
+             ack.accepted_delivery_date is not null as "vendorCommitted"
+        from procurement.purchase_order po
+        left join lateral (
+          select a.accepted_delivery_date from procurement.vendor_po_ack a
+           where a.purchase_order_id = po.purchase_order_id
+           order by a.acknowledged_dt desc nulls last limit 1) ack on true
+        left join procurement.purchase_request req on req.purchase_request_id = po.purchase_request_id
+       where upper(coalesce(po.status, '')) in ('APPROVED', 'ISSUED', 'ACKNOWLEDGED', 'PARTIALLY_RECEIVED')
+         and coalesce(ack.accepted_delivery_date, req.expected_delivery_date) < current_date
+         and not exists (select 1 from inventory.grn_master g
+                          where g.purchase_order_id = po.purchase_order_id
+                            and upper(coalesce(g.status, '')) not in ('CANCELLED', 'REJECTED'))
+         and (${byPo}::text is null or po.po_number = ${byPo})
+       order by 3 asc
+       limit 10`) as Array<Record<string, unknown>>;
+    const approvalLate = (await this.sql`
+      select po.po_number as "poNumber", po.status, po.updated_dt as "pendingSince"
+        from procurement.purchase_order po
+       where upper(coalesce(po.status, '')) in ('DRAFT', 'PENDING', 'PENDING_APPROVAL', 'PENDING_L2_APPROVAL')
+         and po.updated_dt <= now() - (${PO_OVERDUE_HOURS} || ' hours')::interval
+         and (${byPo}::text is null or po.po_number = ${byPo})
+       order by po.updated_dt asc
+       limit 10`) as Array<Record<string, unknown>>;
+    return { scope: poNumber ? "po" : "all", overdueHours: PO_OVERDUE_HOURS, deliveryLate, approvalLate };
+  }
+
+  /** "What is the factory status?" Counts only -- no identities, no quantities of any
+   *  ingredient -- each read off the table that owns the state. */
+  private async factoryStatus(): Promise<Record<string, unknown>> {
+    const byStatus = (await this.sql`
+      select coalesce(upper(status), 'UNKNOWN') as status, count(*)::int c
+        from production.production_order
+       where upper(coalesce(status, '')) not in ('COMPLETED', 'CANCELLED', 'CLOSED')
+       group by 1 order by 1`) as Array<{ status: string; c: number }>;
+    const [counts] = (await this.sql`
+      select
+        (select count(distinct i.production_order_id)::int
+           from production.production_order_ingredients i
+           join production.production_order po on po.production_order_id = i.production_order_id
+          where coalesce(i.issued_qty, false) = false
+            and upper(coalesce(po.status, '')) not in ('COMPLETED', 'CANCELLED', 'CLOSED')) as "blockedOrders",
+        (select count(*)::int from inventory.rm_batch_master where status = 'QUARANTINE') as "quarantinedBatches",
+        (select count(*)::int from quality.qc_inspections where upper(coalesce(overall_result, '')) = 'HOLD') as "qcHolds",
+        (select count(*)::int from production.production_qc where upper(coalesce(result, '')) in ('HOLD', 'FAIL', 'REJECT')) as "productionQcHolds",
+        (select count(*)::int from procurement.purchase_order
+          where upper(coalesce(status, '')) in ('DRAFT', 'PENDING', 'PENDING_APPROVAL', 'PENDING_L2_APPROVAL')) as "posAwaitingApproval",
+        (select count(*)::int from procurement.purchase_order
+          where upper(coalesce(status, '')) in ('APPROVED', 'ISSUED', 'ACKNOWLEDGED', 'PARTIALLY_RECEIVED')) as "posOpen",
+        (select count(*)::int from procurement.purchase_request_approval where approval_status = 'PENDING') as "prApprovalsPending",
+        (select count(*)::int from bridge.production_requirement
+          where production_order_id is null) as "requirementsAwaitingPlan"
+    `) as Array<Record<string, number>>;
+    return { productionOrdersByStatus: byStatus, ...counts! };
+  }
+
+  /** "Why is this batch quarantined?" The batch's own state, the QC verdicts against it and
+   *  the receipt it came in on -- raw-material batch first, then an oil batch, then a finished
+   *  good batch (the three share no namespace). The reason is DERIVED FROM THOSE FACTS in a
+   *  fixed order, never written as prose by a caller. Batch and document numbers only. */
+  private async batchQuarantine(batchNumber: string): Promise<Record<string, unknown> | null> {
+    const [rm] = (await this.sql`
+      select b.rm_batch_id as "id", b.status, b.expiry_date as "expiryDate", b.created_dt as "receivedAt",
+             g.grn_number as "grnNumber", po.po_number as "poNumber"
+        from inventory.rm_batch_master b
+        left join inventory.grn_items gi on gi.grn_item_id = b.grn_item_id
+        left join inventory.grn_master g on g.grn_id = gi.grn_id
+        left join procurement.purchase_order po on po.purchase_order_id = g.purchase_order_id
+       where b.batch_number = ${batchNumber}
+       order by b.created_dt desc
+       limit 1`) as Array<Record<string, unknown>>;
+    if (rm) {
+      const inspections = (await this.sql`
+        select overall_result as "result", status, inspection_dt as "inspectionDt"
+          from quality.qc_inspections
+         where rm_batch_id = ${rm.id as string}
+         order by inspection_dt desc nulls last, created_dt desc
+         limit 5`) as Array<{ result: string | null; status: string | null; inspectionDt: Date | null }>;
+      const { id: _id, ...batch } = rm;
+      return {
+        batchNumber, batchType: "rm", ...batch, inspections,
+        reason: quarantineReason(String(rm.status ?? ""), inspections[0]?.result ?? null,
+          rm.expiryDate as Date | null),
+      };
+    }
+    const [oil] = (await this.sql`
+      select oil_batch_id as "id", status, produced_dt as "producedAt"
+        from production.oil_batch_master where batch_number = ${batchNumber} limit 1`) as Array<Record<string, unknown>>;
+    if (oil) {
+      const inspections = (await this.sql`
+        select result, status, inspection_dt as "inspectionDt"
+          from production.production_qc where oil_batch_id = ${oil.id as string}
+         order by inspection_dt desc nulls last, created_dt desc
+         limit 5`) as Array<{ result: string | null; status: string | null; inspectionDt: Date | null }>;
+      const held = inspections.find((i) => /HOLD|FAIL|REJECT/i.test(i.result ?? ""));
+      const { id: _id, ...batch } = oil;
+      return {
+        batchNumber, batchType: "oil", ...batch, inspections,
+        reason: quarantineReason(String(oil.status ?? ""), held?.result ?? inspections[0]?.result ?? null, null),
+      };
+    }
+    const [fg] = (await this.sql`
+      select status, expiry_date as "expiryDate", manufacturing_date as "manufacturingDate"
+        from packaging.finished_good_batch_master where batch_number = ${batchNumber} limit 1`) as Array<Record<string, unknown>>;
+    if (fg) {
+      return {
+        batchNumber, batchType: "fg", ...fg, inspections: [],
+        reason: quarantineReason(String(fg.status ?? ""), null, fg.expiryDate as Date | null),
+      };
+    }
+    return null;
+  }
+}
+
+/** The reason a batch is held, from the facts in a FIXED order -- a QC verdict outranks the
+ *  state it caused, and expiry is its own reason. `quarantined` is false when the batch is not
+ *  held at all, so ARIA can say "it is not quarantined" rather than invent why it is. */
+export function quarantineReason(
+  status: string, latestResult: string | null, expiryDate: Date | null,
+): { quarantined: boolean; code: string; detail: string } {
+  const st = status.toUpperCase();
+  const res = (latestResult ?? "").toUpperCase();
+  const heldStates = new Set(["QUARANTINE", "HOLD", "ON_HOLD", "REJECTED", "BLOCKED"]);
+  const expired = expiryDate !== null && new Date(expiryDate).getTime() < Date.now();
+  const quarantined = heldStates.has(st) || /HOLD|FAIL|REJECT/.test(res) || expired;
+  if (!quarantined) return { quarantined: false, code: "not_held", detail: `status ${st || "UNKNOWN"}` };
+  if (/FAIL|REJECT/.test(res)) {
+    return { quarantined: true, code: "qc_failed", detail: `QC result ${res}: awaiting disposal / return to vendor` };
+  }
+  if (/HOLD/.test(res)) return { quarantined: true, code: "qc_hold", detail: "QC placed this batch on HOLD" };
+  if (expired) return { quarantined: true, code: "expired", detail: "the batch is past its expiry date" };
+  if (st === "QUARANTINE" && !res) {
+    return { quarantined: true, code: "awaiting_incoming_qc", detail: "received into quarantine; incoming QC inspection not yet recorded" };
+  }
+  return { quarantined: true, code: "held", detail: `batch status ${st}${res ? `, latest QC ${res}` : ""}` };
 }
