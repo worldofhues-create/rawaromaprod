@@ -37,6 +37,28 @@ const COND_TYPE = 'production.qc.recorded'; // only notify on FAIL/HOLD
 const TYPES = [...Object.keys(RULES), COND_TYPE];
 const SCHEMAS = ['procurement', 'quality', 'production', 'packaging', 'sales', 'formula', 'inventory'];
 
+/**
+ * THE OUTBOXES THIS CONNECTION CAN ACTUALLY SEE. `formula.outbox` lives in the VAULT database
+ * (FORMULA_DATABASE_URL), not in the main one this worker's PG_CLIENT is connected to, so on every real
+ * deployment (prod and demo) the main API's in-process worker has no `formula` schema at all. The drain
+ * used to union all seven outboxes regardless: Postgres refused the whole statement (`relation
+ * "formula.outbox" does not exist`), every 5 s, and no outbox-driven email was sent from ANY schema.
+ * So the set is read from the catalogue once -- tables (or views) named `outbox` in these schemas that this
+ * role may use and select -- and a schema that is absent is skipped, said once at info level, not warned
+ * about forever. Where the formula schema IS present (a single-database dev/test setup), it is drained.
+ */
+export async function outboxSchemasPresent(sql: Sql): Promise<string[]> {
+  const rows = (await sql`
+    select n.nspname::text as schema
+      from pg_catalog.pg_class c
+      join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+     where c.relname = 'outbox' and c.relkind in ('r', 'p', 'v')
+       and n.nspname = any(${SCHEMAS})
+       and has_schema_privilege(n.oid, 'USAGE') and has_table_privilege(c.oid, 'SELECT')`) as Array<{ schema: string }>;
+  const present = new Set(rows.map((r) => r.schema));
+  return SCHEMAS.filter((s) => present.has(s));
+}
+
 @Injectable()
 export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(EmailNotifierService.name);
@@ -50,6 +72,8 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
   private running = false;
   private scanning = false;
   private emailCache = new Map<string, { at: number; emails: string[] }>();
+  /** The schemas whose outbox this connection drains; resolved once (see outboxSchemasPresent). */
+  private drainSchemas?: string[];
 
   constructor(
     @Inject(PG_CLIENT) private readonly sql: Sql,
@@ -64,6 +88,32 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
     this.scanTimer = setInterval(() => void this.scan(), this.scanMs);
     if (this.scanTimer.unref) this.scanTimer.unref();
     this.logger.log(`email notifier: outbox every ${this.pollMs}ms, condition scan every ${this.scanMs}ms`);
+    void this.drainTargets();
+  }
+
+  /** Resolve (once) which outboxes exist here, and say once at info level what is skipped and why. A
+   *  catalogue read that fails is warned about and retried on the next drain; nothing is drained until
+   *  it succeeds, so a missing schema is never discovered by a failing drain again. */
+  private async drainTargets(): Promise<string[] | undefined> {
+    if (this.drainSchemas) return this.drainSchemas;
+    let present: string[];
+    try {
+      present = await outboxSchemasPresent(this.sql);
+    } catch (e) {
+      this.logger.warn(`notifier: could not read which outboxes exist (${(e as Error).message}); will retry`);
+      return undefined;
+    }
+    if (this.drainSchemas) return this.drainSchemas; // a concurrent resolve won
+    this.drainSchemas = present;
+    const skipped = SCHEMAS.filter((s) => !present.includes(s));
+    this.logger.log(
+      `email notifier: draining the outbox of ${present.length ? present.join(', ') : 'no schema'}` +
+      (skipped.length
+        ? `; skipping ${skipped.join(', ')} -- no ${skipped.map((s) => `${s}.outbox`).join('/')} in this database` +
+          (skipped.includes('formula') ? ' (formula.outbox lives in the vault database)' : '')
+        : ''),
+    );
+    return present;
   }
   onModuleDestroy(): void {
     if (this.pollTimer) clearInterval(this.pollTimer);
@@ -138,7 +188,9 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
-      const union = SCHEMAS.map((s) => `select id, type, payload::text as payload, occurred_at from ${s}.outbox`).join(' union all ');
+      const schemas = await this.drainTargets();
+      if (!schemas || schemas.length === 0) return;
+      const union = schemas.map((s) => `select id, type, payload::text as payload, occurred_at from ${s}.outbox`).join(' union all ');
       const inList = TYPES.map((t) => `'${t}'`).join(',');
       // Delivery-assurance (audit #10): re-process an event that hasn't been SENT/LOGGED yet and
       // still has retries left (FAILED with attempts < 3). A row that is SENT/LOGGED, or FAILED
