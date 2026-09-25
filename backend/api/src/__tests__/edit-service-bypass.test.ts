@@ -90,6 +90,21 @@ for (const [resource, perm] of [
 }
 
 /**
+ * Lane fread-rp: `formula-versions` targeted formula.formula_version, which lives in the Vault
+ * database (not this box's), so the PATCH could only 500 in production — and where the table did
+ * exist, a generic status PATCH skipped the Vault lifecycle's approval / segregation-of-duties
+ * checks. It is refused outright, before the permission check, like the entries above.
+ */
+test('edit-service: formula-versions is refused on the main box (Vault data; status moves only through the Vault lifecycle)', async () => {
+  for (const permissions of [['formula:formula_version:write'], []]) {
+    await assert.rejects(
+      () => editSvc.update('formula-versions', crypto.randomUUID(), { status: 'APPROVED' }, principal({ permissions })),
+      NotImplementedException,
+    );
+  }
+});
+
+/**
  * S3 security review item 1 — `PATCH /v1/masters/users/:id` used to accept `email`, which
  * combined with `AuthService.loginWithAssertion`'s old email-only mapping was a vault-takeover
  * path: retarget a privileged account's email, then sign in as that account on the new

@@ -9,7 +9,8 @@
  * this box subscribes to a formula event (the in-proc bus's only subscriber is the flags snapshot,
  * and the email notifier reads outboxes from the main database only), so FormulaModule and the
  * formula outbox source are simply not composed here. Production reaches the Vault through
- * `VaultPortModule` (ProductionModule imports it).
+ * `VaultPortModule` (ProductionModule imports it), and so does `MaterialCatalogueSyncModule`, which
+ * pushes the material catalogue the Vault console's picker searches.
  */
 import { Module } from '@nestjs/common';
 import {
@@ -39,6 +40,7 @@ import { NotifyModule } from './notify/notify.module.js';
 import { ConsumptionModule } from './consumption/consumption.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
 import { AutomationModule } from './automation/automation.module.js';
+import { MaterialCatalogueSyncModule } from './vault-bridge/material-catalogue-sync.module.js';
 
 @Module({
   imports: [
@@ -71,6 +73,9 @@ import { AutomationModule } from './automation/automation.module.js';
     ConsumptionModule,
     BridgeModule,
     AutomationModule,
+    // Pushes the material id/code/name catalogue to the Vault console's picker over the signed
+    // main -> Vault channel (the Vault never calls this box).
+    MaterialCatalogueSyncModule,
   ],
 })
 export class WorkerModule {}

@@ -22,37 +22,41 @@ import { randomUUID } from 'node:crypto';
 import { ForbiddenException } from '@nestjs/common';
 import { DashboardService } from '../dashboard.service.js';
 import { ensureSchema, testClient, productionDb, productionSchema, principal, closeTestClient } from '../../../../test-support/db.js';
-// traceFinishedGood's raw SQL left-joins formula.formula_master (the product's recipe name) —
-// that schema lives on its own connection in production (FORMULA_DATABASE_URL) but this lane's
-// test DB shares ONE Postgres for everything, same as backend/cluster-formula/src/__tests__/
-// db.ts is pointed at via FORMULA_TEST_DATABASE_URL for this lane. Ensure it exists
-// independent of test file run order (this file never needs to WRITE to it).
-import { ensureSchema as ensureFormulaSchema, closeTestClient as closeFormulaTestClient } from '../../../../cluster-formula/src/__tests__/db.js';
+import type { FormulaLabelsQuery } from '@ra/cluster-formula';
+// traceFinishedGood no longer touches formula.* (lane fread-rp: that schema is in the Vault
+// database, not the main one). The one formula datum it may show — the product's formula CODE,
+// for a caller holding formula:actual:read when the product has no name of its own — comes from
+// the Vault over the signed channel; here, a recording stub.
 
 const { productionOrder } = productionSchema;
 
 let sql: ReturnType<typeof testClient>;
 let dashboard: DashboardService;
 const sid = () => randomUUID().slice(0, 8);
+const vaultCalls: FormulaLabelsQuery[] = [];
+const FORMULA_CODE = 'FRM-TRACE-01';
+let vaultDown = false;
+const vault = {
+  formulaLabels: async (q: FormulaLabelsQuery) => {
+    vaultCalls.push(q);
+    if (vaultDown) throw new Error('The Formula Vault is unreachable');
+    return { versions: [], formulas: q.formulaIds.map((formulaId) => ({ formulaId, formulaCode: FORMULA_CODE })), recent: null };
+  },
+};
 
 before(async () => {
   await ensureSchema();
-  await ensureFormulaSchema();
   sql = testClient();
-  dashboard = new DashboardService(sql as any);
+  dashboard = new DashboardService(sql as any, vault);
 });
 
 afterAll(async () => {
   await closeTestClient();
-  // The formula-schema connection pool is separate from the main test-support one — must be
-  // closed too, or the process never exits (an open postgres.js pool keeps the event loop
-  // alive indefinitely).
-  await closeFormulaTestClient();
 });
 
 /** Seeds one full finished-good -> package_order -> oil_batch -> production_order ->
  * ingredient -> material/alias -> rm_batch -> grn -> vendor chain, plus a customer/dispatch. */
-async function seedTraceChain(): Promise<string> {
+async function seedTraceChain(product: { name: string | null; formulaId?: string } = { name: 'Signature Eau de Parfum' }): Promise<string> {
   const fgId = randomUUID();
   const packageOrderId = randomUUID();
   const productSkuId = randomUUID();
@@ -81,7 +85,7 @@ async function seedTraceChain(): Promise<string> {
   await sql`insert into inventory.rm_batch_master (rm_batch_id, grn_item_id, material_id, batch_number, status) values (${randomUUID()}, ${grnItemId}, ${materialId}, ${`RMB-${sid()}`}, 'ACTIVE')`;
   await sql`insert into production.production_order_ingredients (production_order_ingredient_id, production_order_id, material_id, required_qty, status) values (${randomUUID()}, ${prodOrderId}, ${materialId}, '5', 'ACTIVE')`;
   await sql`insert into production.oil_batch_master (oil_batch_id, production_order_id, batch_number, produced_qty, status) values (${oilBatchId}, ${prodOrderId}, ${`OIL-${sid()}`}, '5', 'ACTIVE')`;
-  await sql`insert into packaging.product_master (product_id, product_code, product_name, status) values (${productId}, ${`PRD-${sid()}`}, 'Signature Eau de Parfum', 'ACTIVE')`;
+  await sql`insert into packaging.product_master (product_id, product_code, product_name, formula_id, status) values (${productId}, ${`PRD-${sid()}`}, ${product.name}, ${product.formulaId ?? null}, 'ACTIVE')`;
   await sql`insert into packaging.product_sku (product_sku_id, product_id, sku_code, status) values (${productSkuId}, ${productId}, ${`SKU-${sid()}`}, 'ACTIVE')`;
   await sql`insert into packaging.package_order (package_order_id, product_sku_id, oil_batch_id, status) values (${packageOrderId}, ${productSkuId}, ${oilBatchId}, 'ACTIVE')`;
   await sql`insert into packaging.finished_good_batch_master (finished_good_batch_id, package_order_id, product_sku_id, batch_number, status) values (${fgId}, ${packageOrderId}, ${productSkuId}, ${`FG-${sid()}`}, 'ACTIVE')`;
@@ -129,4 +133,43 @@ test('item 3: WITH masterdata:material:reveal, full material/vendor/batch detail
   // the query prefers material_code over material_name when both are present.
   assert.match(trace.materials[0].material, /^MAT-/);
   assert.equal(trace.materialCount, 1);
+});
+
+/* ── lane fread-rp: the product label without formula.* on this box ─────────────────────────── */
+
+test('fread-rp: a formula:actual:read holder sees the product\'s own name; the Vault is not asked', async () => {
+  vaultCalls.length = 0;
+  const fgId = await seedTraceChain({ name: 'Signature Eau de Parfum', formulaId: randomUUID() });
+  const trace: any = await dashboard.traceFinishedGood(fgId, principal({ roles: ['qc'], permissions: ['formula:actual:read'] }));
+  assert.equal(trace.finishedGood.product, 'Signature Eau de Parfum');
+  assert.equal(vaultCalls.length, 0);
+});
+
+test('fread-rp: a product with no name of its own shows its formula CODE from the Vault (never a formula name)', async () => {
+  vaultCalls.length = 0;
+  const formulaId = randomUUID();
+  const fgId = await seedTraceChain({ name: null, formulaId });
+  const trace: any = await dashboard.traceFinishedGood(fgId, principal({ roles: ['qc'], permissions: ['formula:actual:read'] }));
+  assert.equal(trace.finishedGood.product, FORMULA_CODE);
+  assert.deepEqual(vaultCalls, [{ formulaVersionIds: [], formulaIds: [formulaId] }]);
+});
+
+test('fread-rp: without formula:actual:read the product stays masked and the Vault is not asked', async () => {
+  vaultCalls.length = 0;
+  const fgId = await seedTraceChain({ name: null, formulaId: randomUUID() });
+  const trace: any = await dashboard.traceFinishedGood(fgId, principal({ roles: ['qc'], permissions: [] }));
+  assert.equal(trace.finishedGood.product, 'Protected ◆');
+  assert.equal(vaultCalls.length, 0);
+});
+
+test('fread-rp: an unreachable Vault leaves the label "—" instead of failing the whole trace', async () => {
+  vaultDown = true;
+  try {
+    const fgId = await seedTraceChain({ name: null, formulaId: randomUUID() });
+    const trace: any = await dashboard.traceFinishedGood(fgId, principal({ roles: ['qc'], permissions: ['formula:actual:read'] }));
+    assert.equal(trace.finishedGood.product, '—');
+    assert.ok(trace.oilBatch, 'the rest of the trace is still there');
+  } finally {
+    vaultDown = false;
+  }
 });

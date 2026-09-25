@@ -1,13 +1,14 @@
 /**
  * InternalBridgeGuard — the receiving-side check for the signed internal channel
  * (`internal-bridge-signing.ts`). Applied with `@UseGuards(InternalBridgeGuard)` at the
- * CONTROLLER level on the two internal-only surfaces this bridge has (never globally):
- *   - `vault-port-internal.controller.ts` (Vault box) — main → vault, coded-instruction resolve.
- *   - `material-facts.controller.ts` (main app box) — vault → main, material alias/search facts.
+ * CONTROLLER level on the one internal-only surface this bridge has (never globally):
+ *   - `vault-port-internal.controller.ts` (Vault box) — main → vault. (The main box's former
+ *     `material-facts.controller.ts`, vault → main, was retired by lane fread-rp: the Vault
+ *     receives a pushed material catalogue instead and never calls the main box.)
  *
- * Both controllers ALSO carry `@Public()` (these are process-to-process calls, not a user
+ * That controller ALSO carries `@Public()` (these are process-to-process calls, not a user
  * session — there is no bearer JWT to check) — `@Public()` only skips `JwtAuthGuard`/
- * `PermissionsGuard`; THIS guard is the actual access control for these two routes, so it does
+ * `PermissionsGuard`; THIS guard is the actual access control for those routes, so it does
  * not itself consult `@Public()`/`@Permissions()` metadata.
  *
  * Reads `x-internal-signature` + `x-internal-timestamp` and verifies against the exact raw

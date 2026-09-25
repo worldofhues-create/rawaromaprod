@@ -1,17 +1,18 @@
 /**
  * Internal bridge signing — the one signed, service-to-service HTTP channel between the main
  * app box and the standalone Vault EC2 (PB-03 remainder, V4 §109.1's "signed internal channel").
- * Used BOTH directions: `VaultApiClient` (main → vault: a production order's pick list, the coded
- * manufacturing instruction, security-audit writes) and `MaterialFactsClient` (vault → main, the
- * Vault console's material search and alias lookups —
- * the only main-DB-shaped read the Vault box ever makes, read-only, alias/code/name only).
+ * One direction: `VaultApiClient` (main → vault: a production order's pick list, the coded
+ * manufacturing instruction, formula codes/statuses and the access audit for the main box's
+ * screens, security-audit writes, and the material catalogue the main box pushes for the Vault
+ * console's picker). The Vault never calls the main box (lane fread-rp retired the vault → main
+ * `MaterialFactsClient`; no deployment had that network path).
  *
  * Deliberately NOT a JWT / bearer-token scheme — there is no user principal on either side of
  * this call, only two trusted processes. An HMAC-SHA256 over method+path+timestamp+body, keyed
  * by a secret shared via SSM (never committed, never baked into an image), is the same shape
  * this repo's `relay` module and `BridgeModule`'s HMAC connector secret already use for
  * cross-boundary signed envelopes — kept here (backend-kernel, domain-free) rather than in
- * either cluster because BOTH directions need the identical primitive and backend-kernel is the
+ * either cluster because both ends need the identical primitive and backend-kernel is the
  * one package every deployable already depends on.
  *
  * Domain-free by design (no formula/vault-specific types here) — see `internal-bridge.guard.ts`

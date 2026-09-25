@@ -261,6 +261,25 @@ test('render-demo-env vault: CORS admits rawdemovault, audit key carried, the li
   } finally { rmSync(b.root, { recursive: true, force: true }); }
 });
 
+test('render-demo-env vault: a hand-set INTERNAL_BRIDGE_KEY (owner switch) survives a re-render; none is introduced otherwise', () => {
+  // Lane fread-rp: every main -> vault read on the demo (pick list, dashboard labels, the material
+  // picker's catalogue push) needs the key on BOTH demo boxes; the vault render used to drop it.
+  const on = box({ 'etc/rawprod-demo/vault.env': 'FORMULA_AUDIT_HMAC_WRAPPED=wrapped-audit-key\nINTERNAL_BRIDGE_KEY=hand-set\n' }, DEMO_PARAMS);
+  try {
+    const r = run(on, 'infra/aws/demo/render-demo-env.sh', 'vault');
+    assert.equal(r.status, 0, r.stderr);
+    const e = envOf(on, 'etc/rawprod-demo/vault.env');
+    assert.equal(e.get('INTERNAL_BRIDGE_KEY'), DEMO_PARAMS['/rawaroma/demo/rawprod/internal-bridge-key'], 'from SSM once switched on');
+    sameSet(e.keys(), [...LIVE.rawprodDemoVault, 'INTERNAL_BRIDGE_KEY'], '/etc/rawprod-demo/vault.env (switched on)');
+    noSecretPrinted(r, on);
+  } finally { rmSync(on.root, { recursive: true, force: true }); }
+  const off = box({}, DEMO_PARAMS);
+  try {
+    assert.equal(run(off, 'infra/aws/demo/render-demo-env.sh', 'vault').status, 0);
+    assert.equal(envOf(off, 'etc/rawprod-demo/vault.env').has('INTERNAL_BRIDGE_KEY'), false, 'never introduced by a render');
+  } finally { rmSync(off.root, { recursive: true, force: true }); }
+});
+
 const PROD_PARAMS: Record<string, string> = {
   '/rawaroma/bridge/internal-bridge-key': 'prod-ibk-0123456789abcdef0123456789abcdef',
   '/rawaroma/rawprod/ALEMBIC_ASSERTION_TENANT_ID': '00000000-0000-7000-8000-00000000c0de',

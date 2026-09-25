@@ -14,6 +14,7 @@ import {
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { FormulasService } from './formulas.service.js';
+import { FormulaDirectoryService } from '../formula-directory.service.js';
 import {
   actualReadBody,
   addIngredients,
@@ -35,7 +36,10 @@ import {
 
 @Controller()
 export class FormulasController {
-  constructor(private readonly formulas: FormulasService) {}
+  constructor(
+    private readonly formulas: FormulasService,
+    private readonly directory: FormulaDirectoryService,
+  ) {}
 
   /* ── formula master ───────────────────────────────────────────────── */
 
@@ -66,6 +70,15 @@ export class FormulasController {
   @Get('v1/formula-audit-verify')
   verifyAuditChain() {
     return this.formulas.verifyAuditChain();
+  }
+
+  // The Vault console's access-audit and production-audit screens (web-vault/vault.js
+  // screenAudit): the hash-chained formula.audit_events, newest first, from this box's own
+  // database. Same permission and paging the main box's route has always had.
+  @Permissions('formula:actual:read')
+  @Get('v1/formula-access-audit')
+  accessAudit(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
+    return this.directory.accessAudit(limit ? Number(limit) : 100, cursor);
   }
 
   // The Vault draft editor's material picker — `vault.*` permission (not the ordinary

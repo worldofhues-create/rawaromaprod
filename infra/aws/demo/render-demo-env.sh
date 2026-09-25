@@ -184,6 +184,13 @@ vault)
   V_VERIFY=$(req /rawaroma/demo/rawprod/assertion-verify-key)
   V_FURL=$(req /rawaroma/demo/factory-url)
   V_OWNER_PW=$(req /rawaroma/demo/vault/DB_PASSWORD_owner); V_OWNER_PW=$(enc "$V_OWNER_PW")
+  # INTERNAL_BRIDGE_KEY: the same owner switch as the app side (see RP_IBK). The demo vault runs
+  # without one today; once the owner sets it by hand (the SAME value as the demo app's), a
+  # re-render keeps it (from SSM where this role may read it, else the box's own value). Before
+  # lane fread-rp this heredoc had no such line, so a re-render silently turned the demo's signed
+  # main -> vault channel off again (pick lists, dashboard labels, the material picker's catalogue).
+  V_IBK=""; if [ -n "$(current INTERNAL_BRIDGE_KEY /etc/rawprod-demo/vault.env)" ]; then
+    V_IBK=$(opt INTERNAL_BRIDGE_KEY /rawaroma/demo/rawprod/internal-bridge-key /etc/rawprod-demo/vault.env); fi
   put /etc/rawprod-demo/vault.env <<X
 NODE_ENV=production
 APP_ENV=prod
@@ -210,6 +217,7 @@ RAWPROD_ASSERTION_EXPECTED_TARGETS=vault
 # The factory front door, and the public demo Vault console (infra/aws/nginx/rawdemovault.conf).
 CORS_ORIGINS=$V_FURL,https://rawdemovault.huecycle.in
 $V_AUDIT
+$V_IBK
 X
   put /etc/rawprod-demo/vault-migrate.env <<X
 PGSSLROOTCERT=/etc/rawprod/rds-global-bundle.pem

@@ -21,9 +21,12 @@ import { DashboardService } from '../dashboard/dashboard.service.js';
 
 let svc: DashboardService;
 
+// The Vault's labels are not what this file is about (dashboard-vault-labels.test.ts is): none.
+const noLabels = { formulaLabels: async () => ({ versions: [], formulas: [], recent: null }) };
+
 before(async () => {
   await ensureSchema();
-  svc = new DashboardService(testClient());
+  svc = new DashboardService(testClient(), noLabels);
 });
 
 after(async () => {

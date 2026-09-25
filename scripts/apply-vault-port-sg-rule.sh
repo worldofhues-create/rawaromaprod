@@ -17,12 +17,12 @@
 # (alembic-web to alembic-db)" — never a bare IP/CIDR, so the rule tracks the app box even if
 # its private IP changes on restart).
 #
-# The OTHER direction (Vault -> main app box, `MaterialFactsClient`'s material-facts bridge)
-# needs NO new SG rule: the Vault EC2 sits in a public subnet with general internet egress
-# (PROVISIONED.md's "Egress decision" section) and already reaches the main app box's existing
-# public HTTPS listener (behind CloudFront/nginx) — `InternalBridgeGuard`'s signed-HMAC check is
-# the access control for that path, the same way it already covers this port's own callers, not
-# an SG boundary. THIS script is only for the direction that has no path at all today.
+# There is NO Vault -> main app box direction and no rule for one (lane fread-rp): the Vault
+# console's material picker is fed by a catalogue the main box PUSHES over this same port, so the
+# app box's own SG stays closed to the Vault box. (The retired `MaterialFactsClient` path assumed
+# the Vault could reach the main API's /internal/ routes through the public listener; nginx never
+# proxied /internal/, so it never worked.) The demo pair uses the same rule on port 4111
+# (VAULT_PORT_INTERNAL_PORT=4111), which rawdemovault.conf's upstream already relies on.
 #
 # SAFE BY CONSTRUCTION, NOT JUST BY CONVENTION:
 #   - refuses to run without --apply (dry-run prints the exact `aws` command and exits 0)

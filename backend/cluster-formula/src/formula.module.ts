@@ -25,15 +25,21 @@
  *   `MASTERDATA_LOOKUP` resolves locally via `ClusterMasterdataModule` (shared main `PG_CLIENT`).
  *
  *   VAULT_MODE=true (vault-main.ts's VaultAppModule, ONLY): the three controllers ARE mounted
- *   (this is the one process that's allowed to serve them), and `MASTERDATA_LOOKUP` resolves via
- *   `MaterialFactsClient` — a signed HTTP call to the main app box's material-facts bridge
- *   (`facts-bridge/material-facts.client.ts`) — instead of `ClusterMasterdataModule`, which
- *   needs the shared `PG_CLIENT` (main DB) the Vault box must never hold a credential for. This
- *   is the "keeps no main-DB credentials on the vault box" design choice the lane brief asked
- *   this file to pick and document; the alternative considered (a synced local material catalog)
- *   was rejected because it needs its own replication/staleness story for no real benefit over a
- *   live read-only proxy call the Vault box already has a signed channel for (VaultPort, the
- *   opposite direction).
+ *   (this is the one process that's allowed to serve them), and `MASTERDATA_LOOKUP` resolves to
+ *   `MaterialCatalogue` (`facts-bridge/material-catalogue.ts`) — the material id/code/name
+ *   catalogue the MAIN box pushes over the existing main -> Vault signed channel, held in memory —
+ *   instead of `ClusterMasterdataModule`, which needs the shared `PG_CLIENT` (main DB) the Vault
+ *   box must never hold a credential for.
+ *
+ *   Lane fread-rp reversed this file's earlier choice (a live Vault -> main proxy call,
+ *   `MaterialFactsClient`, over MAIN_API_INTERNAL_URL): production and demo never had that path,
+ *   and building it would mean an inbound rule on the app box from the Vault box and rawprod-api's
+ *   port reachable from the Vault — two-way trust. The push keeps the Vault a pure receiver: it
+ *   never initiates a connection to the main box. See material-catalogue.ts for the protocol and
+ *   the staleness bound (one sync interval; a restarted Vault answers 503 until the next sync).
+ *
+ * `FormulaDirectoryService` (both modes) answers the main box's non-recipe reads — formula codes,
+ * version numbers/statuses, lifecycle event types, the access audit — never a formula name.
  */
 import { Global, Inject, Module, type OnModuleDestroy } from '@nestjs/common';
 import type { Sql } from 'postgres';
@@ -49,7 +55,8 @@ import { VaultService } from './vault.service.js';
 import { VaultSecurityAuditSink } from './security-audit-sink.adapter.js';
 import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
-import { MaterialFactsClient } from './facts-bridge/material-facts.client.js';
+import { MaterialCatalogue } from './facts-bridge/material-catalogue.js';
+import { FormulaDirectoryService } from './formula-directory.service.js';
 import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
@@ -101,7 +108,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
 @Global()
 @Module({
   // VAULT_MODE=true: no ClusterMasterdataModule import at all (it needs the shared main
-  // PG_CLIENT) — MASTERDATA_LOOKUP is instead provided directly, below, off MaterialFactsClient.
+  // PG_CLIENT) — MASTERDATA_LOOKUP is instead provided directly, below, off MaterialCatalogue.
   imports: VAULT_MODE ? [] : [ClusterMasterdataModule],
   // VAULT_MODE=false (main app box): zero formula HTTP routes exist in this process.
   controllers: VAULT_MODE ? [CatalogController, FormulasController, ApprovalsController] : [],
@@ -121,11 +128,11 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
       inject: [ConfigService],
       useFactory: (config: ConfigService) => resolveKmsAdapter(config),
     },
-    // VAULT_MODE=true only — see this file's header. Harmless to construct when unused
-    // (ClusterMasterdataModule's own MASTERDATA_LOOKUP binding wins via `imports` above when
-    // VAULT_MODE=false; this provider is simply never registered in that case).
+    // VAULT_MODE=true only — see this file's header (ClusterMasterdataModule's own
+    // MASTERDATA_LOOKUP binding wins via `imports` above when VAULT_MODE=false; this provider is
+    // simply never registered in that case).
     ...(VAULT_MODE
-      ? [MaterialFactsClient, { provide: MASTERDATA_LOOKUP, useExisting: MaterialFactsClient }]
+      ? [MaterialCatalogue, { provide: MASTERDATA_LOOKUP, useExisting: MaterialCatalogue }]
       : []),
     VaultService,
     CatalogService,
@@ -133,12 +140,22 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     ApprovalsService,
     FormulaLookupService,
     { provide: FORMULA_LOOKUP, useExisting: FormulaLookupService },
+    FormulaDirectoryService,
     VaultSecurityAuditSink,
     { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
   // FORMULA_PG_CLIENT: needed by vault-main.ts's VaultHealthController (pings the one DB
   // connection the Vault process actually holds) — see backend/api/src/vault-bridge.
-  exports: [FORMULA_DB, FORMULA_PG_CLIENT, FORMULA_LOOKUP, SECURITY_AUDIT_SINK],
+  // FormulaDirectoryService / MaterialCatalogue: VaultPortInternalController (Vault box) answers
+  // the main box's label/audit reads and receives its catalogue pushes through them.
+  exports: [
+    FORMULA_DB,
+    FORMULA_PG_CLIENT,
+    FORMULA_LOOKUP,
+    SECURITY_AUDIT_SINK,
+    FormulaDirectoryService,
+    ...(VAULT_MODE ? [MaterialCatalogue] : []),
+  ],
 })
 export class FormulaModule implements OnModuleDestroy {
   constructor(@Inject(FORMULA_PG_CLIENT) private readonly client: Sql) {}

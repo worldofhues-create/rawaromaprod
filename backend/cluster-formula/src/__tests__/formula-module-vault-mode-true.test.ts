@@ -26,7 +26,7 @@ process.env.VAULT_MODE = 'true';
 const { CatalogController } = await import('../catalog/catalog.controller.js');
 const { FormulasController } = await import('../formulas/formulas.controller.js');
 const { ApprovalsController } = await import('../approvals/approvals.controller.js');
-const { MaterialFactsClient } = await import('../facts-bridge/material-facts.client.js');
+const { MaterialCatalogue } = await import('../facts-bridge/material-catalogue.js');
 const { FormulaModule, isVaultMode } = await import('../formula.module.js');
 const { MASTERDATA_LOOKUP } = await import('@ra/cluster-masterdata');
 
@@ -50,7 +50,7 @@ test('VAULT_MODE=true: FormulaModule does NOT import ClusterMasterdataModule (no
   }
 });
 
-test('VAULT_MODE=true: MASTERDATA_LOOKUP resolves to MaterialFactsClient (the signed facts-bridge client), not a local DB-backed service', () => {
+test('VAULT_MODE=true: MASTERDATA_LOOKUP resolves to MaterialCatalogue (the catalogue the main box pushes, held in memory), not a local DB-backed service nor a call back into the main box', () => {
   const providers = Reflect.getMetadata('providers', FormulaModule) as Array<
     { provide?: unknown; useExisting?: unknown } | unknown
   >;
@@ -58,5 +58,12 @@ test('VAULT_MODE=true: MASTERDATA_LOOKUP resolves to MaterialFactsClient (the si
     (p) => typeof p === 'object' && p !== null && 'provide' in p && (p as { provide: unknown }).provide === MASTERDATA_LOOKUP,
   ) as { useExisting?: unknown } | undefined;
   assert.ok(binding, 'expected an explicit MASTERDATA_LOOKUP provider in vault mode');
-  assert.equal(binding?.useExisting, MaterialFactsClient);
+  assert.equal(binding?.useExisting, MaterialCatalogue);
+});
+
+test('VAULT_MODE=true: FormulaModule exports what the Vault box\'s internal controller injects (directory + catalogue)', async () => {
+  const { FormulaDirectoryService } = await import('../formula-directory.service.js');
+  const exported = Reflect.getMetadata('exports', FormulaModule) as unknown[];
+  assert.ok(exported.includes(FormulaDirectoryService));
+  assert.ok(exported.includes(MaterialCatalogue));
 });

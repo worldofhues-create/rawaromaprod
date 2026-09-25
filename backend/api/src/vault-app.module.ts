@@ -20,12 +20,15 @@
  *   - `FormulaModule` (VAULT_MODE=true — set via this process's env, read at module-decoration
  *     time in `formula.module.ts`) — formulas/versions/lifecycle/approvals/access policies/
  *     audit/KMS adapter, PLUS the plaintext HTTP routes (only this process ever mounts them),
- *     PLUS material-search resolved over the signed facts bridge instead of a local `PG_CLIENT`
- *     (see `formula.module.ts`'s header for the full design + the rejected alternative).
- *   - `VaultPortInternalModule` — the receiving side of the OTHER signed channel: the main app
- *     box's `VaultApiClient` / `VaultSecurityAuditClient` call in here for every formula read
- *     it needs (a coded manufacturing instruction, a production order's coded pick list) and its
- *     security-audit writes. The main box holds no formula-database connection of its own.
+ *     PLUS material-search answered from the catalogue the main box pushes (held in memory)
+ *     instead of a local `PG_CLIENT`, PLUS the Vault console's access-audit route (see
+ *     `formula.module.ts`'s header for the design + the alternative it replaced).
+ *   - `VaultPortInternalModule` — the receiving side of the signed channel: the main app box's
+ *     `VaultApiClient` / `VaultSecurityAuditClient` call in here for every formula read it needs
+ *     (a coded manufacturing instruction, a production order's coded pick list, formula codes/
+ *     statuses and the access audit for its screens), its security-audit writes and its material
+ *     catalogue pushes. The main box holds no formula-database connection of its own, and this box
+ *     never calls the main box.
  *   - `VaultHealthModule` — `/health`, pinging `FORMULA_PG_CLIENT` (the one DB connection this
  *     process actually holds) instead of the main `HealthController`'s `PG_CLIENT`.
  *

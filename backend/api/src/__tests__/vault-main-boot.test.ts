@@ -84,6 +84,10 @@ for (const [url, payload] of [
   ['/internal/vault/resolve-pick-list', { formulaVersionId: '0199a1b2-0000-7000-8000-000000000001', orderQty: 1, ctx: { actorId: null } }],
   ['/internal/vault/resolve-manufacturing-lines', { formulaVersionId: '0199a1b2-0000-7000-8000-000000000001', permittedBatchQuantity: 1, ctx: { actorId: null } }],
   ['/internal/vault/security-audit', { actorId: null, action: 'security.permission.denied', entityType: 'permission', entityId: null }],
+  // lane fread-rp: the main box's screens' reads, and the catalogue push it makes.
+  ['/internal/vault/formula-labels', { formulaVersionIds: [], formulaIds: [], recent: true }],
+  ['/internal/vault/access-audit', { limit: 10, cursor: null }],
+  ['/internal/vault/material-catalogue', { digest: 'a'.repeat(64) }],
 ] as const) {
   test(`${url} is mounted (the main box's channel) and refuses an unsigned call`, async () => {
     const fastify = app.getHttpAdapter().getInstance();
@@ -93,6 +97,26 @@ for (const [url, payload] of [
     assert.equal(JSON.parse(res.payload).error.code, 'INTERNAL_BRIDGE_UNAUTHORIZED');
   });
 }
+
+test('the Vault console\'s access-audit route IS served here (lane fread-rp) and needs a token', async () => {
+  const fastify = app.getHttpAdapter().getInstance();
+  const res = await fastify.inject({ method: 'GET', url: '/v1/formula-access-audit?limit=200' });
+  assert.notEqual(res.statusCode, 404, 'the Vault console calls this route on the Vault box');
+  assert.equal(res.statusCode, 401);
+});
+
+test('the material picker answers 503 (not an empty list) until the main box has pushed its catalogue', async () => {
+  const { ConfigService, JwtService } = await import('@core/backend-kernel');
+  const jwt = new JwtService(new ConfigService({ JWT_SECRET: process.env.JWT_SECRET } as NodeJS.ProcessEnv));
+  const token = await jwt.signAccess({
+    sub: '0199a1b2-0000-7000-8000-00000000abcd', portal: 'owner', roles: ['formulator'],
+    perms: ['vault:material_search:read'], pv: 1, sid: '0199a1b2-0000-7000-8000-00000000abce', authTime: Math.floor(Date.now() / 1000),
+  });
+  const fastify = app.getHttpAdapter().getInstance();
+  const res = await fastify.inject({ method: 'GET', url: '/v1/vault/materials?q=berg', headers: { authorization: `Bearer ${token}` } });
+  assert.equal(res.statusCode, 503, res.payload);
+  assert.match(JSON.parse(res.payload).error.message, /material catalogue has not arrived/);
+});
 
 test('an unknown route still 404s (the app is otherwise a normal, narrow surface)', async () => {
   const fastify = app.getHttpAdapter().getInstance();

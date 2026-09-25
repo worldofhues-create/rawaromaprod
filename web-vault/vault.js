@@ -160,6 +160,10 @@
   }
   /** Every formula/vault route — the Vault EC2 (`VAULT_API`). */
   function api(path, opts) { return callTunnel(vaultTunnel, path, opts); }
+  /** A list route's rows. The server's envelope lifts a `{ items, nextCursor }` page into `data`
+   * (the rows array) + `meta.cursor`, so `api()` already returns the array — reading `.items` off it
+   * was always undefined and every list/audit screen rendered empty. */
+  function pageItems(page) { return Array.isArray(page) ? page : ((page && page.items) || []); }
   /** ONLY `/auth/alembic-assertion` and `/me` — the main app box (`MAIN_API`), the one process
    * that holds `iam.user_master` (see this section's header comment). */
   function mainApi(path, opts) { return callTunnel(mainTunnel, path, opts); }
@@ -686,7 +690,7 @@
     try {
       var page = await api('/v1/formulas?limit=100');
       var canCreate = hasPerm('formula:formula_master:write');
-      var rows = (page.items || []).map(function (f) {
+      var rows = pageItems(page).map(function (f) {
         var tr = h('tr', { onclick: function () { location.hash = '#/formula/' + f.formulaId; } }, [
           h('td', { class: 'mono', 'data-label': 'Code' }, [f.formulaCode]),
           h('td', { 'data-label': 'Name' }, [f.formulaName]),
@@ -698,7 +702,7 @@
         ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Code']), h('th', {}, ['Name']), h('th', {}, ['Status'])])]), h('tbody', {}, rows)])
         : h('div', { class: 'empty' }, [h('h3', {}, ['No formulas yet']), h('p', {}, [canCreate ? 'Create one to get started.' : 'A formulator can create one.'])]);
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Formulas']), h('span', { class: 'n' }, [(page.items || []).length + ' shown']), h('span', { class: 'spacer' }),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Formulas']), h('span', { class: 'n' }, [pageItems(page).length + ' shown']), h('span', { class: 'spacer' }),
           canCreate ? h('button', { class: 'btn p', onclick: newFormulaDialog }, [icon(ICONS.plus, 14), 'New formula']) : null]),
         table,
       ]);
@@ -735,8 +739,8 @@
     renderShell('formulas', content);
     try {
       var formula = await api('/v1/formulas/' + encodeURIComponent(formulaId));
-      var versionsPage = await api('/v1/formula-versions?limit=200');
-      var versions = (versionsPage.items || []).filter(function (v) { return v.formulaId === formulaId; })
+      var versionsPage = await api('/v1/formula-versions?limit=100'); // the route's max (listQuery)
+      var versions = pageItems(versionsPage).filter(function (v) { return v.formulaId === formulaId; })
         .sort(function (a, b) { return (b.versionNumber || 0) - (a.versionNumber || 0); });
       var maxVersion = versions.reduce(function (m, v) { return Math.max(m, v.versionNumber || 0); }, 0);
       var canDraft = hasPerm('formula:formula_version:write');
@@ -783,7 +787,7 @@
     var body = h('div', {});
     try {
       var page = await api('/v1/formula-access-policies?limit=100');
-      var grants = (page.items || []).filter(function (g) { return g.formulaId === formulaId; });
+      var grants = pageItems(page).filter(function (g) { return g.formulaId === formulaId; });
       var rows = grants.map(function (g) {
         return h('tr', {}, [h('td', { class: 'mono', 'data-label': 'User' }, [g.userId || '—']), h('td', { 'data-label': 'Role' }, [g.roleId || '—']), h('td', { 'data-label': 'Level' }, [String(g.accessLevel != null ? g.accessLevel : '—')])]);
       });
@@ -1059,7 +1063,7 @@
     try {
       var page = await api('/v1/formula-access-audit?limit=200');
       var prefixes = kind === 'mfg' ? MFG_PREFIXES : HUMAN_PREFIXES;
-      var rows = (page.items || []).filter(function (r) { return prefixes.some(function (p) { return r.action && r.action.indexOf(p) === 0; }); });
+      var rows = pageItems(page).filter(function (r) { return prefixes.some(function (p) { return r.action && r.action.indexOf(p) === 0; }); });
       var verify = h('button', { class: 'btn sm', onclick: async function () {
         try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Verified · ' + v.rows + ' rows intact') : ('Broken at row ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
         catch (e) { toast(e.message, true); }

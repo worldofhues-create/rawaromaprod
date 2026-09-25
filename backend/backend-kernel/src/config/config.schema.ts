@@ -205,8 +205,9 @@ export const configSchema = z.object({
    * — before Nest's DI container exists — to decide, once per process, whether to mount the
    * formula plaintext HTTP routes (CatalogController/FormulasController/ApprovalsController;
    * vault mode only) and whether `MASTERDATA_LOOKUP` resolves locally off the shared main
-   * `PG_CLIENT` (main mode; `ClusterMasterdataModule`) or over the signed internal bridge
-   * (vault mode; `MaterialFactsClient` — zero main-DB credential on the Vault box). Also
+   * `PG_CLIENT` (main mode; `ClusterMasterdataModule`) or off the material catalogue the main box
+   * pushes over the signed internal channel (vault mode; `MaterialCatalogue` — zero main-DB
+   * credential on the Vault box, and no call back into the main box). Also
    * exposed here (typed, via `ConfigService`) so `vault-main.ts` can assert it's true and
    * `main.ts` can assert it's NOT true, as a boot-time sanity check that the right entrypoint
    * is running the right module.
@@ -220,15 +221,14 @@ export const configSchema = z.object({
    * PB-03 remainder — the shared secret for the ONE internal, service-to-service signed
    * channel between the main app box and the standalone Vault EC2 (an HMAC-SHA256 over
    * method+path+timestamp+body, `internal-bridge-signing.ts`; §109's "signed internal
-   * channel"). Used BOTH directions:
-   *   - main → vault: `VaultApiClient` / `VaultSecurityAuditClient` (`@ra/cluster-formula`)
-   *     calling `VAULT_API_INTERNAL_URL` — every formula read the main box needs (a coded
-   *     manufacturing instruction, a production order's coded pick list) and its security-audit
-   *     writes; the main box has no formula-database connection.
-   *   - vault → main: `MaterialFactsClient` (`@ra/cluster-formula`, vault mode only) calling
-   *     `MAIN_API_INTERNAL_URL` to resolve a material's RM_ALIAS / run the Vault material
-   *     picker's search — the ONLY main-DB-shaped data the Vault box ever sees, and only ever
-   *     alias/code/name refs, never formula plaintext, over a read-only proxy call.
+   * channel"). ONE direction only, main → vault: `VaultApiClient` / `VaultSecurityAuditClient`
+   * (`@ra/cluster-formula`) calling `VAULT_API_INTERNAL_URL` — every formula read the main box
+   * needs (a coded manufacturing instruction, a production order's coded pick list, formula codes
+   * and statuses for its screens, the access audit), its security-audit writes, and the material
+   * catalogue it PUSHES for the Vault console's picker; the main box has no formula-database
+   * connection. The Vault never calls the main box (lane fread-rp retired the vault → main
+   * `MaterialFactsClient` and `MAIN_API_INTERNAL_URL`: no deployment ever had that path).
+   * Both boxes also derive the keyed material-reference key from it (material-ref.ts).
    * Distributed to both boxes via SSM (never baked into an AMI/image or committed). Optional
    * so every OTHER deployable (main.ts/worker.ts outside this bridge) boots without it;
    * `InternalBridgeGuard` fails CLOSED (401) on every request when it's unset, same "refuse
@@ -240,14 +240,15 @@ export const configSchema = z.object({
    *  app box reaches the vault's port ACROSS hosts, so loopback would break it; set this to the
    *  vault EC2's private IP to bind only the private interface. */
   VAULT_BIND_HOST: z.string().min(1).optional(),
-  /** Main API's own base URL, reachable from the Vault box's SG-scoped private path — the
-   *  target `MaterialFactsClient` (vault mode) calls for material-alias/search facts. */
-  MAIN_API_INTERNAL_URL: z.string().url().optional(),
   /** Vault API's own base URL, reachable from the app box's SG-scoped private path (SG rule
    *  vault-app ← app-box, one port — see `scripts/apply-vault-port-sg-rule.sh`) — the target
    *  `VaultApiClient` (main mode) calls for every formula read — coded manufacturing
    *  instruction and a production order's coded pick list — and security-audit writes. */
   VAULT_API_INTERNAL_URL: z.string().url().optional(),
+  /** How often the main box's worker checks that the Vault holds its current material catalogue
+   *  (a digest probe) and pushes it when not (`MaterialCatalogueSyncService`). Also the longest a
+   *  restarted Vault's material picker waits for its catalogue. */
+  VAULT_CATALOGUE_SYNC_MS: z.coerce.number().int().min(1000).default(15_000),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

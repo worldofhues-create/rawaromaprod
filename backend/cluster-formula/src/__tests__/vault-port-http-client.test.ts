@@ -152,3 +152,52 @@ test('VaultSecurityAuditClient: a signed POST of the entry to /internal/vault/se
   assert.equal(lastRequest?.url, VAULT_INTERNAL_PATHS.securityAudit);
   assert.deepEqual(JSON.parse(lastRequest!.rawBody), entry);
 });
+
+/* ── lane fread-rp: the main box's screens' non-recipe reads + the catalogue push ─────────────── */
+
+test('formulaLabels: a signed POST to /internal/vault/formula-labels with the ids; returns the result', async () => {
+  const result = { versions: [], formulas: [{ formulaId: 'f-1', formulaCode: 'FRM-1' }], recent: null };
+  nextResponse = { status: 201, body: { result } };
+  const query = { formulaVersionIds: ['fv-1'], formulaIds: ['f-1'], recent: true };
+  assert.deepEqual(await client().formulaLabels(query), result);
+  assert.equal(lastRequest?.url, '/internal/vault/formula-labels');
+  assert.equal(lastRequest?.url, VAULT_INTERNAL_PATHS.formulaLabels);
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), query);
+});
+
+test('formulaLabels: a caller-chosen timeout gives up early with a 503', async () => {
+  const slow = createServer(() => { /* never answers */ });
+  await new Promise<void>((resolve) => slow.listen(0, '127.0.0.1', resolve));
+  const port = (slow.address() as { port: number }).port;
+  const started = Date.now();
+  try {
+    await assert.rejects(
+      () => client({ VAULT_API_INTERNAL_URL: `http://127.0.0.1:${port}` }).formulaLabels({ formulaVersionIds: [], formulaIds: [] }, { timeoutMs: 300 }),
+      ServiceUnavailableException,
+    );
+    assert.ok(Date.now() - started < 5_000, 'well under the default 15 s');
+  } finally {
+    slow.closeAllConnections();
+    await new Promise<void>((resolve) => slow.close(() => resolve()));
+  }
+});
+
+test('accessAudit: a signed POST of limit + cursor to /internal/vault/access-audit', async () => {
+  const page = { items: [], nextCursor: null };
+  nextResponse = { status: 201, body: { result: page } };
+  assert.deepEqual(await client().accessAudit(200, '400'), page);
+  assert.equal(lastRequest?.url, VAULT_INTERNAL_PATHS.accessAudit);
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), { limit: 200, cursor: '400' });
+});
+
+test('materialCatalogue: a signed POST of the probe / part to /internal/vault/material-catalogue', async () => {
+  nextResponse = { status: 201, body: { result: { current: false } } };
+  const digest = 'a'.repeat(64);
+  assert.deepEqual(await client().materialCatalogue({ digest }), { current: false });
+  assert.equal(lastRequest?.url, VAULT_INTERNAL_PATHS.materialCatalogue);
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), { digest });
+  const part = { digest, part: 0, parts: 1, materials: [{ materialId: 'm-1', materialCode: 'RM-1', materialName: 'Bergamot' }] };
+  nextResponse = { status: 201, body: { result: { current: true } } };
+  assert.deepEqual(await client().materialCatalogue(part), { current: true });
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), part);
+});

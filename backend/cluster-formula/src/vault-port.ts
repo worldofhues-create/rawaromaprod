@@ -16,6 +16,11 @@
  *     call back into the main box to answer.
  *   - `VaultSecurityAuditClient` (`SECURITY_AUDIT_SINK`) — the edge guards' and SecurityService's
  *     sensitive refusals land on the Vault's hash-chained `formula.audit_events`.
+ *   - the non-recipe reads the main box's screens make (lane fread-rp): formula codes, version
+ *     numbers/statuses and lifecycle event types for the dashboards and the finished-good trace
+ *     (`formulaLabels`, never a formula name), the access audit (`accessAudit`), and the material
+ *     catalogue the main box PUSHES for the Vault console's material picker (`materialCatalogue`;
+ *     the Vault never calls the main box).
  *
  * The caller's own permission is checked on the main box (the route's `@Permissions`); the Vault
  * checks the signed channel (`InternalBridgeGuard`).
@@ -40,6 +45,8 @@ import {
   type SecurityAuditSink,
 } from '@core/backend-kernel';
 import type { CodedInstruction, CodedMaterialLine, CodedPickLine, ReadContext } from './public-api.js';
+import type { AccessAuditPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
+import type { CatalogueUpdate } from './facts-bridge/material-catalogue.js';
 
 /** DI token for `VaultPort`. Inject with `@Inject(VAULT_PORT)`. */
 export const VAULT_PORT = Symbol('VAULT_PORT');
@@ -73,11 +80,14 @@ export interface VaultPort {
 
 /** The internal paths the Vault box serves (vault-port-internal.controller.ts). */
 export const VAULT_INTERNAL_PATHS = {
-  /** Legacy alias-resolving instruction; needs the Vault -> main facts bridge. Not called by this box. */
+  /** Legacy alias-resolving instruction; needs floor codes the Vault does not hold, so it refuses. Not called by this box. */
   manufacturingInstruction: '/internal/vault/resolve-manufacturing-instruction',
   manufacturingLines: '/internal/vault/resolve-manufacturing-lines',
   pickList: '/internal/vault/resolve-pick-list',
   securityAudit: '/internal/vault/security-audit',
+  formulaLabels: '/internal/vault/formula-labels',
+  accessAudit: '/internal/vault/access-audit',
+  materialCatalogue: '/internal/vault/material-catalogue',
 } as const;
 
 /** Upper bound on one Vault round trip (it may include a KMS unwrap). */
@@ -127,8 +137,30 @@ export class VaultApiClient {
     await this.post<unknown>(VAULT_INTERNAL_PATHS.securityAudit, entry);
   }
 
+  /** Codes/version numbers/statuses (and, with `recent`, the dashboard's formula codes and event
+   *  types) for the given ids. Never a formula name. `timeoutMs` lets a dashboard give up early. */
+  async formulaLabels(query: FormulaLabelsQuery, opts: { timeoutMs?: number } = {}): Promise<FormulaLabels> {
+    const data = await this.post<{ result: FormulaLabels }>(VAULT_INTERNAL_PATHS.formulaLabels, query, opts.timeoutMs);
+    return data.result;
+  }
+
+  /** One page of the Vault's access audit (the caller's permission is checked on this box). */
+  async accessAudit(limit: number, cursor?: string | null): Promise<AccessAuditPage> {
+    const data = await this.post<{ result: AccessAuditPage }>(VAULT_INTERNAL_PATHS.accessAudit, {
+      limit,
+      cursor: cursor ?? null,
+    });
+    return data.result;
+  }
+
+  /** A catalogue probe (`{digest}`) or one part of a catalogue push (material-catalogue.ts). */
+  async materialCatalogue(update: CatalogueUpdate): Promise<{ current: boolean }> {
+    const data = await this.post<{ result: { current: boolean } }>(VAULT_INTERNAL_PATHS.materialCatalogue, update);
+    return data.result;
+  }
+
   /** One signed POST; returns the response envelope's `data`. */
-  private async post<T>(path: string, payload: unknown): Promise<T> {
+  private async post<T>(path: string, payload: unknown, timeoutMs: number = VAULT_CALL_TIMEOUT_MS): Promise<T> {
     const baseUrl = this.config.get('VAULT_API_INTERNAL_URL');
     const key = this.config.get('INTERNAL_BRIDGE_KEY');
     if (!baseUrl || !key) {
@@ -154,7 +186,7 @@ export class VaultApiClient {
           'x-internal-nonce': nonce,
         },
         body,
-        signal: AbortSignal.timeout(VAULT_CALL_TIMEOUT_MS),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       // Unreachable or too slow: say so (503) instead of surfacing a raw socket error as a 500.

@@ -20,6 +20,26 @@ export {
 } from './public-api.js';
 export { PICK_QUANTITY_SCALE, instructionQuantity, pickLineRequiredQty } from './pick-quantity.js';
 export { materialRef, materialRefKey } from './material-ref.js';
+// Non-recipe reads the main box's screens make over the signed channel (codes/statuses, never a
+// formula name), and the material catalogue the main box pushes to the Vault's picker.
+export {
+  FormulaDirectoryService,
+  accessAuditBounds,
+  type AccessAuditPage,
+  type AccessAuditRow,
+  type FormulaLabel,
+  type FormulaLabels,
+  type FormulaLabelsQuery,
+  type FormulaVersionLabel,
+} from './formula-directory.service.js';
+export {
+  MaterialCatalogue,
+  MATERIAL_CATALOGUE_PART_SIZE,
+  catalogueParts,
+  materialCatalogueDigest,
+  type CatalogueUpdate,
+  type MaterialCatalogueEntry,
+} from './facts-bridge/material-catalogue.js';
 // The main-app-box side of the Vault trust boundary (V4 §109.1): the signed HTTP client, the
 // production-facing port it backs, and the remote audit sink — the main box reaches the Vault over
 // the signed internal channel only and never holds a formula-DB connection. See vault-port.ts.

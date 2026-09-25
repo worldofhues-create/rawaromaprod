@@ -10,9 +10,18 @@
  *     sees anonymised codes.
  * The payload feeds the hero cards, the planned-vs-actual donut, the super-admin chain-of-custody
  * flow graph, and the warehouse floor zone map.
+ *
+ * FORMULA DATA (lane fread-rp): the `formula` schema is NOT in this box's database (it lives on the
+ * isolated Vault, vault-pg), so the formula joins this service used to make returned nothing in
+ * production (runs table empty, trace 500). Formula labels now come from the Vault over the signed
+ * internal channel (`VaultApiClient.formulaLabels`): formula CODE + version number + status and
+ * lifecycle event TYPES only. The formula NAME never leaves the Vault (Vault-authority data —
+ * formula-directory.service.ts in @ra/cluster-formula), so a caller who used to see the name here
+ * (`formula:actual:read`) now sees the code; everyone else keeps the same masking as before.
  */
-import { ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import { ForbiddenException, Inject, Injectable, Logger } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { VaultApiClient, type FormulaLabels, type FormulaLabelsQuery } from '@ra/cluster-formula';
 import type { Sql } from 'postgres';
 
 /** Olfactive family of a real material, by name — drives class chips + zone placement. */
@@ -50,9 +59,33 @@ const ZONES = [
   { code: 'Z4', name: 'Z4 · Flammables', cls: 'solvent' },
 ] as const;
 
+/** The one Vault read this service makes (VaultApiClient in production; a stub in tests). */
+export type FormulaLabelSource = Pick<VaultApiClient, 'formulaLabels'>;
+
+/** A dashboard gives up on the Vault quickly and renders without formula labels. */
+export const DASHBOARD_VAULT_TIMEOUT_MS = 4_000;
+
+const NO_LABELS: FormulaLabels = { versions: [], formulas: [], recent: null };
+
 @Injectable()
 export class DashboardService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
+  private readonly logger = new Logger(DashboardService.name);
+
+  constructor(
+    @Inject(PG_CLIENT) private readonly sql: Sql,
+    @Inject(VaultApiClient) private readonly vault: FormulaLabelSource,
+  ) {}
+
+  /** Formula labels from the Vault; an unreachable Vault degrades to none (the dashboard's own
+   *  resilience rule: one failed source never 500s the page). */
+  private async labels(query: FormulaLabelsQuery): Promise<FormulaLabels> {
+    try {
+      return await this.vault.formulaLabels(query, { timeoutMs: DASHBOARD_VAULT_TIMEOUT_MS });
+    } catch (err) {
+      this.logger.warn(`formula labels unavailable from the Vault: ${(err as Error).message}`);
+      return NO_LABELS;
+    }
+  }
 
   async snapshot(principal: AuthPrincipal) {
     const sql = this.sql;
@@ -80,17 +113,15 @@ export class DashboardService {
       qcByResult, grnCount, rmBatches, invAgg, zoneRacks,
       mixByStatus, oilAgg, fillCount, pkgByStatus, fgAgg,
       custCount, soByStatus, userAgg, roleCount, poNumbers, oilNumbers, fgNumbers,
-      events, qcRecent,
-      stockReqRows, prodQcByResult, dispatchByStatus, soNumbers, formulaList, qcBatches,
+      qcRecent,
+      stockReqRows, prodQcByResult, dispatchByStatus, soNumbers, qcBatches,
       // Portal-audit WS7 resilience: each aggregate degrades to [] on failure (via .map(.catch)
       // below) so ONE bad sub-query can no longer 500 the home page for every role at once.
     ] = (await Promise.all(([
-      // runs: production orders → formula (product identity) → output oil batch
+      // runs: production orders → output oil batch (the formula label comes from the Vault below)
       sql`select po.production_order_id id, po.order_qty qty, po.status, po.actual_start_dt sdt,
-                 f.formula_name product, f.formula_code fcode, ob.batch_number batch
+                 po.formula_version_id fvid, ob.batch_number batch
           from production.production_order po
-          left join formula.formula_version fv on fv.formula_version_id = po.formula_version_id
-          left join formula.formula_master f on f.formula_id = fv.formula_id
           left join production.oil_batch_master ob on ob.production_order_id = po.production_order_id
           order by po.actual_start_dt desc nulls last limit 12`,
       sql`select status, count(*)::int c from procurement.purchase_order group by status`,
@@ -126,13 +157,11 @@ export class DashboardService {
       sql`select count(*)::int c from iam.role_master`,
       sql`select po_number n from procurement.purchase_order order by order_date desc limit 3`,
       sql`select batch_number n from production.oil_batch_master order by produced_dt desc limit 3`,
-      sql`select b.batch_number n, f.formula_name product
+      sql`select b.batch_number n, pm.product_name product, pm.formula_id fid
           from packaging.finished_good_batch_master b
           left join packaging.product_sku s on s.product_sku_id = b.product_sku_id
           left join packaging.product_master pm on pm.product_id = s.product_id
-          left join formula.formula_master f on f.formula_id = pm.formula_id
           order by b.batch_number limit 3`,
-      sql`select event_type t, event_dt dt, remarks r from formula.formula_event_hist order by event_dt desc limit 5`,
       sql`select overall_result r, inspection_dt dt from quality.qc_inspections order by inspection_dt desc limit 5`,
       // ── corrected 24-step chain-of-custody: the stages the 5-node graph used to skip ──
       sql`select sr.priority, m.material_code mcode, m.material_name mname, a.alias_name alias
@@ -143,14 +172,30 @@ export class DashboardService {
       sql`select result r, count(*)::int c from production.production_qc group by result`,
       sql`select status, count(*)::int c from sales.dispatch_master group by status`,
       sql`select so_number n, status from sales.sales_order order by so_number desc limit 3`,
-      sql`select formula_code fcode, formula_name fname from formula.formula_master order by formula_code limit 3`,
       sql`select i.overall_result r, b.batch_number batch from quality.qc_inspections i
           left join inventory.rm_batch_master b on b.rm_batch_id = i.rm_batch_id
           order by i.inspection_dt desc limit 3`,
     ] as Array<Promise<unknown>>).map((p) => p.catch(() => [] as unknown[])))) as [
       Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
-      Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
+      Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q, Q,
     ];
+
+    // Formula labels for these runs / finished goods, the formula stage's codes and the latest
+    // lifecycle events: one signed Vault call, codes/statuses/event types only (never a name).
+    const vaultLabels = await this.labels({
+      formulaVersionIds: runs.map((r) => r.fvid).filter((v): v is string => typeof v === 'string'),
+      formulaIds: fgNumbers.map((x) => x.fid).filter((v): v is string => typeof v === 'string'),
+      recent: true,
+    });
+    const versionLabel = new Map(vaultLabels.versions.map((v) => [v.formulaVersionId, v]));
+    const formulaCode = new Map(vaultLabels.formulas.map((f) => [f.formulaId, f.formulaCode]));
+    const runLabel = (fvid: unknown): string | null => {
+      const v = typeof fvid === 'string' ? versionLabel.get(fvid) : undefined;
+      if (!v?.formulaCode) return null;
+      return v.versionNumber != null ? `${v.formulaCode} v${v.versionNumber}` : v.formulaCode;
+    };
+    const formulaCodes = vaultLabels.recent?.formulaCodes ?? [];
+    const events = vaultLabels.recent?.events ?? [];
 
     // ── counts ────────────────────────────────────────────────────────────────
     const byStatus = (rows: readonly Record<string, unknown>[]) => {
@@ -181,14 +226,17 @@ export class DashboardService {
     const planPct = planned ? Math.min(100, Math.round((actual / planned) * 100)) : 0;
 
     // ── runs table (product identity gated) ─────────────────────────────────────
+    // A `formula:actual:read` holder sees the run's formula code + version (the name stays in the
+    // Vault); everyone else sees it masked, as before. The class chip no longer reads a product
+    // name (it used to, for every caller); it reads the code, which every caller may see.
     const runRows = runs.slice(0, 6).map((r, i) => ({
       run: 'V-' + String(i + 1).padStart(3, '0'),
-      product: seeProduct ? String(r.product || r.fcode || '—') : 'Protected ◆',
+      product: seeProduct ? (runLabel(r.fvid) ?? '—') : 'Protected ◆',
       stage: stageOf(String(r.status)),
       batch: r.batch ? String(r.batch) : '—',
       target: num(r.qty).toFixed(0) + ' kg',
       status: String(r.status || '').toLowerCase(),
-      cls: classOf(String(r.product || '')),
+      cls: classOf(runLabel(r.fvid) ?? ''),
     }));
 
     // ── corrected 24-step chain of custody (10 grouped stages, real codes, masked) ──────
@@ -225,8 +273,8 @@ export class DashboardService {
         codes: [{ code: Math.round(num(invAgg[0]?.q)) + ' units', sub: num(invAgg[0]?.c) + ' batches · zoned' }],
       },
       formula: {
-        count: formulaList.length,
-        codes: formulaList.slice(0, 2).map((f) => ({ code: seeProduct ? String(f.fname) : String(f.fcode), sub: seeProduct ? 'recipe sealed' : 'protected ◆' })),
+        count: formulaCodes.length,
+        codes: formulaCodes.slice(0, 2).map((code) => ({ code, sub: seeProduct ? 'recipe sealed' : 'protected ◆' })),
       },
       compounding: {
         count: num(mix['INPROGRESS']) || num(mix['ACTIVE']) || num(oilAgg[0]?.c),
@@ -238,7 +286,11 @@ export class DashboardService {
       },
       packaging: {
         count: num(fgAgg[0]?.c),
-        codes: fgNumbers.slice(0, 2).map((x) => ({ code: String(x.n), sub: seeProduct && x.product ? String(x.product) : 'sealed & labelled' })),
+        codes: fgNumbers.slice(0, 2).map((x) => {
+          // packaging.product_master's own name (this box's data), else the formula's code.
+          const product = x.product ? String(x.product) : typeof x.fid === 'string' ? formulaCode.get(x.fid) ?? null : null;
+          return { code: String(x.n), sub: seeProduct && product ? product : 'sealed & labelled' };
+        }),
       },
       salesDispatch: {
         count: Object.values(so).reduce((a, b) => a + b, 0),
@@ -276,9 +328,12 @@ export class DashboardService {
     // ── activity feed (real events, newest first) ──────────────────────────────
     type Feed = { text: string; dot: string; ts: string };
     const feed: Feed[] = [];
+    // Formula lifecycle events: the event TYPE only ("version approved") — an approver's remarks
+    // stay in the Vault (they are free text about a recipe).
     for (const e of events) {
-      const t = String(e.t || '').replace(/_/g, ' ').toLowerCase();
-      feed.push({ text: (e.r ? String(e.r) : t) + (t.includes('approved') ? '' : ''), dot: '#34A56F', ts: e.dt ? String(e.dt) : '' });
+      const t = String(e.eventType || '').replace(/_/g, ' ').toLowerCase();
+      // Same timestamp format as the QC rows below (String(Date)), so the feed sorts as before.
+      feed.push({ text: t, dot: '#34A56F', ts: e.eventDt ? String(new Date(e.eventDt)) : '' });
     }
     for (const q of qcRecent.slice(0, 3)) {
       const r = String(q.r).toUpperCase();
@@ -336,7 +391,9 @@ export class DashboardService {
   /**
    * Reverse traceability (M10): finished-good batch → product → oil batch → production run →
    * materials → RM batch → GRN → vendor. Walks real FKs (FG → package_order → oil_batch →
-   * production_order → ingredients → rm_batch → grn → vendor). The route itself is
+   * production_order → ingredients → rm_batch → grn → vendor), all in this box's database; the
+   * only formula datum (the product's formula code, when the product has no name of its own)
+   * comes from the Vault over the signed channel. The route itself is
    * unguarded (any authenticated caller may run a trace); THIS masking is the actual
    * boundary. §107: no role gets product/material identity implicitly, `owner` included —
    * `seeProduct`/`seeMaterial` are computed from the caller's REAL, explicitly-held
@@ -364,15 +421,23 @@ export class DashboardService {
 
     const head = (
       await sql`select fg.batch_number fgno, fg.package_order_id, po.oil_batch_id,
-                       ps.sku_code, pm.product_name, f.formula_name, f.formula_code
+                       ps.sku_code, pm.product_name, pm.formula_id
                 from packaging.finished_good_batch_master fg
                 left join packaging.package_order po on po.package_order_id = fg.package_order_id
                 left join packaging.product_sku ps on ps.product_sku_id = fg.product_sku_id
                 left join packaging.product_master pm on pm.product_id = ps.product_id
-                left join formula.formula_master f on f.formula_id = pm.formula_id
                 where fg.finished_good_batch_id = ${id} limit 1`
     )[0] as Record<string, unknown> | undefined;
     if (!head) return null;
+
+    // The product label for a caller allowed to see it: packaging.product_master's own name (this
+    // box's data), else the formula's CODE from the Vault (the formula name never leaves the Vault).
+    // Asked only when it is shown; an unreachable Vault leaves it '—' rather than failing the trace.
+    let formulaCode: string | null = null;
+    if (seeProduct && !head.product_name && typeof head.formula_id === 'string') {
+      const labels = await this.labels({ formulaVersionIds: [], formulaIds: [head.formula_id] });
+      formulaCode = labels.formulas.find((f) => f.formulaId === head.formula_id)?.formulaCode ?? null;
+    }
 
     // Who received this batch — customer + sales order (forward end of the chain). Not secret
     // (the buyer isn't the recipe), so shown to anyone allowed to run the trace.
@@ -418,7 +483,7 @@ export class DashboardService {
         : null,
       finishedGood: {
         batch: String(head.fgno || '—'), sku: String(head.sku_code || '—'),
-        product: seeProduct ? String(head.product_name || head.formula_name || '—') : 'Protected ◆',
+        product: seeProduct ? String(head.product_name || formulaCode || '—') : 'Protected ◆',
       },
       oilBatch: oil ? { batch: String(oil.oilno || '—'), qty: num(oil.produced_qty) } : null,
       // Security review item 3: the per-material list (vendor + rm batch + GRN, even keyed by

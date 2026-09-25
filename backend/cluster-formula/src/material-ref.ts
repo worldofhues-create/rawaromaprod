@@ -14,8 +14,8 @@
  * production_order_ingredients row).
  *
  * Why not the RM alias (floor code)? Resolving material_id -> alias inside the Vault needs a call
- * BACK into the main box's material-facts bridge (MAIN_API_INTERNAL_URL), a path production and demo
- * do not have (no MAIN_API_INTERNAL_URL in vault.env, the main API is not reachable from the vault
+ * BACK into the main box's (since retired) material-facts bridge (MAIN_API_INTERNAL_URL), a path production and demo
+ * never had (no MAIN_API_INTERNAL_URL in vault.env, the main API is not reachable from the vault
  * box, and nginx does not proxy /internal/). A keyed ref needs only the main -> vault channel that
  * already exists; the main box turns it into the floor code from its own masterdata.
  */

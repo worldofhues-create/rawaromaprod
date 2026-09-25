@@ -2,7 +2,12 @@
  * AuditService — owner-facing governance views over the tamper-evident audit trail. The formula
  * vault writes a hash-chained row to formula.audit_events on every decrypt/access; this surfaces it
  * as a first-class "who accessed which formula, when, from where" report (the finding: the audit
- * existed at the crypto layer but had no route). Raw SQL, owner-gated.
+ * existed at the crypto layer but had no route). Gated by `formula:actual:read` at the route.
+ *
+ * formula.audit_events lives in the VAULT database, not this box's (lane fread-rp: the old raw
+ * SQL here read a table the production main DB does not have). The page comes from the Vault over
+ * the signed internal channel (`VaultApiClient.accessAudit`); this box adds each actor's email from
+ * its own iam.user_master, which the Vault has no copy of.
  *
  * loginHistory (lane F5, RP-DEADTABLES): NOT AVAILABLE. This used to query `iam.login_history` —
  * a table that does NOT exist in @core/data-iam or @ra/data-org (the only sources `pnpm db:push`
@@ -14,37 +19,42 @@
  * Unblocking it needs: `login_history` added to the Phase-1A dictionary + @core/data-iam (or
  * @ra/data-org) schema (columns as queried below), then db:push.
  */
-import { Inject, Injectable, NotImplementedException } from '@nestjs/common';
+import { Inject, Injectable, NotImplementedException, ServiceUnavailableException } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { VaultApiClient, accessAuditBounds, type AccessAuditPage } from '@ra/cluster-formula';
 import type { Sql } from 'postgres';
 import { AUDITED_SCHEMAS } from './write-audit.interceptor.js';
 
 @Injectable()
 export class AuditService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
+  constructor(
+    @Inject(PG_CLIENT) private readonly sql: Sql,
+    // Always bound in AppModule (VaultPortModule is global); optional only for tests that
+    // exercise the main-database reads alone.
+    @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'accessAudit'>,
+  ) {}
 
-  async formulaAccessAudit(limit = 100, cursor?: string) {
-    const lim = Math.min(Math.max(1, limit), 500);
+  async formulaAccessAudit(limit = 100, cursor?: string): Promise<AccessAuditPage> {
     // Portal-audit WS1: offset-cursor paging so a growing audit trail is fully reachable (was
     // capped at the newest 100 with nextCursor:null). Offset is opaque to the client (meta.cursor);
     // acceptable for a time-desc governance browse where exact-consistency under concurrent writes
-    // isn't required.
-    const offset = Math.max(0, parseInt(cursor || '0', 10) || 0);
-    const items = await this.sql`
-      select ae.id, ae.action, ae.entity_type as "entityType", ae.entity_id as "entityId",
-             ae.actor_id as "actorId", u.email as "actor", ae.ip, ae.request_id as "requestId",
-             ae.occurred_at as "occurredAt",
-             -- section 109.6/109.8: the caller's decrypt reason + allow/refuse result, written
-             -- into the row's after jsonb snapshot by VaultService.writeAudit (see
-             -- backend/cluster-formula/src/vault.service.ts -- NOT part of the tamper-evident
-             -- hash chain; see that file's AuditInput doc comment for why).
-             ae.after ->> 'reason' as "reason",
-             coalesce(ae.after ->> 'result', 'allow') as "result"
-      from formula.audit_events ae
-      left join iam.user_master u on u.user_id = ae.actor_id
-      order by ae.occurred_at desc
-      limit ${lim} offset ${offset}`;
-    return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
+    // isn't required. Same bounds as always: limit 1..500, a malformed cursor reads as 0.
+    const { limit: lim, offset } = accessAuditBounds(limit, cursor);
+    if (!this.vault) throw new ServiceUnavailableException('The Formula Vault client is not configured on this box.');
+    // section 109.6/109.8: each row carries the caller's decrypt reason + allow/refuse result
+    // (VaultService.writeAudit's `after` snapshot, not part of the hash chain).
+    const page = await this.vault.accessAudit(lim, String(offset));
+    const actorIds = [...new Set(page.items.map((r) => r.actorId).filter((a): a is string => !!a))];
+    const emails = new Map<string, string>();
+    if (actorIds.length) {
+      const users = await this.sql<{ user_id: string; email: string | null }[]>`
+        select user_id::text as user_id, email from iam.user_master where user_id = any(${actorIds}::uuid[])`;
+      for (const u of users) if (u.email) emails.set(u.user_id, u.email);
+    }
+    return {
+      items: page.items.map((r) => ({ ...r, actor: (r.actorId && emails.get(r.actorId)) || null })),
+      nextCursor: page.nextCursor,
+    };
   }
 
   /**

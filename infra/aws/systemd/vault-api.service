@@ -33,20 +33,20 @@
 # documents why this box does NOT implement its own `/auth/alembic-assertion` (it would need
 # `iam.user_master` to bind the assertion to a user, i.e. exactly the credential being removed).
 #
-# Vault material-search / RM_ALIAS resolution (the one main-DB-SHAPED read the Vault box still
-# needs): a signed, read-only proxy call to the main app box's `/internal/vault-bridge/*` routes
-# (`MaterialFactsClient`, `@ra/cluster-formula`) — `INTERNAL_BRIDGE_KEY` below, never a live
-# `PG_CLIENT`. The opposite direction (main app box -> Vault, resolving a coded manufacturing
-# instruction for Production) is the same signed channel in reverse — `VaultPortHttpClient`
-# calling THIS box's `/internal/vault/resolve-manufacturing-instruction`; the SG rule that opens
-# vault-app's SG to that one port from the app box's SG is `scripts/apply-vault-port-sg-rule.sh`
-# (written for P0 to review and apply — NOT run by this unit or any lane).
+# The signed internal channel runs ONE way, main app box -> this box: `VaultApiClient`
+# (`@ra/cluster-formula`) calls THIS box's `/internal/vault/*` (pick list, coded manufacturing
+# instruction, formula codes/statuses and the access audit for the main box's screens,
+# security-audit writes) and PUSHES the material id/code/name catalogue the Vault console's
+# picker searches (lane fread-rp; held in memory here, refilled within VAULT_CATALOGUE_SYNC_MS of
+# a restart). This box never calls the main box: there is no MAIN_API_INTERNAL_URL, and none is
+# needed. The SG rule that opens vault-app's SG to this one port from the app box's SG is
+# `scripts/apply-vault-port-sg-rule.sh` (written for P0 to review and apply — NOT run by this unit
+# or any lane).
 #
 # Required in /etc/rawprod/vault.env (beyond what rawprod-api.service's env already documents):
 # VAULT_MODE=true, FORMULA_DATABASE_URL, JWT_SECRET (== the main app box's, via SSM),
 # FORMULA_KMS_KEY_ID (+ region — prod refuses any KMS adapter but AWS KMS), INTERNAL_BRIDGE_KEY
-# (shared secret for both signed-bridge directions, via SSM), MAIN_API_INTERNAL_URL (this box ->
-# main app box, material-facts bridge). DATABASE_URL must NOT be set.
+# (the same value as the main app box's, via SSM). DATABASE_URL must NOT be set.
 
 [Unit]
 Description=Vault API (vault-main.ts/VaultAppModule — separate trust domain, see comment above)

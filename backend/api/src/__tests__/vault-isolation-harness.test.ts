@@ -24,6 +24,17 @@
  * instruction must come back with the materials' floor codes and the same quantities, also with no
  * Vault -> main call.
  *
+ * Lane fread-rp extends it to the main box's remaining formula READS and the Vault console's two
+ * screens that needed the other box's data, all with the same two-process / two-database shape:
+ *   - GET /v1/dashboard — runs, formula stage, feed: formula codes/statuses/event types from the
+ *     Vault over the signed channel; never the formula name (it is only in the vault database).
+ *   - GET /v1/trace/finished-good/:id — the product's formula code from the Vault.
+ *   - GET /v1/formula-access-audit on the main box — the Vault's audit page + this box's emails.
+ *   - GET /v1/formula-access-audit on the VAULT box — the Vault console's access-audit screen.
+ *   - GET /v1/vault/materials on the VAULT box — the material picker, answered from the catalogue
+ *     the main box's worker PUSHES (VAULT_CATALOGUE_SYNC_MS=1000 here); the Vault never calls back.
+ * The formula-DB sentinel's count stays 0 across all of it.
+ *
  * Needs a Postgres with PostGIS (the real migrations create it) where the test role may create
  * databases — the Docker PostGIS at 127.0.0.1:5433 the gates use. Its two databases are dropped
  * and re-created on each run (KEEP_ISO_DBS=1 keeps them afterwards for debugging).
@@ -34,6 +45,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createServer as createNetServer, type Server as NetServer } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import postgres, { type Sql } from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import * as formulaSchema from '@ra/data-formula';
@@ -130,9 +142,16 @@ let formulaDbConnects = 0;
 let vaultProc: Proc | undefined;
 let mainProc: Proc | undefined;
 let mainApi = '';
+let vaultApi = '';
 let mainBootedAt = 0;
 let token = '';
 const userId = randomUUID();
+/** A Vault-authority user (formula:actual:read + the picker), for the reads the production role may not make. */
+let vaultToken = '';
+const vaultUserId = randomUUID();
+const USER_EMAIL = `iso-prod-${randomUUID().slice(0, 8)}@harness.invalid`;
+const FORMULA_NAME = 'Isolation harness formula';
+let vaultProcEnv: Record<string, string> = {};
 
 const materials = [
   { materialId: randomUUID(), rmAliasId: randomUUID(), alias: `ISO-${randomUUID().slice(0, 6)}-1`, percentage: 33.33333, sequenceNo: 1 },
@@ -140,8 +159,11 @@ const materials = [
   { materialId: randomUUID(), rmAliasId: randomUUID(), alias: `ISO-${randomUUID().slice(0, 6)}-3`, percentage: 54.321, sequenceNo: 3 },
 ];
 let approvedVersionId = '';
+let approvedFormulaId = '';
+let approvedFormulaCode = '';
 let draftVersionId = '';
 let orderId = '';
+let vaultRoleCode = '';
 
 before(async () => {
   admin = postgres(dbUrl('postgres'), { max: 1, prepare: false, onnotice: () => {} });
@@ -186,6 +208,18 @@ before(async () => {
                   values (${permissionId}, ${code}, ${code}, 'ACTIVE')`;
     await mainSql`insert into iam.role_permission_mapping (role_id, permission_id, status) values (${roleId}, ${permissionId}, 'ACTIVE')`;
   }
+  // A Vault-authority role (as a formulator holds): the Vault reads' permission + the trace's.
+  const vaultRoleId = randomUUID();
+  vaultRoleCode = `iso-vault-${randomUUID().slice(0, 8)}`;
+  await mainSql`insert into iam.role_master (role_id, role_code, role_name, status) values (${vaultRoleId}, ${vaultRoleCode}, ${vaultRoleCode}, 'ACTIVE')`;
+  for (const code of ['formula:actual:read', 'vault:material_search:read', 'packaging:finished_good_batch_master:read']) {
+    const permissionId = randomUUID();
+    await mainSql`insert into iam.permission_master (permission_id, permission_code, permission_name, status)
+                  values (${permissionId}, ${code}, ${code}, 'ACTIVE')`;
+    await mainSql`insert into iam.role_permission_mapping (role_id, permission_id, status) values (${vaultRoleId}, ${permissionId}, 'ACTIVE')`;
+  }
+  // The production user's directory entry (only the main database has one).
+  await mainSql`insert into iam.user_master (user_id, email, user_name, status) values (${userId}, ${USER_EMAIL}, 'Isolation harness user', 'ACTIVE')`;
 
   // Vault database ONLY: one approved formula version, one draft. The seed runs the Vault's own
   // services, like demo-seed-vault.ts does on the vault box.
@@ -199,7 +233,7 @@ before(async () => {
   const author = principal({ userId: randomUUID() });
   const approver = principal({ userId: randomUUID() });
   const mk = async (approve: boolean) => {
-    const f = await formulas.createFormula({ formulaCode: `ISO-${randomUUID().slice(0, 8)}`, formulaName: 'Isolation harness formula' }, author);
+    const f = await formulas.createFormula({ formulaCode: `ISO-${randomUUID().slice(0, 8)}`, formulaName: FORMULA_NAME }, author);
     const v = await formulas.createVersion({ formulaId: f.formulaId, versionNumber: 1 }, author);
     await formulas.addIngredients(
       v.formulaVersionId,
@@ -207,10 +241,13 @@ before(async () => {
       author,
     );
     if (approve) await approvals.approveVersion(v.formulaVersionId, {}, approver);
-    return v.formulaVersionId;
+    return { versionId: v.formulaVersionId, formulaId: f.formulaId, formulaCode: f.formulaCode as string };
   };
-  approvedVersionId = await mk(true);
-  draftVersionId = await mk(false);
+  const approved = await mk(true);
+  approvedVersionId = approved.versionId;
+  approvedFormulaId = approved.formulaId;
+  approvedFormulaCode = approved.formulaCode;
+  draftVersionId = (await mk(false)).versionId;
 
   // The formula DB the main process is TOLD about: a listener that only counts connection attempts.
   sentinel = createNetServer((socket) => {
@@ -223,9 +260,10 @@ before(async () => {
   const mainPort = await freePort();
   const vaultPort = await freePort();
   mainApi = `http://127.0.0.1:${mainPort}`;
-  const vaultApi = `http://127.0.0.1:${vaultPort}`;
+  vaultApi = `http://127.0.0.1:${vaultPort}`;
 
-  vaultProc = startNode('backend/api/src/vault-main.ts', {
+  // Like prod's vault.env: no DATABASE_URL and no MAIN_API_INTERNAL_URL — no way to the main box.
+  vaultProcEnv = {
     APP_ENV: 'dev',
     VAULT_MODE: 'true',
     PORT: String(vaultPort),
@@ -234,7 +272,8 @@ before(async () => {
     FORMULA_KEK: KEK,
     JWT_SECRET,
     INTERNAL_BRIDGE_KEY: BRIDGE_KEY,
-  });
+  };
+  vaultProc = startNode('backend/api/src/vault-main.ts', vaultProcEnv);
   mainProc = startNode('backend/api/src/main.ts', {
     APP_ENV: 'dev',
     PORT: String(mainPort),
@@ -244,6 +283,8 @@ before(async () => {
     INTERNAL_BRIDGE_KEY: BRIDGE_KEY,
     VAULT_API_INTERNAL_URL: vaultApi,
     RUN_WORKER_IN_PROCESS: 'true',
+    // The worker's material-catalogue push to the Vault's picker, every second here (15 s default).
+    VAULT_CATALOGUE_SYNC_MS: '1000',
   });
   await Promise.all([waitHealthy(vaultApi, vaultProc, 'vault-main.ts'), waitHealthy(mainApi, mainProc, 'main.ts')]);
   mainBootedAt = Date.now();
@@ -251,6 +292,11 @@ before(async () => {
   const jwt = new JwtService(new ConfigService({ DATABASE_URL: MAIN_URL, JWT_SECRET } as NodeJS.ProcessEnv));
   const now = Math.floor(Date.now() / 1000);
   token = await jwt.signAccess({ sub: userId, portal: 'owner', roles: [roleCode], perms: [], pv: 1, sid: randomUUID(), authTime: now });
+  // As the main box's AuthService mints it: roles + the vault-scoped permissions the Vault box reads.
+  vaultToken = await jwt.signAccess({
+    sub: vaultUserId, portal: 'owner', roles: [vaultRoleCode],
+    perms: ['formula:actual:read', 'vault:material_search:read'], pv: 1, sid: randomUUID(), authTime: now,
+  });
 });
 
 afterAll(async () => {
@@ -265,14 +311,33 @@ afterAll(async () => {
   }
 });
 
-async function api(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }> {
-  const res = await fetch(`${mainApi}${path}`, {
+async function api(method: string, path: string, body?: unknown, opts: { base?: string; bearer?: string } = {}): Promise<{ status: number; json: any }> {
+  const res = await fetch(`${opts.base ?? mainApi}${path}`, {
     method,
-    headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
+    headers: { authorization: `Bearer ${opts.bearer ?? token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
   return { status: res.status, json: text ? JSON.parse(text) : null };
+}
+
+/** The Vault console's calls: the Vault box, the Vault-authority user's token. */
+const vaultConsole = (path: string, bearer = vaultToken) => api('GET', path, undefined, { base: vaultApi, bearer });
+
+/** Poll until `probe` returns a value, or fail after `ms`. */
+async function eventually<T>(what: string, ms: number, probe: () => Promise<T | undefined>): Promise<T> {
+  const deadline = Date.now() + ms;
+  let last: unknown;
+  while (Date.now() < deadline) {
+    try {
+      const v = await probe();
+      if (v !== undefined) return v;
+    } catch (err) {
+      last = err;
+    }
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(`${what}: not within ${ms} ms${last ? ` (${(last as Error).message})` : ''}`);
 }
 
 test('the main API boots and serves with no formula database reachable', async () => {
@@ -351,6 +416,123 @@ test('a sensitive refusal on the main API is audited on the Vault, over the API'
     await new Promise((r) => setTimeout(r, 200));
   }
   assert.equal(rows.length, 1, 'the refusal must land on the Vault\'s audit chain');
+});
+
+/* ── lane fread-rp: the main box's remaining formula reads, and the Vault console's two screens ── */
+
+test('GET /v1/dashboard: runs carry the formula code + version from the Vault; never the formula name', async () => {
+  assert.ok(orderId, 'depends on the production-order test above');
+  // The order's oil batch, so the run is recognisable in the runs table.
+  const oilBatch = `ISO-OIL-${randomUUID().slice(0, 6)}`;
+  await mainSql`insert into production.oil_batch_master (oil_batch_id, production_order_id, batch_number, produced_qty, status)
+                values (${randomUUID()}, ${orderId}, ${oilBatch}, ${ORDER_QTY}, 'ACTIVE')`;
+
+  const holder = await api('GET', '/v1/dashboard', undefined, { bearer: vaultToken });
+  assert.equal(holder.status, 200, JSON.stringify(holder.json));
+  const run = holder.json.data.runs.find((r: { batch: string }) => r.batch === oilBatch);
+  assert.ok(run, JSON.stringify(holder.json.data.runs));
+  assert.equal(run.product, `${approvedFormulaCode} v1`);
+  assert.equal(holder.json.data.reveal.product, true);
+  // The formula stage lists the Vault's codes; the feed shows its lifecycle events by type.
+  assert.ok(holder.json.data.flow.formula.codes.some((c: { code: string }) => c.code === approvedFormulaCode));
+  assert.ok(holder.json.data.feed.some((f: { text: string }) => f.text === 'version approved'), JSON.stringify(holder.json.data.feed));
+  assert.doesNotMatch(JSON.stringify(holder.json), new RegExp(FORMULA_NAME), 'the formula name never reaches the main box');
+
+  const production = await api('GET', '/v1/dashboard');
+  assert.equal(production.status, 200);
+  const masked = production.json.data.runs.find((r: { batch: string }) => r.batch === oilBatch);
+  assert.equal(masked.product, 'Protected ◆', 'no formula:actual:read, same mask as before');
+  assert.doesNotMatch(JSON.stringify(production.json), new RegExp(FORMULA_NAME));
+});
+
+test('GET /v1/trace/finished-good/:id: the finished good\'s product is its formula code, from the Vault', async () => {
+  assert.ok(orderId);
+  const [oil] = await mainSql<{ oil_batch_id: string }[]>`
+    select oil_batch_id::text from production.oil_batch_master where production_order_id = ${orderId} limit 1`;
+  assert.ok(oil, 'depends on the dashboard test above');
+  const productId = randomUUID();
+  const skuId = randomUUID();
+  const packageOrderId = randomUUID();
+  const fgId = randomUUID();
+  // The factory product references the Vault's formula by id only; it has no name of its own.
+  await mainSql`insert into packaging.product_master (product_id, product_code, product_name, formula_id, status)
+                values (${productId}, ${`ISO-PRD-${randomUUID().slice(0, 6)}`}, null, ${approvedFormulaId}, 'ACTIVE')`;
+  await mainSql`insert into packaging.product_sku (product_sku_id, product_id, sku_code, status)
+                values (${skuId}, ${productId}, ${`ISO-SKU-${randomUUID().slice(0, 6)}`}, 'ACTIVE')`;
+  await mainSql`insert into packaging.package_order (package_order_id, product_sku_id, oil_batch_id, status)
+                values (${packageOrderId}, ${skuId}, ${oil.oil_batch_id}, 'ACTIVE')`;
+  await mainSql`insert into packaging.finished_good_batch_master (finished_good_batch_id, package_order_id, product_sku_id, batch_number, status)
+                values (${fgId}, ${packageOrderId}, ${skuId}, ${`ISO-FG-${randomUUID().slice(0, 6)}`}, 'ACTIVE')`;
+
+  const res = await api('GET', `/v1/trace/finished-good/${fgId}`, undefined, { bearer: vaultToken });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  assert.equal(res.json.data.finishedGood.product, approvedFormulaCode);
+  assert.equal(res.json.data.oilBatch.qty, ORDER_QTY);
+  assert.equal(res.json.data.materialCount, materials.length);
+  assert.doesNotMatch(JSON.stringify(res.json), new RegExp(FORMULA_NAME));
+});
+
+test('the Vault console\'s access-audit screen: GET /v1/formula-access-audit on the VAULT box, from its own chain', async () => {
+  const res = await vaultConsole('/v1/formula-access-audit?limit=200');
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  const rows = res.json.data as Array<{ action: string; entityId: string | null; actorId: string | null; result: string; actor: string | null }>;
+  const pick = rows.find((r) => r.action === 'formula.picklist.read' && r.entityId === approvedVersionId);
+  assert.ok(pick, 'the production order\'s pick-list read');
+  assert.equal(pick.actorId, userId);
+  assert.equal(pick.actor, null, 'the Vault has no user directory');
+  assert.ok(rows.some((r) => r.action === 'security.permission.denied' && r.actorId === userId && r.result === 'refuse'));
+  // The screen's own reader (web-vault/vault.js) over this exact response: the envelope hands it
+  // the rows array (a page's `.items` never reaches the client), which it must render.
+  const src = readFileSync(join(REPO_ROOT, 'web-vault/vault.js'), 'utf8');
+  const reader = /function pageItems\(page\) \{[^\n]*\}/.exec(src);
+  assert.ok(reader, 'web-vault/vault.js defines pageItems');
+  const pageItems = new Function(`${reader[0]}; return pageItems;`)() as (p: unknown) => typeof rows;
+  assert.equal((res.json.data as { items?: unknown }).items, undefined);
+  assert.ok(pageItems(res.json.data).some((r) => r.action === 'formula.picklist.read' && r.entityId === approvedVersionId));
+  assert.doesNotMatch(src, /page\.items \|\| \[\]/, 'no screen reads rows off .items any more');
+  // Same permission as the screen: the production user's token carries no formula:actual:read.
+  assert.equal((await vaultConsole('/v1/formula-access-audit', token)).status, 403);
+});
+
+test('GET /v1/formula-access-audit on the MAIN box: the Vault\'s page over the signed channel, emails from this box', async () => {
+  const res = await api('GET', '/v1/formula-access-audit?limit=200', undefined, { bearer: vaultToken });
+  assert.equal(res.status, 200, JSON.stringify(res.json));
+  const pick = (res.json.data as Array<{ action: string; entityId: string | null; actor: string | null }>)
+    .find((r) => r.action === 'formula.picklist.read' && r.entityId === approvedVersionId);
+  assert.ok(pick);
+  assert.equal(pick.actor, USER_EMAIL);
+  const firstPage = await api('GET', '/v1/formula-access-audit?limit=1', undefined, { bearer: vaultToken });
+  assert.equal(firstPage.json.data.length, 1);
+  assert.equal(firstPage.json.meta.cursor, '1');
+});
+
+test('the Vault console\'s material picker: GET /v1/vault/materials on the VAULT box, from the catalogue the main box pushes', async () => {
+  // The Vault process has no way to the main box: no main DB, no main API URL.
+  assert.equal(vaultProcEnv.DATABASE_URL, undefined);
+  assert.equal(vaultProcEnv.MAIN_API_INTERNAL_URL, undefined);
+
+  const hits = await eventually('the pushed catalogue on the Vault', 30_000, async () => {
+    const res = await vaultConsole('/v1/vault/materials?q=ISO-MAT&limit=20');
+    return res.status === 200 && res.json.data.length === materials.length ? res.json.data : undefined;
+  });
+  assert.deepEqual(
+    hits.map((h: { materialId: string; materialCode: string }) => [h.materialCode, h.materialId]),
+    materials.map((m) => [`ISO-MAT-${m.sequenceNo}`, m.materialId]),
+  );
+  assert.deepEqual(Object.keys(hits[0]).sort(), ['materialCode', 'materialId', 'materialName', 'uomId']);
+  assert.doesNotMatch(JSON.stringify(hits), /ISO-[0-9a-f]{6}-\d/, 'no floor code (RM alias) is pushed to the Vault');
+
+  // A material added on the factory reaches the picker on the worker's next round.
+  const added = randomUUID();
+  await mainSql`insert into masterdata.material (material_id, material_code, material_name, status)
+                values (${added}, 'ISO-MAT-4', 'Isolation harness material added later', 'ACTIVE')`;
+  await eventually('the new material on the Vault', 30_000, async () => {
+    const res = await vaultConsole('/v1/vault/materials?q=ISO-MAT-4');
+    return res.status === 200 && res.json.data.some((m: { materialId: string }) => m.materialId === added) ? true : undefined;
+  });
+
+  // Same permission as the picker: the production user's token carries no vault:material_search:read.
+  assert.equal((await vaultConsole('/v1/vault/materials?q=ISO-MAT', token)).status, 403);
 });
 
 test('the main process (API + in-process worker) never opened a connection to the formula database', async () => {
