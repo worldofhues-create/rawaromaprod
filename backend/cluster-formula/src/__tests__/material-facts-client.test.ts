@@ -28,12 +28,15 @@ before(async () => {
 
       const signature = req.headers['x-internal-signature'];
       const timestamp = req.headers['x-internal-timestamp'];
+      // The sender's signed per-request nonce (OPS-GREEN, lane ops-factory) is part of the message.
+      const nonce = req.headers['x-internal-nonce'];
       const ok =
         typeof signature === 'string' &&
         typeof timestamp === 'string' &&
         verifyInternalBridgeSignature(
           KEY,
-          { method: req.method ?? 'GET', path: req.url ?? '/', body: rawBody, timestamp },
+          { method: req.method ?? 'GET', path: req.url ?? '/', body: rawBody, timestamp,
+            ...(typeof nonce === 'string' ? { nonce } : {}) },
           signature,
         );
       if (!ok) {
