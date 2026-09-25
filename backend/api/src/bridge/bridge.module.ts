@@ -14,6 +14,7 @@ import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
 import { RequirementsQueueService } from './requirements-queue.service.js';
 import { BridgeRelayService } from './relay.service.js';
+import { OutboxAdminService } from './outbox-admin.service.js';
 import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
 
 @Global()
@@ -28,6 +29,7 @@ import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
     ImporterService,
     ConfigAdminService,
     RequirementsQueueService,
+    OutboxAdminService,
     BridgeRelayService,
   ],
   exports: [BRIDGE_DB, BridgeRelayService],

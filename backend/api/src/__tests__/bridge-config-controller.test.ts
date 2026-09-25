@@ -18,6 +18,7 @@ import { BridgeController } from '../bridge/bridge.controller.js';
 import { RequirementsQueueService } from '../bridge/requirements-queue.service.js';
 import { ConfigAdminService } from '../bridge/config-admin.service.js';
 import { ImporterService } from '../bridge/importer.service.js';
+import { OutboxAdminService } from '../bridge/outbox-admin.service.js';
 import { ensureSchema, bridgeDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 
 let controller: BridgeController;
@@ -30,7 +31,7 @@ before(async () => {
   // tests, so a real client is enough to satisfy the constructor.
   const importer = new ImporterService(db, sql);
   const configAdmin = new ConfigAdminService(db);
-  controller = new BridgeController(importer, configAdmin, new RequirementsQueueService(sql));
+  controller = new BridgeController(importer, configAdmin, new RequirementsQueueService(sql), new OutboxAdminService(db));
 });
 
 after(async () => {

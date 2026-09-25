@@ -18,7 +18,7 @@
  * a Nest-parsed body would compute the signature over different bytes than the sender
  * signed. The route reads the raw body itself (see bridge.module.ts's raw-body config).
  */
-import { Body, Controller, Get, Headers, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Headers, Param, ParseUUIDPipe, Post, Put, Query, Req, Res } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { CurrentUser, Permissions, Public, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { bridge as bridgeContracts } from '@core/contracts';
@@ -26,6 +26,7 @@ import { z } from 'zod';
 import { ImporterService } from './importer.service.js';
 import { ConfigAdminService } from './config-admin.service.js';
 import { RequirementsQueueService } from './requirements-queue.service.js';
+import { OutboxAdminService } from './outbox-admin.service.js';
 
 type ConfigureBridgeBody = z.infer<typeof bridgeContracts.configureBridgeRequest>;
 
@@ -35,6 +36,7 @@ export class BridgeController {
     private readonly importer: ImporterService,
     private readonly configAdmin: ConfigAdminService,
     private readonly queue: RequirementsQueueService,
+    private readonly outboxAdmin: OutboxAdminService,
   ) {}
 
   /* lane/j2 — the planner's incoming-requirements queue (see requirements-queue.service.ts).
@@ -75,5 +77,35 @@ export class BridgeController {
   ) {
     // Security review R1 #5: the real authenticated principal, never the hardcoded 'admin'.
     return this.configAdmin.configure(body, principal.userId);
+  }
+
+  /* OPS_GREEN §17 (P1 poison event) — the RawProd → ALEMBIC dead-letter list and the operator's
+   * two actions. Same permission as the connector config above (bridge admin); replay and
+   * discard are guarded state transitions (a repeat is 409, never a second effect) and are
+   * audited in bridge.audit_events by OutboxAdminService. */
+  @Permissions('platform:flag:write')
+  @Get('v1/bridge/outbox/parked')
+  listParked(@Query('limit') limit?: string) {
+    return this.outboxAdmin.listParked(limit ? Number(limit) : undefined);
+  }
+
+  @Permissions('platform:flag:write')
+  @Post('v1/bridge/outbox/:id/replay')
+  replayParked(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() principal: AuthPrincipal) {
+    return this.outboxAdmin.replay(id, principal.userId);
+  }
+
+  @Permissions('platform:flag:write')
+  @Post('v1/bridge/outbox/:id/discard')
+  discardParked(
+    @Param('id', new ParseUUIDPipe()) id: string,
+    @Body() body: { reason?: unknown } | undefined,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
+    if (!reason || reason.length > 500) {
+      throw new BadRequestException("'reason' is required (1-500 characters): discarding means ALEMBIC never hears of it");
+    }
+    return this.outboxAdmin.discard(id, principal.userId, reason);
   }
 }

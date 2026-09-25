@@ -121,11 +121,44 @@ is not an open receiver.
 
 ## DLQ / reconciliation
 
-An event that fails delivery repeatedly (sender) or fails to apply after being
-un-parked (receiver) is left in place with its failure recorded
-(`last_error`, `attempts` on the sender; `parked_reason` on the receiver) —
-both are queryable dead-letter views over the same tables, not a separate
-DLQ table, so "what's stuck" is always one query against live state.
+**Permanent vs transient (OPS_GREEN §17, P1).** Both receivers answer a delivery
+they can never apply with `400` and a machine-readable body:
+`{ outcome, permanent: true, code }`, where `code` is one of
+`BRIDGE_PERMANENT_BAD_JSON`, `BRIDGE_PERMANENT_INVALID_ENVELOPE`,
+`BRIDGE_PERMANENT_UNKNOWN_TYPE`, `BRIDGE_PERMANENT_INVALID_PAYLOAD` (the
+payload fails the event type's contract, e.g. an unparseable `needed_by`) or
+`BRIDGE_PERMANENT_UNAPPLIABLE` (the database refused the values as data).
+A fault that may clear on its own (database unavailable, serialization
+failure, anything unexpected) is `503` with `permanent: false` and
+`code: BRIDGE_TRANSIENT`. A signature refusal is `401`, `permanent: false`:
+it is a connector configuration fault, not a property of the event.
+
+**Senders** classify every failed delivery the same way: `permanent: true` in
+the body, or a 400/404/410/413/415/422, is PERMANENT and the event is parked
+after one attempt; a network error, 5xx, 408/425/429 or 401/403 is TRANSIENT
+and retried on exponential backoff (2 s doubling, capped at 30 minutes) up to
+12 attempts, after which it is parked (`max_attempts`). A parked event leaves
+the work queue, is audited, and waits for an operator:
+
+- ALEMBIC: `bridge_outbound_event.parked_at/parked_reason` (migration 0197),
+  audited as `bridge.event_parked`; listed on Admin → Integrations → RawProd
+  bridge (`GET /api/v1/bridge/outbound/parked`) with **Replay** (same
+  `event_id`, fresh retry budget) and **Discard** (typed reason kept on the
+  row) — `POST /api/v1/bridge/outbound/:eventId/replay|discard`, `bridge.mapping`,
+  idempotent, audited `bridge.event_replayed` / `bridge.event_discarded`.
+  A later event for the same aggregate is held behind a parked one, so a
+  replay is followed by its successors in order.
+- RawProd: `bridge.outbox_delivery` (per-event delivery state beside
+  `bridge.outbox`), audited in `bridge.audit_events`; listed at
+  `GET /v1/bridge/outbox/parked` with `POST /v1/bridge/outbox/:id/replay|discard`.
+
+A replay of an event that did land is harmless: the receiver's inbox dedupes
+on `event_id` and answers `200 already_seen`.
+
+On the receiving side, an event that was accepted but not applied is recorded
+with `parked_reason` (`out_of_order`, `unknown_aggregate`) — a queryable view
+over the inbox table, not a separate DLQ table
+(`GET /api/v1/bridge/rawprod/unprocessed-events` on ALEMBIC).
 
 ## Identity bridge — staffId / assertion subject (PB-04, PB-06)
 

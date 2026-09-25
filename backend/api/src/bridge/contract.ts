@@ -101,6 +101,151 @@ export function validateEnvelope(raw: unknown, allowedTypes: readonly string[]):
   };
 }
 
+/* ── Payload contract per inbound type (OPS_GREEN §17, P1 poison event) ─────
+ *
+ * `validateEnvelope` checks the envelope and nothing inside `payload`, so a
+ * Created event with no `needed_by` passed validation and the importer threw on
+ * `new Date(String(undefined))` -> an Invalid Date -> a Postgres error -> 500.
+ * ALEMBIC read the 500 as transient and re-sent the same poison bytes for ever.
+ *
+ * Every field the importer reads is checked here first, against the payload
+ * shapes in docs/bridge/EVENT_CONTRACT.md, and a miss is a PERMANENT refusal
+ * (400, `BRIDGE_PERMANENT_INVALID_PAYLOAD`): re-sending the same event can never
+ * make it valid. Pure, so the rule is testable without a database. Unknown
+ * EXTRA fields are tolerated (forward compatibility), missing or malformed
+ * required ones are not. */
+export type PayloadProblem = `${string}:${'missing' | 'invalid'}`;
+
+const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+const isNonEmptyString = (v: unknown, max = 200): v is string =>
+  typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+const isPositiveQty = (v: unknown): boolean => {
+  if (typeof v === 'number') return Number.isFinite(v) && v > 0;
+  return typeof v === 'string' && /^[0-9]+(\.[0-9]+)?$/.test(v.trim()) && Number(v) > 0;
+};
+/** An ISO-8601 instant Postgres will also accept: a date, optionally a time and zone. */
+const isIsoInstant = (v: unknown): boolean =>
+  typeof v === 'string'
+  && /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v)
+  && !Number.isNaN(Date.parse(v));
+
+export function validateInboundPayload(type: string, payload: Record<string, unknown>): readonly PayloadProblem[] {
+  const problems: PayloadProblem[] = [];
+  const need = (field: string, ok: (v: unknown) => boolean) => {
+    const v = payload[field];
+    if (v === undefined || v === null || v === '') problems.push(`${field}:missing`);
+    else if (!ok(v)) problems.push(`${field}:invalid`);
+  };
+  const optional = (field: string, ok: (v: unknown) => boolean) => {
+    const v = payload[field];
+    if (v !== undefined && v !== null && !ok(v)) problems.push(`${field}:invalid`);
+  };
+  const packSize = (v: unknown) => (typeof v === 'string' && v.length <= 50) || (typeof v === 'number' && Number.isFinite(v));
+  const priority = (v: unknown) => typeof v === 'string' && (PRIORITIES as readonly string[]).includes(v);
+
+  switch (type) {
+    case 'ProductionRequirementCreated':
+      need('order_ref', (v) => isNonEmptyString(v, 100));
+      need('mapped_sku', (v) => isNonEmptyString(v));
+      need('qty', isPositiveQty);
+      need('uom', (v) => isNonEmptyString(v, 20));
+      need('needed_by', isIsoInstant);
+      optional('pack_size', packSize);
+      optional('priority', priority);
+      break;
+    case 'ProductionRequirementChanged':
+      optional('mapped_sku', (v) => isNonEmptyString(v));
+      optional('qty', isPositiveQty);
+      optional('uom', (v) => isNonEmptyString(v, 20));
+      optional('needed_by', isIsoInstant);
+      optional('pack_size', packSize);
+      optional('priority', priority);
+      break;
+    case 'ProductionRequirementCancelled':
+      optional('reason', (v) => typeof v === 'string' && v.length <= 1000);
+      break;
+    case 'ProductionRequirementFulfilled':
+      need('received_qty', isPositiveQty);
+      need('uom', (v) => isNonEmptyString(v, 20));
+      optional('receipt_ref', (v) => typeof v === 'string' && v.length <= 200);
+      optional('order_ref', (v) => typeof v === 'string' && v.length <= 100);
+      optional('received_at', isIsoInstant);
+      break;
+    default:
+      // validateEnvelope has already refused a type outside INBOUND_FROM_ALEMBIC.
+      break;
+  }
+  return problems;
+}
+
+/* The machine-readable refusal vocabulary both sides of the bridge share
+ * (docs/bridge/EVENT_CONTRACT.md, "DLQ / reconciliation"). `permanent: true`
+ * tells the sender to park the event after this attempt; `permanent: false`
+ * tells it to retry on backoff. */
+export const BRIDGE_CODES = {
+  badJson: 'BRIDGE_PERMANENT_BAD_JSON',
+  invalidEnvelope: 'BRIDGE_PERMANENT_INVALID_ENVELOPE',
+  unknownType: 'BRIDGE_PERMANENT_UNKNOWN_TYPE',
+  invalidPayload: 'BRIDGE_PERMANENT_INVALID_PAYLOAD',
+  unappliable: 'BRIDGE_PERMANENT_UNAPPLIABLE',
+  transient: 'BRIDGE_TRANSIENT',
+  signatureInvalid: 'BRIDGE_SIGNATURE_INVALID',
+} as const;
+
+/** SQLSTATE classes that mean "these VALUES are wrong" rather than "try again":
+ *  22 data exception (bad date, numeric overflow, string too long), 23 integrity
+ *  constraint violation. A serialization failure (40001), deadlock (40P01), a
+ *  connection fault (08), or anything unrecognised is transient. */
+export function isPermanentDbError(err: unknown): boolean {
+  const code = typeof err === 'object' && err !== null ? (err as { code?: unknown }).code : undefined;
+  return typeof code === 'string' && (code.startsWith('22') || code.startsWith('23'));
+}
+
+/* ── Outbound delivery policy (RawProd -> ALEMBIC), the mirror of ALEMBIC's ──
+ * @alembic/domain delivery-policy.ts: the same classification and the same
+ * bound, so "parked" means the same thing on both sides of the channel. */
+export const BRIDGE_MAX_DELIVERY_ATTEMPTS = 12;
+export const BRIDGE_BACKOFF_CAP_SECONDS = 30 * 60;
+const PERMANENT_STATUSES: ReadonlySet<number> = new Set([400, 404, 410, 413, 415, 422]);
+
+export interface DeliveryFailure { readonly status?: number; readonly body?: unknown }
+export interface FailureDecision {
+  readonly failureClass: 'permanent' | 'transient';
+  readonly park: 'permanent' | 'max_attempts' | null;
+  readonly retryInSeconds: number | null;
+}
+
+const field = (body: unknown, key: string): unknown =>
+  typeof body === 'object' && body !== null && !Array.isArray(body)
+    ? (body as Record<string, unknown>)[key] : undefined;
+
+export function classifyDeliveryFailure(f: DeliveryFailure): 'permanent' | 'transient' {
+  const said = field(f.body, 'permanent');
+  if (said === true) return 'permanent';
+  if (said === false) return 'transient';
+  if (f.status === undefined) return 'transient';
+  return PERMANENT_STATUSES.has(f.status) ? 'permanent' : 'transient';
+}
+
+export function decideFailedDelivery(
+  f: DeliveryFailure, attemptsBefore: number, maxAttempts = BRIDGE_MAX_DELIVERY_ATTEMPTS,
+): FailureDecision {
+  const failureClass = classifyDeliveryFailure(f);
+  const attempts = attemptsBefore + 1;
+  if (failureClass === 'permanent') return { failureClass, park: 'permanent', retryInSeconds: null };
+  if (attempts >= maxAttempts) return { failureClass, park: 'max_attempts', retryInSeconds: null };
+  return { failureClass, park: null, retryInSeconds: Math.min(2 ** attempts, BRIDGE_BACKOFF_CAP_SECONDS) };
+}
+
+export function describeFailure(f: DeliveryFailure, networkMessage?: string): string {
+  if (f.status === undefined) return `network: ${(networkMessage ?? 'unknown_error').slice(0, 200)}`;
+  const code = field(f.body, 'code');
+  const outcome = field(f.body, 'outcome');
+  const tag = typeof code === 'string' && /^[A-Z0-9_]{1,64}$/.test(code) ? code
+    : typeof outcome === 'string' && /^[a-z0-9_]{1,64}$/.test(outcome) ? outcome : null;
+  return tag ? `http_${f.status}: ${tag}` : `http_${f.status}`;
+}
+
 /** Local lifecycle vocabulary RawProd tracks for a requirement it has accepted. A subset
  *  of ALEMBIC's — RawProd applies Created/Changed/Cancelled from ALEMBIC and its own
  *  internal production flow advances the rest (PLANNED..COMPLETE), which is out of this
