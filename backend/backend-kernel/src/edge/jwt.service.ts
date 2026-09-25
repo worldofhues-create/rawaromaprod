@@ -1,22 +1,29 @@
 /**
  * JwtService — sign + verify access/refresh tokens with `jose` (HS256).
  *
- * Access token (15m default): carries `sub` (userId), `aud` (portal), `roles`, `perms`,
- * `pv` (permission version), `sid` (session id) — everything the edge guards need with
- * zero DB hit (doc 05 §1). Refresh token (30d): minimal (`sub`, `sid`, `typ: refresh`) —
- * the rotating-refresh material itself is stored hashed in `iam.sessions`; this token is
- * just the bearer the client presents. Asymmetric keys are a drop-in (swap `signToken`).
+ * Access token (15m default): carries `sub` (userId), `aud` (portal), `roles`, `pv`
+ * (permission version), `sid` (session id), `authTime`, and `perms` holding ONLY the
+ * vault-scoped subset (`formula:*`/`vault:*`, see `permission-resolver.ts`). It used to carry
+ * every permission; an owner's 257 made a 12 KB token that nginx refused as a header. The rest
+ * of the permission set is resolved server-side from `roles` by the process's
+ * `PermissionResolver` (`JwtAuthGuard`). Refresh token (30d): minimal (`sub`, `sid`,
+ * `typ: refresh`) — the rotating-refresh material itself is stored hashed in `iam.sessions`;
+ * this token is just the bearer the client presents. Asymmetric keys are a drop-in (swap
+ * `signToken`).
  */
 import { Inject, Injectable } from '@nestjs/common';
 import { SignJWT, jwtVerify, type JWTPayload } from 'jose';
 import type { Portal } from '@core/contracts';
 import { ConfigService } from '../config/config.service.js';
 import { DomainError } from './domain-error.js';
+import { isTokenCarriedPermission } from './permission-resolver.js';
 
 export interface AccessClaims {
   sub: string;
   portal: Portal;
   roles: string[];
+  /** ONLY the vault-scoped subset (`isTokenCarriedPermission`): what the Vault box, which has
+   *  no IAM tables to resolve roles against, checks. Never the full permission list. */
   perms: string[];
   pv: number;
   sid: string;
@@ -68,12 +75,14 @@ export class JwtService {
    * `iat` is NOT a caller-supplied input — `.setIssuedAt()` stamps "now" below, which is the
    * whole point: a caller can't backdate its own freshness. `authTime` IS caller-supplied
    * (S3 security review item 2) — unlike `iat`, it is not always "now": a refresh re-mint
-   * must carry the ORIGINAL proof time forward, never stamp a fresh one. */
+   * must carry the ORIGINAL proof time forward, never stamp a fresh one. `perms` is narrowed
+   * to the vault-scoped subset HERE, whatever the caller passes, so no caller can put the full
+   * permission list (and the oversized header) back into a token. */
   async signAccess(claims: Omit<AccessClaims, 'iat'>): Promise<string> {
     return new SignJWT({
       portal: claims.portal,
       roles: claims.roles,
-      perms: claims.perms,
+      perms: claims.perms.filter(isTokenCarriedPermission),
       pv: claims.pv,
       sid: claims.sid,
       authTime: claims.authTime,
@@ -109,7 +118,9 @@ export class JwtService {
       sub: payload.sub,
       portal: portal as Portal,
       roles: asStringArray(payload.roles),
-      perms: asStringArray(payload.perms),
+      // Narrowed on read too: a full-list token minted before this change still reads as the
+      // vault-scoped subset, the same as one minted after it.
+      perms: asStringArray(payload.perms).filter(isTokenCarriedPermission),
       pv: typeof payload.pv === 'number' ? payload.pv : 0,
       sid: typeof payload.sid === 'string' ? payload.sid : '',
       // `jose` always stamps `iat` when `.setIssuedAt()` was used to sign (every access token

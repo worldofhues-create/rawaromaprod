@@ -11,7 +11,9 @@ export interface AuthPrincipal {
   portal: Portal;
   /** Role keys carried in the token. */
   roles: string[];
-  /** Flattened `domain:resource:action` permission strings. */
+  /** Flattened `domain:resource:action` permission strings, resolved by the process's
+   *  `PermissionResolver` (`JwtAuthGuard`): from `roles` server-side on the main app box, the
+   *  token's vault-scoped subset on the Vault box. Not the token's own list. */
   permissions: string[];
   /** Permission-version stamp — lets us reject tokens minted before a role change. */
   permVersion: number;

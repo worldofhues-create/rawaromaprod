@@ -17,6 +17,7 @@ import {
 // Same Argon2id parameters the auth service uses to hash/verify passwords.
 const ARGON2_OPTIONS: argon2.Options = { type: argon2.argon2id, memoryCost: 64 * 1024, timeCost: 3, parallelism: 1 };
 import { ORG_DB, orgSchema, type OrgDb } from '../cluster-org.tokens.js';
+import { RolePermissionResolver } from '../auth/role-permission.resolver.js';
 import type { ListQuery, Page } from '../cluster-org.dtos.js';
 import type {
   CreateLocationAuthorityBody,
@@ -118,6 +119,9 @@ export class SecurityService {
   constructor(
     @Inject(ORG_DB) private readonly db: OrgDb,
     @Optional() @Inject(SECURITY_AUDIT_SINK) private readonly auditSink?: SecurityAuditSink,
+    // Invalidated after every role↔permission write, so this process enforces the change on
+    // the next request (other processes within the resolver's TTL). See role-permission.resolver.ts.
+    @Optional() @Inject(RolePermissionResolver) private readonly permissionResolver?: RolePermissionResolver,
   ) {}
 
   // ── user_master ───────────────────────────────────────────────────────────
@@ -409,6 +413,7 @@ export class SecurityService {
         updatedBy: actor,
       })
       .returning();
+    this.permissionResolver?.invalidate();
     return ensure(rows[0]);
   }
 
@@ -859,7 +864,9 @@ export class SecurityService {
 
   /**
    * Revoke a role↔permission grant (audit G/#1). Deletes the mapping so the role loses the
-   * permission. Only an owner may change a top-level admin role's permissions.
+   * permission: on this process's next request, and on every other process within
+   * ROLE_PERMISSION_CACHE_TTL_MS (permissions are resolved from roles server-side, not read from
+   * the token). Only an owner may change a top-level admin role's permissions.
    */
   async revokeRolePermission(mappingId: string, principal: AuthPrincipal): Promise<{ rolePermissionMappingId: string }> {
     const mapping = (
@@ -881,6 +888,7 @@ export class SecurityService {
       }
     }
     await this.db.delete(rolePermissionMapping).where(eq(rolePermissionMapping.rolePermissionMappingId, mappingId));
+    this.permissionResolver?.invalidate();
     return { rolePermissionMappingId: mappingId };
   }
 
