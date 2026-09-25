@@ -191,3 +191,56 @@ test('M4: a thrown apply leaves no inbound_event row, and the retry of the same 
                            where finished_good_reservation_id = ${reservationId}`)[0]!;
   assert.equal(res.status, 'HANDED_OVER');
 });
+
+/* OPS-GREEN Act M (lane ops-factory): ALEMBIC raises the requirement in its base unit (mg)
+ * and reports the goods receipt in kg. Seen live at rc-rawprod-2026-09-25.1: "cumulative 1 of
+ * 1000000" and the requirement never completed. The receipt is converted into the
+ * requirement's own unit before it is compared. */
+async function mgRequirement(qtyMg: number) {
+  const sql = testClient();
+  const reqId = crypto.randomUUID();
+  const correlationId = crypto.randomUUID();
+  await sql`insert into bridge.production_requirement
+    (alembic_requirement_id, org_id, correlation_id, order_ref, mapped_sku, qty, uom, needed_by,
+     lifecycle_status, production_order_id, last_applied_version, last_emitted_version)
+    values (${reqId}, ${crypto.randomUUID()}, ${correlationId}, 'ORD-MG', 'SKU-1', ${qtyMg}, 'mg', now(),
+     'ACCEPTED', null, 1, 7)`;
+  return { reqId, correlationId };
+}
+
+test('Act M: a 1 kg receipt completes a 1 000 000 mg requirement, exactly once', async () => {
+  const sql = testClient();
+  const { reqId, correlationId } = await mgRequirement(1_000_000);
+  const ev = fulfilled(reqId, correlationId, 2, crypto.randomUUID(), '1');
+  assert.equal((await send(ev)).body.outcome, 'applied');
+  const req = (await sql`select lifecycle_status, status_reason from bridge.production_requirement
+                           where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.equal(req.lifecycle_status, 'COMPLETE');
+  assert.match(String(req.status_reason), /cumulative 1000000 of 1000000 mg/);
+  // The same event delivered twice is harmless: no second Completed, nothing re-applied.
+  assert.equal((await send(ev)).body.outcome, 'already_seen');
+  assert.equal((await sql`select 1 from bridge.outbox where aggregate_id = ${reqId}
+                          and type = 'ProductionRequirementCompleted'`).length, 1);
+});
+
+test('Act M: a 0.4 kg receipt leaves a 1 000 000 mg requirement open (partial, in mg)', async () => {
+  const sql = testClient();
+  const { reqId, correlationId } = await mgRequirement(1_000_000);
+  assert.equal((await send(fulfilled(reqId, correlationId, 2, crypto.randomUUID(), '0.4'))).body.outcome, 'applied');
+  const req = (await sql`select lifecycle_status, status_reason from bridge.production_requirement
+                           where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.equal(req.lifecycle_status, 'ACCEPTED');
+  assert.match(String(req.status_reason), /partially fulfilled.*cumulative 400000 of 1000000 mg/);
+});
+
+test('Act M: a receipt in a unit that cannot be converted never completes the requirement', async () => {
+  const sql = testClient();
+  const { reqId, correlationId } = await mgRequirement(1_000);
+  const ev = fulfilled(reqId, correlationId, 2, crypto.randomUUID(), '5');
+  (ev.payload as Record<string, unknown>).uom = 'l';
+  assert.equal((await send(ev)).body.outcome, 'applied');
+  const req = (await sql`select lifecycle_status, status_reason from bridge.production_requirement
+                           where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.notEqual(req.lifecycle_status, 'COMPLETE');
+  assert.match(String(req.status_reason), /cannot be converted to 'mg'/);
+});

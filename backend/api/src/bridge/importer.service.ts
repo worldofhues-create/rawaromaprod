@@ -21,6 +21,7 @@ import {
   validateEnvelope, INBOUND_FROM_ALEMBIC, decideInbound, decideAcceptance,
   type LocalStatus, type BridgeEnvelope,
 } from './contract.js';
+import { convertQty } from './quantity.js';
 
 const { productionRequirement, inboundEvent, connectorConfig, outbox } = bridgeSchema;
 
@@ -271,17 +272,25 @@ export class ImporterService {
     }
 
     // Cumulative received across every applied Fulfilled for this aggregate, INCLUDING this
-    // event (its inbound_event row was inserted earlier in this same transaction).
-    const cum = (await tx.execute(sql`
-      select coalesce(sum(case when (payload->>'received_qty') ~ '^[0-9]+([.][0-9]+)?$'
-                               then (payload->>'received_qty')::numeric else 0 end), 0) as total
+    // event (its inbound_event row was inserted earlier in this same transaction), each one
+    // converted into the REQUIREMENT's unit (ALEMBIC raises in mg, receives in kg).
+    const requiredUom = String(req?.uom ?? '');
+    const receipts = (await tx.execute(sql`
+      select payload->>'received_qty' as qty, payload->>'uom' as uom
         from bridge.inbound_event
        where aggregate_id = ${aggregateId}::uuid and type = 'ProductionRequirementFulfilled'
          and parked_reason is null
-    `)) as unknown as Array<{ total: string }>;
-    const cumulative = Number(cum[0]?.total ?? 0);
+    `)) as unknown as Array<{ qty: string | null; uom: string | null }>;
+    let cumulative = 0;
+    let unconvertible: string | null = null;
+    for (const r of receipts) {
+      const q = /^[0-9]+([.][0-9]+)?$/.test(String(r.qty ?? '')) ? Number(r.qty) : 0;
+      const inReqUnits = convertQty(q, String(r.uom ?? requiredUom), requiredUom);
+      if (inReqUnits === null) { unconvertible = String(r.uom ?? ''); continue; }
+      cumulative += inReqUnits;
+    }
     const required = Number(req?.qty ?? 0);
-    const complete = cumulative >= required;
+    const complete = unconvertible === null && cumulative >= required;
 
     const fgNote = !productionOrderId
       ? 'no linked production order; no FG reservation to hand over'
@@ -290,7 +299,8 @@ export class ImporterService {
         : 'no active FG reservation for the linked production order';
     const statusReason = `${complete ? 'fulfilled' : 'partially fulfilled'}: ALEMBIC goods receipt ${receiptRef || '(no ref)'}`
       + ` received ${String(p.received_qty ?? '')} ${uom}`.trimEnd()
-      + ` (cumulative ${cumulative} of ${required}); ${fgNote}`;
+      + ` (cumulative ${cumulative} of ${required} ${requiredUom}); ${fgNote}`
+      + (unconvertible === null ? '' : `; receipt unit '${unconvertible}' cannot be converted to '${requiredUom}'`);
 
     if (!complete) {
       await tx.update(productionRequirement).set({
