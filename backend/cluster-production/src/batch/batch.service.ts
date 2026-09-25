@@ -14,7 +14,7 @@
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
@@ -169,6 +169,31 @@ export class BatchService {
             ? `Oil batch ${id} cannot be RELEASED: its latest QC result is ${latest.result ?? 'ungraded'}, not PASS.`
             : `Oil batch ${id} cannot be RELEASED: no QC result has been recorded against it (POST /v1/production-qc).`,
         );
+      }
+      /* OPS-GREEN Act L (lane ops-factory): production QC -> maturation -> FINAL QC. A batch that
+       * went through maturation is released on a PASS recorded AFTER it last entered maturation;
+       * the in-process reading taken before maturation does not stand in for the final one. */
+      const matured = (
+        await this.db
+          .select({ at: oilBatchEventHistory.createdDt })
+          .from(oilBatchEventHistory)
+          .where(and(eq(oilBatchEventHistory.oilBatchId, id), inArray(oilBatchEventHistory.eventType, ['IN_MATURATION', 'MATURING'])))
+          .orderBy(desc(oilBatchEventHistory.createdDt))
+          .limit(1)
+      )[0];
+      if (matured?.at) {
+        const finalQc = (
+          await this.db
+            .select({ id: productionQc.productionQcId })
+            .from(productionQc)
+            .where(and(eq(productionQc.oilBatchId, id), gte(productionQc.createdDt, matured.at)))
+            .limit(1)
+        )[0];
+        if (!finalQc) {
+          throw new ConflictException(
+            `Oil batch ${id} cannot be RELEASED: it entered maturation and has no final QC recorded since (POST /v1/production-qc).`,
+          );
+        }
       }
     }
     return this.db.transaction(async (tx) => {

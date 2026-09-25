@@ -21,4 +21,5 @@ export {
   finishedGoodReservation,
 } from "./batch.js";
 export { packagingQc } from "./qc.js";
+export { fgLabelRecord } from "./label.js";
 export { outbox, auditEvents } from "./crosscutting.js";

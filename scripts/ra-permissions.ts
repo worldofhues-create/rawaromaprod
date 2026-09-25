@@ -24,6 +24,7 @@ export const RA_PERMISSIONS: string[] = [
   'formula:formula_type_master:write',
   'formula:formula_version:read',
   'formula:formula_version:write',
+  'iam:audit_events:read',
   'iam:business_unit_master:read',
   'iam:business_unit_master:write',
   'iam:location_authority_master:read',

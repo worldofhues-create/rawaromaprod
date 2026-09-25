@@ -159,3 +159,16 @@ export const transitionOilBatch = z.object({
   status: z.enum(['IN_MATURATION', 'MATURING', 'RELEASED', 'HOLD', 'REWORK', 'FAILED']),
 });
 export type TransitionOilBatch = z.infer<typeof transitionOilBatch>;
+
+/* ── weighing (OPS-GREEN Act L) ─────────────────────────────────────────── */
+
+export const recordWeighing = z.object({
+  sequenceNo: z.number().int().min(1),
+  grossQty: z.number().nonnegative(),
+  tareQty: z.number().nonnegative(),
+  scaleRef: z.string().max(100).optional(),
+});
+export type RecordWeighing = z.infer<typeof recordWeighing>;
+
+export const listWeighings = listQuery.extend({ sessionId: z.string().uuid().optional() });
+export type ListWeighings = z.infer<typeof listWeighings>;

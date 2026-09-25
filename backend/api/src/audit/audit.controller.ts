@@ -16,6 +16,18 @@ export class AuditController {
     return this.svc.formulaAccessAudit(limit ? Number(limit) : 100, cursor);
   }
 
+  @Permissions('iam:audit_events:read')
+  @Get('v1/audit-events')
+  auditEvents(
+    @Query('limit') limit?: string, @Query('cursor') cursor?: string,
+    @Query('entityId') entityId?: string, @Query('entityType') entityType?: string,
+    @Query('action') action?: string,
+  ) {
+    return this.svc.listAuditEvents({
+      limit: limit ? Number(limit) : 100, cursor, entityId, entityType, action,
+    });
+  }
+
   @Permissions('iam:user_master:read')
   @Get('v1/login-history')
   loginHistory(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {

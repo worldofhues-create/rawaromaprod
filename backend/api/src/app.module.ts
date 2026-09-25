@@ -46,6 +46,7 @@ import { EditModule } from './edit/edit.module.js';
 import { DocumentsModule } from './documents/documents.module.js';
 import { PlanningModule } from './planning/planning.module.js';
 import { AuditModule } from './audit/audit.module.js';
+import { WriteAuditInterceptor } from './audit/write-audit.interceptor.js';
 import { SearchModule } from './search/search.module.js';
 import { GeoModule } from './geo/geo.module.js';
 import { ProcAnalyticsModule } from './procanalytics/procanalytics.module.js';
@@ -110,6 +111,10 @@ import { AriaBridgeModule } from './aria/aria-bridge.module.js';
     // Registered AFTER the envelope → on the response path it runs FIRST, masking material_id
     // on the raw handler output before the envelope wraps it. Floor sees aliases, never real ids.
     { provide: APP_INTERCEPTOR, useClass: MaterialMaskingInterceptor },
+    // OPS-GREEN (lane ops-factory): registered LAST → runs first on the response path, on the
+    // handler's raw output, and records who did what to which record (ids + resulting status
+    // only) in the schema the route's @Permissions names, before the response is sent.
+    { provide: APP_INTERCEPTOR, useClass: WriteAuditInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })

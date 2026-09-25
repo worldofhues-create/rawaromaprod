@@ -10,9 +10,10 @@
  * (backend/api/src/automation/packaging-release.service.ts) consumes it to release the FG batch
  * to availability + emit the bridge visibility event on PASS.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
+import { hasAppliedLabel } from './fg-label.service.js';
 
 const COLS = `packaging_qc_id as "packagingQcId", finished_good_batch_id as "finishedGoodBatchId",
   leakage_check as "leakageCheck", label_check as "labelCheck", carton_check as "cartonCheck",
@@ -41,6 +42,13 @@ export class PackagingQcService {
       (checks.some((v) => v === 'FAIL') ? 'FAIL' : checks.some((v) => v === 'HOLD') ? 'HOLD' : 'PASS');
     const packagingQcId = this.uuid();
     const finishedGoodBatchId = (body.finishedGoodBatchId as string) ?? null;
+    // OPS-GREEN Act L (lane ops-factory): the label check inspects a label that exists. PASS on a
+    // batch with no APPLIED label (POST /v1/finished-good-batches/:id/labels) is refused.
+    if (String(body.labelCheck ?? '').toUpperCase() === 'PASS' && !(await hasAppliedLabel(this.sql, finishedGoodBatchId))) {
+      throw new ConflictException(
+        'Label check cannot PASS: no label has been applied to this finished-good batch (POST /v1/finished-good-batches/:id/labels).',
+      );
+    }
     const rows = await this.sql.begin(async (tx) => {
       const inserted = await tx`
         insert into packaging.packaging_qc

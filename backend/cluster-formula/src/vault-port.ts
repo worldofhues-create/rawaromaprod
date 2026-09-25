@@ -15,6 +15,7 @@
  *     `FORMULA_LOOKUP` directly rather than going through this token, since it already IS the
  *     vault, in-process.
  */
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable, Module } from '@nestjs/common';
 import { ConfigService, ConfigModule, computeInternalBridgeSignature } from '@core/backend-kernel';
 import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common';
@@ -67,7 +68,8 @@ export class VaultPortHttpClient implements VaultPort {
     const path = '/internal/vault/resolve-manufacturing-instruction';
     const body = JSON.stringify({ formulaVersionId, permittedBatchQuantity, ctx });
     const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = computeInternalBridgeSignature(key, { method: 'POST', path, body, timestamp });
+    const nonce = randomUUID();
+    const signature = computeInternalBridgeSignature(key, { method: 'POST', path, body, timestamp, nonce });
 
     const res = await fetch(`${baseUrl}${path}`, {
       method: 'POST',
@@ -75,6 +77,7 @@ export class VaultPortHttpClient implements VaultPort {
         'content-type': 'application/json',
         'x-internal-signature': signature,
         'x-internal-timestamp': timestamp,
+        'x-internal-nonce': nonce,
       },
       body,
     });

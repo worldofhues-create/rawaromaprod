@@ -30,6 +30,11 @@ export const productionEvents = {
     'production.oil_batch.status',
     z.object({ oilBatchId: uuid, status: z.string() }),
   ),
+  weighingRecorded: defineEvent(
+    'production.weighing.recorded',
+    z.object({ weighingRecordId: uuid, secureMixingSessionId: uuid, productionOrderId: uuid,
+      sequenceNo: z.number().int(), withinTolerance: z.boolean() }),
+  ),
   mixingSessionAborted: defineEvent(
     'production.mixing_session.aborted',
     z.object({ secureMixingSessionId: uuid, productionOrderId: uuid.nullable(), reason: z.string() }),

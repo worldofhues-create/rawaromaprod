@@ -150,6 +150,9 @@
       ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
       ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
+      ['wtrail', 'Write audit trail', 'clipboard', '/v1/audit-events'],
+      ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
+      ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
       ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
@@ -158,7 +161,8 @@
       ['loctypes', 'Location types', 'sliders', '/v1/location-types'], ['locations', 'Locations', 'building', '/v1/locations'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'sliders', '/v1/uoms'],
       ['contacts', 'Contacts', 'users', '/v1/contacts'], ['countries', 'Countries', 'building', '/v1/countries'],
-      ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'] ] },
+      ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'],
+      ['wtrail', 'Write audit trail', 'clipboard', '/v1/audit-events'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
       ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
       ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
@@ -179,11 +183,13 @@
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
       ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'] ] },
     production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
+      ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
       ['runs', 'Production orders', 'layers', '/v1/production-orders', true], ['orderitems', 'Order ingredients', 'list', '/v1/production-order-ingredients', true],
       ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['pickitems', 'Pick list items', 'list', '/v1/material-pick-list-items'],
       ['issues', 'Material issues', 'box', '/v1/material-issues'],
-      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'],
+      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'],
+      ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'],
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['capas', 'CAPA', 'shield', '/v1/qc-capas'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
@@ -196,13 +202,15 @@
     compounding: { label: 'Compounding', dept: 'Compounding', user: 'Compounding', nav: [
       ['work', 'Worksheets', 'beaker', '/v1/production-order-ingredients', true], ['orders', 'Production orders', 'grid', '/v1/production-orders'],
       ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['issues', 'Material issues', 'box', '/v1/material-issues'],
-      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions'], ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'] ] },
+      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions'], ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'],
+      ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'] ] },
     filling: { label: 'Filling', dept: 'Filling', user: 'Filling', nav: [
       ['tickets', 'Fill tickets', 'droplet', '/v1/filling-sessions'], ['orders', 'Package orders', 'box', '/v1/package-orders'],
       ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
       ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
       ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
+      ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
       ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['products', 'Products', 'tag', '/v1/products'],
       ['skus', 'Product SKUs', 'tag', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'layers', '/v1/packaging-boms'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
@@ -244,6 +252,11 @@
     '/v1/qc-sample-retentions': ['sampleCode', 'sampleQty', 'retainedDt', 'status'],
     '/v1/approval-matrix': ['module', 'transaction', 'createdBy', 'approvedBy', 'finalAuthority', 'autoApproval', 'remarks'],
     '/v1/production-plans': ['planDate', 'plannedStartDt', 'plannedEndDt', 'status'],
+    // OPS-GREEN (lane ops-factory): the factory path's new records + the write audit trail.
+    '/v1/weighing-records': ['sequenceNo', 'floorCode', 'targetQty', 'netQty', 'uom', 'tolerancePct', 'status', 'weighedDt'],
+    '/v1/fg-labels': ['labelCount', 'status', 'appliedDt'],
+    '/v1/bridge/requirements': ['orderRef', 'mappedSku', 'qty', 'uom', 'lifecycleStatus', 'neededBy'],
+    '/v1/audit-events': ['occurredAt', 'actor', 'cluster', 'action', 'entityType', 'resultStatus'],
     '/v1/production-plan-items': ['plannedQty', 'status'],
     '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
@@ -976,6 +989,9 @@
       { label: 'Rework', perm: 'quality:qc_inspections:write', tone: 'warn', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'REWORK' } }
     ],
     '/v1/mixing-sessions': [
+      // OPS-GREEN Act L: WEIGH before MIX — the server resolves the line's target from the coded
+      // instruction and refuses to end a session with an unweighed line.
+      { label: 'Record weighing', perm: 'production:secure_mixing_session:write', tone: 'accent', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, run: function (r) { recordWeighing(r); } },
       { label: 'End session', perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }
     ],
     '/v1/filling-sessions': [
@@ -1003,7 +1019,9 @@
       // included, since only formulator/vault_approver hold it now). Gate the button on
       // read-access to the FG resource itself; the server decides per-caller whether the
       // product/material names come back real or masked (alias/'Protected ◆').
-      { label: 'Trace', perm: 'packaging:finished_good_batch_master:read', when: function () { return true; }, run: function (r) { openTrace(r); } }
+      { label: 'Trace', perm: 'packaging:finished_good_batch_master:read', when: function () { return true; }, run: function (r) { openTrace(r); } },
+      // OPS-GREEN Act L: LABEL before packaging QC (the label check cannot PASS unlabelled).
+      { label: 'Apply labels', perm: 'packaging:finished_good_batch_master:write', tone: 'accent', when: function () { return true; }, run: function (r) { applyFgLabels(r); } }
     ],
     '/v1/oil-batches': [
       // Guarded lifecycle (server enforces the state machine; these `when` guards are UX only).
@@ -1296,6 +1314,32 @@
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   // workflow reject — send a PR/PO back (status → REJECTED). Approvals were one-way before.
+  /* OPS-GREEN Act L (lane ops-factory): weigh one coded-instruction line; label an FG batch. The
+     server composes everything else (target, floor code, label content) from its own records. */
+  function postAction(path, body, okMsg) {
+    tunnel(path, { method: 'POST', body: body }).then(function (res) {
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+      var d = res.json && res.json.data;
+      toast(typeof okMsg === 'function' ? okMsg(d) : okMsg, d && d.status === 'OUT_OF_TOLERANCE' ? 'bad' : 'good'); loadView();
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+  }
+  function recordWeighing(row) {
+    var seq = window.prompt('Instruction line number (sequence) being weighed:');
+    if (!seq) return;
+    var gross = window.prompt('Gross reading on the balance:');
+    if (gross == null || gross === '') return;
+    var tare = window.prompt('Tare (container) reading:');
+    if (tare == null || tare === '') return;
+    postAction('/v1/mixing-sessions/' + row.secureMixingSessionId + '/weighings',
+      { sequenceNo: Number(seq), grossQty: Number(gross), tareQty: Number(tare) },
+      function (d) { return d && d.status === 'OUT_OF_TOLERANCE' ? 'Out of tolerance: re-weigh this line' : 'Weighing accepted'; });
+  }
+  function applyFgLabels(row) {
+    var n = window.prompt('How many labels were applied to batch ' + (row.batchNumber || '') + '?');
+    if (!n) return;
+    postAction('/v1/finished-good-batches/' + row.finishedGoodBatchId + '/labels', { labelCount: Number(n) }, 'Labels recorded');
+  }
+
   function rejectDoc(resource, idKey, row) {
     var id = row[idKey] != null ? row[idKey] : guessId(row);
     var noun = resource.replace(/-/g, ' ').replace(/s$/, '');

@@ -15,6 +15,7 @@ export {
   materialIssueItem,
 } from "./picking.js";
 export { secureMixingSession, mixingStepLog } from "./mixing.js";
+export { weighingRecord } from "./weighing.js";
 export {
   oilBatchMaster,
   oilBatchConsumption,

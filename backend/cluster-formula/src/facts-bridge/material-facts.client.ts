@@ -20,6 +20,7 @@
  * opposite direction — see that file's doc comment for why HMAC-over-raw-bytes rather than a
  * bearer token.
  */
+import { randomUUID } from 'node:crypto';
 import { Inject, Injectable } from '@nestjs/common';
 import { ConfigService, computeInternalBridgeSignature } from '@core/backend-kernel';
 import type { AliasRef, MasterdataLookup, MaterialRef } from '@ra/cluster-masterdata';
@@ -81,13 +82,15 @@ export class MaterialFactsClient implements MasterdataLookup {
 
   private async call<T>(method: 'GET' | 'POST', path: string, body: string): Promise<T> {
     const timestamp = String(Math.floor(Date.now() / 1000));
-    const signature = computeInternalBridgeSignature(this.key(), { method, path, body, timestamp });
+    const nonce = randomUUID();
+    const signature = computeInternalBridgeSignature(this.key(), { method, path, body, timestamp, nonce });
     const res = await fetch(`${this.baseUrl()}${path}`, {
       method,
       headers: {
         'content-type': 'application/json',
         'x-internal-signature': signature,
         'x-internal-timestamp': timestamp,
+        'x-internal-nonce': nonce,
       },
       body: method === 'GET' ? undefined : body,
     });

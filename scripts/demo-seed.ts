@@ -108,6 +108,7 @@ import * as qualitySchema from '@ra/data-quality';
 // ── production ───────────────────────────────────────────────────────────────
 import { PlanningService } from '../backend/cluster-production/src/planning/planning.service.js';
 import { MixingService } from '../backend/cluster-production/src/mixing/mixing.service.js';
+import { WeighingService } from '../backend/cluster-production/src/weighing/weighing.service.js';
 import { PickingService } from '../backend/cluster-production/src/picking/picking.service.js';
 import { BatchService as ProductionBatchService } from '../backend/cluster-production/src/batch/batch.service.js';
 import * as productionSchema from '@ra/data-production';
@@ -148,6 +149,7 @@ import * as formulaSchema from '@ra/data-formula';
 
 // ── packaging QC + tutorial (raw-SQL BFF modules) ───────────────────────────
 import { PackagingQcService } from '../backend/api/src/packaging-qc/packaging-qc.service.js';
+import { FgLabelService } from '../backend/api/src/packaging-qc/fg-label.service.js';
 import { TutorialService } from '../backend/api/src/tutorial/tutorial.service.js';
 
 // ── bridge ───────────────────────────────────────────────────────────────────
@@ -477,6 +479,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
     const planningService = new PlanningService(productionDb, staticFormulaPort);
     const mixingService = new MixingService(productionDb);
     const pickingService = new PickingService(productionDb, staticFormulaPort);
+    const weighingService = new WeighingService(productionDb, staticFormulaPort);
     const productionBatchService = new ProductionBatchService(productionDb);
     const packagingCatalogService = new PackagingCatalogService(packagingDb);
     const packagingOrdersService = new PackagingOrdersService(packagingDb);
@@ -487,6 +490,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
     const salesOrdersService = new SalesOrdersService(salesDb);
     const dispatchService = new DispatchService(salesDb, packagingLookup);
     const packagingQcService = new PackagingQcService(sql);
+    const fgLabelService = new FgLabelService(sql);
     const tutorialService = new TutorialService(tutorialSql);
     const importerService = new ImporterService(bridgeDb, sql);
     const configAdminService = new ConfigAdminService(bridgeDb);
@@ -507,7 +511,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
       inspectionsService, planningService,
       mixingService, pickingService, productionBatchService, packagingCatalogService,
       packagingOrdersService, packagingBatchService, reservationService, salesMastersService,
-      salesOrdersService, dispatchService, packagingQcService, tutorialService, importerService,
+      salesOrdersService, dispatchService, packagingQcService, fgLabelService, weighingService, tutorialService, importerService,
       configAdminService, materialShortageService, quarantineIntakeService,
       incomingQcOutcomeService, packagingReleaseService, alertsService,
     };
@@ -635,6 +639,8 @@ interface Ctx {
     salesOrdersService: SalesOrdersService;
     dispatchService: DispatchService;
     packagingQcService: PackagingQcService;
+    fgLabelService: FgLabelService;
+    weighingService: WeighingService;
     tutorialService: TutorialService;
     importerService: ImporterService;
     configAdminService: ConfigAdminService;
@@ -1759,7 +1765,7 @@ async function ensureBridgeProductionAndFactory(
     // (APPROVED-only, mandatory audit). Alias-coded only (never a raw material_id) — this is
     // the "coded manufacturing instructions via the normal Vault workflow" the lane asks for.
     await ctx.svc.pickingService.generatePickList(productionOrderId, {}, users.production);
-    await ctx.svc.pickingService.resolveManufacturingInstruction(productionOrderId, users.compounding);
+    const instruction = await ctx.svc.pickingService.resolveManufacturingInstruction(productionOrderId, users.compounding);
 
     const session = await ctx.svc.mixingService.startSession(
       { productionOrderId, operatorId: users.compounding.userId, sessionStartDt: ago(80 - i * 2).toISOString() }, users.compounding,
@@ -1773,6 +1779,13 @@ async function ensureBridgeProductionAndFactory(
 
     if (bucket === 'IN_PROGRESS') continue; // mixing under way, nothing produced yet
 
+    // OPS-GREEN Act L: WEIGH before the session can complete — one in-tolerance reading per
+    // coded line (target from the instruction, a fixed 0.5 kg container as tare).
+    for (const line of instruction ?? []) {
+      await ctx.svc.weighingService.recordWeighing(sessionId, {
+        sequenceNo: Number(line.sequenceNo), grossQty: Number(line.quantity) + 0.5, tareQty: 0.5, scaleRef: 'DEMO-BAL-01',
+      }, users.compounding);
+    }
     await ctx.svc.mixingService.endSession(sessionId, { sessionEndDt: ago(78 - i * 2).toISOString() }, users.compounding);
 
     const oilBatchNumber = `DEMO-OIL-${String(i + 1).padStart(4, '0')}`;
@@ -1786,6 +1799,10 @@ async function ensureBridgeProductionAndFactory(
       oilBatchId, observedValue: 0.97, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(76 - i * 2).toISOString(),
     }, users.qc);
     await ctx.svc.productionBatchService.transitionOilBatch(oilBatchId, 'IN_MATURATION', users.qc);
+    // OPS-GREEN Act L: the final QC after maturation is what releases the batch.
+    await ctx.svc.productionBatchService.recordProductionQc({
+      oilBatchId, observedValue: 0.98, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(75 - i * 2).toISOString(),
+    }, users.qc);
     await ctx.svc.productionBatchService.transitionOilBatch(oilBatchId, 'RELEASED', users.qc);
 
     const packageOrder = await ctx.svc.packagingOrdersService.createPackageOrder({
@@ -1814,6 +1831,8 @@ async function ensureBridgeProductionAndFactory(
     fgBatchCount++;
 
     const pkgOutcome: 'PASS' | 'FAIL' = i % 9 === 8 ? 'FAIL' : 'PASS';
+    // OPS-GREEN Act L: LABEL, composed from the batch record, before packaging QC checks it.
+    await ctx.svc.fgLabelService.apply(fgBatchId, { labelCount: Math.max(1, Math.floor(orderQty * 0.88)) }, users.packaging);
     await ctx.svc.packagingQcService.create({
       finishedGoodBatchId: fgBatchId, leakageCheck: 'PASS', labelCheck: 'PASS',
       cartonCheck: pkgOutcome === 'FAIL' ? 'FAIL' : 'PASS', overallResult: pkgOutcome,

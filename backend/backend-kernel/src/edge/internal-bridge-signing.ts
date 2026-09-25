@@ -30,6 +30,13 @@ export interface InternalBridgeSignInput {
   /** Unix seconds, as a string, stamped by the SENDER — the receiver treats this as the replay
    *  window anchor (`verifyInternalBridgeSignature` below), never trusts a body-carried timestamp. */
   timestamp: string;
+  /** A fresh random value per request (`x-internal-nonce`). Without it two IDENTICAL requests
+   *  inside the same second (a GET of one material's alias, a coded instruction resolved twice
+   *  in a second) carried identical signatures and the L1 replay cache refused the second as a
+   *  replay: live, the WEIGH step's instruction lookup straight after the floor's own read failed
+   *  with 401 "Replayed internal bridge signature". Signed, so a replay still repeats the nonce
+   *  and is still refused. Optional only so a sender predating it still verifies. */
+  nonce?: string;
 }
 
 /** A real clock difference between two independent boxes must never read as a forged/replayed
@@ -38,7 +45,8 @@ export interface InternalBridgeSignInput {
 export const INTERNAL_BRIDGE_CLOCK_SKEW_S = 60;
 
 function canonicalMessage(input: InternalBridgeSignInput): string {
-  return `${input.method.toUpperCase()}\n${input.path}\n${input.timestamp}\n${input.body}`;
+  const head = `${input.method.toUpperCase()}\n${input.path}\n${input.timestamp}\n`;
+  return input.nonce ? `${head}${input.nonce}\n${input.body}` : `${head}${input.body}`;
 }
 
 /** Compute the signature a sender attaches as `x-internal-signature` (with `x-internal-timestamp`
