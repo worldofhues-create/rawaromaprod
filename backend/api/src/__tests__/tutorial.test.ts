@@ -17,10 +17,12 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import { TutorialService } from '../tutorial/tutorial.service.js';
 import { getLesson } from '../tutorial/tutorial-lessons.js';
 import { DomainError } from '../../../backend-kernel/src/edge/domain-error.js';
-import { ensureSchema, testClient, principal, closeTestClient } from '../../../test-support/db.js';
+import { ensureSchema, testClient, principal, closeTestClient, TEST_DATABASE_URL } from '../../../test-support/db.js';
 
 let svc: TutorialService;
 
@@ -198,4 +200,47 @@ test('tutorial: resetAll deletes only the calling user’s own rows', async () =
 
   assert.equal((await svc.progress(pA)).length, 0);
   assert.equal((await svc.progress(pB)).length, 1, "user B's row must survive user A's reset");
+});
+
+// RC7 — the same defect as "automation alerts scan failed: r.updated_dt.toISOString is not a function". In the
+// running API the PG_CLIENT pool is also wrapped by Drizzle (DrizzleModule: IAM_DB / PLATFORM_DB), and drizzle-orm's
+// postgres-js driver replaces that client's timestamp parsers (and serializers) with a pass-through, so this
+// service's raw queries get started_at / completed_at / last_seen_at back as TEXT. The tests above run on a plain
+// client, where they are Dates, which is why they never saw it.
+test('tutorial: start, advance to completion, progress and dismiss work on a Drizzle-wrapped pool (timestamps as text)', async () => {
+  const wrapped = postgres(TEST_DATABASE_URL, { max: 2, prepare: false, types: {}, onnotice: () => {} });
+  drizzle(wrapped); // exactly what DrizzleModule does to the shared PG_CLIENT
+  try {
+    const [probe] = await wrapped`select now() as t`;
+    assert.equal(typeof probe?.t, 'string', 'precondition: the Drizzle-wrapped pool returns timestamps as strings');
+
+    const onWrapped = new TutorialService(wrapped as never);
+    const userId = await makeUser('procurement-wrapped');
+    const p = principal({ userId, roles: ['procurement'], permissions: [] });
+    const lesson = getLesson('procurement-reorder-to-requirement')!;
+    const iso = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+
+    const started = await onWrapped.applyEvent(p, lesson.id, { role: 'procurement', event: { type: 'start' } });
+    assert.match(String(started.startedAt), iso);
+    assert.match(String(started.lastSeenAt), iso);
+    assert.equal(started.completedAt, null);
+
+    let last = started;
+    for (let i = 1; i <= lesson.steps.length; i++) {
+      last = await onWrapped.applyEvent(p, lesson.id, { role: 'procurement', event: { type: 'advance', tutorialVersion: lesson.version } });
+    }
+    assert.equal(last.status, 'completed');
+    assert.match(String(last.completedAt), iso);
+    assert.equal(last.startedAt, started.startedAt, 'startedAt survives the round trips unchanged');
+
+    const [row] = (await onWrapped.progress(p)).filter((r) => r.lessonId === lesson.id);
+    assert.equal(row?.status, 'completed');
+    assert.equal(row?.startedAt, started.startedAt);
+    assert.equal(row?.completedAt, last.completedAt);
+
+    const dismissed = await onWrapped.applyEvent(p, lesson.id, { role: 'procurement', event: { type: 'dismiss' } });
+    assert.match(String(dismissed.lastSeenAt), iso);
+  } finally {
+    await wrapped.end({ timeout: 1 });
+  }
 });

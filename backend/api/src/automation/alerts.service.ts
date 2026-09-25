@@ -33,19 +33,7 @@ import {
   SYSTEM_ACTOR,
 } from './automation.constants.js';
 import { runIdempotent } from './ledger.js';
-
-/**
- * A timestamp column as ISO-8601, whichever shape the driver hands back. The shared PG_CLIENT pool is
- * also wrapped by Drizzle (DrizzleModule's IAM_DB / PLATFORM_DB), and drizzle-orm's postgres-js driver
- * swaps that client's timestamp/timestamptz/date parsers for a pass-through — so in the running API
- * these raw queries get `updated_dt` as Postgres text ('2026-09-24 10:00:00.123+00'), not a Date, and
- * `.toISOString()` threw ("automation alerts scan failed: r.updated_dt.toISOString is not a function",
- * seen on the demo), which aborted the whole scan: no QC-HOLD, PR or PO alert was ever raised.
- */
-export function isoOf(v: Date | string): string {
-  const d = v instanceof Date ? v : new Date(v);
-  return Number.isNaN(d.getTime()) ? String(v) : d.toISOString();
-}
+import { isoOf } from '../pg-timestamp.js';
 
 @Injectable()
 export class AutomationAlertsService implements OnModuleInit, OnModuleDestroy {

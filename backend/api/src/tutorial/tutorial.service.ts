@@ -14,6 +14,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { DomainError, PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { asDate, isoOf } from '../pg-timestamp.js';
 import { applyTutorialEvent, type TutorialProgressRecord } from './tutorial-engine.js';
 import {
   TUTORIAL_LESSONS,
@@ -35,16 +36,20 @@ export interface TutorialProgressDto {
   lastSeenAt: string | null;
 }
 
+/** Timestamps are `Date | string`: on the API's Drizzle-wrapped PG_CLIENT they arrive as text (pg-timestamp.ts). */
 interface ProgressRow {
   lesson_id: string;
   role: string;
   status: TutorialProgressRecord['status'];
   step_index: number;
   tutorial_version: number;
-  started_at: Date | null;
-  completed_at: Date | null;
-  last_seen_at: Date | null;
+  started_at: Date | string | null;
+  completed_at: Date | string | null;
+  last_seen_at: Date | string | null;
 }
+
+/** A timestamp as bound to the insert: ISO text, never a JS Date (which the Drizzle-wrapped pool cannot serialize). */
+const bindTs = (v: Date | null): string | null => (v ? isoOf(v) : null);
 
 function toDto(row: ProgressRow, lesson: TutorialLesson | undefined): TutorialProgressDto {
   return {
@@ -58,9 +63,9 @@ function toDto(row: ProgressRow, lesson: TutorialLesson | undefined): TutorialPr
     // WRITE, see applyEvent below).
     totalSteps: lesson ? lesson.steps.length : 0,
     tutorialVersion: lesson ? lesson.version : row.tutorial_version,
-    startedAt: row.started_at ? row.started_at.toISOString() : null,
-    completedAt: row.completed_at ? row.completed_at.toISOString() : null,
-    lastSeenAt: row.last_seen_at ? row.last_seen_at.toISOString() : null,
+    startedAt: row.started_at ? isoOf(row.started_at) : null,
+    completedAt: row.completed_at ? isoOf(row.completed_at) : null,
+    lastSeenAt: row.last_seen_at ? isoOf(row.last_seen_at) : null,
   };
 }
 
@@ -134,9 +139,9 @@ export class TutorialService {
       ? {
           status: existing.status,
           stepIndex: existing.step_index,
-          startedAt: existing.started_at,
-          completedAt: existing.completed_at,
-          lastSeenAt: existing.last_seen_at,
+          startedAt: asDate(existing.started_at),
+          completedAt: asDate(existing.completed_at),
+          lastSeenAt: asDate(existing.last_seen_at),
         }
       : null;
 
@@ -148,7 +153,7 @@ export class TutorialService {
         (user_id, role, lesson_id, status, step_index, tutorial_version, started_at, completed_at, last_seen_at, created_by, updated_by)
       values
         (${principal.userId}, ${body.role}, ${lessonId}, ${next.status}, ${next.stepIndex}, ${lesson.version},
-         ${next.startedAt}, ${next.completedAt}, ${next.lastSeenAt}, ${principal.userId}, ${principal.userId})
+         ${bindTs(next.startedAt)}, ${bindTs(next.completedAt)}, ${bindTs(next.lastSeenAt)}, ${principal.userId}, ${principal.userId})
       on conflict (user_id, role, lesson_id) do update set
         status = excluded.status,
         step_index = excluded.step_index,

@@ -8,7 +8,8 @@ import { randomUUID } from 'node:crypto';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
 import { ensureSchema, testClient, closeTestClient, TEST_DATABASE_URL } from '../../../../test-support/db.js';
-import { AutomationAlertsService, isoOf } from '../alerts.service.js';
+import { AutomationAlertsService } from '../alerts.service.js';
+import { isoOf } from '../../pg-timestamp.js';
 
 let svc: AutomationAlertsService;
 
