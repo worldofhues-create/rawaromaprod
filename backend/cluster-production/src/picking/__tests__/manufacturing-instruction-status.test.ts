@@ -22,7 +22,7 @@ import { test, before, after as afterAll } from 'node:test';
 import assert from 'node:assert/strict';
 import { ForbiddenException, NotFoundException } from '@nestjs/common';
 import { uuidv7 } from '@core/data-kernel';
-import type { CodedInstruction, FormulaLookup, ReadContext } from '@ra/cluster-formula';
+import type { CodedInstruction, ReadContext, VaultPort } from '@ra/cluster-formula';
 import { PickingService } from '../picking.service.js';
 import { ensureSchema, productionDb, productionSchema, principal, closeTestClient } from '../../../../test-support/db.js';
 
@@ -30,16 +30,13 @@ const { productionOrder } = productionSchema;
 
 let db: ReturnType<typeof productionDb>;
 let calls: Array<{ formulaVersionId: string; permittedBatchQuantity: number; ctx: ReadContext }>;
-const stubFormula: FormulaLookup = {
-  async getFloorView() {
-    return null;
-  },
+const stubFormula: VaultPort = {
   async resolveManufacturingInstruction(formulaVersionId, permittedBatchQuantity, ctx) {
     calls.push({ formulaVersionId, permittedBatchQuantity, ctx });
     const out: CodedInstruction[] = [{ code: 'ING-A001', quantity: 5, uom: 'kg', sequenceNo: 1 }];
     return out;
   },
-  async getPickList() {
+  async resolvePickList() {
     return null;
   },
 };

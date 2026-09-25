@@ -66,6 +66,10 @@ export const configSchema = z.object({
    * PB-03 / V4 §109.1, §7.2: MANDATORY when APP_ENV=prod — production NEVER falls back to
    * DATABASE_URL (formula.tokens.ts createFormulaClient throws a clear boot error instead).
    * Optional outside prod purely for dev/CI convenience (falls back to DATABASE_URL there).
+   *
+   * Read ONLY by processes that compose FormulaModule: vault-main.ts (the Vault box), the migrate
+   * runner and single-process scripts/tests. main.ts and worker.ts never read it — the main app box
+   * reaches the Vault over VAULT_API_INTERNAL_URL only (vault-port.ts), so a value set there is inert.
    */
   FORMULA_DATABASE_URL: z.string().url().optional(),
   /**
@@ -217,8 +221,10 @@ export const configSchema = z.object({
    * channel between the main app box and the standalone Vault EC2 (an HMAC-SHA256 over
    * method+path+timestamp+body, `internal-bridge-signing.ts`; §109's "signed internal
    * channel"). Used BOTH directions:
-   *   - main → vault: `VaultPortHttpClient` (`@ra/cluster-formula`) calling
-   *     `VAULT_API_INTERNAL_URL` to resolve a coded manufacturing instruction.
+   *   - main → vault: `VaultApiClient` / `VaultSecurityAuditClient` (`@ra/cluster-formula`)
+   *     calling `VAULT_API_INTERNAL_URL` — every formula read the main box needs (a coded
+   *     manufacturing instruction, a production order's coded pick list) and its security-audit
+   *     writes; the main box has no formula-database connection.
    *   - vault → main: `MaterialFactsClient` (`@ra/cluster-formula`, vault mode only) calling
    *     `MAIN_API_INTERNAL_URL` to resolve a material's RM_ALIAS / run the Vault material
    *     picker's search — the ONLY main-DB-shaped data the Vault box ever sees, and only ever
@@ -239,7 +245,8 @@ export const configSchema = z.object({
   MAIN_API_INTERNAL_URL: z.string().url().optional(),
   /** Vault API's own base URL, reachable from the app box's SG-scoped private path (SG rule
    *  vault-app ← app-box, one port — see `scripts/apply-vault-port-sg-rule.sh`) — the target
-   *  `VaultPortHttpClient` (main mode) calls to resolve a coded manufacturing instruction. */
+   *  `VaultApiClient` (main mode) calls for every formula read — coded manufacturing
+   *  instruction and a production order's coded pick list — and security-audit writes. */
   VAULT_API_INTERNAL_URL: z.string().url().optional(),
 });
 

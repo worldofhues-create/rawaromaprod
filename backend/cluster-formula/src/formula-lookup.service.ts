@@ -4,17 +4,24 @@
  * what they let out:
  *   - getFloorView resolves each real material_id to its RM_ALIAS via MASTERDATA_LOOKUP and
  *     DROPS the material_id — the floor sees alias + % only.
- *   - getPickList returns the real material_id + % for server-side material issue and is
- *     never serialized to a client (no controller route maps it).
+ *   - resolvePickList / resolveManufacturingLines turn each real material_id into a KEYED
+ *     material reference (material-ref.ts) and each percentage into the quantity for one
+ *     order/batch, and drop both originals — what the main app box's production flow receives
+ *     over the signed channel. They need no masterdata lookup at all, so the Vault box never has
+ *     to call back into the main box to serve them.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
+import { ConfigService } from '@core/backend-kernel';
 import { MASTERDATA_LOOKUP, type MasterdataLookup } from '@ra/cluster-masterdata';
 import { VaultService } from './vault.service.js';
+import { instructionQuantity, pickLineRequiredQty } from './pick-quantity.js';
+import { materialRef, materialRefKey } from './material-ref.js';
 import type {
   CodedInstruction,
+  CodedMaterialLine,
+  CodedPickLine,
   FloorIngredient,
   FormulaLookup,
-  PickIngredient,
   ReadContext,
 } from './public-api.js';
 
@@ -23,7 +30,19 @@ export class FormulaLookupService implements FormulaLookup {
   constructor(
     private readonly vault: VaultService,
     @Inject(MASTERDATA_LOOKUP) private readonly masterdata: MasterdataLookup,
+    // INTERNAL_BRIDGE_KEY, for the keyed material references of the main-box reads. Optional so
+    // the in-process reads that don't need it (floor view, alias instruction) construct without it.
+    @Optional() @Inject(ConfigService) private readonly config?: ConfigService,
   ) {}
+
+  /** The material-ref key; refuses (never an unkeyed fallback) when INTERNAL_BRIDGE_KEY is unset. */
+  private refKey(): Buffer {
+    const key = this.config?.get('INTERNAL_BRIDGE_KEY');
+    if (!key) {
+      throw new Error('INTERNAL_BRIDGE_KEY is not configured — the Vault cannot code material references for the main box.');
+    }
+    return materialRefKey(key);
+  }
 
   async getFloorView(
     formulaVersionId: string,
@@ -92,7 +111,7 @@ export class FormulaLookupService implements FormulaLookup {
     return Promise.all(
       ingredients.map(async (i) => {
         const alias = await this.masterdata.findAliasForMaterial(i.materialId);
-        const quantity = Math.round((i.percentage / 100) * permittedBatchQuantity * 1000) / 1000;
+        const quantity = instructionQuantity(i.percentage, permittedBatchQuantity);
         return {
           code: alias?.aliasName ?? null,
           quantity,
@@ -103,10 +122,19 @@ export class FormulaLookupService implements FormulaLookup {
     );
   }
 
-  async getPickList(
+  /**
+   * The coded bill of materials for one production order (see `CodedPickLine`). Same chokepoint
+   * as every other read (approved/locked only, audited as `formula.picklist.read` — the action
+   * the Vault console's audit view already files under manufacturing reads). Each material_id
+   * becomes its keyed reference and each percentage the required quantity for `orderQty`
+   * (pick-quantity.ts, identical to what the main box used to compute); both originals are dropped.
+   */
+  async resolvePickList(
     formulaVersionId: string,
+    orderQty: number,
     ctx: ReadContext,
-  ): Promise<PickIngredient[] | null> {
+  ): Promise<CodedPickLine[] | null> {
+    const key = this.refKey();
     const ingredients = await this.vault.decryptVersion(formulaVersionId, {
       actorId: ctx.actorId,
       action: 'formula.picklist.read',
@@ -117,8 +145,37 @@ export class FormulaLookupService implements FormulaLookup {
     });
     if (!ingredients) return null;
     return ingredients.map((i) => ({
-      materialId: i.materialId,
-      percentage: i.percentage,
+      materialRef: materialRef(key, i.materialId),
+      requiredQty: pickLineRequiredQty(orderQty, i.percentage),
+      sequenceNo: i.sequenceNo,
+    }));
+  }
+
+  /**
+   * `resolveManufacturingInstruction` for the main box: same audit action
+   * (`formula.manufacturing_instruction.resolve`), same approval rule, same quantities
+   * (`instructionQuantity`), with each material as its keyed reference instead of a floor code the
+   * Vault would have to fetch from the main box. The main box resolves the floor code itself.
+   */
+  async resolveManufacturingLines(
+    formulaVersionId: string,
+    permittedBatchQuantity: number,
+    ctx: ReadContext,
+  ): Promise<CodedMaterialLine[] | null> {
+    const key = this.refKey();
+    const ingredients = await this.vault.decryptVersion(formulaVersionId, {
+      actorId: ctx.actorId,
+      action: 'formula.manufacturing_instruction.resolve',
+      entityType: 'formula_version',
+      entityId: formulaVersionId,
+      requestId: ctx.requestId,
+      ip: ctx.ip,
+    });
+    if (!ingredients) return null;
+    return ingredients.map((i) => ({
+      materialRef: materialRef(key, i.materialId),
+      quantity: instructionQuantity(i.percentage, permittedBatchQuantity),
+      uom: 'kg',
       sequenceNo: i.sequenceNo,
     }));
   }

@@ -16,7 +16,7 @@
  * advisory lock below gets its own key so it can't collide with another lane's concurrent test
  * run against a different DB on the same Postgres instance (commit 4e8622a's pattern).
  */
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -106,6 +106,23 @@ export async function ensureSchema(): Promise<void> {
     })();
   }
   return ready;
+}
+
+/**
+ * A masterdata material with its floor code (RM alias), for tests that create production orders:
+ * the Vault's coded pick list names each line by its RM_ALIAS reference, and PlanningService maps
+ * that back to the material row. Returns the three ids/names a `CodedPickLine` stub needs.
+ */
+export async function materialWithAlias(): Promise<{ materialId: string; rmAliasId: string; aliasName: string }> {
+  const sql = testClient();
+  const materialId = randomUUID();
+  const rmAliasId = randomUUID();
+  const aliasName = `RM-${materialId.slice(0, 8)}`;
+  await sql`insert into masterdata.material (material_id, material_code, material_name, status)
+            values (${materialId}, ${`MAT-${materialId.slice(0, 8)}`}, 'Test material', 'ACTIVE')`;
+  await sql`insert into masterdata.rm_alias (rm_alias_id, material_id, alias_name, alias_type, status)
+            values (${rmAliasId}, ${materialId}, ${aliasName}, 'FLOOR_CODE', 'ACTIVE')`;
+  return { materialId, rmAliasId, aliasName };
 }
 
 export function productionDb(): PostgresJsDatabase<typeof productionSchema> {

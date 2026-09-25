@@ -32,7 +32,7 @@ import { ClusterMasterdataModule } from '@ra/cluster-masterdata';
 import { ClusterProcurementModule } from '@ra/cluster-procurement';
 import { ClusterInventoryModule } from '@ra/cluster-inventory';
 import { QualityModule } from '@ra/cluster-quality';
-import { FormulaModule } from '@ra/cluster-formula';
+import { VaultPortModule } from '@ra/cluster-formula';
 import { ProductionModule } from '@ra/cluster-production';
 import { PackagingModule } from '@ra/cluster-packaging';
 import { SalesModule } from '@ra/cluster-sales';
@@ -72,7 +72,11 @@ import { AriaBridgeModule } from './aria/aria-bridge.module.js';
     ClusterProcurementModule,
     ClusterInventoryModule,
     QualityModule,
-    FormulaModule,
+    // The Formula Vault is reached ONLY over the signed internal channel (VaultApiClient, behind
+    // ProductionModule's VAULT_PORT, for reads; SECURITY_AUDIT_SINK for audit writes) — FormulaModule
+    // is never imported on this box, so no formula-DB pool exists in this process and
+    // FORMULA_DATABASE_URL is unused here.
+    VaultPortModule,
     ProductionModule,
     PackagingModule,
     SalesModule,
@@ -95,7 +99,7 @@ import { AriaBridgeModule } from './aria/aria-bridge.module.js';
     PlatformOpsModule,
     // PB-03 remainder (V4 §109.1) — serves the Vault box's material-facts bridge (RM_ALIAS/
     // search only, InternalBridgeGuard-signed, @Public); the Vault's own plaintext formula
-    // routes are never mounted here (FormulaModule stays VAULT_MODE=false in this process).
+    // routes are never mounted here (FormulaModule is not imported by this process at all).
     MaterialFactsModule,
     TutorialModule,
     AriaBridgeModule,

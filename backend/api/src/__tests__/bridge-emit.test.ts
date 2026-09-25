@@ -26,7 +26,7 @@ import { ReservationService } from '../../../cluster-packaging/src/reservation/r
 import { DispatchService } from '../../../cluster-sales/src/dispatch/dispatch.service.js';
 import { PackagingLookupService } from '../../../cluster-packaging/src/packaging-lookup.service.js';
 import { InspectionsService } from '../../../cluster-quality/src/inspections/inspections.service.js';
-import type { FormulaLookup, PickIngredient, ReadContext } from '../../../cluster-formula/src/public-api.js';
+import type { PickLine, VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import {
   ensureSchema,
   productionDb,
@@ -180,20 +180,18 @@ test('emitBridgeOutbound: a rollback of the caller transaction rolls back the em
 
 /* ── ProductionScheduled: planning.service.ts createOrder ───────────────── */
 
-const stubFormulaLookup: FormulaLookup = {
-  async getFloorView() {
-    return null;
-  },
+// The Vault's pick list, as VAULT_PORT hands it to PlanningService (material resolved on this box).
+const stubVault: VaultPort = {
   async resolveManufacturingInstruction() {
     return null;
   },
-  async getPickList(_formulaVersionId: string, _ctx: ReadContext): Promise<PickIngredient[] | null> {
-    return [{ materialId: crypto.randomUUID(), percentage: 100, sequenceNo: 1 }];
+  async resolvePickList(): Promise<PickLine[] | null> {
+    return [{ materialId: crypto.randomUUID(), requiredQty: '10.0000', sequenceNo: 1 }];
   },
 };
 
 test('planning.createOrder: links the requirement and emits ProductionScheduled when alembicRequirementId is given', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const { alembicRequirementId } = await freshRequirement();
 
   const { order } = await svc.createOrder(
@@ -213,7 +211,7 @@ test('planning.createOrder: links the requirement and emits ProductionScheduled 
 });
 
 test('planning.createOrder: no alembicRequirementId — RawProd-internal order, nothing emitted', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const { order } = await svc.createOrder({ formulaVersionId: crypto.randomUUID(), orderQty: 10 }, principal());
   await assertProductionOrderHasNoRequirementLink(order.productionOrderId);
 });
@@ -226,7 +224,7 @@ test('planning.createOrder: a retry with the same alembicRequirementId never re-
   // different from what the caller asked for. Either way, the important invariant is unchanged:
   // the requirement must stay linked to the FIRST order only, and never emit a second
   // ProductionScheduled for a requirement that's already linked elsewhere.
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const { alembicRequirementId } = await freshRequirement();
 
   const first = await svc.createOrder(

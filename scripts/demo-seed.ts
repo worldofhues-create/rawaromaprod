@@ -140,11 +140,9 @@ import type { KmsPort } from '../backend/cluster-formula/src/crypto/kms.port.js'
  * constructor instead of importing the SDK package directly, so this file needs no new
  * dependency just for a test-only injection seam's type. */
 type KMSClient = NonNullable<ConstructorParameters<typeof AwsKmsAdapter>[1]>;
-import type {
-  FormulaLookup as FormulaLookupPort,
-  PickIngredient,
-  CodedInstruction,
-} from '../backend/cluster-formula/src/public-api.js';
+import type { CodedInstruction } from '../backend/cluster-formula/src/public-api.js';
+import type { PickLine, VaultPort } from '../backend/cluster-formula/src/vault-port.js';
+import { instructionQuantity, pickLineRequiredQty } from '../backend/cluster-formula/src/pick-quantity.js';
 import * as formulaSchema from '@ra/data-formula';
 
 // ── packaging QC + tutorial (raw-SQL BFF modules) ───────────────────────────
@@ -1614,26 +1612,28 @@ async function ensureTransporter(ctx: Ctx, actor: AuthPrincipal): Promise<string
 }
 
 /**
- * A `FormulaLookup`/`VaultPort`-shaped object the FACTORY phase passes to `PlanningService`
- * (`getPickList`) and `PickingService` (`resolveManufacturingInstruction`) INSTEAD OF a live
- * `FormulaLookupService` backed by a real `VaultService` — this box has no network path to
- * vault-pg (P0 decision, lane FIXV), so it cannot decrypt anything.
+ * A `VaultPort` the FACTORY phase passes to `PlanningService` (`resolvePickList`) and
+ * `PickingService`/`WeighingService` (`resolveManufacturingInstruction`) INSTEAD OF the live
+ * `ProductionVaultPort` — this box has no network path to vault-pg (P0 decision, lane FIXV), and
+ * a one-off seed run does not need vault-api up either, so it decrypts nothing.
  *
  * It doesn't need to: `demoFormulaIngredientPlan` (scripts/demo-seed-shared.ts) is a PURE
  * function of (formulaIndex, ingredientCount) that reproduces the exact same
  * `{materialId, percentage, sequenceNo}` set the vault phase independently seals under the SAME
  * deterministic ids — so this can answer both reads with zero decrypt, zero DB read of any
- * formula/vault schema, and zero coupling to whether the vault phase has run yet. Alias
- * resolution for `resolveManufacturingInstruction` (RM_ALIAS, never a raw material_id) is a
- * REAL, local read against THIS box's own `masterdata` schema — the one part of this that
- * genuinely needs a live lookup, and it's already local.
+ * formula/vault schema, and zero coupling to whether the vault phase has run yet. It answers in
+ * `VAULT_PORT`'s own main-box shapes — the pick list with this box's material ids, the instruction
+ * with floor codes — exactly what `ProductionVaultPort` produces after resolving the Vault's keyed
+ * references: floor codes (RM_ALIAS) are a REAL, local read against THIS box's own `masterdata`
+ * schema. Quantities use the Vault's own `pickLineRequiredQty` / `instructionQuantity`, so the
+ * seeded orders match what vault-api would have returned.
  *
  * This is a demo-seed-only stand-in — never used by the real running app (which wires
- * `FORMULA_LOOKUP`/`VAULT_PORT` for real, see `formula.module.ts` / `vault-port.ts`). Real
+ * `VAULT_PORT` to the Vault's internal API, see `vault-port.ts`). Real
  * customer formulas are never faked this way; only this script's own known, synthetic,
  * already-fully-determined demo ingredients are.
  */
-function buildStaticFormulaPort(masterdataLookup: MasterdataLookupService): FormulaLookupPort {
+function buildStaticFormulaPort(masterdataLookup: MasterdataLookupService): VaultPort {
   const byVersionId = new Map<string, { formulaIndex: number; ingredientCount: number }>();
   DEMO_FORMULA_DEFS.forEach((def, formulaIndex) => {
     byVersionId.set(demoFormulaVersionId(def.code, 1), { formulaIndex, ingredientCount: def.ingredientCount });
@@ -1645,16 +1645,14 @@ function buildStaticFormulaPort(masterdataLookup: MasterdataLookupService): Form
   };
 
   return {
-    async getFloorView() {
-      // Unused by this seed script's own story (nothing here calls the floor-view read) — kept
-      // as a documented not-implemented stub so this object satisfies the full FormulaLookup
-      // shape, exactly like the test suite's own `unusedFormulaLookup` fixture
-      // (backend/api/src/__tests__/demo-seed.test.ts).
-      return null;
-    },
-    async getPickList(formulaVersionId: string): Promise<PickIngredient[] | null> {
+    async resolvePickList(formulaVersionId: string, orderQty: number): Promise<PickLine[] | null> {
       const p = plan(formulaVersionId);
-      return p ? p.map(({ materialId, percentage, sequenceNo }) => ({ materialId, percentage, sequenceNo })) : null;
+      if (!p) return null;
+      return p.map(({ materialId, percentage, sequenceNo }) => ({
+        materialId,
+        requiredQty: pickLineRequiredQty(orderQty, percentage),
+        sequenceNo,
+      }));
     },
     async resolveManufacturingInstruction(
       formulaVersionId: string,
@@ -1665,7 +1663,7 @@ function buildStaticFormulaPort(masterdataLookup: MasterdataLookupService): Form
       return Promise.all(
         p.map(async ({ materialId, percentage, sequenceNo }) => {
           const alias = await masterdataLookup.findAliasForMaterial(materialId);
-          const quantity = Math.round((percentage / 100) * permittedBatchQuantity * 1000) / 1000;
+          const quantity = instructionQuantity(percentage, permittedBatchQuantity);
           return { code: alias?.aliasName ?? null, quantity, uom: 'kg', sequenceNo };
         }),
       );
@@ -1920,10 +1918,11 @@ async function poisonProductionOrder(ctx: Ctx, marker: string, materialId: strin
   if (existing) return existing.id;
 
   const productionDb = dbFor(ctx.sql, productionSchema);
-  const stub = {
-    async getFloorView() { return null; },
+  const stub: VaultPort = {
     async resolveManufacturingInstruction() { return null; },
-    async getPickList() { return [{ materialId, percentage: 100, sequenceNo: 1 }]; },
+    async resolvePickList(_formulaVersionId: string, orderQty: number) {
+      return [{ materialId, requiredQty: pickLineRequiredQty(orderQty, 100), sequenceNo: 1 }];
+    },
   };
   const planning = new PlanningService(productionDb, stub);
   const bootstrap = principalFor(randomUUID(), ['production']);

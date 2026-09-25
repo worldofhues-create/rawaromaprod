@@ -12,20 +12,17 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { BadRequestException, ConflictException } from '@nestjs/common';
 import { PickingService } from '../../../cluster-production/src/picking/picking.service.js';
-import type { FormulaLookup } from '../../../cluster-formula/src/public-api.js';
+import type { VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 
 // This suite exercises issueMaterials only — never the §109.7 manufacturing-instruction read
 // — so a stub that never resolves anything real is enough to satisfy PickingService's
-// constructor (it now also takes the FORMULA_LOOKUP port, see picking.service.ts).
-const stubFormulaLookup: FormulaLookup = {
-  async getFloorView() {
-    return null;
-  },
+// constructor (it also takes the VAULT_PORT, see picking.service.ts).
+const stubFormulaLookup: VaultPort = {
   async resolveManufacturingInstruction() {
     return null;
   },
-  async getPickList() {
+  async resolvePickList() {
     return null;
   },
 };
@@ -99,7 +96,7 @@ test('issueMaterials: succeeds and flips issued_qty when materialPickListId is p
 /* Golden journey lane/j2 — an instruction line with no floor code (the material has no RM
  * alias) is refused with the fix, never returned as `{ code: null }`. */
 test('resolveManufacturingInstruction: refuses (409) when a line has no floor code, names only sequence numbers', async () => {
-  const lookup: FormulaLookup = {
+  const lookup: VaultPort = {
     ...stubFormulaLookup,
     async resolveManufacturingInstruction() {
       return [

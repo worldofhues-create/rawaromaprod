@@ -10,8 +10,8 @@
  * Consumes `production.order.created` (PlanningService.createOrder — backend/cluster-
  * production/src/planning/planning.service.ts) from `production.outbox`. The BOM is already
  * resolved into `production.production_order_ingredients` at that point (the order can only be
- * planned against an APPROVED/LOCKED formula version — PlanningService reads
- * `FORMULA_LOOKUP.getPickList`, which 403s otherwise), so "approved production order + resolved
+ * planned against an APPROVED/LOCKED formula version — PlanningService reads the Vault's
+ * `VAULT_PORT.resolvePickList`, which 403s otherwise), so "approved production order + resolved
  * material needs" is exactly the state this event signals. Dedupe key = productionOrderId — the
  * shortage check runs once, deterministically, at order-creation time.
  *

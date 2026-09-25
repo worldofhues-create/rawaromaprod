@@ -1,7 +1,7 @@
 {
   "name": "@ra/cluster-production",
   "version": "0.1.0",
-  "description": "RAW AROMACHEM production cluster (production schema): CRUD + flow over production plan/order, material pick/issue, secure mixing, oil batch (master + consumption genealogy + event history), and production QC. Expands an APPROVED formula into a production order's bill-of-materials SERVER-SIDE via FORMULA_LOOKUP.getPickList (the floor never sees the formula). Emits production.order.created / production.materials.issued / production.oil_batch.created. Exposes PRODUCTION_LOOKUP.",
+  "description": "RAW AROMACHEM production cluster (production schema): CRUD + flow over production plan/order, material pick/issue, secure mixing, oil batch (master + consumption genealogy + event history), and production QC. Expands an APPROVED formula into a production order's bill-of-materials SERVER-SIDE via the Formula Vault's coded pick list (VAULT_PORT.resolvePickList over the signed internal channel; the floor never sees the formula). Emits production.order.created / production.materials.issued / production.oil_batch.created. Exposes PRODUCTION_LOOKUP.",
   "license": "UNLICENSED",
   "private": true,
   "type": "module",

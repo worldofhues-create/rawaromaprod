@@ -16,7 +16,7 @@
  * separate, internal-only, signed channel (`internal-bridge-signing.ts`) that a browser can
  * never reach (no CORS, no user JWT accepted — see `InternalBridgeGuard`).
  *
- * Every call signs the outgoing request the same way `VaultPortHttpClient` does for the
+ * Every call signs the outgoing request the same way `VaultApiClient` does for the
  * opposite direction — see that file's doc comment for why HMAC-over-raw-bytes rather than a
  * bearer token.
  */

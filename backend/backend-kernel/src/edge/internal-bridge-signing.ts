@@ -1,8 +1,9 @@
 /**
  * Internal bridge signing — the one signed, service-to-service HTTP channel between the main
  * app box and the standalone Vault EC2 (PB-03 remainder, V4 §109.1's "signed internal channel").
- * Used BOTH directions: `VaultPortHttpClient` (main → vault, resolve a coded manufacturing
- * instruction) and `MaterialFactsClient` (vault → main, resolve a material's RM_ALIAS / search —
+ * Used BOTH directions: `VaultApiClient` (main → vault: a production order's pick list, the coded
+ * manufacturing instruction, security-audit writes) and `MaterialFactsClient` (vault → main, the
+ * Vault console's material search and alias lookups —
  * the only main-DB-shaped read the Vault box ever makes, read-only, alias/code/name only).
  *
  * Deliberately NOT a JWT / bearer-token scheme — there is no user principal on either side of

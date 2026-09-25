@@ -23,7 +23,9 @@
  *     PLUS material-search resolved over the signed facts bridge instead of a local `PG_CLIENT`
  *     (see `formula.module.ts`'s header for the full design + the rejected alternative).
  *   - `VaultPortInternalModule` — the receiving side of the OTHER signed channel: the main app
- *     box's `VaultPortHttpClient` calls in here to resolve a coded manufacturing instruction.
+ *     box's `VaultApiClient` / `VaultSecurityAuditClient` call in here for every formula read
+ *     it needs (a coded manufacturing instruction, a production order's coded pick list) and its
+ *     security-audit writes. The main box holds no formula-database connection of its own.
  *   - `VaultHealthModule` — `/health`, pinging `FORMULA_PG_CLIENT` (the one DB connection this
  *     process actually holds) instead of the main `HealthController`'s `PG_CLIENT`.
  *

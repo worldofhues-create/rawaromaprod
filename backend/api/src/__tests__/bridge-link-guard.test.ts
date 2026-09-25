@@ -19,7 +19,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { ConflictException } from '@nestjs/common';
 import { PlanningService } from '../../../cluster-production/src/planning/planning.service.js';
-import type { FormulaLookup, PickIngredient, ReadContext } from '../../../cluster-formula/src/public-api.js';
+import type { PickLine, VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 
 before(async () => {
@@ -30,15 +30,13 @@ after(async () => {
   await closeTestClient();
 });
 
-const stubFormulaLookup: FormulaLookup = {
-  async getFloorView() {
-    return null;
-  },
+// The Vault's pick list, as VAULT_PORT hands it to PlanningService (material resolved on this box).
+const stubVault: VaultPort = {
   async resolveManufacturingInstruction() {
     return null;
   },
-  async getPickList(_formulaVersionId: string, _ctx: ReadContext): Promise<PickIngredient[] | null> {
-    return [{ materialId: crypto.randomUUID(), percentage: 100, sequenceNo: 1 }];
+  async resolvePickList(): Promise<PickLine[] | null> {
+    return [{ materialId: crypto.randomUUID(), requiredQty: '10.0000', sequenceNo: 1 }];
   },
 };
 
@@ -65,7 +63,7 @@ async function orderCountForRequirement(alembicRequirementId: string): Promise<n
 }
 
 test('planning.createOrder: a REJECTED_MAPPING requirement cannot be scheduled against — throws, nothing linked', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const alembicRequirementId = await freshRequirement('REJECTED_MAPPING');
 
   await assert.rejects(
@@ -76,7 +74,7 @@ test('planning.createOrder: a REJECTED_MAPPING requirement cannot be scheduled a
 });
 
 test('planning.createOrder: a CANCELLED requirement cannot be scheduled against — throws, nothing linked', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const alembicRequirementId = await freshRequirement('CANCELLED');
 
   await assert.rejects(
@@ -87,7 +85,7 @@ test('planning.createOrder: a CANCELLED requirement cannot be scheduled against 
 });
 
 test('planning.createOrder: an ACCEPTED requirement already linked to another order cannot be re-linked — throws', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const alembicRequirementId = await freshRequirement('ACCEPTED', { linked: true });
 
   await assert.rejects(
@@ -99,7 +97,7 @@ test('planning.createOrder: an ACCEPTED requirement already linked to another or
 });
 
 test('planning.createOrder: an unknown alembicRequirementId throws instead of silently creating an unlinked order', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const badId = crypto.randomUUID();
 
   await assert.rejects(
@@ -109,7 +107,7 @@ test('planning.createOrder: an unknown alembicRequirementId throws instead of si
 });
 
 test('planning.createOrder: happy path — an ACCEPTED, unlinked requirement links cleanly', async () => {
-  const svc = new PlanningService(productionDb(), stubFormulaLookup);
+  const svc = new PlanningService(productionDb(), stubVault);
   const alembicRequirementId = await freshRequirement('ACCEPTED');
 
   const { order } = await svc.createOrder(

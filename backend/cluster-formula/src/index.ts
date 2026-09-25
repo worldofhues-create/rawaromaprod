@@ -1,28 +1,34 @@
 /**
  * @ra/cluster-formula — the formula vault module + its public port + DB token. The approval
- * flow emits formula.version.approved / formula.copy.approved via the transactional outbox;
- * the worker drains that outbox onto the bus for production. The ONLY recipe read surface is
- * the FORMULA_LOOKUP port (floor view = RM_ALIAS + % only; pick list server-side only). The
- * real recipe is sealed at rest and never leaves un-decrypted or un-audited.
+ * flow emits formula.version.approved / formula.copy.approved via the transactional outbox
+ * (in the Vault database; the main app box does not drain it). The ONLY recipe read surface is
+ * the FORMULA_LOOKUP port (floor view = RM_ALIAS + % only; manufacturing instruction and the
+ * production order's pick list = floor code + quantity only). The real recipe is sealed at rest
+ * and never leaves un-decrypted or un-audited.
  */
 export { FormulaModule, isVaultMode } from './formula.module.js';
 export { FORMULA_DB, FORMULA_PG_CLIENT, type FormulaDb } from './formula.tokens.js';
 export { formulaEvents } from './formula.events.js';
 export {
   type CodedInstruction,
+  type CodedMaterialLine,
+  type CodedPickLine,
   type FloorIngredient,
   type FormulaLookup,
-  type PickIngredient,
   type ReadContext,
   FORMULA_LOOKUP,
 } from './public-api.js';
-// PB-03 remainder — the main-app-box side of the Vault trust boundary (V4 §109.1): a narrow
-// port + its remote-HTTP binding, so ProductionModule reaches the Vault over the signed
-// internal channel instead of importing FormulaModule's own DB-backed FORMULA_LOOKUP for
-// coded-instruction resolution. See vault-port.ts's header for the full design.
+export { PICK_QUANTITY_SCALE, instructionQuantity, pickLineRequiredQty } from './pick-quantity.js';
+export { materialRef, materialRefKey } from './material-ref.js';
+// The main-app-box side of the Vault trust boundary (V4 §109.1): the signed HTTP client, the
+// production-facing port it backs, and the remote audit sink — the main box reaches the Vault over
+// the signed internal channel only and never holds a formula-DB connection. See vault-port.ts.
 export {
   VAULT_PORT,
+  VAULT_INTERNAL_PATHS,
+  type PickLine,
   type VaultPort,
-  VaultPortHttpClient,
+  VaultApiClient,
   VaultPortModule,
+  VaultSecurityAuditClient,
 } from './vault-port.js';

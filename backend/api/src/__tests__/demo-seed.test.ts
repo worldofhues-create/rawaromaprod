@@ -68,9 +68,8 @@ import { orgMaster, userMaster } from '@ra/data-org';
 
 /** A no-op stand-in for the one dependency these list-only calls never touch. */
 const unusedFormulaLookup = {
-  async getFloorView() { return null; },
   async resolveManufacturingInstruction() { return null; },
-  async getPickList() { return null; },
+  async resolvePickList() { return null; },
 };
 
 const TABLES: Array<[string, string]> = [

@@ -80,6 +80,20 @@ test('the internal vault-port endpoint is mounted and refuses an unsigned call (
   assert.equal(body.error.code, 'INTERNAL_BRIDGE_UNAUTHORIZED');
 });
 
+for (const [url, payload] of [
+  ['/internal/vault/resolve-pick-list', { formulaVersionId: '0199a1b2-0000-7000-8000-000000000001', orderQty: 1, ctx: { actorId: null } }],
+  ['/internal/vault/resolve-manufacturing-lines', { formulaVersionId: '0199a1b2-0000-7000-8000-000000000001', permittedBatchQuantity: 1, ctx: { actorId: null } }],
+  ['/internal/vault/security-audit', { actorId: null, action: 'security.permission.denied', entityType: 'permission', entityId: null }],
+] as const) {
+  test(`${url} is mounted (the main box's channel) and refuses an unsigned call`, async () => {
+    const fastify = app.getHttpAdapter().getInstance();
+    const res = await fastify.inject({ method: 'POST', url, payload });
+    assert.notEqual(res.statusCode, 404);
+    assert.equal(res.statusCode, 401);
+    assert.equal(JSON.parse(res.payload).error.code, 'INTERNAL_BRIDGE_UNAUTHORIZED');
+  });
+}
+
 test('an unknown route still 404s (the app is otherwise a normal, narrow surface)', async () => {
   const fastify = app.getHttpAdapter().getInstance();
   const res = await fastify.inject({ method: 'GET', url: '/v1/production-orders' });

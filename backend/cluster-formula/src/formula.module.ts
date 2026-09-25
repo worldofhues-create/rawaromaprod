@@ -6,7 +6,13 @@
  * Wires: the dedicated FORMULA_DB client, the KMS port (EnvKmsAdapter over FORMULA_KEK), the
  * VaultService crypto engine, the three domain service/controller pairs (catalog, formulas,
  * approvals), and the FORMULA_LOOKUP cold-read port (floor view = alias only). Closes its pool
- * on shutdown. Exports FORMULA_DB (for the worker's outbox source) + FORMULA_LOOKUP.
+ * on shutdown. Exports FORMULA_DB + FORMULA_LOOKUP.
+ *
+ * WHO IMPORTS IT: the Vault box's `VaultAppModule` (vault-main.ts), and single-process scripts
+ * and tests. NOT the main app box — `AppModule` and `WorkerModule` reach the Vault only over the
+ * signed internal channel (`VaultPortModule`, vault-port.ts), so no process on that box ever
+ * builds a FORMULA_PG_CLIENT pool (it has no network path to vault-pg:5432, and the pool's
+ * connect attempts were what timed out creating production orders and polling formula.outbox).
  *
  * PB-03 remainder (V4 §109.1) — VAULT_MODE-gated shape. Read directly off `process.env` at
  * MODULE-DECORATION time (before Nest's DI container exists — the earliest point a plain
@@ -14,11 +20,9 @@
  * (which controllers exist, which sibling module gets imported) rather than a runtime value any
  * provider reads:
  *
- *   VAULT_MODE=false (default — main.ts's AppModule, worker.ts's WorkerModule): NO controllers
- *   (formula plaintext HTTP routes never exist on the main app box's process at all — "the main
- *   API must not expose formula plaintext routes when running in main mode"), and
- *   `MASTERDATA_LOOKUP` resolves locally via `ClusterMasterdataModule` (shared main `PG_CLIENT`
- *   — already true, unchanged).
+ *   VAULT_MODE=false (default — a single-process script or test that has both databases): NO
+ *   controllers (formula plaintext HTTP routes exist only on the Vault box), and
+ *   `MASTERDATA_LOOKUP` resolves locally via `ClusterMasterdataModule` (shared main `PG_CLIENT`).
  *
  *   VAULT_MODE=true (vault-main.ts's VaultAppModule, ONLY): the three controllers ARE mounted
  *   (this is the one process that's allowed to serve them), and `MASTERDATA_LOOKUP` resolves via

@@ -3,12 +3,17 @@
  * PRODUCTION_PLAN, PRODUCTION_PLAN_ITEMS, PRODUCTION_ORDER, PRODUCTION_ORDER_INGREDIENTS.
  * CRUD (create + list + get) for the three header/line masters, plus the KEY flow:
  *
- *   createOrder → reads the APPROVED formula's real pick list via FORMULA_LOOKUP.getPickList
- *                 (server-side only — the floor never sees the recipe), inserts the
- *                 production_order, expands one production_order_ingredients row per pick
- *                 (required_qty = order_qty * percentage / 100), and emits
- *                 `production.order.created` in the SAME transaction. If the formula version
- *                 is not approved/locked getPickList returns null → ForbiddenException.
+ *   createOrder → asks the Formula Vault, over the signed internal channel
+ *                 (`VAULT_PORT.resolvePickList` — ProductionVaultPort), for the APPROVED formula
+ *                 version's bill of materials for this order_qty: per line this box's material_id
+ *                 (resolved here from the Vault's keyed material reference) and the required
+ *                 quantity (computed in the Vault — the raw percentage never leaves it). Inserts the
+ *                 production_order, one production_order_ingredients row per line, and emits
+ *                 `production.order.created` in the SAME transaction. A version that is not
+ *                 approved/locked (or does not exist) → ForbiddenException, as before.
+ *
+ * This box has no formula-database connection: the Vault isolation lets it reach only the
+ * Vault API port, not vault-pg.
  *
  * production_order_ingredients are NEVER created directly — they are expanded here.
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics
@@ -19,7 +24,7 @@ import { ConflictException, ForbiddenException, Inject, Injectable } from '@nest
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
-import { FORMULA_LOOKUP, type FormulaLookup } from '@ra/cluster-formula';
+import { VAULT_PORT, type VaultPort } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { paginate, num, type Page } from '../_helpers.js';
@@ -42,7 +47,7 @@ const {
 export class PlanningService {
   constructor(
     @Inject(PRODUCTION_DB) private readonly db: ProductionDb,
-    @Inject(FORMULA_LOOKUP) private readonly formula: FormulaLookup,
+    @Inject(VAULT_PORT) private readonly vault: VaultPort,
   ) {}
 
   /* ── production plan ──────────────────────────────────────────────── */
@@ -155,12 +160,13 @@ export class PlanningService {
 
   /**
    * POST /v1/production-orders — start production against an APPROVED formula version.
-   * Reads the real pick list server-side (FORMULA_LOOKUP.getPickList), expands the
-   * bill-of-materials into production_order_ingredients, and emits production.order.created.
-   * Returns 403 if the formula version is not approved/locked.
+   * The caller's `production:production_order:write` is checked by the route; the Vault checks
+   * the signed channel. Reads the coded bill of materials from the Vault (VAULT_PORT
+   * .resolvePickList), expands it into production_order_ingredients, and emits
+   * production.order.created. Returns 403 if the formula version is not approved/locked.
    */
   async createOrder(body: CreateOrder, principal: AuthPrincipal) {
-    const picks = await this.formula.getPickList(body.formulaVersionId, {
+    const picks = await this.vault.resolvePickList(body.formulaVersionId, body.orderQty, {
       actorId: principal.userId,
     });
     if (!picks) {
@@ -197,7 +203,7 @@ export class PlanningService {
           productionOrderIngredientId: uuidv7(),
           productionOrderId,
           materialId: pick.materialId,
-          requiredQty: num((body.orderQty * pick.percentage) / 100),
+          requiredQty: pick.requiredQty,
           issuedQty: false,
           uomId: body.uomId ?? null,
           status: 'PENDING',
