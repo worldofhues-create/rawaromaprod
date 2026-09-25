@@ -172,18 +172,33 @@ exact failing check) in two independent domains (a status-value mutation and a r
 it reuses their upstreams/maps). Cert: `certbot certonly --nginx --cert-name rawlanes.huecycle.in -d <9 names>` —
 same nginx authenticator as raw.huecycle.in; `certbot.timer` renews. Change procedure: `nginx -t` then `systemctl reload nginx` only.
 - rawfactory / rawplatform: static from `/var/www/rawprod-cf/{factory,platform}`, API `/rpc|/crypto/|/v1/|/auth/|/health` → 127.0.0.1:4100 (no-store).
-- rawdemofactory / rawdemoplatform: static from `/var/www/rawprod-demo-cf/{factory,platform}` (install-box.sh), API → :4110.
-- On a RawProd web deploy, refresh those copy dirs; nothing in this file changes.
+- rawdemofactory / rawdemoplatform: static from `/var/www/rawprod-demo-cf/{factory,platform}`, API → :4110.
+- rawdemoadmin / rawdemoagent / rawdemostudio include ALEMBIC's `security-headers-console-demo.conf` (connect-src
+  `https://rawdemo.huecycle.in`), not the production console snippet (connect-src `https://raw.huecycle.in`). Both
+  snippets live in the alembic repo's `ops/nginx/` and install to `/etc/nginx/alembic/`.
+- On a RawProd web deploy, refresh the copy dirs with `infra/aws/nginx/install-static.sh prod|demo` (all three roots,
+  factory/platform/vault, plus their console-config.js / vault-config.js); nothing in this file changes.
 - rawvault (owner decision 2026-09-24): its own vhost `infra/aws/nginx/rawvault.conf` → `sites-enabled/zz-rawvault.conf`
   (loads after rawprod-cf-origin.conf, reuses `upstream rawprod_api_cf`). Static `/var/www/rawprod-cf/vault`; `/auth/`,
   `/rpc|/crypto/|/v1/` and `/health` → vault box `172.31.51.157:4100` over the private network; `/main/` → the MAIN
-  RawProd API on this box (sign-in channel, prefix stripped). rawdemovault still has no public name.
+  RawProd API on this box (sign-in channel, prefix stripped).
+- rawdemovault (recorded from live 2026-09-25, lane cfg-rp): `infra/aws/nginx/rawdemovault.conf` →
+  `sites-enabled/zz-rawdemovault.conf`, the same shape pointed at the DEMO side: static `/var/www/rawprod-demo-cf/vault`,
+  API → vault box `172.31.51.157:4111` (vault-demo-api), `/main/` → `upstream rawprod_demo_api` (4110, from
+  rawaroma-demo-origin.conf). It loads before zz-rawvault.conf and relies on that file's http-level `limit_req_status 429`.
 - Browser config (OPS_GREEN §17, recorded from live 2026-09-25): every static console gets `console-config.js`
   (`window.ALEMBIC_CONSOLE_URL`) injected by `sub_filter` ahead of `shell.js`/`platform.js`; rawvault gets
   `vault-config.js` (`window.MAIN_API='/main'`) ahead of `vault.js`. Sources: `infra/aws/nginx/static-config/`
-  (README.txt there has the install targets). A web deploy that refreshes `/var/www/rawprod-cf/vault` must re-install
-  `vault-config.js`.
+  (README.txt there has the install targets). The demo factory origin (`demo/nginx/rawaroma-demo-origin.conf`, 8445)
+  injects the demo console-config.js too; rawdemovault gets `static-config/demo-vault/vault-config.js`. A web deploy
+  that refreshes a vault root must re-install `vault-config.js` -- `install-static.sh` does both.
 - Env files: `infra/aws/env/render-env.sh app|vault` and `infra/aws/demo/render-demo-env.sh app|vault` render every key
-  the boxes run with (INTERNAL_BRIDGE_KEY from `/rawaroma/bridge/internal-bridge-key`, both roles granted).
+  the boxes run with (INTERNAL_BRIDGE_KEY from `/rawaroma/bridge/internal-bridge-key`, both roles granted). Lane cfg-rp
+  (2026-09-25) re-read the live files and made a re-render reproduce them: the ALEMBIC demo's CORS origins, public
+  origin, bridge sweep, mail drops and `web-build.env`; the demo RawProd targets incl. vault; the demo vault CORS incl.
+  rawdemovault. The demo's BRIDGE_HMAC_KEK, RUN_WORKER_IN_PROCESS and INTERNAL_BRIDGE_KEY follow what the demo RUNS
+  with (production KEK; no worker; no bridge key) -- a parameter appearing in SSM never switches them.
+  `backend/api/src/__tests__/infra-live-capture.test.ts` runs both scripts against a sandbox. ALEMBIC PRODUCTION's
+  `/etc/alembic/{api,web-build}.env` are rendered by the alembic repo's `ops/deploy/render-env.sh`.
 - `deploy.sh` health: API at `127.0.0.1:4100/health`, consoles over HTTPS with `--resolve <host>:443:127.0.0.1`
   (port 80 only redirects), so a good deploy records `/srv/rawprod/DEPLOYED_SHA`.

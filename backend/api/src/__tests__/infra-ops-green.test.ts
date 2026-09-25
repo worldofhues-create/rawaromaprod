@@ -75,14 +75,17 @@ test('render-demo-env app: the demo RawProd API gets the keys it ran with from a
   const a = arm(s, 'app');
   const body = rendered(a, '/etc/rawprod-demo/api.env');
   const k = keys(body);
-  for (const key of ['ALEMBIC_ASSERTION_TENANT_ID', 'RUN_WORKER_IN_PROCESS', 'VAULT_API_INTERNAL_URL',
+  for (const key of ['ALEMBIC_ASSERTION_TENANT_ID', 'VAULT_API_INTERNAL_URL',
     'FORMULA_DATABASE_URL', 'BRIDGE_HMAC_KEK', 'GIT_SHA']) {
     assert.ok(k.has(key), `demo api.env lacks ${key}`);
   }
   assert.match(body, /^\$RP_KMS$/m, 'FORMULA_KMS_KEY_ID line');
+  // Lane cfg-rp (live 2026-09-25): the demo runs WITHOUT the in-process worker, so the render carries
+  // RUN_WORKER_IN_PROCESS from the box (\$RP_WORKER) instead of introducing it; infra-live-capture.test.ts runs it.
+  assert.match(body, /^\$RP_WORKER$/m, 'RUN_WORKER_IN_PROCESS is carried, not introduced');
   assert.match(body, /^VAULT_API_INTERNAL_URL=http:\/\/\$VAULT_PRIVATE:4111$/m);
   assert.match(body, /^FORMULA_DATABASE_URL=postgres:\/\/vault_demo_app@\$VPG\/vault_demo\?sslmode=require$/m);
-  assert.match(a, /rm -f "\$RP_EXTRA"/, 'the hand-placed api.extra.env is retired once its keys are rendered');
+  assert.match(a, /rm -f "(\$E)?\$RP_EXTRA"/, 'the hand-placed api.extra.env is retired once its keys are rendered');
   assert.match(rendered(arm(s, 'vault'), '/etc/rawprod-demo/vault.env'), /^\$V_AUDIT$/m);
 });
 
