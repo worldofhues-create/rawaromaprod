@@ -17,6 +17,7 @@
 import { Inject, Injectable, NotImplementedException } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
+import { AUDITED_SCHEMAS } from './write-audit.interceptor.js';
 
 @Injectable()
 export class AuditService {
@@ -43,6 +44,45 @@ export class AuditService {
       left join iam.user_master u on u.user_id = ae.actor_id
       order by ae.occurred_at desc
       limit ${lim} offset ${offset}`;
+    return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
+  }
+
+  /**
+   * GET /v1/audit-events (OPS-GREEN, lane ops-factory) — the write-audit trail every mutating
+   * request now leaves (write-audit.interceptor.ts), across every cluster schema, newest first.
+   * Filters: `entityId` (one record's history), `entityType` (one table), `action` (substring of
+   * the route, e.g. `purchase-orders`). Offset cursor, same as formulaAccessAudit. Governance
+   * read: `iam:audit_events:read` (owner + admin).
+   */
+  async listAuditEvents(q: { limit?: number; cursor?: string; entityId?: string; entityType?: string; action?: string }) {
+    const lim = Math.min(Math.max(1, q.limit ?? 100), 500);
+    const offset = Math.max(0, parseInt(q.cursor || '0', 10) || 0);
+    const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    const entityId = q.entityId && uuid.test(q.entityId) ? q.entityId : null;
+    const entityType = q.entityType ? String(q.entityType).slice(0, 120) : null;
+    const action = q.action ? `%${String(q.action).slice(0, 120)}%` : null;
+    // Only schemas whose audit_events table actually exists on this database (a schema group
+    // that was never provisioned must not turn the whole governance read into a 500).
+    const present = (await this.sql<{ s: string }[]>`
+      select s from unnest(${[...AUDITED_SCHEMAS]}::text[]) as s
+       where to_regclass(s || '.audit_events') is not null`).map((r) => r.s);
+    if (present.length === 0) return { items: [], nextCursor: null };
+    const parts = present.map((schema) => this.sql`
+      select ${schema}::text as "cluster", ae.id, ae.action, ae.entity_type as "entityType",
+             ae.entity_id as "entityId", ae.actor_id as "actorId", ae.after ->> 'status' as "resultStatus",
+             ae.request_id as "requestId", ae.occurred_at as "occurredAt"
+        from ${this.sql(schema)}.audit_events ae
+       where (${entityId}::uuid is null or ae.entity_id = ${entityId}::uuid)
+         and (${entityType}::text is null or ae.entity_type = ${entityType}::text)
+         and (${action}::text is null or ae.action ilike ${action}::text)`);
+    let union = parts[0]!;
+    for (const p of parts.slice(1)) union = this.sql`${union} union all ${p}`;
+    const items = await this.sql`
+      select t.*, u.email as "actor"
+        from (${union}) t
+        left join iam.user_master u on u.user_id = t."actorId"
+       order by t."occurredAt" desc, t.id desc
+       limit ${lim} offset ${offset}`;
     return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
   }
 
