@@ -37,6 +37,14 @@ test('auditRowFor: a create finds the table id in the response (top level or one
   assert.deepEqual(nested?.after, { status: 'PLANNING' });
 });
 
+test('auditRowFor: a child row created without :id is filed under the record the body names', () => {
+  const r = auditRowFor({ method: 'POST', route: '/v1/packaging-qc', permissions: ['packaging:finished_good_batch_master:write'],
+    params: {}, payload: { packagingQcId: ACTOR, overallResult: 'PASS', status: 'ACTIVE' },
+    body: { finishedGoodBatchId: ID, labelCheck: 'PASS' } });
+  assert.equal(r?.entityId, ID);
+  assert.equal(r?.entityType, 'finished_good_batch_master');
+});
+
 test('auditRowFor: reads, unpermissioned routes and unknown schemas', () => {
   assert.equal(auditRowFor({ method: 'GET', route: '/v1/grns', permissions: ['inventory:grn_master:read'], params: {}, payload: {} }), null);
   assert.equal(auditRowFor({ method: 'POST', route: '/auth/login', permissions: undefined, params: {}, payload: {} }), null);

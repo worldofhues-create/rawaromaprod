@@ -12,7 +12,7 @@
  * The row lands in the schema the route's own `@Permissions('<schema>:<table>:<verb>')` names,
  * so the audit follows the RBAC decision that admitted the request. `entity_type` is that
  * table; `action` is the route (`POST /v1/purchase-orders/:id/approve`); `entity_id` is the
- * `:id` param, else the table's own id in the response. Only a small `after` is kept (the
+ * `:id` param, else the table's own id in the response, else in the request body. Only a small `after` is kept (the
  * resulting `status`, when the response carries one): the audit trail says who did what to
  * which record, it never copies a record's contents (material identities stay where masking
  * already governs them). The Vault process never mounts this (its formula audit is the
@@ -100,6 +100,9 @@ export function auditRowFor(input: {
   permissions: readonly string[] | undefined;
   params: Record<string, unknown> | undefined;
   payload: unknown;
+  /** The request body: names the record acted on when the route has no `:id` and the response
+   *  is a new child row (e.g. POST /v1/packaging-qc names `finishedGoodBatchId`). */
+  body?: unknown;
 }): AuditRow | null {
   if (!MUTATING.has(input.method.toUpperCase())) return null;
   const perm = (input.permissions ?? []).find((p) => p.split(':').length === 3);
@@ -111,7 +114,7 @@ export function auditRowFor(input: {
   const shortKey = camelId(table.replace(/_(master|masters|details)$/, ''));
   const paramId = typeof input.params?.id === 'string' && UUID.test(input.params.id) ? input.params.id : null;
   const entityId = paramId ?? findId(input.payload, key) ?? findId(input.payload, shortKey)
-    ?? firstTopLevelId(input.payload);
+    ?? findId(input.body, key) ?? findId(input.body, shortKey) ?? firstTopLevelId(input.payload);
   const status = findStatus(input.payload, key);
   return {
     schema,
@@ -134,7 +137,7 @@ export class WriteAuditInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
     const req = context.switchToHttp().getRequest<RequestWithUser & {
-      params?: Record<string, unknown>; routeOptions?: { url?: string }; routerPath?: string;
+      params?: Record<string, unknown>; body?: unknown; routeOptions?: { url?: string }; routerPath?: string;
     }>();
     const method = String(req.method ?? 'GET');
     if (!MUTATING.has(method.toUpperCase())) return next.handle();
@@ -144,7 +147,7 @@ export class WriteAuditInterceptor implements NestInterceptor {
     const route = req.routeOptions?.url ?? req.routerPath ?? String(req.url ?? '').split('?')[0] ?? '';
     return next.handle().pipe(
       concatMap(async (payload) => {
-        const row = auditRowFor({ method, route, permissions, params: req.params, payload });
+        const row = auditRowFor({ method, route, permissions, params: req.params, payload, body: req.body });
         if (row) {
           try { await this.write(row, req); } catch (err) {
             this.logger.error(`audit row not written for ${row.action}: ${(err as Error).message}`);
