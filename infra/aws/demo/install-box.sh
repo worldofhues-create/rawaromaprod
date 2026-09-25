@@ -8,6 +8,9 @@ set -euo pipefail
 D=$(cd "$(dirname "$0")" && pwd)
 LIB=/usr/local/lib/rawaroma/demo
 if [ "$D" != "$LIB" ]; then install -d "$LIB"; cp -a "$D/." "$LIB/"; chown -R root:root "$LIB"; fi
+# The app box's shared http-level header buffers live beside the production vhosts (infra/aws/nginx/); staged into
+# $LIB/nginx/ with the demo's own so a later run from $LIB still has it.
+if [ -f "$D/../nginx/rawprod-large-headers.conf" ]; then install -m 644 "$D/../nginx/rawprod-large-headers.conf" "$LIB/nginx/rawprod-large-headers.conf"; fi
 mkuser(){ id "$1" >/dev/null 2>&1 || useradd --system --home-dir "$2" --no-create-home --shell /usr/sbin/nologin "$1"; }
 unit(){ install -m 644 "$LIB/systemd/$1" /etc/systemd/system/$1; systemctl disable "$1" >/dev/null 2>&1 || true; }
 case "${1:?app|vault}" in
@@ -35,6 +38,9 @@ app)
     install -d -m 755 /var/www/rawprod-demo-cf/factory
     [ -f /var/www/rawprod-demo-cf/factory/index.html ] || printf '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>RawProd demo</title></head><body style="font-family:system-ui;margin:3rem"><h1>RawProd demo</h1><p>Origin is up. The demo console is not deployed yet.</p></body></html>\n' > /var/www/rawprod-demo-cf/factory/index.html
   fi
+  # The app box's http-level header buffers (shared with production; infra/aws/nginx/rawprod-large-headers.conf), so a
+  # large RawProd owner token is never refused at nginx. Checked by the same nginx -t as the vhost below.
+  install -d /etc/nginx/conf.d; install -m 644 "$LIB/nginx/rawprod-large-headers.conf" /etc/nginx/conf.d/rawprod-large-headers.conf
   install -m 644 "$LIB/nginx/rawaroma-demo-origin.conf" /etc/nginx/sites-available/rawaroma-demo-origin.conf
   ln -sf /etc/nginx/sites-available/rawaroma-demo-origin.conf /etc/nginx/sites-enabled/rawaroma-demo-origin.conf
   if nginx -t 2>&1; then systemctl reload nginx; echo "nginx reloaded"; else rm -f /etc/nginx/sites-enabled/rawaroma-demo-origin.conf; echo "nginx -t FAILED, demo vhost removed"; exit 1; fi

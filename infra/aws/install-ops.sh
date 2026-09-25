@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # On-box installer for lane INFRA2 (G6 metrics, G7 restore drill, env files, staged units/vhosts).
 # usage (as root, from an unpacked copy of infra/aws): ./install-ops.sh app|vault
-# Idempotent. Never starts or restarts rawprod-api / vault-api, never touches alembic-* units or nginx state:
+# Idempotent. Never starts or restarts rawprod-api / vault-api, never touches alembic-* units, never reloads nginx
+# (it stages vhosts/snippets and, on app, conf.d/rawprod-large-headers.conf for the next nginx -t + reload):
 # the only service it (re)starts is amazon-cloudwatch-agent. daemon-reload does not restart anything.
 set -euo pipefail
 R=${1:?app|vault}; D=$(cd "$(dirname "$0")" && pwd)
@@ -39,6 +40,9 @@ install -d /etc/nginx/sites-available
 install -m 644 "$D/nginx/$V" "/etc/nginx/sites-available/$V"
 install -d /etc/nginx/rawprod; [ "$R" = vault ] && install -m 644 "$D/nginx/security-headers-vault.conf" /etc/nginx/rawprod/ || true
 [ "$R" = app ] && install -m 644 "$D/nginx/security-headers-factory.conf" "$D/nginx/security-headers-platform.conf" /etc/nginx/rawprod/ || true
+# http-level header buffers for the app box (prod + demo): a large RawProd owner token must not lock the owner out
+# at nginx (live since 2026-09-25; see the file). Installed, not reloaded -- the next nginx -t + reload picks it up.
+[ "$R" = app ] && { install -d /etc/nginx/conf.d; install -m 644 "$D/nginx/rawprod-large-headers.conf" /etc/nginx/conf.d/rawprod-large-headers.conf; } || true
 # env files from SSM (mode 600)
 /usr/local/lib/rawaroma/render-env.sh "$R"
 # CloudWatch agent

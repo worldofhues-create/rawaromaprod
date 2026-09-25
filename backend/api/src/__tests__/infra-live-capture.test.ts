@@ -460,8 +460,23 @@ test('nginx: the demo factory origin injects console-config.js from the DEMO con
   assert.match(d, /sub_filter '<script src="\/platform\.js">' '<script src="\/console-config\.js"><\/script><script src="\/platform\.js">';/);
 });
 
+test('nginx: conf.d/rawprod-large-headers.conf exists, holds 4x32k header buffers, and both app installers put it in conf.d', () => {
+  // Live since 2026-09-25: the RawProd owner token (257 permissions, ~12.3 KB) overflowed nginx's 4 8k default and the
+  // owner was locked out of Factory at the proxy. Kept as defence in depth after the token is made small.
+  const f = 'infra/aws/nginx/rawprod-large-headers.conf';
+  assert.ok(existsSync(join(ROOT, f)), `${f} is missing`);
+  const directives = code(read(f)).split('\n').map((l) => l.trim()).filter(Boolean);
+  assert.deepEqual(directives, ['large_client_header_buffers 4 32k;'], 'http-level file: that one directive and nothing else');
+  // conf.d is included at http level; a second http-level copy anywhere in the enabled set fails nginx -t as a duplicate.
+  assert.deepEqual(matches(/large_client_header_buffers/g).map(({ f: file }) => file), []);
+  const dest = /install -m 644 "\$(?:D|LIB)\/nginx\/rawprod-large-headers\.conf" \/etc\/nginx\/conf\.d\/rawprod-large-headers\.conf/;
+  assert.match(read('infra/aws/install-ops.sh'), dest, 'install-ops.sh app does not install it into conf.d');
+  assert.match(read('infra/aws/demo/install-box.sh'), dest, 'install-box.sh app does not install it into conf.d');
+});
+
 test('every script this lane touched is valid bash', () => {
-  for (const f of ['infra/aws/env/render-env.sh', 'infra/aws/demo/render-demo-env.sh', 'infra/aws/nginx/install-static.sh']) {
+  for (const f of ['infra/aws/env/render-env.sh', 'infra/aws/demo/render-demo-env.sh', 'infra/aws/nginx/install-static.sh',
+    'infra/aws/install-ops.sh', 'infra/aws/demo/install-box.sh']) {
     const r = spawnSync('bash', ['-n', join(ROOT, f)], { encoding: 'utf8' });
     assert.equal(r.status, 0, `${f}: ${r.stderr}`);
   }

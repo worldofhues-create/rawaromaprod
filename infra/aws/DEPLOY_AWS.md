@@ -56,7 +56,10 @@ no ALEMBIC processes to collide with.
    `systemctl daemon-reload`, `systemctl enable --now rawprod-migrate.service rawprod-api.service`.
    Then run the **IAM bootstrap seed (§4a) — required**: without it the `iam` tables stay empty and
    no role can do anything. The demo box needs the same seed against `rawprod_demo`.
-6. Copy `infra/aws/nginx/rawprod-main.conf` and `infra/aws/nginx/security-headers-{factory,platform}.conf`
+6. Copy `infra/aws/nginx/rawprod-large-headers.conf` to `/etc/nginx/conf.d/` (http-level
+   `large_client_header_buffers 4 32k;` — live since 2026-09-25, when a ~12 KB owner token was refused
+   by nginx's 8k default and the owner was locked out of Factory; `install-ops.sh app` and the demo's
+   `install-box.sh app` both install it). Copy `infra/aws/nginx/rawprod-main.conf` and `infra/aws/nginx/security-headers-{factory,platform}.conf`
    to `/etc/nginx/rawprod/` (create the dir), symlink `rawprod-main.conf` into
    `sites-enabled/`, `certbot --nginx -d rawfactory.huecycle.in -d rawplatform.huecycle.in`,
    `nginx -t && systemctl reload nginx`.
