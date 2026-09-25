@@ -244,8 +244,10 @@ same nginx authenticator as raw.huecycle.in; `certbot.timer` renews. Change proc
   (2026-09-25) re-read the live files and made a re-render reproduce them: the ALEMBIC demo's CORS origins, public
   origin, bridge sweep, mail drops, `ALEMBIC_REF_PREFIX=DEMO` (set live 2026-09-25; the proforma rail is off
   without it) and `web-build.env`; the demo RawProd targets incl. vault; the demo vault CORS incl.
-  rawdemovault. The demo's BRIDGE_HMAC_KEK, RUN_WORKER_IN_PROCESS and INTERNAL_BRIDGE_KEY follow what the demo RUNS
-  with (production KEK; no worker; no bridge key) -- a parameter appearing in SSM never switches them.
+  rawdemovault. The demo's BRIDGE_HMAC_KEK and INTERNAL_BRIDGE_KEY follow what the demo RUNS with (production KEK; no
+  bridge key) -- a parameter appearing in SSM never switches them. RUN_WORKER_IN_PROCESS=true is rendered ALWAYS (RC6):
+  without the in-process worker the demo's bridge outbox never drains (201 events were stuck on 2026-09-25, and the
+  RawProd->ALEMBIC projection and every worker automation were dead).
   `backend/api/src/__tests__/infra-live-capture.test.ts` runs both scripts against a sandbox. ALEMBIC PRODUCTION's
   `/etc/alembic/{api,web-build}.env` are rendered by the alembic repo's `ops/deploy/render-env.sh`.
 - `deploy.sh` health: API at `127.0.0.1:4100/health`, consoles over HTTPS with `--resolve <host>:443:127.0.0.1`

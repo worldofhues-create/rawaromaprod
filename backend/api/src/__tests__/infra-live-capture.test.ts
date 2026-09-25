@@ -98,7 +98,8 @@ const LIVE = {
   rawprodDemoApi: ['ALEMBIC_ASSERTION_AUDIENCE', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_TENANT_ID',
     'ALEMBIC_ASSERTION_VERIFY_KEY', 'APP_ENV', 'AWS_EC2_METADATA_DISABLED', 'BRIDGE_HMAC_KEK', 'CORS_ORIGINS', 'DATABASE_URL',
     'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'GIT_SHA', 'JWT_ACCESS_TTL', 'JWT_SECRET', 'NODE_ENV',
-    'PGSSLROOTCERT', 'PORT', 'RAWPROD_ASSERTION_EXPECTED_TARGETS', 'RAWPROD_ENVIRONMENT', 'VAULT_API_INTERNAL_URL'],
+    'PGSSLROOTCERT', 'PORT', 'RAWPROD_ASSERTION_EXPECTED_TARGETS', 'RAWPROD_ENVIRONMENT', 'VAULT_API_INTERNAL_URL',
+    'RUN_WORKER_IN_PROCESS'],
   rawprodDemoVault: ['NODE_ENV', 'APP_ENV', 'RAWPROD_ENVIRONMENT', 'JWT_ACCESS_TTL', 'PORT', 'VAULT_MODE', 'PGSSLROOTCERT',
     'FORMULA_DATABASE_URL', 'FORMULA_KMS_KEY_ID', 'FORMULA_KMS_REGION', 'AWS_CONFIG_FILE', 'AWS_SHARED_CREDENTIALS_FILE',
     'AWS_SDK_LOAD_CONFIG', 'AWS_EC2_METADATA_DISABLED', 'JWT_SECRET', 'ALEMBIC_ASSERTION_ISSUER', 'ALEMBIC_ASSERTION_AUDIENCE',
@@ -174,7 +175,10 @@ test('render-demo-env app: rawprod-demo api.env is the running key set, targets 
     assert.equal(e.get('RAWPROD_ASSERTION_EXPECTED_TARGETS'), 'factory,platform,vault');
     // /rawaroma/demo/rawprod/bridge-hmac-kek exists and differs; switching would orphan every sealed bridge secret.
     assert.equal(e.get('BRIDGE_HMAC_KEK'), DEMO_PARAMS['/rawaroma/rawprod/bridge-hmac-kek']);
-    assert.equal(e.has('RUN_WORKER_IN_PROCESS'), false, 'the demo runs without the in-process worker');
+    // RC6: set live by P0 2026-09-25 -- without the in-process worker the demo's bridge outbox never drains (201 events
+    // were stuck; the RawProd->ALEMBIC projection and every worker automation were dead). Rendered even when the box's
+    // current file lacks it, as this sandbox's does.
+    assert.equal(e.get('RUN_WORKER_IN_PROCESS'), 'true', 'the demo app must run the in-process worker');
     assert.equal(e.has('INTERNAL_BRIDGE_KEY'), false, 'the demo (and the demo vault) run without an internal bridge key');
     assert.equal(e.get('CORS_ORIGINS'), 'https://fgw.execute-api.invalid');
     assert.equal(e.get('ALEMBIC_ASSERTION_TENANT_ID'), TENANT);
@@ -184,6 +188,19 @@ test('render-demo-env app: rawprod-demo api.env is the running key set, targets 
     assert.equal(existsSync(join(b.root, 'etc/rawprod-demo/api.extra.env')), false, 'api.extra.env retired');
     noSecretPrinted(r, b);
   } finally { rmSync(b.root, { recursive: true, force: true }); }
+});
+
+test('render-demo-env app: RUN_WORKER_IN_PROCESS=true is rendered whatever the box says, exactly once', () => {
+  for (const onBox of ['', 'RUN_WORKER_IN_PROCESS=false\n', 'RUN_WORKER_IN_PROCESS=true\n']) {
+    const b = demoAppBox(onBox);
+    try {
+      const r = run(b, 'infra/aws/demo/render-demo-env.sh', 'app');
+      assert.equal(r.status, 0, r.stderr);
+      const text = readFileSync(join(b.root, 'etc/rawprod-demo/api.env'), 'utf8');
+      assert.deepEqual(text.split('\n').filter((l) => l.startsWith('RUN_WORKER_IN_PROCESS=')), ['RUN_WORKER_IN_PROCESS=true'],
+        `box had ${JSON.stringify(onBox)}`);
+    } finally { rmSync(b.root, { recursive: true, force: true }); }
+  }
 });
 
 test('render-demo-env app: owner switches made on the box survive a re-render (demo KEK, worker, bridge key)', () => {

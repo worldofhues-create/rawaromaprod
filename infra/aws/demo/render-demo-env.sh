@@ -21,7 +21,8 @@
 #   /etc/alembic-demo/web-build.env  NEXT_PUBLIC_RAWPROD_{FACTORY,PLATFORM,VAULT}_ORIGIN (read by ALEMBIC's
 #                                    ops/deploy/deploy-sha.sh at build time; public, mode 644)
 #   /etc/rawprod-demo/api.env        RAWPROD_ASSERTION_EXPECTED_TARGETS=factory,platform,vault; BRIDGE_HMAC_KEK is the
-#                                    KEK the demo RUNS with (see RP_KEK), never switched by a parameter appearing
+#                                    KEK the demo RUNS with (see RP_KEK), never switched by a parameter appearing;
+#                                    RUN_WORKER_IN_PROCESS=true (always -- the demo outbox and automations need it)
 #   /etc/rawprod-demo/vault.env      CORS_ORIGINS also admits https://rawdemovault.huecycle.in (infra/aws/nginx/
 #                                    rawdemovault.conf)
 # RENDER_ROOT (test-only) prefixes every path this script reads or writes, so
@@ -122,15 +123,17 @@ X
     RP_KEK=$RP_DKEK
   fi
   RP_SHA=$(git_sha /srv/rawprod-demo/app); [ -n "$RP_SHA" ] || RP_SHA=$(current GIT_SHA "$RP_EXTRA")
-  # The demo runs WITHOUT an INTERNAL_BRIDGE_KEY and WITHOUT RUN_WORKER_IN_PROCESS (live 2026-09-25, read from the
-  # running process), and the demo vault has no INTERNAL_BRIDGE_KEY either. /rawaroma/demo/rawprod/internal-bridge-key
-  # now exists, but its mere existence must not turn the internal bridge on for one side only, and d75d8e4's
-  # RUN_WORKER_IN_PROCESS=true (start the demo outbox/bridge relay) was never applied. Both are owner switches:
-  # each is rendered once the box runs with it (set it by hand, then re-render keeps it), never introduced here.
+  # The demo runs WITHOUT an INTERNAL_BRIDGE_KEY (live 2026-09-25, read from the running process), and the demo vault
+  # has no INTERNAL_BRIDGE_KEY either. /rawaroma/demo/rawprod/internal-bridge-key now exists, but its mere existence
+  # must not turn the internal bridge on for one side only: it is an owner switch, rendered once the box runs with it
+  # (set it by hand, then re-render keeps it), never introduced here.
   RP_IBK=""; if [ -n "$(current INTERNAL_BRIDGE_KEY /etc/rawprod-demo/api.env)$(current INTERNAL_BRIDGE_KEY "$RP_EXTRA")" ]; then
     RP_IBK=$(opt INTERNAL_BRIDGE_KEY /rawaroma/demo/rawprod/internal-bridge-key /etc/rawprod-demo/api.env "$RP_EXTRA"); fi
-  RP_WORKER=$(current RUN_WORKER_IN_PROCESS /etc/rawprod-demo/api.env); [ -n "$RP_WORKER" ] || RP_WORKER=$(current RUN_WORKER_IN_PROCESS "$RP_EXTRA")
-  [ -z "$RP_WORKER" ] || RP_WORKER="RUN_WORKER_IN_PROCESS=$RP_WORKER"
+  # RUN_WORKER_IN_PROCESS=true, ALWAYS (RC6, reversing lane cfg-rp's carry-only rule). Without the in-process worker the
+  # demo's bridge outbox never drains: on 2026-09-25 201 events were stuck, and the RawProd->ALEMBIC projection and
+  # every worker automation were dead. P0 set it live on /etc/rawprod-demo/api.env the same day; a re-render must not
+  # take it away again, whatever the box's file says.
+  RP_WORKER="RUN_WORKER_IN_PROCESS=true"
   RP_PW=$(req /rawaroma/demo/rawprod/DB_PASSWORD_app); RP_PW=$(enc "$RP_PW")
   RP_JWT=$(req /rawaroma/demo/rawprod/JWT_SECRET)
   RP_VERIFY=$(req /rawaroma/demo/rawprod/assertion-verify-key)
