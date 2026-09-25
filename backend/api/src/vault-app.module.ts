@@ -6,10 +6,14 @@
  *
  *   - `ConfigModule` + `JwtModule` — identity. `JwtAuthGuard`/`PermissionsGuard`/`FreshAuthGuard`
  *     (registered globally below, same order `AppModule` uses) verify the RawProd session JWT
- *     the caller already holds (roles/permissions/authTime embedded in the token itself —
- *     `principal.ts`) purely off `JWT_SECRET`, shared with the main app box via SSM. Zero DB
- *     read on the request path — see this file's own "IDENTITY DESIGN" note below for why this
- *     is the chosen shape and what was deliberately NOT built.
+ *     the caller already holds (roles, the vault-scoped `formula:*`/`vault:*` permissions and
+ *     authTime embedded in the token itself — `principal.ts`) purely off `JWT_SECRET`, shared
+ *     with the main app box via SSM. `PERMISSION_RESOLVER` is `TokenCarriedPermissionResolver`
+ *     (permission-resolver.ts): the main box resolves the full set from roles against the IAM
+ *     tables, which this box has no credential for, so here a request holds exactly the
+ *     vault-scoped subset the token carries, which is every permission a route on this box
+ *     checks. Zero DB read on the request path — see this file's own "IDENTITY DESIGN" note
+ *     below for why this is the chosen shape and what was deliberately NOT built.
  *   - `CryptoModule` — the encrypted `/crypto/handshake` + `/rpc` tunnel `web-vault/vault.js`
  *     talks over (the SAME wire protocol every RawProd client uses). Domain-free, in-memory
  *     only (`SessionKeysService`).
@@ -34,12 +38,13 @@
  * vault box; document"): a vault user authenticates the SAME way every other RawProd staff
  * member does — ALEMBIC OTP -> signed assertion -> `POST /auth/alembic-assertion` on the MAIN
  * app box (`cluster-org`'s `AuthService.loginWithAssertion`), which mints the RawProd JWT with
- * roles/permissions embedded. That JWT is then presented to the Vault console exactly like any
- * other bearer token. This process does NOT implement its own `/auth/alembic-assertion` — doing
- * so would require binding the assertion's `sub`/`email` to an `iam.user_master` row (exactly
- * what `AuthService.loginWithAssertion` does) to resolve roles/permissions, which needs the
- * main-schema DB this box must never hold a credential for. The assertion's own `roles` claim is
- * too coarse a substitute (no flattened `domain:resource:action` permission list), so minting a
+ * roles and the vault-scoped permissions embedded. That JWT is then presented to the Vault
+ * console exactly like any other bearer token. This process does NOT implement its own
+ * `/auth/alembic-assertion` — doing so would require binding the assertion's `sub`/`email` to
+ * an `iam.user_master` row (exactly what `AuthService.loginWithAssertion` does) to resolve
+ * roles/permissions, which needs the main-schema DB this box must never hold a credential for.
+ * The assertion's own `roles` claim is too coarse a substitute (no flattened
+ * `domain:resource:action` permission list), so minting a
  * SECOND, parallel, main-DB-free JWT here would mean a second permission-flattening
  * implementation to keep in sync with `ROLE_PERMISSION_MAPPING` — a bigger, riskier surface than
  * "authenticate once on the main box, bring the token here." The replay-protected, audited half
@@ -56,9 +61,11 @@ import {
   FreshAuthGuard,
   JwtAuthGuard,
   JwtModule,
+  PERMISSION_RESOLVER,
   PermissionsGuard,
   RequestIdMiddleware,
   ResponseEnvelopeInterceptor,
+  TokenCarriedPermissionResolver,
 } from '@core/backend-kernel';
 import { FormulaModule } from '@ra/cluster-formula';
 import { CryptoModule } from './crypto/crypto.module.js';
@@ -75,6 +82,8 @@ import { VaultHealthModule } from './vault-bridge/vault-health.module.js';
     VaultHealthModule,
   ],
   providers: [
+    // No IAM tables here: a request holds the vault-scoped permissions its token carries (header).
+    { provide: PERMISSION_RESOLVER, useClass: TokenCarriedPermissionResolver },
     // Same order as AppModule: authenticate, then authorize, then step-up. No FlagGuard (see
     // header) — routes here carry no @Flag() decorators, and there is no FlagsService snapshot
     // to evaluate against without PlatformModule.

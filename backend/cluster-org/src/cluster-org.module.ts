@@ -9,9 +9,13 @@
  * organization list" screen (§6) without a second org_master query implementation —
  * it maps the result down to id/code/name/status only, so no other org_master column
  * leaks into that platform_super_admin-only, no-tenant-business-data surface.
+ *
+ * `PERMISSION_RESOLVER` is exported for `AppModule`'s global `JwtAuthGuard`: this cluster owns
+ * the IAM tables, so it is the one that resolves a token's roles to permissions server-side
+ * (`RolePermissionResolver`).
  */
 import { Module } from '@nestjs/common';
-import { PG_CLIENT } from '@core/backend-kernel';
+import { PERMISSION_RESOLVER, PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { OrgController } from './org/org.controller.js';
 import { OrgService } from './org/org.service.js';
@@ -19,6 +23,7 @@ import { SecurityController } from './security/security.controller.js';
 import { SecurityService } from './security/security.service.js';
 import { AuthController } from './auth/auth.controller.js';
 import { AuthService } from './auth/auth.service.js';
+import { RolePermissionResolver } from './auth/role-permission.resolver.js';
 import { OrgLookupService } from './cluster-org-lookup.service.js';
 import { ORG_DB, drizzle, orgSchema } from './cluster-org.tokens.js';
 import { ORG_LOOKUP } from './public-api.js';
@@ -36,7 +41,9 @@ import { ORG_LOOKUP } from './public-api.js';
     AuthService,
     OrgLookupService,
     { provide: ORG_LOOKUP, useExisting: OrgLookupService },
+    RolePermissionResolver,
+    { provide: PERMISSION_RESOLVER, useExisting: RolePermissionResolver },
   ],
-  exports: [ORG_DB, ORG_LOOKUP, OrgService],
+  exports: [ORG_DB, ORG_LOOKUP, OrgService, PERMISSION_RESOLVER],
 })
 export class ClusterOrgModule {}

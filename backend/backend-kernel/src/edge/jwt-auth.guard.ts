@@ -4,6 +4,10 @@
  * the request. Routes marked `@Public()` skip it. Portal-audience narrowing for a
  * specific route is enforced separately by reading `@Portal(...)` here too, so an admin
  * route rejects a buyer token at the audience layer (doc 05 §1).
+ *
+ * `principal.permissions` comes from the process's `PermissionResolver`, not from the token
+ * (the token carries roles + only the vault-scoped subset; see `permission-resolver.ts`). The
+ * resolver is a required dependency: a composition root that does not bind one fails at boot.
  */
 import {
   type CanActivate,
@@ -16,6 +20,7 @@ import { PORTALS, type Portal } from '@core/contracts';
 import { META_PORTALS, META_PUBLIC } from '../decorators/metadata.keys.js';
 import { DomainError } from './domain-error.js';
 import { JwtService } from './jwt.service.js';
+import { PERMISSION_RESOLVER, type PermissionResolver } from './permission-resolver.js';
 import type { AuthPrincipal, RequestWithUser } from './principal.js';
 
 @Injectable()
@@ -23,6 +28,7 @@ export class JwtAuthGuard implements CanActivate {
   constructor(
     @Inject(Reflector) private readonly reflector: Reflector,
     @Inject(JwtService) private readonly jwt: JwtService,
+    @Inject(PERMISSION_RESOLVER) private readonly permissionResolver: PermissionResolver,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -57,7 +63,7 @@ export class JwtAuthGuard implements CanActivate {
       userId: claims.sub,
       portal: claims.portal,
       roles: claims.roles,
-      permissions: claims.perms,
+      permissions: await this.permissionResolver.resolve(claims),
       permVersion: claims.pv,
       sessionId: claims.sid,
       iat: claims.iat,

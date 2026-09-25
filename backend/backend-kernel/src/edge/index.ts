@@ -2,6 +2,14 @@ export { DomainError } from './domain-error.js';
 export { JwtService, type AccessClaims, type RefreshClaims } from './jwt.service.js';
 export { JwtModule } from './jwt.module.js';
 export { JwtAuthGuard } from './jwt-auth.guard.js';
+export {
+  PERMISSION_RESOLVER,
+  TOKEN_CARRIED_PERMISSION_PATTERNS,
+  TokenCarriedPermissionResolver,
+  isTokenCarriedPermission,
+  type PermissionClaims,
+  type PermissionResolver,
+} from './permission-resolver.js';
 export { PermissionsGuard } from './permissions.guard.js';
 export { FreshAuthGuard } from './fresh-auth.guard.js';
 export { FlagGuard } from './flag.guard.js';

@@ -97,7 +97,8 @@ const answered = () => ({ status: 200, body: {
 test('POST /v1/aria/ask needs a RawProd session: the real JwtAuthGuard refuses a request without one', async () => {
   const reflector = new Reflector();
   const jwt = { verifyAccess: async () => { throw new Error('must not be reached without a token'); } };
-  const guard = new JwtAuthGuard(reflector, jwt as never);
+  const permissions = { resolve: async () => { throw new Error('must not be reached without a token'); } };
+  const guard = new JwtAuthGuard(reflector, jwt as never, permissions);
   for (const method of ['ask', 'status'] as const) {
     const handler = (AriaBridgeController.prototype as unknown as Record<string, unknown>)[method];
     assert.notEqual(reflector.get(META_PUBLIC, handler as never), true, `${method} must not be @Public`);

@@ -2,7 +2,10 @@
  * AuthService — login against the dictionary USER_MASTER (Phase-1A). Verifies the Argon2id
  * password_hash, flattens the user's roles (USER_ROLE_MAPPING → ROLE_MASTER) and permissions
  * (→ ROLE_PERMISSION_MAPPING → PERMISSION_MASTER) and mints the access/refresh tokens the
- * @core edge guards already consume. `setPassword` hashes + stores a user's password.
+ * @core edge guards already consume. The access token carries the roles but only the
+ * vault-scoped permissions (`JwtService.signAccess` narrows them); the main box resolves the
+ * rest from roles per request (`RolePermissionResolver`), and `/me` returns the full list for
+ * the UI. `setPassword` hashes + stores a user's password.
  *
  * MVP note: no server-side session store yet (the dictionary has no sessions table), so
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.

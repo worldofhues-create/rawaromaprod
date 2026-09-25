@@ -16,6 +16,7 @@ import { eq } from 'drizzle-orm';
 import { uuidv7 } from '@core/data-kernel';
 import { ConfigService, JwtService } from '@core/backend-kernel';
 import { AuthService } from '../auth/auth.service.js';
+import { RolePermissionResolver } from '../auth/role-permission.resolver.js';
 import { ensureSchema, orgDb, orgSchema, testClient, closeTestClient, principal } from '../../../test-support/db.js';
 
 const {
@@ -155,13 +156,18 @@ test('valid assertion for a provisioned, active user mints a session with that '
   assert.ok(result.accessToken);
   assert.ok(result.refreshToken);
 
-  // The MINTED token's roles/perms come from user_master's OWN grants, never from the
-  // assertion's `roles` claim (which named an unrelated ALEMBIC role above).
+  // The MINTED token's roles come from user_master's OWN grants, never from the assertion's
+  // `roles` claim (which named an unrelated ALEMBIC role above), and the permissions the
+  // server resolves from those roles are that user's own grants too. The (non-vault)
+  // permission is NOT carried inline: the token holds roles, the server resolves the rest.
   const config = testConfig();
   const jwt = new JwtService(config);
   const claims = await jwt.verifyAccess(result.accessToken);
   assert.ok(claims.roles.includes(roleCode));
-  assert.ok(claims.perms.includes(permCode));
+  assert.ok(!claims.roles.includes('some-unrelated-alembic-role'));
+  assert.ok((await new RolePermissionResolver(db).resolve(claims)).includes(permCode));
+  const raw = JSON.parse(Buffer.from(result.accessToken.split('.')[1]!, 'base64url').toString('utf8'));
+  assert.ok(!(raw.perms ?? []).includes(permCode));
 });
 
 test('UNKNOWN USER — no auto-provisioning; refused with a clear message', async () => {
