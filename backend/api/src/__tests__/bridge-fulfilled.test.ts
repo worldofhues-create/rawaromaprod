@@ -248,3 +248,31 @@ test('Act M: a receipt in a unit that cannot be converted never completes the re
   assert.notEqual(req.lifecycle_status, 'COMPLETE');
   assert.match(String(req.status_reason), /cannot be converted to 'mg'/);
 });
+
+/* RC5 integration (RELIABILITY x FACTORY on importer.service.ts). Both halves on ONE
+ * Fulfilled path: the payload contract refuses a malformed receipt before the unit
+ * conversion ever reads it (400 permanent, nothing recorded, the requirement untouched), and
+ * the well-formed kg receipt that follows still completes the mg requirement. */
+test('RC5: a malformed Fulfilled is a 400 permanent refusal; the well-formed kg receipt then completes the mg requirement', async () => {
+  const sql = testClient();
+  const { reqId, correlationId } = await mgRequirement(1_000_000);
+  const bad = fulfilled(reqId, correlationId, 2, crypto.randomUUID(), 'one kilo');
+  const refused = await send(bad);
+  assert.equal(refused.status, 400);
+  assert.equal(refused.body.permanent, true);
+  assert.equal(refused.body.code, 'BRIDGE_PERMANENT_INVALID_PAYLOAD');
+  assert.equal(refused.body.detail, 'received_qty:invalid');
+  assert.equal((await sql`select 1 from bridge.inbound_event where event_id = ${bad.event_id}`).length, 0);
+  const before = (await sql`select lifecycle_status, last_applied_version from bridge.production_requirement
+                              where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.equal(before.lifecycle_status, 'ACCEPTED');
+  assert.equal(Number(before.last_applied_version), 1);
+
+  const ok = await send(fulfilled(reqId, correlationId, 2, crypto.randomUUID(), '1'));
+  assert.equal(ok.status, 200);
+  assert.equal(ok.body.outcome, 'applied');
+  const req = (await sql`select lifecycle_status, status_reason from bridge.production_requirement
+                           where alembic_requirement_id = ${reqId}`)[0]!;
+  assert.equal(req.lifecycle_status, 'COMPLETE');
+  assert.match(String(req.status_reason), /cumulative 1000000 of 1000000 mg/);
+});
