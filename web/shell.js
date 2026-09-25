@@ -324,7 +324,8 @@
   // file either; loadTutorialView (web/tutorial.js, loaded after this file) itself decides which
   // lessons a session may actually see, same split as __dash__/loadDashboard).
   Object.keys(ROLES).forEach(function (k) { ROLES[k].nav.push(['tutorial', 'Tutorials', 'clipboard', '__tutorial__']); });
-  var VIEW = { owner: 'superadmin' };
+  // LANE D1: the demo showcase opens the owner's screens; the server keeps it read-only and masked (no writes, no formula access).
+  var VIEW = { owner: 'superadmin', showcase: 'superadmin' };
   function roleView(r) { return VIEW[r] || r; }
 
   /* ---------------- state + helpers ---------------- */
