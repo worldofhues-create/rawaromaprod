@@ -67,6 +67,13 @@
     if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status); }
     return r.json ? r.json.data : null;
   }
+  /* A cursor page: the envelope carries the rows as `data` and the next cursor as `meta.cursor`
+   * (ResponseEnvelopeInterceptor) — `api()` above keeps only `data`, so paged screens use this. */
+  async function apiPage(path) {
+    var r = await tunnel(path);
+    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status); }
+    return { items: (r.json && r.json.data) || [], cursor: (r.json && r.json.meta && r.json.meta.cursor) || null };
+  }
 
   /* Health is @Public() — usable to prove connectivity even before login, but the rest of
    * the console still requires a platform_super_admin session. */
@@ -516,22 +523,55 @@
     });
   }
 
-  /* ── audit & support (real route, honestly not-implemented server-side today) ─────────────── */
-  // A 501 from the route means "not built yet", not "you can't" — the card says so in plain
-  // words, whatever the server's message. Any other failure keeps its own message.
+  /* ── audit & support: every sign-in attempt, newest first (GET /v1/login-history) ─────────── */
+  // Rows come from unauthenticated sign-in attempts, so every value goes in as a text node (h()),
+  // never as markup. "Load more" follows the page cursor.
   async function screenSupport() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('support', content);
+    var tbody = h('tbody', {});
+    var more = h('button', { class: 'btn', style: 'margin-top:12px' }, ['Load more']);
+    var cursor = null;
+    function row(r) {
+      var ok = r.outcome === 'SUCCESS';
+      return h('tr', {}, [
+        h('td', { 'data-label': 'When' }, [fmtDt(r.when)]),
+        h('td', { 'data-label': 'Who' }, [r.who || '—']),
+        h('td', { 'data-label': 'How' }, [r.how || '—']),
+        h('td', { 'data-label': 'Result' }, [
+          h('span', { class: 'chip ' + (ok ? 'g' : 'r') }, [ok ? 'Success' : 'Refused']),
+          ok ? null : h('div', { style: 'margin-top:4px;color:var(--ink-3)' }, [r.reason || r.reasonCode || '']),
+        ]),
+        h('td', { class: 'mono', 'data-label': 'IP' }, [r.ip || '—']),
+      ]);
+    }
+    async function load() {
+      var page = await apiPage('/v1/login-history?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+      page.items.forEach(function (r) { tbody.appendChild(row(r)); });
+      cursor = page.cursor;
+      more.style.display = cursor ? '' : 'none';
+      return page.items.length;
+    }
+    more.addEventListener('click', async function () {
+      more.disabled = true;
+      try { await load(); } catch (e) { toast(e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.', true); }
+      more.disabled = false;
+    });
     try {
-      var page = await api('/v1/login-history?limit=100');
-      var rows = (page.items || []).map(function (r) { return h('tr', {}, [h('td', {}, [fmtDt(r.occurredAt)]), h('td', {}, [r.actor || '—'])]); });
+      var n = await load();
       content.innerHTML = '';
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Login history'])]), h('table', {}, [h('tbody', {}, rows)])]));
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Login history'])]),
+        n
+          ? h('div', {}, [
+              h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['When']), h('th', {}, ['Who']), h('th', {}, ['How']), h('th', {}, ['Result']), h('th', {}, ['IP'])])]), tbody]),
+              more,
+            ])
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No sign-ins recorded yet'])]),
+      ]));
     } catch (e) {
       content.innerHTML = '';
-      content.appendChild((e instanceof PlatformError && e.status === 501)
-        ? notBuilt('Login history', 'Login history isn\'t recorded yet.')
-        : notBuilt('Login history didn\'t load', (e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.')));
+      content.appendChild(notBuilt('Login history didn\'t load', (e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.')));
     }
   }
 

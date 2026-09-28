@@ -277,7 +277,7 @@
     '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
     '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'shortage', 'suggestedVendor'],
-    '/v1/login-history': ['loginAt', 'user', 'portal', 'expiresAt'],
+    '/v1/login-history': ['when', 'who', 'how', 'result', 'ip'],
     '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
     '/v1/countries': ['countryCode', 'countryName', 'status'],
     '/v1/stock-transfers': ['transferQty', 'transferDt', 'status'],
@@ -342,26 +342,32 @@
   var HIDE = { createdDt: 1, updatedDt: 1, createdBy: 1, updatedBy: 1 };
   function sensitive(k) { return /hash|secret|token|password|salt|enc_?payload|enc_?iv|enc_?tag|encpayload|enciv|enctag|encryption|vaultlocation/i.test(k); }
   function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/.test(v); }
-  function label(k) { return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
+  function label(k) { if (k === 'ip') return 'IP'; return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
   // uomId → readable unit code (kg / L / units …), loaded once (loadView) and used to label
   // quantity cells + create-form unit pickers so every quantity reads "10 kg", not a bare "10".
   var UOM = {};
   function trimNum(v) { var n = Number(v); return isFinite(n) && String(v).trim() !== '' ? String(n) : String(v); }
   function isQtyKey(k) { return /qty$/i.test(k) || k === 'available' || k === 'onHand' || k === 'reserved'; }
   function unitHtml(k, r) { var u = (isQtyKey(k) && r && r.uomId && UOM[r.uomId]) ? UOM[r.uomId] : ''; return u ? ' <span style="color:var(--ink-3);font-weight:var(--w-med);font-size:var(--t-cap)">' + u + '</span>' : ''; }
+  // Every value is escaped before it goes into markup: rows can carry text nobody vetted (a
+  // login-history row records the browser and email an unauthenticated sign-in attempt sent).
+  function escCell(v) { return String(v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fmt(k, v, r) {
     if (v === null || v === undefined || v === '') return '<span style="color:var(--ink-3)">—</span>';
     if (typeof v === 'boolean') return v ? '<span style="color:var(--green);font-weight:var(--w-med)">Yes</span>' : '<span style="color:var(--ink-3)">No</span>';
-    if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 30 ? 'var(--red)' : (d <= 90 ? 'var(--amber)' : 'var(--ink-2)'); return '<span style="font-weight:var(--w-med);color:' + c + '">' + (d <= 0 ? 'EXPIRED' : d + ' d') + '</span>'; }
-    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (a <= 0 ? 'var(--red)' : 'var(--green)') + '">' + trimNum(v) + '</span>' + unitHtml(k, r); }
-    if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (sh > 0 ? 'var(--red)' : 'var(--ink-3)') + '">' + (sh > 0 ? '▲ ' + v : v) + '</span>'; }
-    if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + trimNum(v) + '</span>' + unitHtml(k, r);
-    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + v + '</span>'; }
-    if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + String(v).slice(0, 8).toUpperCase() + '</span>';
-    if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--ink-2)">' + v.slice(0, 10) + '</span>';
-    if (/code|number|alias/i.test(k)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + v + '</span>';
-    return '<span>' + String(v) + '</span>';
+    if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 30 ? 'var(--red)' : (d <= 90 ? 'var(--amber)' : 'var(--ink-2)'); return '<span style="font-weight:var(--w-med);color:' + c + '">' + (d <= 0 ? 'EXPIRED' : escCell(d) + ' d') + '</span>'; }
+    if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (a <= 0 ? 'var(--red)' : 'var(--green)') + '">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r); }
+    if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (sh > 0 ? 'var(--red)' : 'var(--ink-3)') + '">' + (sh > 0 ? '▲ ' : '') + escCell(v) + '</span>'; }
+    if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r);
+    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(v) + '</span>'; }
+    if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString()) + '</span>'; }
+    if (k === 'result' && typeof v === 'string' && v.indexOf('Refused') === 0) return '<span style="color:var(--red)">' + escCell(v) + '</span>';
+    if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + escCell(String(v).slice(0, 8).toUpperCase()) + '</span>';
+    if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--ink-2)">' + escCell(v.slice(0, 10)) + '</span>';
+    if (/code|number|alias/i.test(k)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(v) + '</span>';
+    return '<span>' + escCell(v) + '</span>';
   }
+
   function columns(rows, endpoint) {
     if (!rows.length) return [];
     var present = Object.keys(rows[0]);

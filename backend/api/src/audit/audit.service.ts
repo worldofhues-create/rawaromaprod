@@ -9,17 +9,12 @@
  * the signed internal channel (`VaultApiClient.accessAudit`); this box adds each actor's email from
  * its own iam.user_master, which the Vault has no copy of.
  *
- * loginHistory (lane F5, RP-DEADTABLES): NOT AVAILABLE. This used to query `iam.login_history` —
- * a table that does NOT exist in @core/data-iam or @ra/data-org (the only sources `pnpm db:push`
- * draws the `iam` schema from, per scripts/db-schema-groups.ts) and is not in the Phase-1A Data
- * Dictionary. Any real/dev database would 500 with "relation iam.login_history does not exist"
- * the instant this ran. Honest "not available" instead of a crash or fabricated data. (The write
- * side, cluster-org/src/auth/auth.service.ts#recordSession, is already best-effort/try-caught and
- * does not block login — left as-is; both sides need the table added before either is real.)
- * Unblocking it needs: `login_history` added to the Phase-1A dictionary + @core/data-iam (or
- * @ra/data-org) schema (columns as queried below), then db:push.
+ * loginHistory: every sign-in attempt on this deployment, successful or refused, newest first, from
+ * iam.login_history (scripts/migrations/2026-09-28-login-history.sql; written by cluster-org's
+ * AuthService at the ALEMBIC SSO exchange (factory, platform and the Vault console's step-up) and
+ * the retired password door). Gated by `iam:user_master:read` at the route.
  */
-import { Inject, Injectable, NotImplementedException, ServiceUnavailableException } from '@nestjs/common';
+import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import { VaultApiClient, accessAuditBounds, type AccessAuditPage } from '@ra/cluster-formula';
 import type { Sql } from 'postgres';
@@ -96,10 +91,49 @@ export class AuditService {
     return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
   }
 
-  /** The 501 message is shown verbatim to end users by the Platform console (and any other
-   * caller), so it says what the user needs to know and nothing about tables or teams — the
-   * engineering detail lives in this file's header comment. Lane platform-roles, 2026-09-28. */
-  async loginHistory(_limit = 100, _cursor?: string): Promise<never> {
-    throw new NotImplementedException("Login history isn't recorded yet.");
+  /**
+   * GET /v1/login-history — one row per sign-in attempt, newest first, offset-cursor paged like
+   * the other governance reads (limit 1..500; a malformed cursor reads as 0). Each row carries the
+   * raw fields plus display-ready `when` / `who` / `how` / `result` so every console renders the
+   * same words. `email` falls back to the account's current email when the attempt recorded none.
+   * Parameters are bound as text — PG_CLIENT is the Drizzle-wrapped pool.
+   */
+  async loginHistory(limit = 100, cursor?: string) {
+    const lim = Math.min(Math.max(1, Math.trunc(Number(limit)) || 100), 500);
+    const offset = Math.max(0, parseInt(cursor || '0', 10) || 0);
+    const rows = await this.sql<LoginHistoryRow[]>`
+      select lh.login_history_id::text as "loginHistoryId",
+             to_char(lh.occurred_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as "when",
+             lh.user_id::text as "userId", coalesce(lh.email, u.email) as "email", u.user_name as "userName",
+             lh.method, lh.console, lh.outcome, lh.reason_code as "reasonCode", lh.reason,
+             lh.ip, lh.user_agent as "userAgent", lh.session_id::text as "sessionId"
+        from iam.login_history lh
+        left join iam.user_master u on u.user_id = lh.user_id
+       order by lh.occurred_at desc, lh.login_history_id desc
+       limit ${String(lim)}::int offset ${String(offset)}::int`;
+    const items = rows.map((r) => ({
+      ...r,
+      who: r.email || r.userName || 'Unknown',
+      how: signInMethodLabel(r.method, r.console),
+      result: r.outcome === 'SUCCESS' ? 'Success' : `Refused: ${r.reason || r.reasonCode || 'no reason given'}`,
+    }));
+    return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
   }
+
+}
+
+interface LoginHistoryRow {
+  loginHistoryId: string; when: string; userId: string | null; email: string | null; userName: string | null;
+  method: string; console: string | null; outcome: string; reasonCode: string | null; reason: string | null;
+  ip: string | null; userAgent: string | null; sessionId: string | null;
+}
+
+const CONSOLE_LABEL: Record<string, string> = { factory: 'Factory', platform: 'Platform', vault: 'Vault' };
+
+/** "ALEMBIC SSO · Factory", "Vault step-up", "Password" — the words the consoles show in "How". */
+export function signInMethodLabel(method: string, console: string | null): string {
+  if (method === 'VAULT_STEP_UP') return 'Vault step-up';
+  if (method === 'PASSWORD') return 'Password';
+  const where = console ? CONSOLE_LABEL[console] ?? console : null;
+  return where ? `ALEMBIC SSO · ${where}` : 'ALEMBIC SSO';
 }

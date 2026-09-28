@@ -46,10 +46,9 @@ const repoRoot = join(__dirname, '..', '..');
  * CLAUDE.md C3) or — for material_issue_applied — a larger redesign than a route-level stub,
  * because it's woven into a working transactional flow, not a dead-end route:
  *
- *   iam.login_history            — cluster-org/src/auth/auth.service.ts#recordSession, a
- *                                   best-effort/try-caught write on every login (does not block
- *                                   login on failure). The READ side (AuditService.loginHistory)
- *                                   was already converted to NotImplementedException by lane F5.
+ *   iam.login_history            — (resolved 2026-09-28: scripts/migrations/2026-09-28-login-
+ *                                   history.sql; AuthService records every sign-in attempt and
+ *                                   AuditService.loginHistory reads it.)
  *   inventory.material_issue_applied
  *                                 — the single-applier concurrency claim shared between
  *                                   ConsumptionService.applyIssue (outbox poller) and
@@ -82,10 +81,10 @@ const repoRoot = join(__dirname, '..', '..');
  * remains unaccounted for.
  */
 const KNOWN_DEBT: ReadonlySet<string> = new Set([
-  'iam.login_history',
-  // inventory.material_issue_applied / platform.document_registry / platform.notification_log left
-  // this list on 2026-09-28 (lane platform-roles): scripts/migrations/0015-0017 create them, and
-  // this guard now reads those migrations as a real schema source (see realTablesAndColumns).
+  // Empty since 2026-09-28 (lane platform-roles): inventory.material_issue_applied,
+  // platform.document_registry and platform.notification_log come from scripts/migrations/0015-0017,
+  // and iam.login_history from 2026-09-28-login-history.sql; this guard reads those migrations as a
+  // real schema source (see realTablesAndColumns). Add a table here only with a reason, as above.
 ]);
 
 /** Recursively list files under `dir` whose path matches `pred`, skipping node_modules/dist. */

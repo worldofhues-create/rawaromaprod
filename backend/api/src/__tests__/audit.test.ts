@@ -1,8 +1,9 @@
 /**
- * Lane F5 (RP-DEADTABLES) — AuditService (backend/api/src/audit/audit.service.ts) loginHistory:
- * used to query iam.login_history, a table that exists in NEITHER @core/data-iam nor
- * @ra/data-org (db:push's only sources for the `iam` schema) nor the Phase-1A Data Dictionary.
- * It now throws NotImplementedException instead of a 500 against any real database.
+ * AuditService.loginHistory (backend/api/src/audit/audit.service.ts) — GET /v1/login-history over
+ * iam.login_history (scripts/migrations/2026-09-28-login-history.sql, lane platform-roles): every
+ * sign-in attempt, newest first, paged, with display-ready when/who/how/result. Exercised on a
+ * Drizzle-wrapped pool, as the running API's PG_CLIENT is. The WRITE side is tested in
+ * backend/cluster-org/src/__tests__/login-history.test.ts.
  *
  * formulaAccessAudit (reads formula.audit_events, a real per-schema cross-cutting table built by
  * the @core/data-kernel auditTable() factory) is left untested here: the `formula` schema lives
@@ -11,29 +12,68 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { NotImplementedException } from '@nestjs/common';
-import { AuditService } from '../audit/audit.service.js';
-import { ensureSchema, testClient, closeTestClient } from '../../../test-support/db.js';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
+import { AuditService, signInMethodLabel } from '../audit/audit.service.js';
+import { ensureSchema, testClient, closeTestClient, TEST_DATABASE_URL } from '../../../test-support/db.js';
 
 let svc: AuditService;
+let wrapped: ReturnType<typeof postgres>;
 
 before(async () => {
   await ensureSchema();
-  svc = new AuditService(testClient() as never);
+  wrapped = postgres(TEST_DATABASE_URL, { max: 2, prepare: false, types: {}, onnotice: () => {} });
+  drizzle(wrapped);
+  svc = new AuditService(wrapped as never);
 });
 
 after(async () => {
+  await wrapped.end({ timeout: 1 });
   await closeTestClient();
 });
 
-test('login-history (lane F5): honest "not available" — iam.login_history does not exist in @core/data-iam or @ra/data-org', async () => {
-  await assert.rejects(() => svc.loginHistory(100), NotImplementedException);
+test('login-history: newest first, with who/how/result in plain words and the account email as fallback', async () => {
+  const sql = testClient();
+  const userId = crypto.randomUUID();
+  const email = `lh-read-${userId.slice(0, 8)}@rawaroma.local`;
+  await sql`insert into iam.user_master (user_id, email, user_name, is_active) values (${userId}, ${email}, 'Reader', true)`;
+  // Far-future timestamps, later on every run, keep these three at the top of the list whatever
+  // else the shared test DB already holds (including earlier runs of this test).
+  const base = Date.now() + 500 * 365 * 86_400_000;
+  const at = (s: number) => new Date(base + s * 1000).toISOString();
+  await sql`insert into iam.login_history (occurred_at, user_id, email, method, console, outcome, ip)
+    values (${at(1)}, ${userId}, null, 'ALEMBIC_SSO', 'factory', 'SUCCESS', '198.51.100.1')`;
+  await sql`insert into iam.login_history (occurred_at, user_id, email, method, console, outcome, reason_code, reason, ip)
+    values (${at(2)}, ${userId}, ${email}, 'VAULT_STEP_UP', 'vault', 'REFUSED', 'AUTH_FORBIDDEN', 'Account inactive', '198.51.100.2')`;
+  await sql`insert into iam.login_history (occurred_at, email, method, outcome, reason_code, reason)
+    values (${at(3)}, null, 'PASSWORD', 'REFUSED', 'AUTH_FORBIDDEN', 'Password sign-in is retired. Sign in via ALEMBIC.')`;
+
+  const { items } = await svc.loginHistory(3);
+  const top = items as unknown as Array<Record<string, string | null>>;
+  assert.deepEqual(top.map((r) => r.when), [at(3), at(2), at(1)]);
+  assert.deepEqual(top.map((r) => [r.who, r.how, r.result]), [
+    ['Unknown', 'Password', 'Refused: Password sign-in is retired. Sign in via ALEMBIC.'],
+    [email, 'Vault step-up', 'Refused: Account inactive'],
+    [email, 'ALEMBIC SSO · Factory', 'Success'],
+  ]);
+  assert.equal(top[2]!.email, email, 'no recorded email falls back to the account email');
+  assert.equal(top[1]!.ip, '198.51.100.2');
 });
 
-test('login-history (lane platform-roles): the 501 is plain user copy', async () => {
-  await assert.rejects(() => svc.loginHistory(100), (err: unknown) => {
-    assert.ok(err instanceof NotImplementedException);
-    assert.equal((err as NotImplementedException).message, "Login history isn't recorded yet.");
-    return true;
-  });
+test('login-history: pages with an opaque cursor, bounded limit', async () => {
+  const first = await svc.loginHistory(2);
+  assert.equal(first.items.length, 2);
+  assert.equal(first.nextCursor, '2');
+  const second = await svc.loginHistory(2, first.nextCursor!);
+  const ids = new Set([...first.items, ...second.items].map((r) => r.loginHistoryId));
+  assert.equal(ids.size, first.items.length + second.items.length, 'pages never overlap');
+  assert.equal((await svc.loginHistory(10_000)).items.length <= 500, true);
+  assert.ok((await svc.loginHistory(1, 'garbage')).items.length <= 1);
+});
+
+test('signInMethodLabel: the words every console shows under "How"', () => {
+  assert.equal(signInMethodLabel('ALEMBIC_SSO', 'platform'), 'ALEMBIC SSO · Platform');
+  assert.equal(signInMethodLabel('ALEMBIC_SSO', null), 'ALEMBIC SSO');
+  assert.equal(signInMethodLabel('VAULT_STEP_UP', 'vault'), 'Vault step-up');
+  assert.equal(signInMethodLabel('PASSWORD', null), 'Password');
 });

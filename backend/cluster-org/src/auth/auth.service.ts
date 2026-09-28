@@ -13,7 +13,7 @@
 import { HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq, gt, lt } from "drizzle-orm";
 import * as argon2 from "argon2";
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
 import { DomainError, JwtService, PG_CLIENT, ConfigService, type AuthPrincipal } from "@core/backend-kernel";
 import type { Portal } from "@core/contracts";
@@ -47,6 +47,43 @@ export interface LoginResult {
   accessToken: string;
   refreshToken: string;
   expiresIn: number;
+}
+
+/** Where a sign-in attempt came from — the controller passes the request's client IP (Fastify
+ *  `trustProxy`, the same `req.ip` the write-audit trail records) and User-Agent. Both optional so
+ *  a direct service call (tests, scripts) still works; they are recorded as null then. */
+export interface SignInContext {
+  readonly ip?: string | null;
+  readonly userAgent?: string | null;
+}
+
+/** How a sign-in was attempted, as iam.login_history records it. The Vault console has no sign-in
+ *  of its own — it exchanges an assertion ALEMBIC minted behind a fresh step-up, targeted at
+ *  `vault`, on this box — so that exchange is recorded as VAULT_STEP_UP. */
+export type SignInMethod = "ALEMBIC_SSO" | "VAULT_STEP_UP" | "PASSWORD";
+
+/** What a sign-in attempt has learned so far. Filled in as the attempt proceeds, so a refusal is
+ *  recorded with as much as was known when it was refused. Never holds a token or password. */
+interface SignInAttempt {
+  method: SignInMethod;
+  console: string | null;
+  email: string | null;
+  userId: string | null;
+  sessionId: string | null;
+}
+
+// A typed identifier is only recorded when it is a plausible email: people paste passwords into
+// the email field, and a refused attempt must never write one into the log.
+const PLAIN_EMAIL = /^[^\s@<>"'`]{1,64}@[^\s@<>"'`]{1,255}$/;
+function recordableEmail(v: string | null | undefined): string | null {
+  const e = String(v ?? "").trim().toLowerCase();
+  return e && e.length <= 320 && PLAIN_EMAIL.test(e) ? e : null;
+}
+function clip(v: string | null | undefined, max: number): string | null {
+  if (v === null || v === undefined) return null;
+  // eslint-disable-next-line no-control-regex
+  const t = String(v).replace(/[\u0000-\u001f\u007f]/g, " ").trim();
+  return t ? t.slice(0, max) : null;
 }
 
 /** LANE D1 — the demo showcase role (scripts/ra-roles.ts). It may hold a RawProd session ONLY
@@ -133,20 +170,41 @@ export class AuthService {
     return rows.length > 0;
   }
 
-  /** Record a login in iam.login_history so the admin Login-history view has data (audit
-   * requirement). We use a dedicated table keyed to iam.user_master rather than the legacy
-   * iam.sessions (whose user_id FK points at the unused iam.users identity table, making it
-   * impossible to record real app users). Stores the SHA-256 of the refresh token — never the
-   * raw token. Best-effort: a failure here must not block login. */
-  private async recordSession(userId: string, refreshToken: string): Promise<void> {
+  /** Append one row to iam.login_history (scripts/migrations/2026-09-28-login-history.sql).
+   *  Best-effort, like every audit write in this codebase: a failure is logged at error level and
+   *  never turns a good sign-in into a failed one, or changes the error a refused one gets.
+   *  Every value is bound as text (or null) — PG_CLIENT is the Drizzle-wrapped pool, which does
+   *  not serialize parameters. */
+  private async recordAttempt(
+    a: SignInAttempt,
+    ctx: SignInContext,
+    refusal: { code: string; reason: string } | null,
+  ): Promise<void> {
     try {
-      const refreshHash = createHash("sha256").update(refreshToken).digest("hex");
       await this.sql`
-        insert into iam.login_history (id, user_id, portal_audience, refresh_token_hash, expires_at)
-        values (${randomUUID()}, ${userId}, ${RA_PORTAL}, ${refreshHash}, now() + interval '30 days')`;
+        insert into iam.login_history
+          (user_id, email, method, console, outcome, reason_code, reason, ip, user_agent, session_id)
+        values (${a.userId}::uuid, ${recordableEmail(a.email)}, ${a.method}, ${clip(a.console, 20)},
+                ${refusal ? "REFUSED" : "SUCCESS"}, ${refusal ? clip(refusal.code, 60) : null},
+                ${refusal ? clip(refusal.reason, 500) : null}, ${clip(ctx.ip, 64)},
+                ${clip(ctx.userAgent, 512)}, ${a.sessionId}::uuid)`;
     } catch (e) {
-      this.logger.warn(`session record failed: ${(e as Error).message}`);
+      this.logger.error(`login history not recorded (${a.method}, ${refusal ? "refused" : "success"}): ${(e as Error).message}`);
     }
+  }
+
+  /** Run one sign-in attempt and record its outcome — success, or the refusal with the code and
+   *  sentence the caller was shown. The original error is always rethrown unchanged. */
+  private async recorded(a: SignInAttempt, ctx: SignInContext, run: () => Promise<LoginResult>): Promise<LoginResult> {
+    let result: LoginResult;
+    try {
+      result = await run();
+    } catch (e) {
+      await this.recordAttempt(a, ctx, refusalOf(e));
+      throw e;
+    }
+    await this.recordAttempt(a, ctx, null);
+    return result;
   }
 
   /** Count a failed login; lock the identifier once it exceeds the threshold. */
@@ -161,8 +219,16 @@ export class AuthService {
   }
 
   /** Password login against user_master (identifier = email). RETIRED for launch —
-   *  see `passwordLoginAllowed()`. */
-  async login(identifier: string, password: string): Promise<LoginResult> {
+   *  see `passwordLoginAllowed()`. Every attempt, refused ones included, is recorded in
+   *  iam.login_history (never the password). */
+  async login(identifier: string, password: string, ctx: SignInContext = {}): Promise<LoginResult> {
+    const attempt: SignInAttempt = {
+      method: "PASSWORD", console: null, email: recordableEmail(identifier), userId: null, sessionId: null,
+    };
+    return this.recorded(attempt, ctx, () => this.passwordLogin(identifier, password, attempt));
+  }
+
+  private async passwordLogin(identifier: string, password: string, attempt: SignInAttempt): Promise<LoginResult> {
     if (!this.passwordLoginAllowed()) {
       throw DomainError.forbidden(
         'AUTH_FORBIDDEN',
@@ -198,6 +264,8 @@ export class AuthService {
       this.recordLoginFail(key);
       throw DomainError.unauthorized("AUTH_INVALID_CREDENTIALS", "Invalid credentials");
     }
+    attempt.userId = row.userId;
+    attempt.email = row.email ?? attempt.email;
     this.loginFails.delete(key); // success clears the counter
     if (row.isActive === false) {
       throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
@@ -223,6 +291,7 @@ export class AuthService {
     // per-session revoke). Item 2: a password login IS the fresh proof, so authTime = now,
     // same as iat.
     const sid = randomUUID();
+    attempt.sessionId = sid;
     const nowSec = Math.floor(Date.now() / 1000);
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
@@ -234,7 +303,6 @@ export class AuthService {
       authTime: nowSec,
     });
     const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid, authTime: nowSec });
-    await this.recordSession(row.userId, refreshToken);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,
@@ -284,7 +352,17 @@ export class AuthService {
    *  becoming Vault-authority-holding, and that is exactly the window an attacker most wants to
    *  claim the ALEMBIC binding in, before `SecurityService.changeUserEmail`'s own refusal for a
    *  CURRENT holder would even apply. */
-  async loginWithAssertion(assertion: string): Promise<LoginResult> {
+  async loginWithAssertion(assertion: string, ctx: SignInContext = {}): Promise<LoginResult> {
+    const attempt: SignInAttempt = {
+      method: "ALEMBIC_SSO", console: null, email: null, userId: null, sessionId: null,
+    };
+    return this.recorded(attempt, ctx, () => this.assertionLogin(assertion, attempt));
+  }
+
+  /** The body of `loginWithAssertion` (its doc above). Nothing the token claims is written to
+   *  `attempt` until the signature, issuer, audience, window, target, tenant and environment
+   *  have all verified — a forged assertion is recorded as refused, naming nobody. */
+  private async assertionLogin(assertion: string, attempt: SignInAttempt): Promise<LoginResult> {
     const verifyKey = this.config.get('ALEMBIC_ASSERTION_VERIFY_KEY');
     if (!verifyKey) {
       throw DomainError.featureDisabled(
@@ -319,6 +397,9 @@ export class AuthService {
       throw new DomainError('AUTH_ASSERTION_INVALID', verified.detail, 401);
     }
     const { claims } = verified;
+    attempt.console = claims.target;
+    attempt.method = claims.target === "vault" ? "VAULT_STEP_UP" : "ALEMBIC_SSO";
+    attempt.email = claims.email;
 
     // SINGLE-USE, CHECKED RIGHT AFTER CRYPTOGRAPHIC VALIDITY — before any DB lookup,
     // so a replayed token is refused as a replay even if the account it names has since
@@ -349,6 +430,7 @@ export class AuthService {
       const byEmail = (
         await this.db.select(USER_COLS).from(userMaster).where(eq(userMaster.email, email)).limit(1)
       )[0];
+      if (byEmail) attempt.userId = byEmail.userId;
       if (!byEmail) {
         throw new DomainError(
           'AUTH_UNKNOWN_USER',
@@ -387,6 +469,7 @@ export class AuthService {
     // ACTIVE/INACTIVE/SUSPENDED/…) is the dictionary-wide lifecycle column every other master
     // table already uses — a row suspended via `status` alone (is_active left true/null) must
     // refuse exactly like one suspended via is_active.
+    attempt.userId = row.userId;
     const statusUpper = row.status ? row.status.toUpperCase() : null;
     if (row.isActive === false || (statusUpper !== null && statusUpper !== 'ACTIVE')) {
       throw DomainError.forbidden('AUTH_FORBIDDEN', 'Account inactive');
@@ -414,6 +497,7 @@ export class AuthService {
     // proved), never "now" — a fresh RawProd token minted off a not-so-fresh ALEMBIC session
     // must not read as a fresh authentication for @FreshAuth's purposes.
     const sid = randomUUID();
+    attempt.sessionId = sid;
     const accessToken = await this.jwt.signAccess({
       sub: row.userId,
       portal: RA_PORTAL,
@@ -424,7 +508,6 @@ export class AuthService {
       authTime: claims.auth_time,
     });
     const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid, authTime: claims.auth_time });
-    await this.recordSession(row.userId, refreshToken);
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,
@@ -601,4 +684,16 @@ export class AuthService {
       .where(eq(userRoleMapping.userId, userId));
     return rows.map((r) => r.code).filter((c): c is string => c !== null);
   }
+}
+
+/** The code + sentence a refused sign-in is recorded with: exactly what the caller was told for a
+ *  DomainError or HttpException (the lockout is LOCKED_OUT); anything unexpected is recorded as
+ *  ERROR with a fixed sentence, never a raw driver/stack message that could carry internals. */
+function refusalOf(e: unknown): { code: string; reason: string } {
+  if (e instanceof DomainError) return { code: String(e.code), reason: e.message };
+  if (e instanceof HttpException) {
+    const status = e.getStatus();
+    return { code: status === HttpStatus.TOO_MANY_REQUESTS ? "LOCKED_OUT" : `HTTP_${status}`, reason: e.message };
+  }
+  return { code: "ERROR", reason: "Sign-in failed unexpectedly." };
 }

@@ -1650,3 +1650,38 @@ create table if not exists platform.document_registry (
   created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
   created_by varchar(64), updated_by varchar(64)
 );
+
+-- Lane platform-roles (2026-09-28): iam.login_history exactly as scripts/migrations/2026-09-28-login-history.sql
+-- creates it (gen_random_uuid() for this harness's default, as elsewhere in this file), append-only trigger included.
+create table if not exists iam.login_history (
+  login_history_id uuid primary key default gen_random_uuid(),
+  occurred_at timestamptz not null default now(),
+  user_id uuid,
+  email varchar(320),
+  method varchar(20) not null,
+  console varchar(20),
+  outcome varchar(10) not null,
+  reason_code varchar(60),
+  reason varchar(500),
+  ip varchar(64),
+  user_agent varchar(512),
+  session_id uuid,
+  constraint login_history_method_ck check (method in ('ALEMBIC_SSO', 'VAULT_STEP_UP', 'PASSWORD')),
+  constraint login_history_outcome_ck check (outcome in ('SUCCESS', 'REFUSED')),
+  constraint login_history_reason_ck check ((outcome = 'SUCCESS') = (reason_code is null))
+);
+create index if not exists login_history_occurred_idx on iam.login_history (occurred_at desc, login_history_id desc);
+create index if not exists login_history_user_idx on iam.login_history (user_id, occurred_at desc);
+create or replace function iam.login_history_append_only()
+  returns trigger language plpgsql as $$
+  begin
+    raise exception 'iam.login_history is append-only — % is blocked', tg_op;
+  end $$;
+drop trigger if exists login_history_append_only on iam.login_history;
+create trigger login_history_append_only
+  before update or delete on iam.login_history
+  for each row execute function iam.login_history_append_only();
+drop trigger if exists login_history_no_truncate on iam.login_history;
+create trigger login_history_no_truncate
+  before truncate on iam.login_history
+  for each statement execute function iam.login_history_append_only();

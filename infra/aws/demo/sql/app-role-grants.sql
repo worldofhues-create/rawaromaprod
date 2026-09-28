@@ -14,3 +14,13 @@ BEGIN
     EXECUTE format('ALTER DEFAULT PRIVILEGES IN SCHEMA %I GRANT USAGE, SELECT ON SEQUENCES TO %I', s, app);
   END LOOP;
 END $$;
+-- iam.login_history is append-only (scripts/migrations/2026-09-28-login-history.sql): the blanket grant above
+-- re-hands the app role UPDATE/DELETE on it after every demo migrate, so take them back. Its trigger refuses them
+-- anyway; this keeps the privileges honest too.
+DO $$
+DECLARE app text := current_setting('demo.app');
+BEGIN
+  IF to_regclass('iam.login_history') IS NOT NULL THEN
+    EXECUTE format('REVOKE UPDATE, DELETE, TRUNCATE ON iam.login_history FROM %I', app);
+  END IF;
+END $$;
