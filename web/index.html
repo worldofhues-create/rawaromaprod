@@ -37,6 +37,9 @@
        add workspace-specific view specials and MUST load after it. -->
   <!-- Click/notification/alert sounds (window.RaSound); before shell.js, which calls it. -->
   <script src="/sound.js"></script>
+  <!-- Focus mode + "open as an app" (owner 2026-09-29): full screen on the first click, a menu switch,
+       and an install offer. Before the console script, which mounts the menu switch. -->
+  <script src="/focus.js" data-app="RAW Factory"></script>
   <script src="/shell.js"></script>
   <script src="/ws-supply.js"></script>
   <script src="/ws-mfg.js"></script>

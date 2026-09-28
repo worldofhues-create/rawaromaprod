@@ -2198,6 +2198,8 @@
     $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
+    /* Focus mode switch (focus.js), between the sound switch and Sign out. */
+    if (window.RaFocus && RaFocus.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:' + ($('ra-logout').style.marginLeft === '0px' ? '0' : 'auto'))) $('ra-logout').style.marginLeft = '0';
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
     var bell = $('ra-bell'); if (bell) bell.onclick = function (e) { e.stopPropagation(); var pop = $('ra-bell-pop'); pop.style.display = pop.style.display === 'none' ? 'block' : 'none'; };
     if (!window.__raBellOutside) { window.__raBellOutside = true; document.addEventListener('click', function () { var pop = $('ra-bell-pop'); if (pop) pop.style.display = 'none'; }); }

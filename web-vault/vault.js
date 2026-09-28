@@ -1,6 +1,8 @@
-/* Formula Vault console — a separate, NON-PWA client for the existing formula backend
- * routes only (backend/cluster-formula). No manifest, no service worker (any stray SW for
- * this origin/scope is unregistered on load), no localStorage/IndexedDB/sessionStorage for
+/* Formula Vault console — a separate, NON-offline client for the existing formula backend
+ * routes only (backend/cluster-formula). No service worker (any stray SW for this
+ * origin/scope is unregistered on load) and nothing cached; since 2026-09-29 a web app
+ * manifest only, so it can open in its own app window (focus.js, owner requirement "consoles
+ * open full screen"). No localStorage/IndexedDB/sessionStorage for
  * formula (or session) data — the access token lives in a JS closure variable only and is
  * lost on reload by design (§109.4 "short idle session"). No analytics. No formula payload
  * ever appears in a URL, query string, or console.log.
@@ -263,7 +265,8 @@
           'Confirm a new code on ALEMBIC. You\'ll come straight back here; then repeat the action.',
         ]));
         var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
-          h('button', { class: 'btn p', onclick: function () {
+          // data-focus-skip: this click leaves for ALEMBIC, so focus.js must not go full screen on it.
+          h('button', { class: 'btn p', 'data-focus-skip': '', onclick: function () {
             close(); resolve();
             if (ALEMBIC_CONSOLE_URL) location.assign(alembicSignInUrl('vault'));
           } }, ['Open ALEMBIC →']),
@@ -652,6 +655,9 @@
     ]);
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     var rme = rail.querySelector('.rme'); if (window.RaSound && rme) RaSound.mountToggle(rme, rme.lastChild, 'rail-min', 'position:static;margin-left:0');
+    /* Focus mode switch (focus.js), between the sound switch and Sign out. A UI switch only: it
+     * stores on/off, never formula or session data. */
+    if (window.RaFocus && rme) RaFocus.mountToggle(rme, rme.lastChild, 'rail-min', 'position:static;margin-left:0');
     var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
     ariaCtx = 'Vault · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [

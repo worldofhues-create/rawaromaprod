@@ -5,10 +5,10 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v90'; // v90: UX-H Aria answers via /v1/aria (v89: reference shell, UX-D welcome/logo/icons, UX-E Aria panel, UX-F sound)
+const CACHE = 'ra-shell-v91'; // v91: focus.js (focus mode + app-window offer). v90: UX-H Aria answers via /v1/aria (v89: reference shell, UX-D welcome/logo/icons, UX-E Aria panel, UX-F sound)
 const SHELL = [
   '/', '/index.html', '/sound.js', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
-  '/qrcode.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',
+  '/qrcode.js', '/focus.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',
   // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
   '/rac-preload.js', '/logo/brand.css',
   '/logo/raw-logo.png', '/logo/raw-logo@2x.png', '/logo/raw-logo@3x.png',
@@ -43,15 +43,24 @@ self.addEventListener('activate', (e) => {
   );
 });
 
+/** Backend and tunnel paths: network-only, never cached, never answered from cache, whatever the
+ *  method. /rpc and /crypto/ are the encrypted tunnel every console call travels through; /main/ is
+ *  the Vault host's channel to the main API (not served here today, excluded all the same). */
+function isNetworkOnly(url) {
+  const p = url.pathname;
+  return url.origin !== self.location.origin && url.hostname !== 'unpkg.com'
+    || url.port === '3000'
+    || p === '/rpc' || p.startsWith('/rpc/') || p.startsWith('/main/') || p === '/main'
+    || p.startsWith('/crypto/') || p.startsWith('/v1/') || p.startsWith('/auth/') || p === '/health'
+    || p === '/console-config.js';
+}
+
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET') return;
   const url = new URL(req.url);
-
-  // API (backend) — never cache; let it fail offline (the app handles it).
-  if (url.port === '3000' || url.pathname.startsWith('/v1/') || url.pathname.startsWith('/auth/')) {
-    return; // default network handling
-  }
+  // API (backend) and tunnel — never cache; let it fail offline (the app handles it).
+  if (isNetworkOnly(url)) return; // default network handling
+  if (req.method !== 'GET') return;
 
   // Navigations → NETWORK-FIRST so a fresh deploy is picked up on the next reload; fall back to
   // the cached shell only when offline. (Was cache-first, which stranded users on an old shell

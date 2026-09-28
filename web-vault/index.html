@@ -4,16 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Vault · Raw Aroma Chem</title>
-  <!-- Deliberately NO <link rel="manifest">, NO theme-color/apple-mobile-web-app tags, NO
-       service-worker registration anywhere in this page or vault.js. §109.4: "Vault Console
-       is NOT a PWA." vault.js also actively unregisters any SW previously registered for
-       this origin/scope, in case a stray one exists from local dev testing. -->
-  <!-- UX-D: the shared favicon only. Still NO manifest, NO apple-touch/app tags and NO service
-       worker -- §109.4, Vault is not a PWA. -->
+  <!-- §109.4 still holds where it matters: NO service worker (vault.js unregisters any stray one),
+       nothing cached, nothing offline, no formula or session data in any storage. Owner requirement
+       2026-09-29 ("all consoles open full screen, like a focus mode") adds ONLY a web app manifest so
+       the Vault can open in its own app window: a manifest is a static description (name, icons,
+       display mode) and makes the browser store no page data. Chromium installs without a service
+       worker; Safari/iOS never needed one. -->
+  <link rel="manifest" href="/manifest.webmanifest">
+  <meta name="theme-color" content="#26262B">
+  <!-- UX-D: the one icon set every ALEMBIC and RawProd surface uses. -->
   <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
   <link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">
   <link rel="icon" href="/favicon-16.png" sizes="16x16" type="image/png">
   <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
+  <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <meta name="robots" content="noindex, nofollow, noarchive">
   <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
        same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
@@ -35,6 +39,9 @@
   <div class="stage" id="root"></div>
   <!-- UX-F: click/notification/alert sounds (window.RaSound); before the console script, which calls it. -->
   <script src="/sound.js"></script>
+  <!-- Focus mode + "open as an app" (owner 2026-09-29): full screen on the first click, a menu switch,
+       and an install offer. Before the console script, which mounts the menu switch. -->
+  <script src="/focus.js" data-app="RAW Vault"></script>
   <script src="/vault.js"></script>
 </body>
 </html>

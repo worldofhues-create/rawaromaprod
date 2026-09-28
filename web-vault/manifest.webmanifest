@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "RAW Platform",
-  "short_name": "RAW Platform",
-  "description": "Raw Aroma Chem platform operations.",
+  "name": "RAW Vault",
+  "short_name": "RAW Vault",
+  "description": "Raw Aroma Chem formula access.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

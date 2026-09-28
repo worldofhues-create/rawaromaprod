@@ -446,6 +446,8 @@
     ]);
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     var rme = rail.querySelector('.rme'); if (window.RaSound && rme) { var so = rme.lastChild; if (RaSound.mountToggle(rme, so, 'rail-min', 'position:static;margin-left:auto')) so.style.marginLeft = '0'; }
+    /* Focus mode switch (focus.js), between the sound switch and Sign out. */
+    if (window.RaFocus && rme) { var fo = rme.lastChild; if (RaFocus.mountToggle(rme, fo, 'rail-min', 'position:static;margin-left:' + (fo.style.marginLeft === '0px' ? '0' : 'auto'))) fo.style.marginLeft = '0'; }
     var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
     ariaCtx = 'Platform · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [

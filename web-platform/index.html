@@ -33,6 +33,9 @@
   <div class="stage" id="root"></div>
   <!-- UX-F: click/notification/alert sounds (window.RaSound); before the console script, which calls it. -->
   <script src="/sound.js"></script>
+  <!-- Focus mode + "open as an app" (owner 2026-09-29): full screen on the first click, a menu switch,
+       and an install offer. Before the console script, which mounts the menu switch. -->
+  <script src="/focus.js" data-app="RAW Platform"></script>
   <script src="/platform.js"></script>
 </body>
 </html>
