@@ -20,6 +20,10 @@
  *        formula name or an event's remarks (formula-directory.service.ts says why).
  *   POST /internal/vault/access-audit — one page of `formula.audit_events` for the main box's
  *        `/v1/formula-access-audit` (the caller's `formula:actual:read` is checked there).
+ *   POST /internal/vault/compliance-certificates — the IFRA/allergen certificates calculated after a
+ *        cursor (the certificate `seq`), oldest first: kind, amendment, the calculated numbers, the
+ *        opaque formula version ref, and the formula id the main box maps to its products. Never an
+ *        ingredient, a material, a percentage or a formula version id (owner ruling 2026-09-28).
  *   POST /internal/vault/material-catalogue — the main box PUSHES the material id/code/name
  *        catalogue the Vault console's picker searches (a digest probe, or one part of a full
  *        replacement — facts-bridge/material-catalogue.ts). The Vault never calls the main box.
@@ -42,6 +46,7 @@ import {
   type SecurityAuditSink,
 } from '@core/backend-kernel';
 import {
+  ComplianceService,
   FORMULA_LOOKUP,
   FormulaDirectoryService,
   MATERIAL_CATALOGUE_PART_SIZE,
@@ -52,6 +57,7 @@ import {
   type CodedPickLine,
   type FormulaLabels,
   type FormulaLookup,
+  type InternalCertificate,
   type ReadContext,
 } from '@ra/cluster-formula';
 
@@ -103,6 +109,11 @@ const accessAuditBody = z.object({
   cursor: z.string().regex(/^\d{1,9}$/).nullable().optional(),
 });
 
+const complianceCertificatesBody = z.object({
+  afterSeq: z.number().int().min(0),
+  limit: z.number().int().min(1).max(200),
+}).strict();
+
 /** Only the three fields the picker shows cross (material-catalogue.ts). Column sizes as
  *  masterdata.material (material_code varchar(50), material_name varchar(200)). */
 const catalogueEntry = z
@@ -131,7 +142,15 @@ export class VaultPortInternalController {
     @Inject(SECURITY_AUDIT_SINK) private readonly securityAudit: SecurityAuditSink,
     @Inject(FormulaDirectoryService) private readonly directory: FormulaDirectoryService,
     @Inject(MaterialCatalogue) private readonly catalogue: MaterialCatalogue,
+    @Inject(ComplianceService) private readonly compliance: ComplianceService,
   ) {}
+
+  @Post('compliance-certificates')
+  async complianceCertificates(
+    @Body(new ZodValidationPipe(complianceCertificatesBody)) body: z.infer<typeof complianceCertificatesBody>,
+  ): Promise<{ result: InternalCertificate[] }> {
+    return { result: await this.compliance.certificatesAfter(body.afterSeq, body.limit) };
+  }
 
   @Post('resolve-manufacturing-instruction')
   async resolve(

@@ -245,6 +245,13 @@ export const RA_PERMISSIONS: string[] = [
   'production:production_plan_items:write',
   'production:production_qc:read',
   'production:production_qc:write',
+  // Owner ruling 2026-09-28 (COA data from factory QC): per-product QC spec + per-batch COA
+  // results/photos + the release that emits qc.batch.released to ALEMBIC.
+  'production:product_qc_spec:read',
+  'production:product_qc_spec:write',
+  'production:batch_coa:read',
+  'production:batch_coa:write',
+  'production:batch_coa:release',
   'production:secure_mixing_session:read',
   'production:secure_mixing_session:write',
   'quality:qc_attachments:read',
@@ -275,4 +282,9 @@ export const RA_PERMISSIONS: string[] = [
   'sales:transporter_master:read',
   'sales:transporter_master:write',
   'vault:material_search:read',
+  // Owner ruling 2026-09-28 (IFRA + allergen certificates calculated in the Vault): raw-material
+  // compliance data, and the calculation preview / missing-data report (formulator/vault_approver).
+  'vault:rm_compliance:read',
+  'vault:rm_compliance:write',
+  'vault:compliance_calc:read',
 ];

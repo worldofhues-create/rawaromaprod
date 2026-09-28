@@ -22,4 +22,5 @@ export {
   oilBatchEventHistory,
 } from "./batch.js";
 export { productionQc, oilBatchQcHistory } from "./qc.js";
+export { productQcSpec, batchCoa, batchCoaPhoto } from "./coa.js";
 export { outbox, auditEvents } from "./crosscutting.js";

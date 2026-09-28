@@ -243,6 +243,15 @@ export const ROLES: RoleDef[] = [
         'production:oil_batch_qc_history:read',
         'production:oil_batch_qc_history:write',
       ),
+      // Owner ruling 2026-09-28: QC keeps each product's COA spec and records/releases each
+      // batch's COA results (the release emits qc.batch.released to ALEMBIC).
+      oneOf(
+        'production:product_qc_spec:read',
+        'production:product_qc_spec:write',
+        'production:batch_coa:read',
+        'production:batch_coa:write',
+        'production:batch_coa:release',
+      ),
       oneOf(
         'inventory:rm_batch_master:read',
         'inventory:grn_master:read',
@@ -352,6 +361,9 @@ export const ROLES: RoleDef[] = [
         'production:oil_batch_event_history:read',
         'production:oil_batch_qc_history:read',
         'production:production_qc:read',
+        // QC outcome oversight (owner ruling 2026-09-28): specs and COA results, read-only.
+        'production:product_qc_spec:read',
+        'production:batch_coa:read',
       ),
       oneOf(
         'quality:qc_capa:read',
@@ -458,6 +470,10 @@ export const ROLES: RoleDef[] = [
       'formula:formula_copy_request:read',
       'formula:formula_copy_request:write',
       'vault:material_search:read',
+      // Owner ruling 2026-09-28: raw-material compliance data + IFRA/allergen calculation.
+      'vault:rm_compliance:read',
+      'vault:rm_compliance:write',
+      'vault:compliance_calc:read',
       VAULT_PLAINTEXT_PERMISSION,
     ),
     sampleEmail: 'formulator@rawaroma.local',
@@ -490,6 +506,10 @@ export const ROLES: RoleDef[] = [
       'formula:formula_copy_request:read',
       'formula:formula_copy_request:write',
       'vault:material_search:read',
+      // Owner ruling 2026-09-28: raw-material compliance data + IFRA/allergen calculation.
+      'vault:rm_compliance:read',
+      'vault:rm_compliance:write',
+      'vault:compliance_calc:read',
       VAULT_PLAINTEXT_PERMISSION,
     ),
     sampleEmail: 'vault.approver@rawaroma.local',

@@ -57,6 +57,8 @@ import { FormulaLookupService } from './formula-lookup.service.js';
 import { FORMULA_LOOKUP } from './public-api.js';
 import { MaterialCatalogue } from './facts-bridge/material-catalogue.js';
 import { FormulaDirectoryService } from './formula-directory.service.js';
+import { ComplianceController } from './compliance/compliance.controller.js';
+import { ComplianceService } from './compliance/compliance.service.js';
 import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
@@ -111,7 +113,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
   // PG_CLIENT) — MASTERDATA_LOOKUP is instead provided directly, below, off MaterialCatalogue.
   imports: VAULT_MODE ? [] : [ClusterMasterdataModule],
   // VAULT_MODE=false (main app box): zero formula HTTP routes exist in this process.
-  controllers: VAULT_MODE ? [CatalogController, FormulasController, ApprovalsController] : [],
+  controllers: VAULT_MODE ? [CatalogController, FormulasController, ApprovalsController, ComplianceController] : [],
   providers: [
     {
       provide: FORMULA_PG_CLIENT,
@@ -141,6 +143,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     FormulaLookupService,
     { provide: FORMULA_LOOKUP, useExisting: FormulaLookupService },
     FormulaDirectoryService,
+    ComplianceService,
     VaultSecurityAuditSink,
     { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
@@ -154,6 +157,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     FORMULA_LOOKUP,
     SECURITY_AUDIT_SINK,
     FormulaDirectoryService,
+    ComplianceService,
     ...(VAULT_MODE ? [MaterialCatalogue] : []),
   ],
 })

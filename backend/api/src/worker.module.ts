@@ -41,6 +41,7 @@ import { ConsumptionModule } from './consumption/consumption.module.js';
 import { BridgeModule } from './bridge/bridge.module.js';
 import { AutomationModule } from './automation/automation.module.js';
 import { MaterialCatalogueSyncModule } from './vault-bridge/material-catalogue-sync.module.js';
+import { ComplianceCertificateSyncModule } from './vault-bridge/compliance-certificate-sync.module.js';
 
 @Module({
   imports: [
@@ -76,6 +77,9 @@ import { MaterialCatalogueSyncModule } from './vault-bridge/material-catalogue-s
     // Pushes the material id/code/name catalogue to the Vault console's picker over the signed
     // main -> Vault channel (the Vault never calls this box).
     MaterialCatalogueSyncModule,
+    // Pulls the Vault's calculated IFRA/allergen certificates (numbers only) over the same signed
+    // channel and emits compliance.certificate.calculated toward ALEMBIC per product.
+    ComplianceCertificateSyncModule,
   ],
 })
 export class WorkerModule {}

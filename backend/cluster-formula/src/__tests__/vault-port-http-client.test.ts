@@ -201,3 +201,16 @@ test('materialCatalogue: a signed POST of the probe / part to /internal/vault/ma
   assert.deepEqual(await client().materialCatalogue(part), { current: true });
   assert.deepEqual(JSON.parse(lastRequest!.rawBody), part);
 });
+
+test('complianceCertificates: a correctly signed POST to /internal/vault/compliance-certificates with the cursor', async () => {
+  const cert = {
+    seq: 7, certificateId: '0199a1b2-0000-7000-8000-00000000c0c1', formulaId: '0199a1b2-0000-7000-8000-00000000f0f1',
+    formulaVersionRef: `fvr_${'a'.repeat(32)}`, kind: 'ifra', amendment: '51',
+    values: [{ category: '4', limitPct: 10 }], calculatedAt: '2026-09-28T00:00:00.000Z',
+  };
+  nextResponse = { status: 200, body: { result: [cert] } };
+  const result = await client().complianceCertificates(6, 100);
+  assert.deepEqual(result, [cert]);
+  assert.equal(lastRequest?.url, VAULT_INTERNAL_PATHS.complianceCertificates);
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), { afterSeq: 6, limit: 100 });
+});

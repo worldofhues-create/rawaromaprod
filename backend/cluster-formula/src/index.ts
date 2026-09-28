@@ -40,6 +40,16 @@ export {
   type CatalogueUpdate,
   type MaterialCatalogueEntry,
 } from './facts-bridge/material-catalogue.js';
+// Owner ruling 2026-09-28: raw-material compliance data + the IFRA/allergen certificate engine
+// (Vault box only), and the certificate shape the main box pulls over the signed channel.
+export { ComplianceService, type InternalCertificate } from './compliance/compliance.service.js';
+export {
+  IFRA_CATEGORIES,
+  calculateAllergens,
+  calculateIfra,
+  type AllergenValue,
+  type IfraValue,
+} from './compliance/compliance-calc.js';
 // The main-app-box side of the Vault trust boundary (V4 §109.1): the signed HTTP client, the
 // production-facing port it backs, and the remote audit sink — the main box reaches the Vault over
 // the signed internal channel only and never holds a formula-DB connection. See vault-port.ts.

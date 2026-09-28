@@ -17,9 +17,11 @@
  * GET /v1/bridge/outbox/parked for replay/discard (outbox-admin.service.ts). A later event for
  * an aggregate is held behind its parked predecessor, since ALEMBIC applies strictly in order.
  */
-import { Inject, Injectable, Logger, type OnModuleDestroy } from '@nestjs/common';
+import { Inject, Injectable, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { eq, sql } from 'drizzle-orm';
+import { asc, eq, sql } from 'drizzle-orm';
+import { bridge as bridgeContracts } from '@core/contracts';
+import { ConfigService } from '@core/backend-kernel';
 import { BRIDGE_DB, bridgeSchema, type BridgeDb } from './bridge.tokens.js';
 import { openSecret } from './secret-box.js';
 import { signBody } from './signing.js';
@@ -50,7 +52,25 @@ export class BridgeRelayService implements OnModuleDestroy {
   /** The transport. A seam for the bridge-poison tests; production uses the global fetch. */
   fetchImpl: typeof fetch = (input, init) => fetch(input, init);
 
-  constructor(@Inject(BRIDGE_DB) private readonly db: BridgeDb) {}
+  constructor(
+    @Inject(BRIDGE_DB) private readonly db: BridgeDb,
+    @Optional() @Inject(ConfigService) private readonly config?: ConfigService,
+  ) {}
+
+  /**
+   * The org id for an event that is not about a production requirement (a sales-order continuity
+   * action, a QC release, a compliance certificate): RawProd serves one ALEMBIC tenant, so this is
+   * the deployment's configured tenant (ALEMBIC_ASSERTION_TENANT_ID) or, failing that, the org of
+   * the requirements ALEMBIC has sent. With neither, org_id stays null as before — ALEMBIC refuses
+   * it as a permanent envelope error and the event parks, replayable once the tenant is configured.
+   */
+  private async fallbackOrgId(): Promise<string | null> {
+    const configured = this.config?.get('ALEMBIC_ASSERTION_TENANT_ID');
+    if (configured && /^[0-9a-f-]{36}$/i.test(configured)) return configured;
+    const row = (await this.db.select({ orgId: productionRequirement.orgId }).from(productionRequirement)
+      .orderBy(asc(productionRequirement.createdDt)).limit(1))[0];
+    return row?.orgId ?? null;
+  }
 
   onModuleDestroy(): void {
     this.stopped = true;
@@ -119,13 +139,15 @@ export class BridgeRelayService implements OnModuleDestroy {
       // event-type convention is PascalCase starting with the aggregate's noun (Production*,
       // SalesOrder*, …), so a type this relay doesn't recognize as production-requirement-shaped
       // is reported as the aggregate it actually names instead of a silently wrong guess.
-      const aggregateType = ev.type.startsWith('SalesOrder') ? 'sales_order' : 'production_requirement';
+      const complianceType = (bridgeContracts.COMPLIANCE_AGGREGATE_TYPES as Record<string, string>)[ev.type];
+      const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order' : 'production_requirement');
+      const orgId = req?.orgId ?? (await this.fallbackOrgId());
 
       const body = JSON.stringify({
         event_id: ev.id,
         version,
         type: ev.type,
-        org_id: req?.orgId ?? null,
+        org_id: orgId,
         correlation_id: rawPayload.correlation_id ?? ev.aggregateId,
         causation_id: null,
         occurred_at: ev.occurredAt.toISOString(),

@@ -47,6 +47,7 @@ import {
 import type { CodedInstruction, CodedMaterialLine, CodedPickLine, ReadContext } from './public-api.js';
 import type { AccessAuditPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
 import type { CatalogueUpdate } from './facts-bridge/material-catalogue.js';
+import type { InternalCertificate } from './compliance/compliance.service.js';
 
 /** DI token for `VaultPort`. Inject with `@Inject(VAULT_PORT)`. */
 export const VAULT_PORT = Symbol('VAULT_PORT');
@@ -88,6 +89,7 @@ export const VAULT_INTERNAL_PATHS = {
   formulaLabels: '/internal/vault/formula-labels',
   accessAudit: '/internal/vault/access-audit',
   materialCatalogue: '/internal/vault/material-catalogue',
+  complianceCertificates: '/internal/vault/compliance-certificates',
 } as const;
 
 /** Upper bound on one Vault round trip (it may include a KMS unwrap). */
@@ -156,6 +158,13 @@ export class VaultApiClient {
   /** A catalogue probe (`{digest}`) or one part of a catalogue push (material-catalogue.ts). */
   async materialCatalogue(update: CatalogueUpdate): Promise<{ current: boolean }> {
     const data = await this.post<{ result: { current: boolean } }>(VAULT_INTERNAL_PATHS.materialCatalogue, update);
+    return data.result;
+  }
+
+  /** The IFRA/allergen certificates the Vault calculated after `afterSeq` (oldest first) — the
+   *  numbers only, plus the formula id this box maps to its products (owner ruling 2026-09-28). */
+  async complianceCertificates(afterSeq: number, limit: number): Promise<InternalCertificate[]> {
+    const data = await this.post<{ result: InternalCertificate[] }>(VAULT_INTERNAL_PATHS.complianceCertificates, { afterSeq, limit });
     return data.result;
   }
 
