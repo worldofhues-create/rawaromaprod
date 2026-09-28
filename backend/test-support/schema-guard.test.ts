@@ -83,9 +83,9 @@ const repoRoot = join(__dirname, '..', '..');
  */
 const KNOWN_DEBT: ReadonlySet<string> = new Set([
   'iam.login_history',
-  'inventory.material_issue_applied',
-  'platform.document_registry',
-  'platform.notification_log',
+  // inventory.material_issue_applied / platform.document_registry / platform.notification_log left
+  // this list on 2026-09-28 (lane platform-roles): scripts/migrations/0015-0017 create them, and
+  // this guard now reads those migrations as a real schema source (see realTablesAndColumns).
 ]);
 
 /** Recursively list files under `dir` whose path matches `pred`, skipping node_modules/dist. */
@@ -170,6 +170,18 @@ function realTablesAndColumns(): Map<string, Set<string>> {
       }
     }
   }
+  // Lane platform-roles (2026-09-28): scripts/migrations/*.sql is what production actually runs
+  // (PB-16 — scripts/db-migrate.ts is the ONLY schema provisioner deploy executes), and several
+  // tables exist ONLY there (0014-0018's hand-written "adhoc" tables: vendor_negotiation,
+  // po_advance_payment, vendor_dispatch, dispatch_document, document_registry,
+  // material_issue_applied, notification_log, relay_*). Treating only the drizzle sources as real
+  // made this guard keep routes switched off for tables every real database has had since
+  // 2026-09-24. `main`-target blocks only; the formula block is the Vault's own database.
+  for (const [key, cols] of migrationTablesAndColumns()) {
+    const merged = tables.get(key) ?? new Set<string>();
+    cols.forEach((c) => merged.add(c));
+    tables.set(key, merged);
+  }
   // The @core/data-kernel auditTable()/outboxTable() factories build `<schema>.outbox` and
   // `<schema>.audit_events` for every cluster's crosscutting.ts (auditTable(schema) /
   // outboxTable(schema) called with each schema's own pgSchema instance) — these don't match the
@@ -182,6 +194,58 @@ function realTablesAndColumns(): Map<string, Set<string>> {
     tables.set(`${s}.audit_events`, new Set(AUDIT_EVENTS_COLUMNS));
   }
   return tables;
+}
+
+/** `create table [if not exists] schema.table (...)` + `alter table schema.table add column [if not
+ * exists] col` in the `main`-target blocks of scripts/migrations/*.sql -> "schema.table" -> columns. */
+function migrationTablesAndColumns(): Map<string, Set<string>> {
+  const out = new Map<string, Set<string>>();
+  const dir = join(repoRoot, 'scripts', 'migrations');
+  const CONSTRAINT = /^(primary|unique|constraint|foreign|check|exclude)$/i;
+  for (const file of readdirSync(dir).filter((f) => f.endsWith('.sql')).sort()) {
+    const parts = readFileSync(join(dir, file), 'utf8').split(/^--\s*@target:\s*(\S+).*$/m);
+    for (let i = 1; i < parts.length; i += 2) {
+      if (parts[i] !== 'main') continue;
+      const sql = parts[i + 1]!.replace(/--[^\n]*/g, '');
+      const createRe = /create\s+table\s+(?:if\s+not\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?\."?([a-z_][a-z0-9_]*)"?\s*\(/gi;
+      let m: RegExpExecArray | null;
+      while ((m = createRe.exec(sql))) {
+        const key = `${m[1]!.toLowerCase()}.${m[2]!.toLowerCase()}`;
+        const cols = out.get(key) ?? new Set<string>();
+        let depth = 1;
+        let j = createRe.lastIndex;
+        const start = j;
+        for (; j < sql.length && depth > 0; j++) {
+          if (sql[j] === '(') depth++;
+          else if (sql[j] === ')') depth--;
+        }
+        const body = sql.slice(start, j - 1);
+        // split on top-level commas only
+        let d = 0;
+        let cur = '';
+        const items: string[] = [];
+        for (const ch of body) {
+          if (ch === '(') d++;
+          if (ch === ')') d--;
+          if (ch === ',' && d === 0) { items.push(cur); cur = ''; } else cur += ch;
+        }
+        items.push(cur);
+        for (const item of items) {
+          const cm = /^\s*"?([a-z_][a-z0-9_]*)"?\s+\S/i.exec(item);
+          if (cm && !CONSTRAINT.test(cm[1]!)) cols.add(cm[1]!.toLowerCase());
+        }
+        out.set(key, cols);
+      }
+      const addRe = /alter\s+table\s+(?:if\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?\."?([a-z_][a-z0-9_]*)"?\s+add\s+column\s+(?:if\s+not\s+exists\s+)?"?([a-z_][a-z0-9_]*)"?/gi;
+      while ((m = addRe.exec(sql))) {
+        const key = `${m[1]!.toLowerCase()}.${m[2]!.toLowerCase()}`;
+        const cols = out.get(key) ?? new Set<string>();
+        cols.add(m[3]!.toLowerCase());
+        out.set(key, cols);
+      }
+    }
+  }
+  return out;
 }
 
 /** SQL keywords that can follow a `schema.table` reference where an alias would otherwise go —

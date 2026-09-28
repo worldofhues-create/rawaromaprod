@@ -1,38 +1,63 @@
 /**
- * Lane F5 (RP-DEADTABLES) — DocumentsService (backend/api/src/documents/documents.service.ts):
- * list/get/create used to query/insert platform.document_registry, a table that exists in
- * NEITHER @core/data-platform nor @ra/data-reference (db:push's only sources for the `platform`
- * schema, per scripts/db-schema-groups.ts) nor the Phase-1A Data Dictionary. All three now throw
- * NotImplementedException instead of a 500 against any real database.
+ * DocumentsService (backend/api/src/documents/documents.service.ts) — lane platform-roles
+ * (2026-09-28) restored it: platform.document_registry exists on every real database
+ * (scripts/migrations/0015), so the Factory "Documents" screen lists/creates/versions documents
+ * instead of showing lane F5's refusal. Exercised on a Drizzle-wrapped pool, as in the running API.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { NotImplementedException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import { DocumentsService } from '../documents/documents.service.js';
-import { ensureSchema, testClient, principal, closeTestClient } from '../../../test-support/db.js';
+import { ensureSchema, principal, closeTestClient, TEST_DATABASE_URL } from '../../../test-support/db.js';
 
+let wrapped: ReturnType<typeof postgres>;
 let svc: DocumentsService;
 
 before(async () => {
   await ensureSchema();
-  svc = new DocumentsService(testClient() as never);
+  wrapped = postgres(TEST_DATABASE_URL, { max: 2, prepare: false, types: {}, onnotice: () => {} });
+  drizzle(wrapped);
+  svc = new DocumentsService(wrapped as never);
 });
 
 after(async () => {
+  await wrapped.end({ timeout: 1 });
   await closeTestClient();
 });
 
-test('document-registry (lane F5): list is honest "not available" — platform.document_registry does not exist', async () => {
-  await assert.rejects(() => svc.list({ limit: 100 }), NotImplementedException);
+test('document-registry: create, get, and list by entity — with days-to-expiry', async () => {
+  const entityId = crypto.randomUUID();
+  const doc = (await svc.create(
+    { title: 'IFRA certificate', documentType: 'IFRA Certificate', entityType: 'vendor', entityId, expiryDate: '2099-01-01', sourceUrl: 'https://example.com/ifra.pdf' },
+    principal(),
+  )) as Record<string, unknown>;
+  assert.equal(doc.title, 'IFRA certificate');
+  assert.equal(doc.version, 1);
+  assert.equal(doc.status, 'ACTIVE');
+  assert.equal(doc.expiryDate, '2099-01-01');
+  assert.ok(Number(doc.daysToExpiry) > 0);
+  const { items } = await svc.list({ entityType: 'vendor', entityId });
+  assert.equal(items.length, 1);
+  assert.equal((await svc.get(String(doc.documentRegistryId)) as Record<string, unknown>).title, 'IFRA certificate');
 });
 
-test('document-registry (lane F5): get is honest "not available"', async () => {
-  await assert.rejects(() => svc.get(crypto.randomUUID()), NotImplementedException);
+test('document-registry: a new version supersedes the prior one in the same transaction', async () => {
+  const v1 = (await svc.create({ title: 'COA', documentType: 'COA' }, principal())) as Record<string, unknown>;
+  const v2 = (await svc.create({ title: 'COA', documentType: 'COA', supersedesId: v1.documentRegistryId }, principal())) as Record<string, unknown>;
+  assert.equal(v2.version, 2);
+  assert.equal(v2.supersedesId, v1.documentRegistryId);
+  assert.equal((await svc.get(String(v1.documentRegistryId)) as Record<string, unknown>).status, 'SUPERSEDED');
 });
 
-test('document-registry (lane F5): create is honest "not available", not a fabricated row', async () => {
-  await assert.rejects(
-    () => svc.create({ title: 'COA' }, principal()),
-    NotImplementedException,
-  );
+test('document-registry: bad input is a 400/404 with plain copy, never a Postgres 500', async () => {
+  await assert.rejects(() => svc.create({ documentType: 'COA' }, principal()), BadRequestException);
+  await assert.rejects(() => svc.create({ title: 'x', documentType: 'COA', entityId: 'nope' }, principal()), BadRequestException);
+  await assert.rejects(() => svc.create({ title: 'x', documentType: 'COA', entityType: 'planet' }, principal()), BadRequestException);
+  await assert.rejects(() => svc.create({ title: 'x', documentType: 'COA', expiryDate: 'soon' }, principal()), BadRequestException);
+  await assert.rejects(() => svc.create({ title: 'x', documentType: 'COA', sourceUrl: 'javascript:alert(1)' }, principal()), BadRequestException);
+  await assert.rejects(() => svc.create({ title: 'x', documentType: 'COA', supersedesId: crypto.randomUUID() }, principal()), NotFoundException);
+  await assert.rejects(() => svc.get('not-a-uuid'), NotFoundException);
+  await assert.rejects(() => svc.list({ entityId: 'nope' }), BadRequestException);
 });

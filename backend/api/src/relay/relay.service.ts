@@ -14,21 +14,14 @@
  * Only signed event envelopes cross. Never a DB connection, never the KEK, never a recipe
  * (formula.* is stripped by the contract and the formula schema is never scanned).
  *
- * NOT AVAILABLE (lane F5, RP-DEADTABLES): every public method here depends on
- * platform.relay_cursor, platform.relay_inbox, and/or platform.relay_package — none of which
- * exist in @core/data-platform or @ra/data-reference (the only sources `pnpm db:push` draws the
- * `platform` schema from, per scripts/db-schema-groups.ts) or the Phase-1A Data Dictionary. Any
- * real/dev database would 500 with "relation does not exist" the instant any of these ran — dead
- * calls dressed up as a working air-gap sync. Per CLAUDE.md C3 (no destructive migration;
- * additive schema only if the dictionary process permits it — report if locked), new tables are
- * NOT added here. exportPackage/importPackage/status now throw an honest NotImplementedException.
- * The export/import/status implementation (signing, chain verification, hydration, apply) is
- * removed rather than kept as unreachable code; restore it from integration/fullsystem@db4815f
- * (this file) once the tables exist. relay-contract/relay-crypto/relay-hydration are untouched.
- * Unblocking it needs: `relay_cursor` (direction, source_schema, last_seq, updated_dt — PK
- * direction+source_schema), `relay_inbox` (event dedupe by id + direction), and `relay_package`
- * (package_id, direction, kind, package_hash, prev_hash, event_count, created_dt) added to the
- * Phase-1A dictionary + @ra/data-reference (or @core/data-platform) schema, then db:push.
+ * NOT AVAILABLE on this deployment. The tables now exist (scripts/migrations/0018_adhoc_relay_
+ * tables.sql, on production since 2026-09-24), but the export/import/status implementation
+ * (signing, chain verification, hydration, apply) was removed by lane F5 (RP-DEADTABLES,
+ * 2026-09-23) while they did not, and production crosses between RawProd and ALEMBIC through the
+ * signed bridge instead. Restoring air-gap sync means restoring that implementation from
+ * integration/fullsystem@db4815f (this file) and re-reviewing it — a feature decision, not a
+ * wiring fix — so the methods keep refusing, now with plain user copy (lane platform-roles,
+ * 2026-09-28). relay-contract/relay-crypto/relay-hydration are untouched.
  */
 import { Injectable, NotImplementedException } from '@nestjs/common';
 import type { RelayDirection } from './relay-contract.js';
@@ -63,8 +56,7 @@ export interface RelayPackage {
   signature: string;
 }
 
-const UNAVAILABLE =
-  'Relay (air-gap sync) is not available: its backing tables (platform.relay_cursor, platform.relay_inbox, platform.relay_package) were never added to the Phase-1A Data Dictionary or @core/data-platform / @ra/data-reference schema, so they do not exist in any real database. Ask the data team to add them to the dictionary before this feature can go live.';
+const UNAVAILABLE = "Air-gap sync isn't available on this deployment.";
 
 @Injectable()
 export class RelayService {

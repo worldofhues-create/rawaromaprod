@@ -1606,3 +1606,47 @@ create table if not exists packaging.fg_label_record (
   created_by varchar(255),
   updated_by varchar(255)
 );
+
+-- Lane platform-roles (2026-09-28): the tables scripts/migrations/0014_adhoc_negotiation_advance_
+-- dispatch.sql and 0015_adhoc_document_registry.sql create in every real database, copied verbatim,
+-- so the restored DispatchDocsService / DocumentsService / ProcAnalyticsService negotiation,
+-- vendor-dispatch and advance-payment paths are tested against the production shape.
+create table if not exists procurement.vendor_negotiation (
+  vendor_negotiation_id uuid primary key default gen_random_uuid(),
+  quotation_id uuid, vendor_id uuid, material_id uuid,
+  original_rate numeric(18,4), revised_rate numeric(18,4),
+  notes text, recommendation text,
+  status varchar(30) default 'ACTIVE',
+  created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(64), updated_by varchar(64)
+);
+create table if not exists procurement.po_advance_payment (
+  po_advance_payment_id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid, amount numeric(18,2), payment_date date, reference text,
+  status varchar(30) default 'PAID',
+  created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(64), updated_by varchar(64)
+);
+create table if not exists procurement.vendor_dispatch (
+  vendor_dispatch_id uuid primary key default gen_random_uuid(),
+  purchase_order_id uuid, dispatch_date date, transporter text, docket_number text, vehicle_number text,
+  status varchar(30) default 'DISPATCHED',
+  created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(64), updated_by varchar(64)
+);
+create table if not exists sales.dispatch_document (
+  dispatch_document_id uuid primary key default gen_random_uuid(),
+  dispatch_id uuid, sales_order_id uuid, document_type text, document_number text, document_date date,
+  amount numeric(18,2), reference text, received_by text, notes text,
+  status varchar(30) default 'ISSUED',
+  created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(64), updated_by varchar(64)
+);
+create table if not exists platform.document_registry (
+  document_registry_id uuid primary key,
+  title text, document_type text, entity_type text, entity_id uuid, reference_no text,
+  source_url text, file_name text, version integer not null default 1, supersedes_id uuid,
+  issue_date date, expiry_date date, notes text, status text not null default 'ACTIVE',
+  created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(64), updated_by varchar(64)
+);

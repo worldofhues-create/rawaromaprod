@@ -7,18 +7,17 @@
  *   three compute from dictionary tables that genuinely exist in @ra/data-procurement/@ra/data-
  *   inventory/@ra/data-quality — no fake data, no missing tables.
  *
- *   NOT AVAILABLE (disabled honestly, not faked) — vendor-negotiations and vendor-dispatches.
- *   Both used to query/insert procurement.vendor_negotiation / procurement.vendor_dispatch,
- *   tables that exist in NEITHER @ra/data-procurement (db:push's only source for the
- *   `procurement` schema) NOR the Phase-1A Data Dictionary — so on any real/dev database they
- *   would 500 with "relation does not exist". They now throw NotImplementedException with an
- *   honest message instead.
+ *   Negotiation, vendor dispatch, advance payments and the approval matrix were disabled by lanes
+ *   RP-PROC-007/F5 while their tables had no migration; they are REAL again (lane platform-roles,
+ *   2026-09-28) and tested below on a Drizzle-wrapped pool.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { NotImplementedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import postgres from 'postgres';
+import { drizzle } from 'drizzle-orm/postgres-js';
 import { ProcAnalyticsService } from '../procanalytics/procanalytics.service.js';
-import { ensureSchema, testClient, principal, closeTestClient } from '../../../test-support/db.js';
+import { ensureSchema, testClient, principal, closeTestClient, TEST_DATABASE_URL } from '../../../test-support/db.js';
 
 let svc: ProcAnalyticsService;
 
@@ -83,30 +82,112 @@ test('qc-rejected-grns: REAL — surfaces GRNs with a real QC REJECT, not fabric
   assert.ok(row, 'a GRN with a real QC REJECT must appear');
 });
 
-test('vendor-negotiations (RP-PROC-007): honest "not available", not a crash or fake data', async () => {
-  await assert.rejects(() => svc.listNegotiations(200), NotImplementedException);
-  await assert.rejects(
-    () => svc.createNegotiation({ quotationId: crypto.randomUUID() }, principal({ permissions: ['procurement:quotation_items:write'] })),
-    NotImplementedException,
-  );
+/* ── Lane platform-roles (2026-09-28): negotiation / vendor dispatch / advance payment / approval
+ * matrix are REAL again — their tables come from scripts/migrations/0014 (and 0001 for
+ * approval_matrix) and exist on production. Exercised on a Drizzle-WRAPPED pool, exactly as the
+ * running API's PG_CLIENT is (timestamps/dates come back as text and parameters are not
+ * serialized — every value these services bind must already be a string). ── */
+
+async function withWrapped<T>(fn: (svc: ProcAnalyticsService) => Promise<T>): Promise<T> {
+  const wrapped = postgres(TEST_DATABASE_URL, { max: 2, prepare: false, types: {}, onnotice: () => {} });
+  drizzle(wrapped);
+  try {
+    return await fn(new ProcAnalyticsService(wrapped as never));
+  } finally {
+    await wrapped.end({ timeout: 1 });
+  }
+}
+
+async function makePo(): Promise<{ purchaseOrderId: string; vendorId: string; poNumber: string }> {
+  const sql = testClient();
+  const vendorId = crypto.randomUUID();
+  const purchaseOrderId = crypto.randomUUID();
+  const poNumber = 'PO-PR-' + purchaseOrderId.slice(0, 8);
+  await sql`insert into procurement.vendor_details (vendor_id, vendor_code, vendor_name, status)
+    values (${vendorId}, ${'V-' + vendorId.slice(0, 8)}, 'Dispatch Vendor', 'ACTIVE')`;
+  await sql`insert into procurement.purchase_order (purchase_order_id, po_number, vendor_id, total_amount, status)
+    values (${purchaseOrderId}, ${poNumber}, ${vendorId}, 1000, 'APPROVED')`;
+  return { purchaseOrderId, vendorId, poNumber };
+}
+
+test('vendor-dispatches: record against a real PO, then list it with PO number + vendor', async () => {
+  const po = await makePo();
+  await withWrapped(async (w) => {
+    const created = (await w.createVendorDispatch(
+      { purchaseOrderId: po.purchaseOrderId, dispatchDate: '2026-09-28', transporter: 'Blue Dart', docketNumber: 'LR-1', vehicleNumber: 'MH01AB1234' },
+      principal({ permissions: ['procurement:purchase_order:read'] }),
+    )) as { vendorDispatchId: string; status: string };
+    assert.equal(created.status, 'DISPATCHED');
+    const { items } = await w.listVendorDispatches(500);
+    const row = items.find((r) => (r as { vendorDispatchId: string }).vendorDispatchId === created.vendorDispatchId) as Record<string, unknown> | undefined;
+    assert.ok(row);
+    assert.equal(row!.poNumber, po.poNumber);
+    assert.equal(row!.vendorName, 'Dispatch Vendor');
+    assert.equal(row!.dispatchDate, '2026-09-28');
+  });
 });
 
-test('vendor-dispatches (RP-PROC-007): honest "not available", not a crash or fake data', async () => {
-  await assert.rejects(() => svc.listVendorDispatches(200), NotImplementedException);
-  await assert.rejects(
-    () => svc.createVendorDispatch({ purchaseOrderId: crypto.randomUUID() }, principal({ permissions: ['procurement:purchase_order:read'] })),
-    NotImplementedException,
-  );
+test('vendor-dispatches: bad input is a 400/404, never a Postgres 500; permission still first', async () => {
+  const ok = principal({ permissions: ['procurement:purchase_order:read'] });
+  await assert.rejects(() => svc.createVendorDispatch({ purchaseOrderId: 'nope', dispatchDate: '2026-09-28' }, ok), BadRequestException);
+  await assert.rejects(() => svc.createVendorDispatch({ purchaseOrderId: crypto.randomUUID() }, ok), BadRequestException);
+  await assert.rejects(() => svc.createVendorDispatch({ purchaseOrderId: crypto.randomUUID(), dispatchDate: '2026-09-28' }, ok), NotFoundException);
+  await assert.rejects(() => svc.createVendorDispatch({ purchaseOrderId: crypto.randomUUID(), dispatchDate: '2026-09-28' }, principal({ permissions: [] })), ForbiddenException);
 });
 
-test('approval-matrix (lane F5): honest "not available" — iam.approval_matrix does not exist in @core/data-iam or @ra/data-org', async () => {
-  await assert.rejects(() => svc.approvalMatrix(200), NotImplementedException);
+test('po-advance-payments: record against a real PO, then list it', async () => {
+  const po = await makePo();
+  await withWrapped(async (w) => {
+    const created = (await w.createAdvancePayment(
+      { purchaseOrderId: po.purchaseOrderId, amount: 2500.5, paymentDate: '2026-09-27', reference: 'UTR123' },
+      principal({ permissions: ['procurement:purchase_order:write'] }),
+    )) as { poAdvancePaymentId: string; amount: string; status: string };
+    assert.equal(created.status, 'PAID');
+    assert.equal(Number(created.amount), 2500.5);
+    const { items } = await w.listAdvancePayments(500);
+    const row = items.find((r) => (r as { poAdvancePaymentId: string }).poAdvancePaymentId === created.poAdvancePaymentId) as Record<string, unknown> | undefined;
+    assert.ok(row);
+    assert.equal(row!.poNumber, po.poNumber);
+    assert.equal(row!.paymentDate, '2026-09-27');
+  });
+  const ok = principal({ permissions: ['procurement:purchase_order:write'] });
+  await assert.rejects(() => svc.createAdvancePayment({ purchaseOrderId: po.purchaseOrderId, amount: 0, paymentDate: '2026-09-27' }, ok), BadRequestException);
+  await assert.rejects(() => svc.createAdvancePayment({ purchaseOrderId: po.purchaseOrderId, amount: 'ten', paymentDate: '2026-09-27' }, ok), BadRequestException);
+  await assert.rejects(() => svc.createAdvancePayment({ purchaseOrderId: po.purchaseOrderId, amount: 10, paymentDate: '2026-09-27' }, principal({ permissions: [] })), ForbiddenException);
 });
 
-test('po-advance-payments (lane F5): honest "not available" — procurement.po_advance_payment does not exist in @ra/data-procurement', async () => {
-  await assert.rejects(() => svc.listAdvancePayments(200), NotImplementedException);
-  await assert.rejects(
-    () => svc.createAdvancePayment({ purchaseOrderId: crypto.randomUUID() }, principal({ permissions: ['procurement:purchase_order:write'] })),
-    NotImplementedException,
-  );
+test('vendor-negotiations: create then list; recommendation is validated', async () => {
+  const po = await makePo();
+  await withWrapped(async (w) => {
+    const created = (await w.createNegotiation(
+      { vendorId: po.vendorId, originalRate: '300', revisedRate: '275.5', recommendation: 'APPROVE', notes: 'volume discount' },
+      principal({ permissions: ['procurement:quotation_items:write'] }),
+    )) as { vendorNegotiationId: string; revisedRate: string; status: string };
+    assert.equal(Number(created.revisedRate), 275.5);
+    const { items } = await w.listNegotiations(500);
+    const row = items.find((r) => (r as { vendorNegotiationId: string }).vendorNegotiationId === created.vendorNegotiationId) as Record<string, unknown> | undefined;
+    assert.ok(row);
+    assert.equal(row!.vendorName, 'Dispatch Vendor');
+  });
+  const ok = principal({ permissions: ['procurement:quotation_items:write'] });
+  await assert.rejects(() => svc.createNegotiation({ vendorId: po.vendorId, recommendation: 'MAYBE' }, ok), BadRequestException);
+  await assert.rejects(() => svc.createNegotiation({}, ok), BadRequestException);
+  await assert.rejects(() => svc.createNegotiation({ vendorId: po.vendorId }, principal({ permissions: [] })), ForbiddenException);
+});
+
+test('approval-matrix: lists the configured per-organisation policies with the organisation name', async () => {
+  const sql = testClient();
+  const orgId = crypto.randomUUID();
+  await sql`insert into iam.org_master (organization_id, organization_code, organization_name, status)
+    values (${orgId}, ${'ORG-' + orgId.slice(0, 6)}, 'Matrix Org', 'ACTIVE')`;
+  await sql`insert into iam.approval_matrix (organization_id, policy_type, threshold_amount, status)
+    values (${orgId}, 'PO_APPROVAL_THRESHOLD', 500000, 'ACTIVE')`;
+  await withWrapped(async (w) => {
+    const { items } = await w.approvalMatrix(500);
+    const row = items.find((r) => (r as { organizationId: string }).organizationId === orgId) as Record<string, unknown> | undefined;
+    assert.ok(row);
+    assert.equal(row!.organizationName, 'Matrix Org');
+    assert.equal(row!.policyType, 'PO_APPROVAL_THRESHOLD');
+    assert.equal(Number(row!.thresholdAmount), 500000);
+  });
 });

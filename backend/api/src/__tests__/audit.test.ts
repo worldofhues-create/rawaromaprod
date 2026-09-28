@@ -29,3 +29,11 @@ after(async () => {
 test('login-history (lane F5): honest "not available" — iam.login_history does not exist in @core/data-iam or @ra/data-org', async () => {
   await assert.rejects(() => svc.loginHistory(100), NotImplementedException);
 });
+
+test('login-history (lane platform-roles): the 501 is plain user copy', async () => {
+  await assert.rejects(() => svc.loginHistory(100), (err: unknown) => {
+    assert.ok(err instanceof NotImplementedException);
+    assert.equal((err as NotImplementedException).message, "Login history isn't recorded yet.");
+    return true;
+  });
+});

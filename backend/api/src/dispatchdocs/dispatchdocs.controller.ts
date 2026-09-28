@@ -13,7 +13,7 @@ export class DispatchDocsController {
     return this.svc.list(limit ? Number(limit) : 200);
   }
 
-  @DynamicPermission('sales:dispatch_master:write checked in DispatchDocsService.create before it throws NotImplementedException')
+  @DynamicPermission('sales:dispatch_master:write checked in DispatchDocsService.create before any read or write')
   @Post('v1/dispatch-documents')
   create(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.create(body, principal);

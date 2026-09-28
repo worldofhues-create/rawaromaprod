@@ -8,19 +8,14 @@
  *   - Vendor Performance: per-vendor PO count, GRN count, QC pass/fail + pass% (QC linked back
  *     through grn → rm_batch → inspection). REAL — dictionary tables only.
  *   - QC-rejected GRNs / vendor ledger / replacement PO: REAL — dictionary tables only.
- *   - Negotiation + vendor dispatch (RP-PROC-007) + approval matrix + advance payments
- *     (lane F5, RP-DEADTABLES): NOT AVAILABLE. All four used to query/insert
- *     procurement.vendor_negotiation / procurement.vendor_dispatch / iam.approval_matrix /
- *     procurement.po_advance_payment — tables that exist in NEITHER their owning package (the
- *     only source `pnpm db:push` draws each schema from, per scripts/db-schema-groups.ts) NOR
- *     the Phase-1A Data Dictionary (docs/PHASE1A_SCHEMA_PLAN.md's table list). Any real/dev
- *     database would 500 with "relation does not exist" the instant these ran — dead calls
- *     dressed up as working ones. Per CLAUDE.md C3 (no destructive migration; additive schema
- *     only if the dictionary process permits it), these now throw an honest
- *     NotImplementedException instead of crashing or fabricating rows — see
- *     listNegotiations/createNegotiation, listVendorDispatches/createVendorDispatch,
- *     approvalMatrix, and listAdvancePayments/createAdvancePayment below for what unblocking
- *     each needs.
+ *   - Negotiation, vendor dispatch, advance payments: REAL — procurement.vendor_negotiation /
+ *     vendor_dispatch / po_advance_payment, created by scripts/migrations/
+ *     0014_adhoc_negotiation_advance_dispatch.sql (on production since 2026-09-24). Lane F5
+ *     (RP-DEADTABLES, 2026-09-23) had replaced these with NotImplemented refusals before that
+ *     migration existed; lane platform-roles (2026-09-28) restored them.
+ *   - Approval matrix: REAL — the per-organisation policy rows in iam.approval_matrix
+ *     (packages/data-org/src/schema/policy.ts, 0001_iam.sql) that PoService/RfqService enforce.
+ *     Read-only here: it shows which policies are configured and their values.
  * Reads are permission-gated at the controller to reveal-capable procurement roles; every write
  * is now ALSO permission-gated at the controller (previously service-only checks on 4 POST
  * routes — the controller had no @Permissions decorator, so PermissionsGuard let any
@@ -32,11 +27,12 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
-  NotImplementedException,
+  NotFoundException,
 } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
+import { BodyFields } from '../body-fields.js';
 
 const NEG_WRITE_PERM = 'procurement:quotation_items:write';
 
@@ -104,89 +100,117 @@ export class ProcAnalyticsService {
   }
 
   /**
-   * Approval matrix — the governance table (who creates / submits / approves / final authority /
-   * auto-approval) for every transaction, per the owner's spec. NOT AVAILABLE: this used to query
-   * `iam.approval_matrix` — a table that does NOT exist in @core/data-iam or @ra/data-org (the
-   * only sources `pnpm db:push` draws the `iam` schema from, per scripts/db-schema-groups.ts) and
-   * is not in the Phase-1A Data Dictionary. Any real/dev database would 500 with "relation
-   * iam.approval_matrix does not exist" the instant this ran. Honest "not available" instead of a
-   * crash or fabricated data — see web/app.js's loadView, which surfaces this message verbatim.
-   * Unblocking it needs: `approval_matrix` added to the Phase-1A dictionary + @ra/data-org (or
-   * @core/data-iam) schema (columns as queried below), then db:push.
+   * Approval matrix — the approval policies actually enforced (iam.approval_matrix, one row per
+   * organisation × policy type): PO_APPROVAL_THRESHOLD (amount at/above which a purchase order
+   * needs a second, distinct approver) and RFQ_AWARD_SEPARATION (award approver must differ from
+   * the RFQ creator). A policy with no row runs on its built-in default (see PoService/RfqService),
+   * so an empty list means "defaults everywhere", not "no controls".
    */
-  async approvalMatrix(_limit = 200): Promise<never> {
-    throw new NotImplementedException(
-      'Approval matrix is not available: its backing table (iam.approval_matrix) was never added to the Phase-1A Data Dictionary or @core/data-iam / @ra/data-org schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+  async approvalMatrix(limit = 200) {
+    const lim = String(Math.min(Math.max(1, Number(limit) || 200), 500));
+    const items = await this.sql`
+      select am.approval_matrix_id as "approvalMatrixId", am.organization_id as "organizationId",
+             o.organization_name as "organizationName", am.policy_type as "policyType",
+             am.threshold_amount as "thresholdAmount", am.is_enabled as "isEnabled",
+             am.status as "status", am.updated_dt as "updatedDt"
+        from iam.approval_matrix am
+        left join iam.org_master o on o.organization_id = am.organization_id
+       order by o.organization_name asc nulls last, am.policy_type asc
+       limit ${lim}::int`;
+    return { items, nextCursor: null };
   }
 
   /* ── vendor dispatch (scope-freeze step 15) ────────────────────────── */
 
-  /**
-   * RP-PROC-007: this used to run `select ... from procurement.vendor_dispatch` — a table that
-   * does NOT exist anywhere in the real schema pipeline. `procurement.vendor_dispatch` is not
-   * defined in @ra/data-procurement (the only source db:push draws the `procurement` schema
-   * from, per scripts/db-schema-groups.ts) and is not in the Phase-1A Data Dictionary's table
-   * list (docs/PHASE1A_SCHEMA_PLAN.md). Any real or dev database would 500 with "relation
-   * procurement.vendor_dispatch does not exist" the moment this ran — a dead call dressed up as
-   * a working one. Per CLAUDE.md C3 (no destructive migration; additive schema only if the
-   * dictionary process permits it — report if locked), a new table is NOT added here. This is an
-   * honest "not available" instead of a crash or fabricated data; web/app.js's loadView surfaces
-   * this message verbatim rather than showing a misleading "No records yet".
-   * Unblocking it needs: `vendor_dispatch` added to the Phase-1A dictionary + @ra/data-procurement
-   * schema (columns as queried below), then db:push.
-   */
-  async listVendorDispatches(_limit = 200): Promise<never> {
-    throw new NotImplementedException(
-      'Vendor dispatch tracking is not available: its backing table (procurement.vendor_dispatch) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+  async listVendorDispatches(limit = 200) {
+    const lim = String(Math.min(Math.max(1, Number(limit) || 200), 500));
+    const items = await this.sql`
+      select vd.vendor_dispatch_id as "vendorDispatchId", vd.purchase_order_id as "purchaseOrderId",
+             po.po_number as "poNumber", v.vendor_name as "vendorName",
+             vd.dispatch_date::text as "dispatchDate", vd.transporter as "transporter",
+             vd.docket_number as "docketNumber", vd.vehicle_number as "vehicleNumber", vd.status as "status"
+        from procurement.vendor_dispatch vd
+        left join procurement.purchase_order po on po.purchase_order_id = vd.purchase_order_id
+        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
+       order by vd.created_dt desc, vd.vendor_dispatch_id desc
+       limit ${lim}::int`;
+    return { items, nextCursor: null };
   }
 
-  async createVendorDispatch(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
+  async createVendorDispatch(body: Record<string, unknown>, principal: AuthPrincipal) {
     if (!(principal.permissions || []).includes('procurement:purchase_order:read')) {
       throw new ForbiddenException('Missing permission procurement:purchase_order:read');
     }
-    throw new NotImplementedException(
-      'Vendor dispatch tracking is not available: its backing table (procurement.vendor_dispatch) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+    const f = new BodyFields(body ?? {});
+    const purchaseOrderId = f.required('purchaseOrderId', f.uuid('purchaseOrderId'));
+    const dispatchDate = f.required('dispatchDate', f.date('dispatchDate'));
+    const transporter = f.text('transporter', 200);
+    const docketNumber = f.text('docketNumber', 100);
+    const vehicleNumber = f.text('vehicleNumber', 30);
+    await this.requirePurchaseOrder(purchaseOrderId);
+    const rows = (await this.sql`
+      insert into procurement.vendor_dispatch (vendor_dispatch_id, purchase_order_id, dispatch_date, transporter, docket_number, vehicle_number, status, created_by, updated_by)
+      values (${uuidv7()}::uuid, ${purchaseOrderId}::uuid, ${dispatchDate}::date, ${transporter}, ${docketNumber}, ${vehicleNumber}, 'DISPATCHED', ${principal.userId}, ${principal.userId})
+      returning vendor_dispatch_id as "vendorDispatchId", status as "status"`) as Array<Record<string, unknown>>;
+    return rows[0];
+  }
+
+  private async requirePurchaseOrder(purchaseOrderId: string): Promise<void> {
+    const po = await this.sql`select 1 from procurement.purchase_order where purchase_order_id = ${purchaseOrderId}::uuid`;
+    if (!po.length) throw new NotFoundException('That purchase order was not found.');
   }
 
   /* ── advance payment (scope-freeze step 13) ────────────────────────── */
 
-  /**
-   * NOT AVAILABLE: this used to query/insert `procurement.po_advance_payment` — a table that does
-   * NOT exist in @ra/data-procurement (db:push's only source for the `procurement` schema) or the
-   * Phase-1A Data Dictionary. Any real/dev database would 500 with "relation
-   * procurement.po_advance_payment does not exist". Honest "not available" instead of a crash or
-   * fabricated data. Unblocking it needs: `po_advance_payment` added to the Phase-1A dictionary +
-   * @ra/data-procurement schema (columns as queried below), then db:push.
-   */
-  async listAdvancePayments(_limit = 200): Promise<never> {
-    throw new NotImplementedException(
-      'Advance payments are not available: their backing table (procurement.po_advance_payment) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+  async listAdvancePayments(limit = 200) {
+    const lim = String(Math.min(Math.max(1, Number(limit) || 200), 500));
+    const items = await this.sql`
+      select ap.po_advance_payment_id as "poAdvancePaymentId", ap.purchase_order_id as "purchaseOrderId",
+             po.po_number as "poNumber", v.vendor_name as "vendorName",
+             ap.amount as "amount", ap.payment_date::text as "paymentDate", ap.reference as "reference", ap.status as "status"
+        from procurement.po_advance_payment ap
+        left join procurement.purchase_order po on po.purchase_order_id = ap.purchase_order_id
+        left join procurement.vendor_details v on v.vendor_id = po.vendor_id
+       order by ap.created_dt desc, ap.po_advance_payment_id desc
+       limit ${lim}::int`;
+    return { items, nextCursor: null };
   }
 
-  async createAdvancePayment(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
+  async createAdvancePayment(body: Record<string, unknown>, principal: AuthPrincipal) {
     if (!(principal.permissions || []).includes('procurement:purchase_order:write')) {
       throw new ForbiddenException('Missing permission procurement:purchase_order:write');
     }
-    throw new NotImplementedException(
-      'Advance payments are not available: their backing table (procurement.po_advance_payment) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+    const f = new BodyFields(body ?? {});
+    const purchaseOrderId = f.required('purchaseOrderId', f.uuid('purchaseOrderId'));
+    const amount = f.required('amount', f.number('amount'));
+    if (!(Number(amount) > 0)) throw new BadRequestException('amount must be greater than zero.');
+    const paymentDate = f.required('paymentDate', f.date('paymentDate'));
+    const reference = f.text('reference', 200);
+    await this.requirePurchaseOrder(purchaseOrderId);
+    const rows = (await this.sql`
+      insert into procurement.po_advance_payment (po_advance_payment_id, purchase_order_id, amount, payment_date, reference, status, created_by, updated_by)
+      values (${uuidv7()}::uuid, ${purchaseOrderId}::uuid, ${amount}::numeric, ${paymentDate}::date, ${reference}, 'PAID', ${principal.userId}, ${principal.userId})
+      returning po_advance_payment_id as "poAdvancePaymentId", amount as "amount", status as "status"`) as Array<Record<string, unknown>>;
+    return rows[0];
   }
 
   /* ── negotiation ────────────────────────────────────────────────────── */
 
-  /**
-   * RP-PROC-007: same defect as listVendorDispatches above — `procurement.vendor_negotiation`
-   * does not exist in @ra/data-procurement or the Phase-1A Data Dictionary, so this call would
-   * 500 against any real database. Honest "not available" instead of a crash or fake rows.
-   */
-  async listNegotiations(_limit = 200): Promise<never> {
-    throw new NotImplementedException(
-      'Vendor negotiation tracking is not available: its backing table (procurement.vendor_negotiation) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+  async listNegotiations(limit = 200) {
+    const lim = String(Math.min(Math.max(1, Number(limit) || 200), 500));
+    const items = await this.sql`
+      select n.vendor_negotiation_id as "vendorNegotiationId", n.quotation_id as "quotationId",
+             q.quotation_number as "quotationNumber", n.vendor_id as "vendorId", v.vendor_name as "vendorName",
+             n.material_id as "materialId", m.material_name as "materialName",
+             n.original_rate as "originalRate", n.revised_rate as "revisedRate",
+             n.notes as "notes", n.recommendation as "recommendation", n.status as "status"
+        from procurement.vendor_negotiation n
+        left join procurement.quotations q on q.quotation_id = n.quotation_id
+        left join procurement.vendor_details v on v.vendor_id = n.vendor_id
+        left join masterdata.material m on m.material_id = n.material_id
+       order by n.created_dt desc, n.vendor_negotiation_id desc
+       limit ${lim}::int`;
+    return { items, nextCursor: null };
   }
 
   /* ── FAIL-branch tail (scope-freeze M05 rejection loop) ─────────────── */
@@ -303,12 +327,27 @@ export class ProcAnalyticsService {
     return { purchaseOrderId: poId, poNumber, replacementOfPoId: grn.purchase_order_id, lines: items.length, totalAmount: total };
   }
 
-  async createNegotiation(_body: Record<string, unknown>, principal: AuthPrincipal): Promise<never> {
+  async createNegotiation(body: Record<string, unknown>, principal: AuthPrincipal) {
     if (!(principal.permissions || []).includes(NEG_WRITE_PERM)) {
       throw new ForbiddenException(`Missing permission ${NEG_WRITE_PERM}`);
     }
-    throw new NotImplementedException(
-      'Vendor negotiation tracking is not available: its backing table (procurement.vendor_negotiation) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+    const f = new BodyFields(body ?? {});
+    const vendorId = f.required('vendorId', f.uuid('vendorId'));
+    const quotationId = f.uuid('quotationId');
+    const materialId = f.uuid('materialId');
+    const originalRate = f.number('originalRate');
+    const revisedRate = f.number('revisedRate');
+    const recommendation = f.oneOf('recommendation', ['APPROVE', 'REJECT', 'HOLD', 'RENEGOTIATE'] as const);
+    const notes = f.text('notes');
+    const rows = (await this.sql`
+      insert into procurement.vendor_negotiation
+        (vendor_negotiation_id, quotation_id, vendor_id, material_id, original_rate, revised_rate,
+         notes, recommendation, status, created_by, updated_by)
+      values (${uuidv7()}::uuid, ${quotationId}::uuid, ${vendorId}::uuid, ${materialId}::uuid,
+              ${originalRate}::numeric, ${revisedRate}::numeric, ${notes},
+              ${recommendation}, 'ACTIVE', ${principal.userId}, ${principal.userId})
+      returning vendor_negotiation_id as "vendorNegotiationId", revised_rate as "revisedRate",
+                recommendation as "recommendation", status as "status"`) as Array<Record<string, unknown>>;
+    return rows[0];
   }
 }

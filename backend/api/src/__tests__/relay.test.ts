@@ -41,3 +41,11 @@ test('relay import (lane F5): honest "not available" — platform.relay_inbox/re
 test('relay status (lane F5): honest "not available" — platform.relay_cursor/relay_inbox/relay_package do not exist', async () => {
   await assert.rejects(() => svc.status(), NotImplementedException);
 });
+
+test('relay (lane platform-roles): the refusal is plain user copy — no tables, dictionaries or teams', async () => {
+  await assert.rejects(() => svc.status(), (err: unknown) => {
+    assert.ok(err instanceof NotImplementedException);
+    assert.equal((err as NotImplementedException).message, "Air-gap sync isn't available on this deployment.");
+    return true;
+  });
+});

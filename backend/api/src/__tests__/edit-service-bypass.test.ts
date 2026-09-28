@@ -8,7 +8,7 @@
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { BadRequestException, NotImplementedException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, NotFoundException, NotImplementedException } from '@nestjs/common';
 import { EditService } from '../edit/edit.service.js';
 import { BatchService } from '../../../cluster-production/src/batch/batch.service.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
@@ -60,12 +60,10 @@ test('edit-service: an editable resource (e.g. vendors) still works — the regi
 });
 
 /**
- * Lane F5 (RP-DEADTABLES): these five REGISTRY entries target tables that do not exist in any
- * real database (see the guard test in backend/test-support/schema-guard.test.ts for the full
- * list + reasons). Before this fix, update() would issue a raw `update <schema>.<table> ...`
- * against a nonexistent relation and the caller got an unhandled 500 PostgresError. Now `cfg.
- * unavailable` short-circuits to an honest NotImplementedException, checked BEFORE the permission
- * check (never let a caller conclude they lack permission when the feature doesn't exist at all).
+ * Lane platform-roles (2026-09-28): these five REGISTRY entries were switched off by lane F5 while
+ * their tables had no migration; 0014/0015 create them on every real database now, so the generic
+ * editor is live again for them — permission-checked like every other resource, 404 on an unknown
+ * id, and a real write on a real row.
  */
 for (const [resource, perm] of [
   ['documents', 'platform:document_master:write'],
@@ -74,20 +72,31 @@ for (const [resource, perm] of [
   ['vendor-dispatches', 'procurement:purchase_order:read'],
   ['vendor-negotiations', 'procurement:quotation_items:write'],
 ] as const) {
-  test(`edit-service: ${resource} is honestly unavailable (its backing table does not exist), not a 500`, async () => {
+  test(`edit-service: ${resource} is editable again — unknown id is 404, not a 500`, async () => {
     await assert.rejects(
       () => editSvc.update(resource, crypto.randomUUID(), { status: 'ACTIVE' }, principal({ permissions: [perm] })),
-      NotImplementedException,
+      NotFoundException,
     );
   });
 
-  test(`edit-service: ${resource} refuses before checking permission (no perm at all still gets the honest message, not Forbidden)`, async () => {
+  test(`edit-service: ${resource} still requires ${perm}`, async () => {
     await assert.rejects(
       () => editSvc.update(resource, crypto.randomUUID(), { status: 'ACTIVE' }, principal({ permissions: [] })),
-      NotImplementedException,
+      ForbiddenException,
     );
   });
 }
+
+test('edit-service: a real dispatch document can be edited through the generic editor', async () => {
+  const sql = testClient();
+  const id = crypto.randomUUID();
+  await sql`insert into sales.dispatch_document (dispatch_document_id, document_type, status) values (${id}, 'INVOICE', 'ISSUED')`;
+  const updated = (await editSvc.update('dispatch-documents', id, { documentNumber: 'INV-9', status: 'CANCELLED' }, principal({
+    permissions: ['sales:dispatch_master:write'],
+  }))) as { document_number: string; status: string };
+  assert.equal(updated.document_number, 'INV-9');
+  assert.equal(updated.status, 'CANCELLED');
+});
 
 /**
  * Lane fread-rp: `formula-versions` targeted formula.formula_version, which lives in the Vault

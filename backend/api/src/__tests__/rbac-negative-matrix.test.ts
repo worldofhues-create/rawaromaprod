@@ -237,11 +237,9 @@ test('SB-03: OrgUnitsController.update denies a principal without iam:business_u
 });
 
 test('SB-03: DispatchDocsController.create denies a principal without sales:dispatch_master:write', async () => {
-  /* No `@Inject(PG_CLIENT)` here (unlike the other four) -- lane F5 found the
-     backing table does not exist anywhere and left both methods throwing
-     NotImplementedException; the permission check still runs first (read
-     from the source above), so this is still a real negative case. */
-  const svc = new DispatchDocsService();
+  /* The permission check runs before any SQL, so a null client proves the refusal
+     happens without touching the database. */
+  const svc = new DispatchDocsService(null as never);
   await assert.rejects(() => svc.create({}, denied),
     (err: unknown) => { assertForbidden(() => { throw err; }, 'DispatchDocsService.create'); return true; });
 });

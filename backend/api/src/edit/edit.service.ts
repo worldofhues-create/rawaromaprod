@@ -27,12 +27,11 @@ interface ResourceCfg {
    */
   statusGuard?: { column: string; allowed: string[] };
   /**
-   * Lane F5 (RP-DEADTABLES): set when `schema.table` above does NOT exist in this table's owning
-   * db:push source (each packages/data-<cluster>/src/schema directory, per
-   * scripts/db-schema-groups.ts) nor the Phase-1A Data Dictionary. Without this guard, update() would issue `update <schema>.<table> ...`
-   * against a relation that does not exist on any real database and the caller would get a raw
-   * 500 (PostgresError) instead of an honest explanation. Checked before the permission check so
-   * the "this feature doesn't exist yet" fact is never hidden behind a permission prompt.
+   * Set when this resource must not be edited through the generic PATCH at all (e.g. formula
+   * versions, which change only through the Vault's lifecycle actions). The text is shown to the
+   * user verbatim, so it is plain user copy. Checked before the permission check. (Lane F5 used
+   * this for five tables that had no migration yet; they all have one now — 0014/0015 — and lane
+   * platform-roles removed those entries, 2026-09-28.)
    */
   unavailable?: string;
 }
@@ -73,7 +72,6 @@ const REGISTRY: Record<string, ResourceCfg> = {
   documents: {
     schema: 'platform', table: 'document_registry', pk: 'document_registry_id', perm: 'platform:document_master:write',
     cols: { title: 'title', documentType: 'document_type', entityType: 'entity_type', entityId: 'entity_id', referenceNo: 'reference_no', sourceUrl: 'source_url', fileName: 'file_name', issueDate: 'issue_date', expiryDate: 'expiry_date', notes: 'notes', status: 'status' },
-    unavailable: 'Document registry is not available: its backing table (platform.document_registry) was never added to the Phase-1A Data Dictionary or @core/data-platform / @ra/data-reference schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
   },
   dispatches: {
     schema: 'sales', table: 'dispatch_master', pk: 'dispatch_id', perm: 'sales:dispatch_master:write',
@@ -82,7 +80,6 @@ const REGISTRY: Record<string, ResourceCfg> = {
   'dispatch-documents': {
     schema: 'sales', table: 'dispatch_document', pk: 'dispatch_document_id', perm: 'sales:dispatch_master:write',
     cols: { documentNumber: 'document_number', amount: 'amount', receivedBy: 'received_by', reference: 'reference', status: 'status' },
-    unavailable: 'Dispatch documents are not available: their backing table (sales.dispatch_document) was never added to the Phase-1A Data Dictionary or @ra/data-sales schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
   },
   // RP-FAC2 (RP-INV-004 follow-up): 'status'/'reservedQty' were removed (audit registry
   // follow-up mirroring the oil-batch fix below). The generic editor let a caller PATCH a
@@ -160,8 +157,8 @@ const REGISTRY: Record<string, ResourceCfg> = {
   'batch-container-mappings': { schema: 'inventory', table: 'batch_container_mappings', pk: 'batch_container_mapping_id', perm: 'inventory:batch_container_mappings:write', cols: { status: 'status' } },
   rfqs: { schema: 'procurement', table: 'rfq_master', pk: 'rfq_id', perm: 'procurement:rfq_master:write', cols: { status: 'status' } },
   quotations: { schema: 'procurement', table: 'quotations', pk: 'quotation_id', perm: 'procurement:quotation_items:write', cols: { status: 'status' } },
-  'po-advance-payments': { schema: 'procurement', table: 'po_advance_payment', pk: 'po_advance_payment_id', perm: 'procurement:purchase_order:write', cols: { amount: 'amount', reference: 'reference', status: 'status' }, unavailable: 'Advance payments are not available: their backing table (procurement.po_advance_payment) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.' },
-  'vendor-dispatches': { schema: 'procurement', table: 'vendor_dispatch', pk: 'vendor_dispatch_id', perm: 'procurement:purchase_order:read', cols: { dispatchDate: 'dispatch_date', transporter: 'transporter', docketNumber: 'docket_number', vehicleNumber: 'vehicle_number', status: 'status' }, unavailable: 'Vendor dispatch tracking is not available: its backing table (procurement.vendor_dispatch) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.' },
+  'po-advance-payments': { schema: 'procurement', table: 'po_advance_payment', pk: 'po_advance_payment_id', perm: 'procurement:purchase_order:write', cols: { amount: 'amount', reference: 'reference', status: 'status' } },
+  'vendor-dispatches': { schema: 'procurement', table: 'vendor_dispatch', pk: 'vendor_dispatch_id', perm: 'procurement:purchase_order:read', cols: { dispatchDate: 'dispatch_date', transporter: 'transporter', docketNumber: 'docket_number', vehicleNumber: 'vehicle_number', status: 'status' } },
   // Lane fread-rp: formula_version lives in the Vault database, not this box's, so this UPDATE
   // could only ever 500 here ("relation formula.formula_version does not exist"). A version's
   // status moves only through the Vault's lifecycle routes on the Vault box (finalize / submit /
@@ -173,7 +170,7 @@ const REGISTRY: Record<string, ResourceCfg> = {
   },
   'qc-parameters': { schema: 'quality', table: 'qc_parameter_master', pk: 'qc_parameter_id', perm: 'quality:qc_parameter_master:write', cols: { parameterCode: 'parameter_code', parameterName: 'parameter_name', status: 'status' } },
   'vendor-contacts': { schema: 'procurement', table: 'vendor_contact', pk: 'vendor_contact_id', perm: 'procurement:vendor_contact:write', cols: { contactName: 'contact_name', designation: 'designation', email: 'email', mobileNumber: 'mobile_number', contactType: 'contact_type', status: 'status' } },
-  'vendor-negotiations': { schema: 'procurement', table: 'vendor_negotiation', pk: 'vendor_negotiation_id', perm: 'procurement:quotation_items:write', cols: { revisedRate: 'revised_rate', notes: 'notes', recommendation: 'recommendation', status: 'status' }, unavailable: 'Vendor negotiation tracking is not available: its backing table (procurement.vendor_negotiation) was never added to the Phase-1A Data Dictionary or @ra/data-procurement schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.' },
+  'vendor-negotiations': { schema: 'procurement', table: 'vendor_negotiation', pk: 'vendor_negotiation_id', perm: 'procurement:quotation_items:write', cols: { revisedRate: 'revised_rate', notes: 'notes', recommendation: 'recommendation', status: 'status' } },
   'vendor-rm-mappings': { schema: 'procurement', table: 'vendor_rm_mapping', pk: 'vendor_rm_mapping_id', perm: 'procurement:vendor_rm_mapping:write', cols: { isPreferred: 'is_preferred', leadTimeDays: 'lead_time_days', minOrderQty: 'min_order_qty', status: 'status' }, bool: ['is_preferred'] },
   contacts: { schema: 'platform', table: 'contact_master', pk: 'contact_id', perm: 'platform:contact_master:write', cols: { contactName: 'contact_name', email: 'email', mobileNumber: 'mobile_number', phone: 'phone', whatsapp: 'whatsapp', facebook: 'facebook', instagram: 'instagram', xHandle: 'x_handle', linkedin: 'linkedin', preferredLanguage: 'preferred_language', preferredContactMethod: 'preferred_contact_method', status: 'status' } },
   countries: { schema: 'platform', table: 'country_master', pk: 'country_id', perm: 'platform:country_master:write', cols: { countryName: 'country_name', currencyId: 'currency_id', timezone: 'timezone', status: 'status' } },

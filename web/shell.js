@@ -250,7 +250,7 @@
     '/v1/po-advance-payments': ['poNumber', 'vendorName', 'amount', 'paymentDate', 'reference', 'status'],
     '/v1/vendor-dispatches': ['poNumber', 'vendorName', 'dispatchDate', 'transporter', 'docketNumber', 'status'],
     '/v1/qc-sample-retentions': ['sampleCode', 'sampleQty', 'retainedDt', 'status'],
-    '/v1/approval-matrix': ['module', 'transaction', 'createdBy', 'approvedBy', 'finalAuthority', 'autoApproval', 'remarks'],
+    '/v1/approval-matrix': ['organizationName', 'policyType', 'thresholdAmount', 'isEnabled', 'status'],
     '/v1/production-plans': ['planDate', 'plannedStartDt', 'plannedEndDt', 'status'],
     // OPS-GREEN (lane ops-factory): the factory path's new records + the write audit trail.
     '/v1/weighing-records': ['sequenceNo', 'floorCode', 'targetQty', 'netQty', 'uom', 'tolerancePct', 'status', 'weighedDt'],
