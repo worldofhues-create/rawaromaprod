@@ -170,7 +170,11 @@
 
   /* ---------------------------------------------------------------------------------------
    * 2. session (in-memory ONLY — never persisted; a reload always returns to the login
-   *    screen, which is the correct behaviour for a short-idle-session secure console).
+   *    screen, which is the correct behaviour for a short-idle-session secure console, §109.4).
+   *    Unlike Factory and Platform, this console never asks the tunnel to keep its session in
+   *    the saved-session cookie (backend/api/src/crypto/session-cookie.ts): a reload means a
+   *    fresh ALEMBIC step-up, by design. "Sign in via ALEMBIC" carries ?open=vault, so that
+   *    step-up returns here in the same tab (docs/bridge/CONSOLE_SIGN_IN.md).
    * --------------------------------------------------------------------------------------- */
   var session = { token: null, iat: 0, email: null, userId: null, roles: [], permissions: [] };
   var FRESH_WINDOW_S = 300; // must match backend/backend-kernel FreshAuth default
@@ -204,6 +208,13 @@
    * convention as `VAULT_API`/`PLATFORM_API`. Unset is an honest "not configured", never a
    * guessed URL. */
   var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
+  // ?open=vault: once the person has confirmed a fresh code, ALEMBIC hands this console an
+  // assertion in the same tab (docs/bridge/CONSOLE_SIGN_IN.md). Built from the configured URL.
+  function alembicSignInUrl(target) {
+    if (!ALEMBIC_CONSOLE_URL) return '';
+    try { var u = new URL(ALEMBIC_CONSOLE_URL, location.href); u.searchParams.set('open', target); return u.toString(); }
+    catch (e) { return ALEMBIC_CONSOLE_URL; }
+  }
 
   /* Consumes `#assertion=...` left in the URL by an ALEMBIC redirect. `history.replaceState`
    * does not fire `hashchange`, so this cannot loop back into itself — see the identical
@@ -240,7 +251,8 @@
    *  THE TRADE-OFF, WRITTEN DOWN rather than pretended away: the old inline password prompt
    *  could retry the caller's pending action after re-auth, in place. A trip to ALEMBIC
    *  cannot — this console keeps nothing in storage by design (§109.4, "short idle
-   *  session"), so returning from ALEMBIC is a NEW tab with a NEW session, not a resumed one.
+   *  session"), so coming back from ALEMBIC (same tab, via ?open=vault) is a NEW session,
+   *  not a resumed one.
    *  `withFreshAuth` below ends this tab's session rather than leave it holding a stale
    *  token, and the operator is told to repeat the action once signed in again — an honest
    *  extra step, not a silent "resume" this app cannot actually do. */
@@ -248,12 +260,12 @@
     return new Promise(function (resolve) {
       openDialog('Confirm it\'s you', function (body, close) {
         body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [
-          'Confirm a new code on ALEMBIC, then open Vault again.',
+          'Confirm a new code on ALEMBIC. You\'ll come straight back here; then repeat the action.',
         ]));
         var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
           h('button', { class: 'btn p', onclick: function () {
-            if (ALEMBIC_CONSOLE_URL) window.open(ALEMBIC_CONSOLE_URL, '_blank', 'noopener');
             close(); resolve();
+            if (ALEMBIC_CONSOLE_URL) location.assign(alembicSignInUrl('vault'));
           } }, ['Open ALEMBIC →']),
           h('button', { class: 'btn', onclick: function () { close(); resolve(); } }, ['Cancel']),
         ]);
@@ -448,7 +460,7 @@
   function renderLogin() {
     root.innerHTML = '';
     var err = h('div', { class: 'err', role: 'alert' });
-    var goBtn = h('a', { class: 'btn p', href: ALEMBIC_CONSOLE_URL || '#' }, ['Sign in via ALEMBIC →']);
+    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('vault') || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
       err.textContent = 'Sign-in isn\'t set up for this build.';

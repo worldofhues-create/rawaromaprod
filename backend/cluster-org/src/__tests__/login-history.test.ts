@@ -229,3 +229,17 @@ test('iam.login_history is append-only — UPDATE, DELETE and TRUNCATE are refus
   await assert.rejects(() => sql`truncate iam.login_history`, /append-only/);
   assert.equal((await rowsFor(c.userAgent)).length, 1);
 });
+
+test('a reload\'s refresh keeps the same session (sid, step-up time) and is not a new sign-in row', async () => {
+  const email = `lh-refresh-${randomUUID().slice(0, 8)}@rawaroma.local`;
+  await makeUser(email);
+  const c = ctx();
+  const svc = makeService();
+  const claims = claimsFor(email, { target: 'platform' });
+  const out = await svc.loginWithAssertion(signAssertion(claims), c);
+  const again = await svc.refresh(out.refreshToken);
+  const decode = (t: string) => JSON.parse(Buffer.from(t.split('.')[1]!, 'base64url').toString('utf8'));
+  assert.equal(decode(again.accessToken).sid, sidOf(out.accessToken));
+  assert.equal(decode(again.accessToken).authTime, claims.auth_time, 'a refresh never makes a session look freshly authenticated');
+  assert.equal((await rowsFor(c.userAgent)).length, 1);
+});

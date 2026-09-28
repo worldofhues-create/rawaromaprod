@@ -47,16 +47,26 @@
   }
   async function seal(pt) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, te(pt))); var out = new Uint8Array(12 + ct.length); out.set(iv, 0); out.set(ct, 12); return b64(out); }
   async function open(blob) { var raw = ub64(blob); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, aesKey, raw.slice(12)); return new TextDecoder().decode(pt); }
-  async function tunnel(path, opts) {
+  async function tunnel(path, opts, _retried) {
     opts = opts || {};
     await handshake();
     var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
     if (opts.body !== undefined) payload.body = opts.body;
     if (session.token) payload.token = session.token;
+    // Keep this console's session across reloads in the tunnel's HttpOnly cookie
+    // (backend/api/src/crypto/session-cookie.ts) — the refresh token never reaches page script.
+    if (path.indexOf('/auth/') === 0) payload.persist = true;
     var res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
     var envelope = await res.json();
     if (!envelope || !envelope.data || !envelope.data.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Can\'t connect. Try again.', 0); }
     var inner = JSON.parse(await open(envelope.data.enc));
+    // Access token expired mid-session (15-min TTL): refresh once from the saved-session cookie
+    // and retry, rather than failing the screen.
+    if (inner.status === 401 && !_retried && session.token && path.indexOf('/auth/') !== 0) {
+      var rr = await tunnel('/auth/refresh', { method: 'POST' }, true);
+      var d = rr.json && rr.json.data;
+      if (rr.status < 400 && d && d.accessToken) { session.token = d.accessToken; return tunnel(path, opts, true); }
+    }
     var body = inner.body ? JSON.parse(inner.body) : null;
     return { status: inner.status, json: body };
   }
@@ -81,7 +91,9 @@
     return fetch(API + '/health').then(function (r) { return r.json(); });
   }
 
-  /* ---- session (in-memory; a reload returns to login — no persisted admin credential) ---- */
+  /* ---- session: the access token lives in memory; the refresh token lives only in the tunnel's
+   * HttpOnly cookie, so a reload restores the session (tryRestoreSession) without page script ever
+   * holding a long-lived credential. ---- */
   var session = { token: null, iat: 0, email: null, roles: [], permissions: [] };
   function hasPerm(p) { return session.permissions.indexOf(p) >= 0; }
 
@@ -99,13 +111,50 @@
     session.roles = me.roles || [];
     session.permissions = me.permissions || [];
   }
-  function logout() { session.token = null; session.email = null; session.roles = []; session.permissions = []; location.hash = ''; render(); }
+  function hasPlatformAccess() { return hasPerm('platform:flag:write') || hasPerm('iam:user_master:read') || hasPerm('platformops:console:read'); }
+  function clearSession() { session.token = null; session.email = null; session.roles = []; session.permissions = []; }
+  function logout() {
+    restoreTried = true; // never silently restore what the person just ended
+    clearSession();
+    tunnel('/auth/logout', { method: 'POST' }).catch(function () {});
+    location.hash = ''; render();
+  }
+
+  /* A reload or new tab: restore the session from the saved-session cookie, once per page load.
+   * With no cookie (or an expired one) the server answers 401 and the sign-in card shows. */
+  var restoreTried = false;
+  async function tryRestoreSession() {
+    if (restoreTried) return false;
+    restoreTried = true;
+    try {
+      var r = await tunnel('/auth/refresh', { method: 'POST' });
+      var d = r.json && r.json.data;
+      if (r.status >= 400 || !d || !d.accessToken) return false;
+      session.token = d.accessToken;
+      session.email = (d.user && d.user.email) || null;
+      var me = await api('/me');
+      session.roles = me.roles || [];
+      session.permissions = me.permissions || [];
+      if (!hasPlatformAccess()) { clearSession(); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); return false; }
+      return true;
+    } catch (e) {
+      clearSession();
+      return false;
+    }
+  }
 
   /* Where "Sign in via ALEMBIC" sends the browser: ALEMBIC's own console, which mints the
    * assertion and returns here with it in the URL FRAGMENT (never a query string a server
    * would log) at `#assertion=<token>`. Set at deploy time, same convention as `PLATFORM_API`
    * above — unset is an honest "not configured" card, never a guessed URL. */
   var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
+  // ?open=platform: once signed in, ALEMBIC hands this console an assertion in the same tab
+  // (docs/bridge/CONSOLE_SIGN_IN.md). Built from the configured URL, never hardcoded.
+  function alembicSignInUrl(target) {
+    if (!ALEMBIC_CONSOLE_URL) return '';
+    try { var u = new URL(ALEMBIC_CONSOLE_URL, location.href); u.searchParams.set('open', target); return u.toString(); }
+    catch (e) { return ALEMBIC_CONSOLE_URL; }
+  }
 
   /* Consumes `#assertion=...` left in the URL by an ALEMBIC redirect, exchanges it for a
    * session, and scrubs the fragment with `history.replaceState` — which does NOT fire
@@ -116,13 +165,14 @@
     var m = /(?:^|[#&])assertion=([^&]+)/.exec(location.hash);
     if (!m || consumingAssertion) return false;
     consumingAssertion = true;
+    restoreTried = true; // an explicit sign-in wins; never fall back to an older saved session
     var token = decodeURIComponent(m[1]);
     // Scrub the fragment BEFORE the exchange — a single-use token must not sit in the address
     // bar even for the duration of one network round trip.
     history.replaceState(null, '', location.pathname + location.search);
     try {
       await loginWithAssertion(token);
-      if (!hasPerm('platform:flag:write') && !hasPerm('iam:user_master:read') && !hasPerm('platformops:console:read')) {
+      if (!hasPlatformAccess()) {
         toast('This account has no Platform access. Ask an admin for the platform role.', true);
         logout();
       }
@@ -201,7 +251,7 @@
   function renderLogin() {
     root.innerHTML = '';
     var err = h('div', { class: 'err', role: 'alert' });
-    var goBtn = h('a', { class: 'btn p', href: ALEMBIC_CONSOLE_URL || '#' }, ['Sign in via ALEMBIC →']);
+    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('platform') || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
       err.textContent = 'Sign-in isn\'t set up for this build.';
@@ -833,6 +883,7 @@
   async function render() {
     if (!session.token) {
       if (await tryConsumeAssertion()) { render(); return; }
+      if (await tryRestoreSession()) { render(); return; }
       renderLogin();
       return;
     }

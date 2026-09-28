@@ -18,6 +18,14 @@
   // override convention as window.RA_API; unset renders an honest "not configured" notice
   // rather than a guessed URL.
   var ALEMBIC_CONSOLE_URL = (typeof window.ALEMBIC_CONSOLE_URL === 'string') ? window.ALEMBIC_CONSOLE_URL : '';
+  // "Sign in via ALEMBIC" asks ALEMBIC to open THIS console once signed in (?open=factory), so the
+  // person comes straight back here in the same tab instead of stranding on ALEMBIC
+  // (docs/bridge/CONSOLE_SIGN_IN.md). Built from the configured URL, never hardcoded.
+  function alembicSignInUrl(target) {
+    if (!ALEMBIC_CONSOLE_URL) return '';
+    try { var u = new URL(ALEMBIC_CONSOLE_URL, location.href); u.searchParams.set('open', target); return u.toString(); }
+    catch (e) { return ALEMBIC_CONSOLE_URL; }
+  }
 
   /* ---------------- encrypted tunnel (ECDH P-256 → AES-256-GCM, single /rpc) ---------------- */
   var AES = null, KID = null, hsP = null, session = null;
@@ -51,6 +59,9 @@
     var p = { method: (opts.method || 'GET').toUpperCase(), path: path };
     if (opts.body !== undefined) p.body = opts.body;
     if (session) p.token = session.token;
+    // Keep this console's session across reloads in the tunnel's HttpOnly cookie
+    // (backend/api/src/crypto/session-cookie.ts) — the refresh token never reaches page script.
+    if (path.indexOf('/auth/') === 0) p.persist = true;
     // Transient-failure resilience (SYS-01): a dropped fetch, a cold-start 502, or a reset
     // handshake all surface as a missing encrypted envelope. Rather than bubble "could not reach
     // the secure channel" to the user on the first blip, reset the crypto state and retry with a
@@ -70,17 +81,14 @@
       throw new Error('channel');
     }
     var inner = JSON.parse(await openCipher(outer.data.enc));
-    // Access token expired mid-session (15-min TTL) → silently refresh once and retry, so the user isn't bounced.
-    if (inner.status === 401 && !_retried && path !== '/auth/refresh' && path !== '/auth/login' && path !== '/auth/alembic-assertion') {
-      var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
-      if (rt) {
-        var rr = await tunnel('/auth/refresh', { method: 'POST', body: { refreshToken: rt } }, true);
-        var d = rr.json && rr.json.data;
-        if (rr.status < 400 && d && d.accessToken) {
-          if (session) session.token = d.accessToken;
-          try { if (d.refreshToken) localStorage.setItem('ra_rt', d.refreshToken); } catch (e) {}
-          return tunnel(path, opts, true);
-        }
+    // Access token expired mid-session (15-min TTL) → silently refresh once (from the saved-session
+    // cookie) and retry, so the user isn't bounced.
+    if (inner.status === 401 && !_retried && session && path.indexOf('/auth/') !== 0) {
+      var rr = await tunnel('/auth/refresh', { method: 'POST' }, true);
+      var d = rr.json && rr.json.data;
+      if (rr.status < 400 && d && d.accessToken) {
+        session.token = d.accessToken;
+        return tunnel(path, opts, true);
       }
     }
     return { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
@@ -2187,7 +2195,7 @@
     var home = function () { navTo(ROLES[st.role].nav[0][0]); };
     if ($('ra-home')) $('ra-home').onclick = home;
     if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
-    $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); };
+    $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
     var wsw = $('ra-wsw'); if (wsw) wsw.onchange = function () { switchRole(wsw.value); };
@@ -2278,7 +2286,7 @@
         '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aroma Chem production.</p>' +
-        '<a id="lb" href="' + (ALEMBIC_CONSOLE_URL || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
+        '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
         '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in isn\'t set up for this build.') + '</div>' +
       '</div></div>';
   }
@@ -2290,8 +2298,8 @@
     return tunnel('/auth/alembic-assertion', { method: 'POST', body: { assertion: token } });
   }
 
-  // Establish the session from a login/refresh result, persist the refresh token (survives reloads),
-  // fetch real permissions, and render the shell. Returns false if NONE of the JWT's roles has a
+  // Establish the session from a login/refresh result (the refresh token itself stays in the tunnel's
+  // HttpOnly cookie, so a reload restores the session), fetch real permissions, and render the shell. Returns false if NONE of the JWT's roles has a
   // portal. When it holds MORE than one, every one with a portal is kept on session.availableRoles
   // so the workspace switcher (shell(), addendum §5/§8) can move between them without a second login.
   function enterPortal(d) {
@@ -2300,7 +2308,6 @@
     var v = avail[0] || null;
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
-    try { if (d.refreshToken) localStorage.setItem('ra_rt', d.refreshToken); } catch (e) {}
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
     tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });
     return true;
@@ -2333,14 +2340,15 @@
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
     var assertionExchange = consumeAssertionFromHash();
     if (assertionExchange) { assertionExchange.then(function () {}); return; }
-    var rt = null; try { rt = localStorage.getItem('ra_rt'); } catch (e) {}
-    if (!rt) { showLogin(); return; }
-    // Returning user — restore the session from the stored refresh token instead of forcing re-login.
-    tunnel('/auth/refresh', { method: 'POST', body: { refreshToken: rt } }).then(function (res) {
+    // Earlier builds kept a 30-day refresh token in localStorage, readable by any script on the page.
+    // It is never read again; drop it.
+    try { localStorage.removeItem('ra_rt'); } catch (e) {}
+    // Returning user (a reload, a new tab) — restore the session from the saved-session cookie. With
+    // none (or an expired one) the server answers 401 and the sign-in card shows.
+    tunnel('/auth/refresh', { method: 'POST' }).then(function (res) {
       var d = res.json && res.json.data;
       if (res.status < 400 && d && d.accessToken && enterPortal(d)) return;
-      try { localStorage.removeItem('ra_rt'); } catch (e) {}
       showLogin();
-    }).catch(function () { try { localStorage.removeItem('ra_rt'); } catch (e) {} showLogin(); });
+    }).catch(function () { showLogin(); });
   }
   if (document.readyState !== 'loading') boot(); else document.addEventListener('DOMContentLoaded', boot);
