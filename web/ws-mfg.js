@@ -216,3 +216,156 @@
       }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
+
+  /* ---- Owner ruling 2026-09-28: COA data from factory QC ------------------------------------
+   * The QC spec per product (specific gravity 20/4 °C, flash point PMCC, shelf life) and, per
+   * finished oil batch, the results + colour/odour conformance + photos, then the release that
+   * sends `qc.batch.released` to ALEMBIC (which prints the Certificate of Analysis). The server
+   * judges pass/fail against the spec and refuses to release a failed batch — this is UX only.
+   * Photos: RawProd stores no image bytes of its own; a photo is a platform document id or an
+   * https URL the image already lives at, plus a caption. */
+  var COA_LBL = 'font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)';
+  var COA_HINT = 'font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)';
+  function coaField(label, input, hintId) {
+    return '<label style="display:flex;flex-direction:column;gap:5px"><span style="' + COA_LBL + '">' + label + '</span>' + input +
+      (hintId ? '<span id="' + hintId + '" style="' + COA_HINT + '"></span>' : '') + '</label>';
+  }
+  function coaNum(id, value, step) {
+    return '<input id="' + id + '" type="number" step="' + (step || 'any') + '" class="fld" value="' + (value == null ? '' : escHtml(String(value))) + '">';
+  }
+  function coaErr(res, fallback) { return (res.json && res.json.error && res.json.error.message) || fallback; }
+
+  function openCoaSpec(row) {
+    var body = '<form id="ra-sform" style="display:flex;flex-direction:column;gap:12px">' +
+      '<div style="' + COA_HINT + '">' + escHtml((row.productCode || '') + (row.productName ? ' · ' + row.productName : '')) + '</div>' +
+      '<div style="display:flex;gap:10px">' + coaField('SG 20/4 °C min *', coaNum('ra-sg1', row.sgMin, '0.0001')) + coaField('SG max *', coaNum('ra-sg2', row.sgMax, '0.0001')) + '</div>' +
+      '<div style="display:flex;gap:10px">' + coaField('Flash point min °C *', coaNum('ra-fp1', row.flashPointMinC, '0.1')) + coaField('Flash point max °C *', coaNum('ra-fp2', row.flashPointMaxC, '0.1')) + '</div>' +
+      coaField('Shelf life (months) *', coaNum('ra-shelf', row.shelfLifeMonths, '1')) +
+      coaField('Colour & appearance standard', '<input id="ra-cstd" class="fld" value="' + escHtml(row.colourAppearanceStandard || '') + '">') +
+      coaField('Odour standard', '<input id="ra-ostd" class="fld" value="' + escHtml(row.odourStandard || '') + '">') +
+      '<div id="ra-serr" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" id="ra-ssave" class="btn p" style="width:100%;justify-content:center">Save spec</button></form>';
+    var d = openMfgSheet('QC spec (COA)', body);
+    $('ra-sform').onsubmit = function (e) {
+      e.preventDefault();
+      var v = { sgMin: Number($('ra-sg1').value), sgMax: Number($('ra-sg2').value), flashPointMinC: Number($('ra-fp1').value), flashPointMaxC: Number($('ra-fp2').value), shelfLifeMonths: Number($('ra-shelf').value) };
+      if ([$('ra-sg1'), $('ra-sg2'), $('ra-fp1'), $('ra-fp2'), $('ra-shelf')].some(function (x) { return x.value === ''; })) { $('ra-serr').textContent = 'Fill in every limit and the shelf life.'; return; }
+      if (v.sgMin > v.sgMax || v.flashPointMinC > v.flashPointMaxC) { $('ra-serr').textContent = 'Each minimum must be at or below its maximum.'; return; }
+      v.colourAppearanceStandard = $('ra-cstd').value.trim() || null; v.odourStandard = $('ra-ostd').value.trim() || null;
+      var save = $('ra-ssave'); save.disabled = true; save.textContent = 'Saving…';
+      tunnel('/v1/product-qc-specs/' + row.productId, { method: 'PUT', body: v }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save spec'; $('ra-serr').textContent = coaErr(res, 'Failed (' + res.status + ')'); return; }
+        d.close(); toast('Spec saved', 'good'); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save spec'; $('ra-serr').textContent = 'Can\'t connect. Try again.'; });
+    };
+  }
+
+  async function openCoaRecord(row) {
+    var existing = null, batches = [];
+    try {
+      if (row) {
+        var r0 = await tunnel('/v1/batch-coas/' + row.batchCoaId);
+        if (r0.status >= 400) { toast(coaErr(r0, 'Could not load the COA (' + r0.status + ')'), 'bad'); return; }
+        existing = r0.json && r0.json.data;
+      } else {
+        var r1 = await tunnel('/v1/oil-batches?limit=100');
+        if (r1.status >= 400) { toast(coaErr(r1, 'Could not load oil batches (' + r1.status + ')'), 'bad'); return; }
+        batches = ((r1.json && r1.json.data) || []).filter(function (b) { return String(b.status || '').toUpperCase() !== 'FAILED'; });
+      }
+    } catch (e) { toast('Can\'t connect. Try again.', 'bad'); return; }
+    var batchInput = existing
+      ? '<input class="fld" value="' + escHtml(row.batchNumber || existing.oilBatchId) + '" disabled><input id="ra-cb" type="hidden" value="' + existing.oilBatchId + '">'
+      : '<select id="ra-cb" class="fld"><option value="">Pick a batch…</option>' + batches.map(function (b) { return '<option value="' + b.oilBatchId + '">' + escHtml(b.batchNumber || String(b.oilBatchId).slice(0, 8)) + ' · ' + escHtml(String(b.status || '')) + '</option>'; }).join('') + '</select>';
+    var x = existing || {};
+    var body = '<form id="ra-cform" style="display:flex;flex-direction:column;gap:12px">' +
+      coaField('Oil batch *', batchInput) +
+      coaField('Product *', '<select id="ra-cp" class="fld"><option value="">—</option></select>', 'ra-cspec') +
+      '<div style="display:flex;gap:10px">' + coaField('SG at 20/4 °C *', coaNum('ra-csg', x.sgResult, '0.0001')) + coaField('Flash point PMCC °C *', coaNum('ra-cfp', x.flashPointResultC, '0.1')) + '</div>' +
+      coaField('Colour & appearance *', '<input id="ra-cca" class="fld" value="' + escHtml(x.colourAppearance || '') + '">') +
+      '<label style="display:flex;gap:8px;align-items:center"><input id="ra-ccap" type="checkbox"' + (x.colourAppearancePass === false ? '' : ' checked') + '><span>Colour &amp; appearance conform to standard</span></label>' +
+      coaField('Odour *', '<input id="ra-cod" class="fld" value="' + escHtml(x.odourDescription || '') + '">') +
+      '<label style="display:flex;gap:8px;align-items:center"><input id="ra-codp" type="checkbox"' + (x.odourPass === false ? '' : ' checked') + '><span>Odour conforms to standard</span></label>' +
+      coaField('Production date', '<input id="ra-cdate" type="date" class="fld" value="' + escHtml(String(x.productionDate || '').slice(0, 10)) + '">', 'ra-cdhint') +
+      '<div style="display:flex;flex-direction:column;gap:6px"><span style="' + COA_LBL + '">Photos</span><div id="ra-cphotos" style="display:flex;flex-direction:column;gap:6px"></div>' +
+      '<button type="button" id="ra-cpadd" class="btn sm" style="align-self:flex-start">+ Photo</button>' +
+      '<span style="' + COA_HINT + '">A platform document id, or the https address the photo is stored at.</span></div>' +
+      '<div id="ra-cerr" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" id="ra-csave" class="btn p" style="width:100%;justify-content:center">Save results</button>' +
+      '<div style="' + COA_HINT + ';text-align:center">Pass/fail is judged against the product\'s spec. Release is a separate step.</div></form>';
+    var d = openMfgSheet(existing ? 'Re-test batch COA' : 'Record batch COA', body, '560px');
+    $('ra-cdhint').textContent = 'Blank = the batch\'s produced date. Best-before = this + the product\'s shelf life.';
+
+    function addPhoto(p) {
+      var line = document.createElement('div'); line.className = 'ra-cph'; line.style.cssText = 'display:flex;gap:6px;align-items:center';
+      var ref = p ? (p.url || p.documentId || '') : '';
+      line.innerHTML = '<input data-ref class="fld" style="flex:2;min-width:0" placeholder="Document id or https://…" value="' + escHtml(ref) + '">' +
+        '<input data-cap class="fld" style="flex:1;min-width:0" placeholder="Caption" value="' + escHtml((p && p.caption) || '') + '">' +
+        '<button type="button" class="xp" aria-label="Remove photo" style="flex:none">&times;</button>';
+      $('ra-cphotos').appendChild(line); line.querySelector('.xp').onclick = function () { line.remove(); };
+    }
+    (x.photos || []).forEach(addPhoto);
+    $('ra-cpadd').onclick = function () { addPhoto(null); };
+
+    function showSpec() {
+      var pid = $('ra-cp').value; $('ra-cspec').textContent = '';
+      if (!pid) return;
+      tunnel('/v1/product-qc-specs/' + pid).then(function (res) {
+        if (res.status === 404) { $('ra-cspec').textContent = 'No QC spec for this product yet — set it on the QC specs screen first.'; return; }
+        var s = res.json && res.json.data; if (!s) return;
+        $('ra-cspec').textContent = 'Spec: SG ' + s.sgMin + '–' + s.sgMax + ' · flash point ' + s.flashPointMinC + '–' + s.flashPointMaxC + ' °C · shelf life ' + s.shelfLifeMonths + ' months';
+      }).catch(function () {});
+    }
+    function loadProducts(batchId, selected) {
+      var sel = $('ra-cp'); sel.innerHTML = '<option value="">—</option>';
+      if (!batchId) return;
+      Promise.all([tunnel('/v1/oil-batches/' + batchId + '/coa-products'), tunnel('/v1/product-qc-specs')]).then(function (rs) {
+        var mapped = (rs[0].json && rs[0].json.data) || [];
+        var all = ((rs[1].json && rs[1].json.data) || []).map(function (p) { return { product_id: p.productId, product_code: p.productCode, product_name: p.productName }; });
+        var list = mapped.length ? mapped : all; // no formula link on the order → any product
+        sel.innerHTML = '<option value="">Pick the product…</option>' + list.map(function (p) { return '<option value="' + p.product_id + '">' + escHtml((p.product_code || '') + (p.product_name ? ' · ' + p.product_name : '')) + '</option>'; }).join('');
+        var pick = selected || (mapped.length === 1 ? mapped[0].product_id : '');
+        if (pick) { sel.value = pick; showSpec(); }
+      }).catch(function () { $('ra-cerr').textContent = 'Could not load products.'; });
+    }
+    $('ra-cp').onchange = showSpec;
+    if (existing) loadProducts(existing.oilBatchId, existing.productId);
+    else $('ra-cb').onchange = function () { loadProducts($('ra-cb').value, null); };
+
+    $('ra-cform').onsubmit = function (e) {
+      e.preventDefault(); var err = $('ra-cerr');
+      var b = { oilBatchId: $('ra-cb').value, sgResult: Number($('ra-csg').value), flashPointResultC: Number($('ra-cfp').value),
+        colourAppearance: $('ra-cca').value.trim(), colourAppearancePass: $('ra-ccap').checked,
+        odourDescription: $('ra-cod').value.trim(), odourPass: $('ra-codp').checked, photos: [] };
+      if (!b.oilBatchId) { err.textContent = 'Pick the oil batch.'; return; }
+      if ($('ra-cp').value) b.productId = $('ra-cp').value;
+      if ($('ra-csg').value === '' || $('ra-cfp').value === '') { err.textContent = 'Enter the specific gravity and the flash point.'; return; }
+      if (!b.colourAppearance || !b.odourDescription) { err.textContent = 'Describe the colour & appearance and the odour.'; return; }
+      if ($('ra-cdate').value) b.productionDate = $('ra-cdate').value;
+      var bad = false;
+      [].forEach.call(d.sheet.querySelectorAll('.ra-cph'), function (line) {
+        var ref = line.querySelector('[data-ref]').value.trim(), cap = line.querySelector('[data-cap]').value.trim();
+        if (!ref) return;
+        if (/^https?:\/\//i.test(ref)) b.photos.push({ url: ref, caption: cap || undefined });
+        else if (/^[0-9a-f-]{36}$/i.test(ref)) b.photos.push({ documentId: ref, caption: cap || undefined });
+        else bad = true;
+      });
+      if (bad) { err.textContent = 'Each photo needs a document id or an https address.'; return; }
+      var save = $('ra-csave'); save.disabled = true; save.textContent = 'Saving…';
+      tunnel('/v1/batch-coas', { method: 'POST', body: b }).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; err.textContent = coaErr(res, 'Failed (' + res.status + ')'); return; }
+        var out = res.json && res.json.data; d.close();
+        if (out && out.coa && out.coa.overallResult === 'PASS') toast('Passed — ready to release', 'good');
+        else toast('Failed: ' + ((out && out.failedTests) || []).join(', '), 'bad');
+        loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Save results'; err.textContent = 'Can\'t connect. Try again.'; });
+    };
+  }
+
+  function releaseCoa(row) {
+    raConfirm('Release batch ' + (row.batchNumber || '') + '? Its certificate-of-analysis data goes to ALEMBIC and can no longer be changed.', function () {
+      tunnel('/v1/batch-coas/' + row.batchCoaId + '/release', { method: 'POST', body: {} }).then(function (res) {
+        if (res.status >= 400) { toast(coaErr(res, 'Release failed (' + res.status + ')'), 'bad'); return; }
+        toast('Released — COA data sent to ALEMBIC', 'good'); loadView();
+      }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    }, { title: 'Release batch', confirmLabel: 'Release', tone: 'good' });
+  }

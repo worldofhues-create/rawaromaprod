@@ -466,6 +466,11 @@
     { id: 'formulas', label: 'Formulas', icon: 'lock', need: null },
     { id: 'audit-access', label: 'Access audit', icon: 'clipboard', need: 'formula:actual:read' },
     { id: 'audit-mfg', label: 'Production audit', icon: 'activity', need: 'formula:actual:read' },
+    // Owner ruling 2026-09-28: raw-material compliance data and the IFRA/allergen certificates the
+    // Vault calculates from it (formulator / vault_approver only — `vault:*` permissions).
+    { id: 'compliance', label: 'Compliance data', icon: 'shield', need: 'vault:rm_compliance:read' },
+    { id: 'certificates', label: 'Certificates', icon: 'layers', need: 'vault:rm_compliance:read' },
+    { id: 'missing', label: 'Missing data', icon: 'alert', need: 'vault:compliance_calc:read' },
   ];
 
   /* ---- reference shell kit — vanilla port of rac-console.jsx (BrandMark, rail toggle, QuickDock,
@@ -1029,7 +1034,7 @@
    * access decisions; `formula.floor.read` / `formula.picklist.read` are the server-resolved
    * manufacturing reads (FormulaLookupService, §109.7) that never leave the backend as
    * plaintext but ARE audited the same way. */
-  var HUMAN_PREFIXES = ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.version.finalized', 'formula.version.submitted_for_review', 'formula.version.locked', 'formula.version.superseded', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage'];
+  var HUMAN_PREFIXES = ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.version.finalized', 'formula.version.submitted_for_review', 'formula.version.locked', 'formula.version.superseded', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage', 'formula.compliance.'];
   var MFG_PREFIXES = ['formula.floor.read', 'formula.picklist.read', 'formula.manufacturing_instruction.resolve'];
 
   function auditTable(rows) {
@@ -1080,6 +1085,301 @@
   }
 
   /* ---------------------------------------------------------------------------------------
+   * 5b. compliance — owner ruling 2026-09-28. Raw-material compliance data (allergen
+   * composition, IFRA restrictions) entered or CSV-imported by the regulatory team, and the
+   * IFRA / allergen certificates this box calculates from each formula's current approved
+   * version. The certificates that leave the Vault carry numbers only; the preview and the
+   * missing-data report below name ingredients, so they stay on this console (fresh sign-in).
+   * Nothing here is fabricated: an empty list means the data has not been supplied yet.
+   * --------------------------------------------------------------------------------------- */
+  var IFRA_CATS = ['1', '2', '3', '4', '5A', '5B', '5C', '5D', '6', '7A', '7B', '8', '9', '10A', '10B', '11A', '11B', '12'];
+  var IFRA_TYPES = ['RESTRICTED', 'PROHIBITED', 'SPECIFICATION'];
+  function outcomeChip(o) {
+    var tone = { CERTIFIED: 'g', UNCHANGED: 'g', MISSING_DATA: 'a', NOT_CONFIGURED: 'a', NO_APPROVED_VERSION: 'n' }[o] || 'n';
+    return h('span', { class: 'chip ' + tone }, [String(o || '—').replace(/_/g, ' ')]);
+  }
+  function yesNo(v) { return h('span', { class: 'chip ' + (v ? 'g' : 'a') }, [v ? 'Complete' : 'Not complete']); }
+  function simpleTable(headers, rows) {
+    if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['Nothing here yet'])]);
+    return h('table', {}, [h('thead', {}, [h('tr', {}, headers.map(function (t) { return h('th', {}, [t]); }))]), h('tbody', {}, rows)]);
+  }
+  function td(label, value, cls) { return h('td', { 'data-label': label, class: cls || null }, [value == null || value === '' ? '—' : (typeof value === 'object' ? value : String(value))]); }
+  function field(label, input) { return h('label', { class: 'field' }, [h('span', { class: 'lbl' }, [label]), input]); }
+
+  async function screenCompliance() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('compliance', content);
+    var canWrite = hasPerm('vault:rm_compliance:write');
+    try {
+      var settings = await api('/v1/compliance/settings');
+      var refs = await api('/v1/compliance/allergen-refs');
+      var materials = await api('/v1/compliance/materials');
+      var settingsCard = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Settings']), h('span', { class: 'spacer' }),
+          canWrite ? h('button', { class: 'btn sm', onclick: function () { settingsDialog(settings); } }, ['Edit']) : null]),
+        simpleTable(['Setting', 'Value'], [
+          h('tr', {}, [td('Setting', 'IFRA amendment in force'), td('Value', settings.ifraAmendment || 'Not set — no IFRA certificate until it is')]),
+          h('tr', {}, [td('Setting', 'Allergen reporting threshold'), td('Value', settings.reportingThresholdPct + ' % (at or below → A)')]),
+          h('tr', {}, [td('Setting', 'Regulated allergen list'), td('Value', (settings.allergenListRef || 'No reference set') + ' · ' + refs.length + ' allergen(s)')]),
+        ]),
+      ]);
+      var materialRows = materials.map(function (m) {
+        return h('tr', { onclick: function () { materialDialog(m.materialId, refs, canWrite); } }, [
+          td('Code', m.materialCode, 'mono'), td('Material', m.materialName),
+          td('Allergens', h('span', {}, [yesNo(m.allergenComplete), ' ' + m.allergenRows + ' row(s)'])),
+          td('IFRA', h('span', {}, [yesNo(m.ifraComplete), ' ' + (m.ifraAmendment ? 'amendment ' + m.ifraAmendment + ' · ' : '') + m.ifraRows + ' row(s)'])),
+          td('Updated', fmtDt(m.updatedDt)),
+        ]);
+      });
+      var materialsCard = h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Raw materials']), h('span', { class: 'n' }, [materials.length + ' with data']), h('span', { class: 'spacer' }),
+          canWrite ? h('button', { class: 'btn sm', onclick: function () { pickMaterial(refs); } }, [icon(ICONS.plus, 14), 'Add material']) : null]),
+        simpleTable(['Code', 'Material', 'Allergens', 'IFRA', 'Updated'], materialRows),
+      ]);
+      var importCard = canWrite ? importCardEl() : null;
+      content.innerHTML = '';
+      [settingsCard, materialsCard, importCard].forEach(function (c) { if (c) content.appendChild(c); });
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Compliance data didn\'t load', e.message));
+    }
+  }
+
+  function settingsDialog(settings) {
+    openDialog('Compliance settings', function (body, close) {
+      var err = h('div', { class: 'err' });
+      var amend = h('input', { class: 'fld', style: 'width:100%', value: settings.ifraAmendment || '' });
+      var thr = h('input', { class: 'fld', style: 'width:100%', type: 'number', step: 'any', min: '0', value: String(settings.reportingThresholdPct) });
+      var listRef = h('input', { class: 'fld', style: 'width:100%', value: settings.allergenListRef || '' });
+      body.appendChild(field('IFRA amendment in force (e.g. 51)', amend));
+      body.appendChild(field('Allergen reporting threshold, % of the fragrance', thr));
+      body.appendChild(field('Regulated allergen list reference', listRef));
+      body.appendChild(h('p', { class: 'card-note' }, ['Changing a setting recalculates every certificate.']));
+      body.appendChild(err);
+      var save = h('button', { class: 'btn p' }, ['Save']);
+      save.addEventListener('click', async function () {
+        try {
+          await api('/v1/compliance/settings', { method: 'PUT', body: { ifraAmendment: amend.value.trim() || null, reportingThresholdPct: Number(thr.value || 0), allergenListRef: listRef.value.trim() || null } });
+          close(); toast('Settings saved'); render();
+        } catch (e) { err.textContent = e.message; }
+      });
+      body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [save, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
+    });
+  }
+
+  function pickMaterial(refs) {
+    openDialog('Add material', function (body, close) {
+      var q = h('input', { class: 'fld', style: 'width:100%', placeholder: 'Code or name' });
+      var list = h('div', {});
+      var t;
+      q.addEventListener('input', function () {
+        clearTimeout(t);
+        t = setTimeout(async function () {
+          if (!q.value.trim()) { list.innerHTML = ''; return; }
+          try {
+            var hits = await api('/v1/vault/materials?q=' + encodeURIComponent(q.value.trim()) + '&limit=20');
+            list.innerHTML = '';
+            (hits || []).forEach(function (m) {
+              list.appendChild(h('button', { class: 'btn sm', style: 'display:block;width:100%;text-align:left;margin-top:6px', onclick: function () { close(); materialDialog(m.materialId, refs, true); } },
+                [(m.materialCode || '') + ' · ' + (m.materialName || '')]));
+            });
+          } catch (e) { list.textContent = e.message; }
+        }, 250);
+      });
+      body.appendChild(field('Search the material master', q));
+      body.appendChild(list);
+    });
+  }
+
+  async function materialDialog(materialId, refs, canWrite) {
+    var m;
+    try { m = await api('/v1/compliance/materials/' + encodeURIComponent(materialId)); }
+    catch (e) { toast(e.message, true); return; }
+    openDialog((m.materialCode || 'Material') + ' · compliance data', function (body, close) {
+      var err = h('div', { class: 'err' });
+      var casOptions = refs.map(function (r) { return { v: r.cas, l: r.name + ' (' + r.cas + ')' }; });
+      function sel(options, value) {
+        var s = h('select', { class: 'fld' }, options.map(function (o) { return h('option', { value: o.v }, [o.l]); }));
+        if (value != null) s.value = value; return s;
+      }
+      function num(value) { return h('input', { class: 'fld', type: 'number', step: 'any', min: '0', max: '100', style: 'width:7em', value: value == null ? '' : String(value) }); }
+      var aRows = h('div', {});
+      function addA(a) {
+        var row = h('div', { class: 'row-a', style: 'display:flex;gap:6px;align-items:center;margin-top:6px' });
+        var cas = sel(casOptions, a && a.cas), nat = num(a ? a.naturalPct : 0), syn = num(a ? a.syntheticPct : 0);
+        row.appendChild(cas); row.appendChild(h('span', {}, ['nat %'])); row.appendChild(nat); row.appendChild(h('span', {}, ['syn %'])); row.appendChild(syn);
+        row.appendChild(h('button', { class: 'xp', 'aria-label': 'Remove', onclick: function () { row.remove(); } }, [raw(CI.x)]));
+        row._get = function () { return { cas: cas.value, naturalPct: Number(nat.value || 0), syntheticPct: Number(syn.value || 0) }; };
+        aRows.appendChild(row);
+      }
+      var iRows = h('div', {});
+      function addI(r) {
+        var row = h('div', { class: 'row-i', style: 'display:flex;gap:6px;align-items:center;margin-top:6px' });
+        var cat = sel(IFRA_CATS.map(function (c) { return { v: c, l: 'Category ' + c }; }), r && r.category);
+        var type = sel(IFRA_TYPES.map(function (x) { return { v: x, l: x }; }), r && r.restrictionType);
+        var max = num(r ? r.maxPct : null);
+        row.appendChild(cat); row.appendChild(type); row.appendChild(h('span', {}, ['max %'])); row.appendChild(max);
+        row.appendChild(h('button', { class: 'xp', 'aria-label': 'Remove', onclick: function () { row.remove(); } }, [raw(CI.x)]));
+        row._get = function () { return { category: cat.value, restrictionType: type.value, maxPct: type.value === 'RESTRICTED' && max.value !== '' ? Number(max.value) : null }; };
+        iRows.appendChild(row);
+      }
+      (m.allergens || []).forEach(addA);
+      (m.ifra || []).forEach(addI);
+      var aDone = h('input', { type: 'checkbox' }); aDone.checked = !!m.allergenComplete;
+      var iDone = h('input', { type: 'checkbox' }); iDone.checked = !!m.ifraComplete;
+      var amend = h('input', { class: 'fld', style: 'width:8em', value: m.ifraAmendment || '' });
+      var src = h('input', { class: 'fld', style: 'width:100%', value: m.sourceRef || '', placeholder: 'e.g. supplier IFRA certificate / allergen declaration ref' });
+      body.appendChild(h('h3', {}, ['Regulated allergens in this material']));
+      body.appendChild(aRows);
+      if (canWrite) body.appendChild(h('button', { class: 'btn sm', style: 'margin-top:6px', onclick: function () { if (!refs.length) { toast('Import the regulated allergen list first.', true); return; } addA(null); } }, ['+ Allergen']));
+      body.appendChild(h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px' }, [aDone, 'Allergen data complete (no rows = contains none of the listed allergens)']));
+      body.appendChild(h('h3', { style: 'margin-top:14px' }, ['IFRA restrictions']));
+      body.appendChild(iRows);
+      if (canWrite) body.appendChild(h('button', { class: 'btn sm', style: 'margin-top:6px', onclick: function () { addI(null); } }, ['+ Restriction']));
+      body.appendChild(h('label', { style: 'display:flex;gap:8px;align-items:center;margin-top:8px' }, [iDone, 'IFRA data complete for amendment ', amend]));
+      body.appendChild(field('Source', src));
+      body.appendChild(err);
+      if (!canWrite) return;
+      var save = h('button', { class: 'btn p' }, ['Save']);
+      save.addEventListener('click', async function () {
+        var amendment = amend.value.trim();
+        var payload = {
+          allergenComplete: aDone.checked, ifraComplete: iDone.checked, ifraAmendment: amendment || null, sourceRef: src.value.trim() || null,
+          allergens: [].map.call(aRows.querySelectorAll('.row-a'), function (r) { return r._get(); }),
+          ifra: [].map.call(iRows.querySelectorAll('.row-i'), function (r) { var x = r._get(); x.amendment = amendment; return x; }),
+        };
+        if (payload.ifra.length && !amendment) { err.textContent = 'Name the IFRA amendment these restrictions are for.'; return; }
+        try { await api('/v1/compliance/materials/' + encodeURIComponent(materialId), { method: 'PUT', body: payload }); close(); toast('Saved — certificates are being recalculated'); render(); }
+        catch (e) { err.textContent = e.message; }
+      });
+      body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [save, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
+    });
+  }
+
+  var IMPORT_HELP = {
+    allergen: 'material_code,cas,natural_pct,synthetic_pct — one row per allergen per material; a row with an empty CAS declares that material contains none of the listed allergens. Replaces each listed material\'s allergen data.',
+    ifra: 'material_code,amendment,category,restriction_type,max_pct — restriction_type RESTRICTED (with max_pct), PROHIBITED or SPECIFICATION; a row with an empty category declares the material not restricted. Replaces each listed material\'s IFRA data.',
+    allergen_ref: 'cas,name,sort_order — the regulated allergen list certificates report against (adds or renames; never deletes).',
+  };
+  function importCardEl() {
+    var kind = h('select', { class: 'fld' }, [
+      h('option', { value: 'allergen' }, ['Allergen composition']), h('option', { value: 'ifra' }, ['IFRA restrictions']), h('option', { value: 'allergen_ref' }, ['Regulated allergen list'])]);
+    var help = h('p', { class: 'card-note' }, [IMPORT_HELP.allergen]);
+    kind.addEventListener('change', function () { help.textContent = IMPORT_HELP[kind.value]; });
+    var file = h('input', { type: 'file', accept: '.csv,text/csv' });
+    var text = h('textarea', { class: 'fld', rows: '6', style: 'width:100%', placeholder: 'Paste CSV here, or choose a file' });
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; if (!f) return;
+      var rd = new FileReader(); rd.onload = function () { text.value = String(rd.result || ''); }; rd.readAsText(f);
+    });
+    var out = h('div', {});
+    async function run(commit) {
+      out.innerHTML = '';
+      if (!text.value.trim()) { out.appendChild(h('div', { class: 'err' }, ['Paste or choose a CSV first.'])); return; }
+      try {
+        var r = await api('/v1/compliance/import', { method: 'POST', body: { kind: kind.value, csv: text.value, commit: commit } });
+        var rows = r.rows.map(function (x) {
+          return h('tr', {}, [td('Line', x.line, 'mono'), td('Material', x.materialCode ? x.materialCode + (x.materialName ? ' · ' + x.materialName : '') : ''), td('Row', x.summary), td('Problem', x.error ? h('span', { class: 'chip r' }, [x.error]) : h('span', { class: 'chip g' }, ['OK']))]);
+        });
+        out.appendChild(h('p', { class: 'card-note' }, [r.committed ? ('Imported ' + r.rows.length + ' row(s) for ' + r.materialCount + ' material(s). Certificates are being recalculated.')
+          : r.errorCount ? (r.errorCount + ' row(s) need fixing — nothing was imported.') : ('Preview: ' + r.rows.length + ' row(s), no problems. Import to apply.')]));
+        out.appendChild(simpleTable(['Line', 'Material', 'Row', 'Problem'], rows));
+        if (!r.committed && !r.errorCount) out.appendChild(h('button', { class: 'btn p', style: 'margin-top:10px', onclick: function () { run(true); } }, ['Import']));
+        if (r.committed) toast('Imported');
+      } catch (e) { out.appendChild(h('div', { class: 'err' }, [e.message])); }
+    }
+    return h('div', { class: 'card' }, [
+      h('div', { class: 'card-hd' }, [h('h2', {}, ['Import CSV'])]),
+      field('What the file holds', kind), help, file, text,
+      h('div', { style: 'display:flex;gap:8px;margin-top:10px' }, [h('button', { class: 'btn', onclick: function () { run(false); } }, ['Preview'])]),
+      out,
+    ]);
+  }
+
+  async function screenCertificates() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('certificates', content);
+    try {
+      var statuses = await api('/v1/compliance/status');
+      var formulas = pageItems(await api('/v1/formulas?limit=100'));
+      var byFormula = {};
+      statuses.forEach(function (s) { (byFormula[s.formulaId] = byFormula[s.formulaId] || {})[s.kind] = s; });
+      var canCalc = hasPerm('vault:compliance_calc:read');
+      var rows = formulas.map(function (f) {
+        var st = byFormula[f.formulaId] || {};
+        var cell = function (k) { var s = st[k]; return s ? h('span', {}, [outcomeChip(s.outcome), s.missingCount ? ' ' + s.missingCount + ' missing' : '']) : '—'; };
+        return h('tr', {}, [td('Code', f.formulaCode, 'mono'), td('IFRA', cell('ifra')), td('Allergens', cell('allergen')),
+          td('Calculated', fmtDt((st.ifra || st.allergen || {}).calculatedAt)),
+          td('', canCalc ? h('button', { class: 'btn sm', onclick: function () { previewDialog(f); } }, ['Preview']) : '')]);
+      });
+      var recalc = hasPerm('vault:rm_compliance:write') ? h('button', { class: 'btn sm', onclick: async function () {
+        try { var r = await api('/v1/compliance/recalculate', { method: 'POST', body: {} }); toast('Recalculated ' + r.length + ' formula(s)'); render(); }
+        catch (e) { toast(e.message, true); }
+      } }, ['Recalculate all']) : null;
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Certificates']), h('span', { class: 'spacer' }), recalc]),
+        h('p', { class: 'card-note' }, ['Calculated for each formula\'s current approved version. Only the numbers leave the Vault, for ALEMBIC to issue the IFRA and allergen certificates.']),
+        simpleTable(['Code', 'IFRA', 'Allergens', 'Calculated', ''], rows),
+      ]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Certificates didn\'t load', e.message));
+    }
+  }
+
+  async function previewDialog(f) {
+    var p;
+    try { p = await withFreshAuth(function () { return api('/v1/compliance/preview/' + encodeURIComponent(f.formulaId)); }); }
+    catch (e) { toast(e.message, true); return; }
+    openDialog(f.formulaCode + ' · v' + (p.versionNumber || '?') + ' · calculation preview', function (body) {
+      function part(title, res, renderValues) {
+        body.appendChild(h('h3', { style: 'margin-top:12px' }, [title]));
+        if (!res.ok) {
+          body.appendChild(h('p', { class: 'card-note' }, [res.reason === 'missing_data' ? 'No certificate: these materials lack data.' : res.reason === 'not_configured' ? 'No certificate: ' + (res.notes[0] || 'not configured') + '.' : 'No certificate: the version has no ingredients.']));
+          if (res.missingMaterials && res.missingMaterials.length) {
+            body.appendChild(simpleTable(['Code', 'Material'], res.missingMaterials.map(function (m) { return h('tr', {}, [td('Code', m.materialCode, 'mono'), td('Material', m.materialName)]); })));
+          }
+          return;
+        }
+        renderValues(res.values);
+        (res.notes || []).forEach(function (n) { body.appendChild(h('p', { class: 'card-note' }, [n])); });
+      }
+      part('IFRA (amendment ' + (p.settings.ifraAmendment || '—') + ')', p.ifra, function (values) {
+        body.appendChild(simpleTable(['Category', 'Max use level'], values.map(function (v) { return h('tr', {}, [td('Category', v.category, 'mono'), td('Max use level', v.limitPct + ' %')]); })));
+      });
+      part('Allergens (% in the fragrance; A = absent)', p.allergen, function (values) {
+        body.appendChild(simpleTable(['Allergen', 'CAS', 'Natural', 'Synthetic', 'Total'], values.map(function (v) {
+          return h('tr', {}, [td('Allergen', v.name), td('CAS', v.cas, 'mono'), td('Natural', v.natural), td('Synthetic', v.synthetic), td('Total', v.total)]);
+        })));
+      });
+    });
+  }
+
+  async function screenMissing() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('missing', content);
+    try {
+      var r = await withFreshAuth(function () { return api('/v1/compliance/missing'); });
+      var mRows = r.materials.map(function (m) {
+        return h('tr', {}, [td('Code', m.materialCode, 'mono'), td('Material', m.materialName),
+          td('Missing', [m.missingAllergen ? 'allergen' : null, m.missingIfra ? 'IFRA' : null].filter(Boolean).join(' + ')),
+          td('Used in', m.formulas.join(', '))]);
+      });
+      var fRows = r.formulas.map(function (f) {
+        return h('tr', {}, [td('Code', f.formulaCode, 'mono'), td('IFRA', f.ifra), td('Allergens', f.allergen), td('Materials missing', f.missingCount)]);
+      });
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Materials lacking compliance data']), h('span', { class: 'n' }, [r.materials.length + ' material(s)'])]),
+        h('p', { class: 'card-note' }, ['Raw materials used by an approved formula with no complete allergen or IFRA data (IFRA amendment in force: ' + (r.settings.ifraAmendment || 'not set') + '). Their formulas get no certificate until the data is supplied.']),
+        simpleTable(['Code', 'Material', 'Missing', 'Used in'], mRows),
+      ]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['By formula'])]), simpleTable(['Code', 'IFRA', 'Allergens', 'Materials missing'], fRows)]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Missing-data report didn\'t load', e.message));
+    }
+  }
+
+  /* ---------------------------------------------------------------------------------------
    * 6. bootstrap + route render
    * --------------------------------------------------------------------------------------- */
   async function render() {
@@ -1093,6 +1393,9 @@
     if (r.view === 'version' && r.id) return screenVersion(r.id);
     if (r.view === 'audit-access') return screenAudit('access');
     if (r.view === 'audit-mfg') return screenAudit('mfg');
+    if (r.view === 'compliance') return screenCompliance();
+    if (r.view === 'certificates') return screenCertificates();
+    if (r.view === 'missing') return screenMissing();
     return screenFormulas();
   }
 
