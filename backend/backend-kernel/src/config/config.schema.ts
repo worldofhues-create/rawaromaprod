@@ -249,6 +249,9 @@ export const configSchema = z.object({
    *  (a digest probe) and pushes it when not (`MaterialCatalogueSyncService`). Also the longest a
    *  restarted Vault's material picker waits for its catalogue. */
   VAULT_CATALOGUE_SYNC_MS: z.coerce.number().int().min(1000).default(15_000),
+  /** How often the main box's worker pulls newly calculated IFRA/allergen certificates from the
+   *  Vault (`ComplianceCertificateSyncService`) and emits them toward ALEMBIC. */
+  VAULT_COMPLIANCE_SYNC_MS: z.coerce.number().int().min(1000).default(30_000),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

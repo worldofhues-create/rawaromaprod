@@ -1685,3 +1685,125 @@ drop trigger if exists login_history_no_truncate on iam.login_history;
 create trigger login_history_no_truncate
   before truncate on iam.login_history
   for each statement execute function iam.login_history_append_only();
+-- lane compliance-rp (owner rulings 2026-09-28): scripts/migrations/2026-09-28-compliance-documents.sql
+-- (main block), hand-matched to packages/data-production/src/schema/coa.ts and
+-- packages/data-bridge/src/schema/compliance.ts; plus the two existing tables the COA flow reads
+-- (production.production_plan_items for batch → formula → product, platform.document_master for
+-- photo references) that this harness had not needed before.
+create table if not exists production.production_plan_items (
+  production_plan_item_id uuid primary key default gen_random_uuid(),
+  production_plan_id uuid,
+  formula_id uuid,
+  planned_qty numeric(18,4),
+  uom_id uuid,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create table if not exists platform.document_master (
+  document_id uuid primary key default gen_random_uuid(),
+  document_type_id uuid,
+  file_name varchar(200),
+  file_path varchar(255),
+  uploaded_dt timestamptz,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create table if not exists production.product_qc_spec (
+  product_qc_spec_id uuid primary key default gen_random_uuid(),
+  product_id uuid not null,
+  sg_min numeric(8,4) not null,
+  sg_max numeric(8,4) not null,
+  flash_point_min_c numeric(6,1) not null,
+  flash_point_max_c numeric(6,1) not null,
+  shelf_life_months integer not null,
+  colour_appearance_standard text,
+  odour_standard text,
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  constraint product_qc_spec_ranges_chk
+    check (sg_min > 0 and sg_min <= sg_max and flash_point_min_c <= flash_point_max_c and shelf_life_months between 1 and 240)
+);
+create unique index if not exists product_qc_spec_product_uq on production.product_qc_spec (product_id);
+create table if not exists production.batch_coa (
+  batch_coa_id uuid primary key default gen_random_uuid(),
+  oil_batch_id uuid not null,
+  product_id uuid not null,
+  sg_result numeric(8,4) not null,
+  sg_spec_min numeric(8,4) not null,
+  sg_spec_max numeric(8,4) not null,
+  sg_pass boolean not null,
+  flash_point_result_c numeric(6,1) not null,
+  flash_point_spec_min_c numeric(6,1) not null,
+  flash_point_spec_max_c numeric(6,1) not null,
+  flash_point_pass boolean not null,
+  colour_appearance text not null,
+  colour_appearance_pass boolean not null,
+  odour_description text not null,
+  odour_pass boolean not null,
+  production_date date not null,
+  best_before date not null,
+  overall_result varchar(10) not null,
+  tested_by uuid,
+  tested_dt timestamptz not null default now(),
+  released_by uuid,
+  released_dt timestamptz,
+  status varchar(30) not null,
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  constraint batch_coa_state_chk check (
+    overall_result in ('PASS', 'FAIL')
+    and status in ('TESTED', 'RELEASED')
+    and (status <> 'RELEASED' or (overall_result = 'PASS' and released_dt is not null and released_by is not null))
+    and best_before > production_date
+  )
+);
+create unique index if not exists batch_coa_oil_batch_uq on production.batch_coa (oil_batch_id);
+create table if not exists production.batch_coa_photo (
+  batch_coa_photo_id uuid primary key default gen_random_uuid(),
+  batch_coa_id uuid not null references production.batch_coa (batch_coa_id),
+  document_id uuid,
+  url text,
+  caption varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255),
+  constraint batch_coa_photo_ref_chk check (document_id is not null or url is not null)
+);
+create table if not exists bridge.compliance_certificate (
+  certificate_id uuid primary key,
+  vault_seq bigint not null,
+  formula_id uuid not null,
+  formula_version_ref varchar(80) not null,
+  kind varchar(10) not null,
+  amendment varchar(60),
+  cert_values jsonb not null,
+  calculated_at timestamptz not null,
+  received_at timestamptz not null default now()
+);
+create unique index if not exists bridge_compliance_certificate_seq_uq on bridge.compliance_certificate (vault_seq);
+create table if not exists bridge.compliance_certificate_emission (
+  emission_id uuid primary key default gen_random_uuid(),
+  certificate_id uuid not null,
+  product_id uuid not null,
+  emitted_at timestamptz not null default now()
+);
+create unique index if not exists bridge_compliance_certificate_emission_uq
+  on bridge.compliance_certificate_emission (certificate_id, product_id);
+create table if not exists bridge.vault_sync_cursor (
+  id varchar(50) primary key,
+  last_seq bigint not null default 0,
+  updated_at timestamptz not null default now()
+);

@@ -5,7 +5,7 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v91'; // v91: focus.js (focus mode + app-window offer). v90: UX-H Aria answers via /v1/aria (v89: reference shell, UX-D welcome/logo/icons, UX-E Aria panel, UX-F sound)
+const CACHE = 'ra-shell-v92'; // v92: merge focus.js (v91 focus) + batch COA/QC spec screens (v91 compliance). v90: UX-H Aria answers via /v1/aria
 const SHELL = [
   '/', '/index.html', '/sound.js', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
   '/qrcode.js', '/focus.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',

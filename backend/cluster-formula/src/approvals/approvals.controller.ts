@@ -12,6 +12,7 @@ import {
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { ApprovalsService } from './approvals.service.js';
+import { ComplianceService } from '../compliance/compliance.service.js';
 import {
   approveVersion,
   createCopyRequest,
@@ -31,7 +32,10 @@ import {
 
 @Controller()
 export class ApprovalsController {
-  constructor(private readonly approvals: ApprovalsService) {}
+  constructor(
+    private readonly approvals: ApprovalsService,
+    private readonly compliance: ComplianceService,
+  ) {}
 
   /* ── version approval ─────────────────────────────────────────────── */
 
@@ -60,12 +64,20 @@ export class ApprovalsController {
   @Permissions('formula:formula_approval:write')
   @FreshAuth()
   @Post('v1/formula-versions/:id/approve')
-  approveVersion(
+  async approveVersion(
     @Param('id') id: string,
     @Body(new ZodValidationPipe(approveVersion)) body: ApproveVersion,
     @CurrentUser() principal: AuthPrincipal,
   ) {
-    return this.approvals.approveVersion(id, body, principal);
+    const result = await this.approvals.approveVersion(id, body, principal);
+    // Owner ruling 2026-09-28: a newly approved version is the formula's current version, so its
+    // IFRA/allergen certificates are recalculated now — after the approval committed, off the
+    // request path (a calculation failure or missing raw-material data never fails an approval).
+    const formulaId = result.version.formulaId;
+    if (formulaId) {
+      this.compliance.recalculateFormulaInBackground(formulaId, 'version_approved', principal.userId);
+    }
+    return result;
   }
 
   @Permissions('formula:formula_approval:write')

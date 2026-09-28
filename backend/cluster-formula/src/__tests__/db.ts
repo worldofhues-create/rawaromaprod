@@ -17,12 +17,39 @@
  *   at a DIFFERENT database than the one actually being prepared/reused.
  */
 import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 import postgres, { type Sql } from 'postgres';
 import { drizzle, type PostgresJsDatabase } from 'drizzle-orm/postgres-js';
 import { UUIDV7_SQL } from '@core/data-kernel';
 import * as formulaSchema from '@ra/data-formula';
 
 const require = createRequire(import.meta.url);
+const __dirname = dirname(fileURLToPath(import.meta.url));
+
+/** Hand-written, idempotent formula-schema migrations applied on top of the Drizzle push on EVERY
+ *  run — on a fresh database they only add what Drizzle cannot express (CHECK constraints); on a
+ *  database this harness pushed before the tables existed (the sentinel below skips the push),
+ *  they create the tables too. Only the `-- @target: formula` blocks are run. */
+const FORMULA_MIGRATIONS = ['2026-09-28-compliance-documents.sql'];
+
+function formulaBlocks(file: string): string[] {
+  const text = readFileSync(join(__dirname, '..', '..', '..', '..', 'scripts', 'migrations', file), 'utf8');
+  const blocks: string[] = [];
+  let current: string[] | null = null;
+  for (const line of text.split('\n')) {
+    const marker = /^--\s*@target:\s*(\S+)/.exec(line);
+    if (marker) {
+      if (current) blocks.push(current.join('\n'));
+      current = marker[1] === 'formula' ? [] : null;
+      continue;
+    }
+    if (current) current.push(line);
+  }
+  if (current) blocks.push(current.join('\n'));
+  return blocks;
+}
 // Same reason as scripts/db-push.ts: drizzle-kit 0.30.6's live-DB introspector throws under
 // drizzle-orm 0.38 + Postgres 16/17, so we diff an EMPTY snapshot -> the formula schema's
 // target snapshot (pure CREATE DDL for a schema we know is fresh) and execute that ourselves.
@@ -64,6 +91,7 @@ export async function ensureSchema(): Promise<void> {
           const statements = generated.filter((s) => !/^\s*create\s+schema\b/i.test(s));
           for (const stmt of statements) await sql.unsafe(stmt);
         }
+        for (const file of FORMULA_MIGRATIONS) for (const block of formulaBlocks(file)) await sql.unsafe(block);
       } finally {
         await sql`select pg_advisory_unlock(481027365591)`;
       }

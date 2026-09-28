@@ -70,6 +70,78 @@ Field rules:
 
 All carry `{ requirement_id }` at minimum, correlated by `correlation_id`.
 
+## Compliance documents — RawProd → ALEMBIC (owner rulings 2026-09-28)
+
+ALEMBIC issues the Certificate of Analysis, the IFRA Standards certificate and the allergen
+declaration; RawProd supplies the data. Two event types, each its own aggregate (not a
+production requirement), `version` 1, `correlation_id` = `aggregate.id`, `org_id` = the
+deployment's ALEMBIC tenant (`ALEMBIC_ASSERTION_TENANT_ID`, else the org of the requirements
+ALEMBIC has sent). Shapes and validators: `packages/contracts/src/clusters/bridge/compliance-events.ts`
+(RawProd). **ALEMBIC must add both types to its `INBOUND_EVENT_TYPES`** — until it does, it
+refuses them as `BRIDGE_PERMANENT_UNKNOWN_TYPE` and RawProd parks them (replayable, same
+`event_id`, once ALEMBIC accepts them).
+
+| Type | `aggregate.type` / `aggregate.id` | When |
+|---|---|---|
+| `qc.batch.released` | `qc_batch` / RawProd `batch_coa_id` | QC released a finished (oil) batch whose every test passed. A failed batch is never released and never emitted. Exactly once per batch. |
+| `compliance.certificate.calculated` | `compliance_certificate` / a RawProd emission id | The Vault calculated a new IFRA or allergen certificate for a formula's current approved version; one event per product made from that formula. A recalculation that changes nothing emits nothing. |
+
+`qc.batch.released` payload:
+
+```jsonc
+{
+  "batchNo": "A140226",
+  "productRef": "ALTHAIR",                       // RawProd packaging.product_master.product_code
+  "skuCodes": ["ALTHAIR-25KG", "ALTHAIR-5KG"],   // every product_sku.sku_code = ALEMBIC's mapped_sku values
+  "results": [
+    { "test": "specific_gravity_20_4", "value": 0.995, "unit": null, "specMin": 0.95, "specMax": 1.5, "pass": true },
+    { "test": "flash_point_pmcc", "value": 116, "unit": "°C", "specMin": 110, "specMax": 120, "pass": true }
+  ],
+  "colourAppearance": "Deep Brown",
+  "odourDescription": "Warm Spicy Vanilla Fragrance",
+  "photos": [
+    { "url": "https://…/a140226.jpg", "assetRef": "document:<platform.document_master id>", "caption": "Retained sample" }
+  ],                                             // each photo has a url, an assetRef, or both
+  "productionDate": "2026-02-14",                // yyyy-mm-dd
+  "bestBefore": "2028-02-14",                    // productionDate + the product's shelf life (months)
+  "releasedAt": "2026-02-15T09:30:00.000Z",
+  "releasedBy": "<RawProd user id>",
+  "releasedByName": "QC Analyst"                 // or null
+}
+```
+
+Specific gravity is a dimensionless ratio at 20/4 °C, hence `unit: null`. Spec limits are
+inclusive (a result on the limit passes). Colour/appearance and odour are pass/fail
+conformance calls by the analyst; the batch's overall result is PASS only when all four pass.
+
+`compliance.certificate.calculated` payload:
+
+```jsonc
+{
+  "productRef": "ALTHAIR",
+  "skuCodes": ["ALTHAIR-25KG"],
+  "kind": "ifra",                                // "ifra" | "allergen"
+  "amendment": "51",                             // IFRA: amendment in force; allergen: the regulated-list reference; or null
+  "values": [ { "category": "1", "limitPct": 0 }, { "category": "4", "limitPct": 25 } ],
+  //  allergen: [ { "name": "Cinnamal", "cas": "104-55-2", "natural": 0.02, "synthetic": "A", "total": 0.02 } ]
+  "calculatedAt": "2026-08-31T10:00:00.000Z",
+  "formulaVersionRef": "fvr_<32 hex>"            // opaque, Vault-keyed; equal = same formula version
+}
+```
+
+IFRA `values` has one entry per category 1, 2, 3, 4, 5A–5D, 6, 7A, 7B, 8, 9, 10A, 10B, 11A,
+11B, 12: the maximum use level of the fragrance in that product category, %, floored to 2
+decimals, 0 where an ingredient is prohibited, 100 where nothing is restricted. Allergen
+`values` has one entry per allergen on the Vault's regulated list, % in the fragrance, `"A"`
+when zero or at/below the Vault's reporting threshold.
+
+**No formula content, ever.** Neither payload carries an ingredient, a material id/code/name,
+a percentage of an ingredient, a formula id/code/name or a formula version id. The emitters
+run `assertNoFormulaContent` on every payload and refuse to emit one that fails it. The
+calculation itself runs only inside the Vault; the main box pulls the certificate numbers over
+the signed internal channel (`POST /internal/vault/compliance-certificates`, INTERNAL_BRIDGE_KEY
+HMAC + nonce — the Vault never calls the main box, the main box never opens the Vault DB).
+
 ## Transport
 
 Signed HTTP webhook. Each direction is a separate connector, admin-configured

@@ -192,10 +192,13 @@ class OtherProcessResolver extends RolePermissionResolver {
 
 /* ── 1. size ───────────────────────────────────────────────────────────────────────────── */
 
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 258 of the '
+// 257 → 258: platform-roles lane; 258 → 263: owner ruling 2026-09-28 added five production:* COA
+// permissions (product_qc_spec read/write, batch_coa read/write/release); its three vault:*
+// compliance permissions are never the owner's.
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 263 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
-  assert.equal(ownerGrant.length, 258);
+  assert.equal(ownerGrant.length, 263);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

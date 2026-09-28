@@ -38,6 +38,11 @@ export const OUTBOUND_TO_ALEMBIC = [
   'SalesOrderManualContinuityCreated',
   'SalesOrderManualContinuityConfirmed',
   'SalesOrderManualContinuityItemAdded',
+  // Owner rulings 2026-09-28 — compliance documents ALEMBIC issues (payload shapes:
+  // @core/contracts bridge/compliance-events.ts, docs/bridge/EVENT_CONTRACT.md). Not tied to a
+  // production_requirement: each is its own aggregate (the batch COA / the certificate emission).
+  'qc.batch.released',
+  'compliance.certificate.calculated',
 ] as const;
 export type OutboundToAlembic = (typeof OUTBOUND_TO_ALEMBIC)[number];
 

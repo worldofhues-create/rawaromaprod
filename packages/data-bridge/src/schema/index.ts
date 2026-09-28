@@ -9,3 +9,4 @@ export { connectorConfig } from "./connector-config.js";
 export { factsNonce } from "./facts-nonce.js";
 export { outbox, auditEvents } from "./crosscutting.js";
 export { outboxDelivery } from "./outbox-delivery.js";
+export { complianceCertificate, complianceCertificateEmission, vaultSyncCursor } from "./compliance.js";

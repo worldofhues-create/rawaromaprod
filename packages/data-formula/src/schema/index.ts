@@ -17,3 +17,12 @@ export {
   formulaEventHist,
 } from "./history.js";
 export { outbox, auditEvents } from "./crosscutting.js";
+export {
+  rmComplianceProfile,
+  rmAllergenComposition,
+  rmIfraRestriction,
+  complianceAllergenRef,
+  complianceSetting,
+  complianceCertificate,
+  complianceCalcStatus,
+} from "./compliance.js";

@@ -138,7 +138,7 @@
   var STATUS = { pending: 'a', pass: 'g', fail: 'r', approved: 'g', ordered: 'b', draft: 'n', received: 'g', inprogress: 'b', active: 'g', confirmed: 'g', pending_approval: 'a',
     hold: 'a', accept: 'g', accepted: 'g', reject: 'r', rejected: 'r', rework: 'a', released: 'g', release: 'g', in_maturation: 'b', maturing: 'b', failed: 'r', produced: 'b',
     done: 'g', completed: 'g', delivered: 'g', issued: 'b', cancelled: 'r', archived: 'n', closed: 'n', open: 'b', submitted: 'b', planning: 'n',
-    in_progress: 'b', aborted: 'r', materials_issued: 'b', verified: 'g' };
+    in_progress: 'b', aborted: 'r', materials_issued: 'b', verified: 'g', tested: 'b', no_spec: 'a' };
 
   /* ---------------- role → nav → real endpoints (Phase-1 modules, DB-driven) ---------------- */
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
@@ -161,7 +161,8 @@
       ['wtrail', 'Write audit trail', 'clipboard', '/v1/audit-events'],
       ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
       ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
-      ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'] ] },
+      ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
+      ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
@@ -189,7 +190,9 @@
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
       ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
       ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
-      ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'] ] },
+      ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'],
+      // Owner ruling 2026-09-28: COA data per finished batch (results, photos, release → ALEMBIC).
+      ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'] ] },
     production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
       ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
@@ -198,7 +201,8 @@
       ['issues', 'Material issues', 'box', '/v1/material-issues'],
       ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'],
       ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'],
-      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['capas', 'CAPA', 'shield', '/v1/qc-capas'] ] },
+      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['capas', 'CAPA', 'shield', '/v1/qc-capas'],
+      ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
       ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
       ['movements', 'Movements', 'activity', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
@@ -308,6 +312,8 @@
     '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
     '/v1/material-issues': ['issuedDt', 'productionOrderId', 'status'],
     '/v1/production-qc': ['result', 'observedValue', 'inspectionDt', 'status'],
+    '/v1/product-qc-specs': ['productCode', 'productName', 'sgMin', 'sgMax', 'flashPointMinC', 'flashPointMaxC', 'shelfLifeMonths', 'status'],
+    '/v1/batch-coas': ['batchNumber', 'productCode', 'sgResult', 'flashPointResultC', 'overallResult', 'productionDate', 'bestBefore', 'status'],
     '/v1/warehouses': ['warehouseCode', 'warehouseName', 'status'],
     '/v1/floors': ['floorCode', 'floorName', 'status'],
     '/v1/zones': ['zoneCode', 'zoneName', 'status'],
@@ -926,6 +932,15 @@
   // authoritatively; this just hides the button so the button isn't offered in the first place).
   function isCreator(r) { return !!(r && session && session.user && r.createdBy && r.createdBy === session.user.userId); }
   var ACTIONS = {
+    // Owner ruling 2026-09-28 — COA data from factory QC. The sheets live in ws-mfg.js
+    // (openCoaSpec / openCoaRecord / releaseCoa); the server re-checks every rule.
+    '/v1/product-qc-specs': [
+      { label: 'Set spec', perm: 'production:product_qc_spec:write', tone: 'accent', when: function () { return true; }, run: function (r) { openCoaSpec(r); } }
+    ],
+    '/v1/batch-coas': [
+      { label: 'Re-test', perm: 'production:batch_coa:write', when: function (r) { return UP(r.status) === 'TESTED'; }, run: function (r) { openCoaRecord(r); } },
+      { label: 'Release', perm: 'production:batch_coa:release', tone: 'good', when: function (r) { return UP(r.status) === 'TESTED' && UP(r.overallResult) === 'PASS'; }, run: function (r) { releaseCoa(r); } }
+    ],
     '/v1/reorder-suggestions': [
       { label: 'Raise requirement', perm: 'procurement:stock_requirement:write', when: function (r) { return Number(r.shortage) > 0; }, run: function (r) { openRaiseRequirement(r); } }
     ],
@@ -1497,6 +1512,9 @@
 
   /* ---------------- "+ New" create forms (existing POST create routes) ---------------- */
   var CREATE = {
+    // Custom sheet (photos + a product picker that depends on the batch): `open` replaces the
+    // generic field form — see the "+ New" wiring in loadView.
+    '/v1/batch-coas': { title: 'Record batch COA', perm: 'production:batch_coa:write', open: function () { openCoaRecord(null); } },
     '/v1/users': { title: 'New user', perm: 'iam:user_master:write', fields: [
       { n: 'userName', l: 'Full name', t: 'text', req: true },
       { n: 'email', l: 'Email (used to sign in)', t: 'text', req: true },
@@ -2027,7 +2045,7 @@
     var newBtn = canNew ? '<button id="ra-new" data-tutorial-target="ra-new-record" class="btn p">+ New</button>' : '';
     if (!rows.length && !st.search.trim()) {
       V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
-      var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
+      var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
       return;
     }
     var shell = '<div class="card">' +
@@ -2037,7 +2055,7 @@
       '<div id="ra-results"></div></div>';
     V.innerHTML = kpiBand + shell;
     paintResults();
-    var nb = $('ra-new'); if (nb) nb.onclick = function () { CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
+    var nb = $('ra-new'); if (nb) nb.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
     var si = $('ra-search'); if (si) {
       si.addEventListener('input', function (e) { st.search = e.target.value; paintResults(); clearTimeout(st._st); st._st = setTimeout(searchServer, 380); });
       if (st.search) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
