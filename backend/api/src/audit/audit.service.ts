@@ -96,9 +96,10 @@ export class AuditService {
     return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
   }
 
+  /** The 501 message is shown verbatim to end users by the Platform console (and any other
+   * caller), so it says what the user needs to know and nothing about tables or teams — the
+   * engineering detail lives in this file's header comment. Lane platform-roles, 2026-09-28. */
   async loginHistory(_limit = 100, _cursor?: string): Promise<never> {
-    throw new NotImplementedException(
-      'Login history is not available: its backing table (iam.login_history) was never added to the Phase-1A Data Dictionary or @core/data-iam / @ra/data-org schema, so it does not exist in any real database. Ask the data team to add it to the dictionary before this feature can go live.',
-    );
+    throw new NotImplementedException("Login history isn't recorded yet.");
   }
 }

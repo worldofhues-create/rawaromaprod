@@ -90,15 +90,22 @@ export const VAULT_APPROVER_FORBIDDEN_PERMISSIONS: ReadonlySet<string> = new Set
   'formula:formula_stage_ingredients:write',
 ]);
 
-/** Platform Ops console read (§6/§113, this lane) — tenant/org list, environment/outbox
- * health, provider status, build identity. Deliberately its OWN domain prefix
- * (`platformops:`, not `platform:`) so it can never be swept in by an existing role's
+/** Platform Ops console read (§6/§113) — tenant/org list, environment/outbox health,
+ * provider status (never secrets), build identity. READ-ONLY. Deliberately its OWN domain
+ * prefix (`platformops:`, not `platform:`) so it can never be swept in by an existing role's
  * broader `startsWith('platform:')` grant (procurement/sales both read `platform:*`
  * reference data — country/contact/document masters — and must NOT thereby gain Platform
- * Ops access). Held ONLY by `platform_super_admin`, explicitly excluded below from
- * `owner`'s otherwise-blanket grant — tenant authority and platform-operations authority
- * are separate domains (same split §108 draws for Vault authority): owning the tenant does
- * not mean owning the platform's own operational console. */
+ * Ops access).
+ *
+ * Held by `platform_super_admin` AND `owner` (lane platform-roles, 2026-09-28, owner report
+ * "rawplatform is completely unusable"). The original §113 split excluded `owner`, but that
+ * left the real owner accounts — the only accounts RawProd production has — signed in to the
+ * Platform console (admitted by `platform:flag:write`, which `owner` already holds: it can
+ * flip the production kill-switches) yet refused Health/Tenants/Providers/Build, the strictly
+ * less sensitive READ half of the same console. Nobody could fix that in-app either: owner
+ * cannot assign `platform_super_admin` (it does not hold a superset of that role's grant).
+ * Every other role stays excluded, `admin` and `showcase` included, and the seed asserts it
+ * (PLATFORM_OPS_ROLES below). Vault authority is NOT relaxed by this — see §107/§108. */
 export const PLATFORM_OPS_PERMISSION = 'platformops:console:read';
 
 /** §109.7 manufacturing-instruction read (security review item 4) — the ONE formula-derived
@@ -145,8 +152,9 @@ export const ROLES: RoleDef[] = [
     // "everything" just because nobody remembered to list it here too), EXCEPT every
     // FORMULA_DECISION_PERMISSIONS write (§107/§108, security review item 2 — owner keeps
     // formula:*:read for oversight, but can never draft/seal/approve/reject/lock/grant a
-    // formula), AND EXCEPT the Platform Ops console (§113: a separate operational authority
-    // from tenant ownership — see PLATFORM_OPS_PERMISSION's doc comment).
+    // formula). It DOES hold the read-only Platform Ops console (`platformops:console:read`)
+    // — see PLATFORM_OPS_PERMISSION's doc comment for why the original §113 exclusion was
+    // reversed for owner only.
     //
     // Can still ASSIGN the two Vault roles (formulator/vault_approver) to a user, despite
     // holding none of their permissions itself — that is NOT the ordinary "grant a role whose
@@ -161,7 +169,6 @@ export const ROLES: RoleDef[] = [
     select: (p) =>
       p !== VAULT_PLAINTEXT_PERMISSION &&
       !p.startsWith('vault:') &&
-      p !== PLATFORM_OPS_PERMISSION &&
       !FORMULA_DECISION_PERMISSIONS.has(p) &&
       p !== MANUFACTURING_INSTRUCTION_PERMISSION,
     sampleEmail: 'owner@rawaroma.local',
@@ -538,10 +545,11 @@ export const ROLES: RoleDef[] = [
  * granted."). */
 export const VAULT_PLAINTEXT_ROLES = ['formulator', 'vault_approver'];
 
-/** Roles allowed to hold PLATFORM_OPS_PERMISSION — everyone else is rejected by the seed,
- * `owner` included (§113: Platform Ops is a separate operational authority from tenant
- * ownership, same split as Vault authority above). */
-export const PLATFORM_OPS_ROLES = ['platform_super_admin'];
+/** Roles allowed to hold PLATFORM_OPS_PERMISSION — everyone else (admin, showcase, every
+ * factory role) is rejected by the seed. `owner` was added 2026-09-28 (lane platform-roles):
+ * see PLATFORM_OPS_PERMISSION's doc comment. Mirrored at runtime by
+ * backend/cluster-org/src/security/security.service.ts PLATFORMOPS_ALLOWED_ROLES. */
+export const PLATFORM_OPS_ROLES = ['platform_super_admin', 'owner'];
 
 /** The role-granting permission. Only owner + admin may hold it — asserted by the seed. */
 export const ROLE_GRANT_PERMISSION = 'iam:user_role_mapping:write';

@@ -4,11 +4,10 @@
  * (same pattern as vault-rbac.test.ts / permissions-guard.test.ts). Proves:
  *   - platform_super_admin's REAL computed grant (scripts/ra-roles.ts `select()` over the
  *     real RA_PERMISSIONS catalogue) passes.
- *   - owner's REAL computed grant — despite being "everything except two exclusions" —
- *     EXCLUDES platformops:console:read (the second exclusion this lane adds; the seed
- *     invariant in scripts/db-seed.ts backs this up server-side too). Without this explicit
- *     exclusion, owner's blanket `p !== VAULT_PLAINTEXT_PERMISSION` predicate would have
- *     granted it implicitly — this test is the regression guard for that.
+ *   - owner's REAL computed grant passes too (lane platform-roles, 2026-09-28: the original
+ *     §113 owner exclusion left the only real production accounts refused on the read-only
+ *     console they were already admitted to — see scripts/ra-roles.ts PLATFORM_OPS_PERMISSION),
+ *     and EXACTLY {platform_super_admin, owner} hold it.
  *   - admin, and the two factory roles whose selectors read `platform:*` reference data
  *     (procurement, sales) are denied — proving PLATFORM_OPS_PERMISSION's own domain prefix
  *     (`platformops:`, not `platform:`) is not accidentally swept up by their
@@ -65,21 +64,26 @@ for (const route of ROUTES) {
   });
 }
 
-/* ── denied: owner's real computed grant excludes it (§113, the exclusion this lane adds) ── */
+/* ── permitted: owner's real computed grant (lane platform-roles, 2026-09-28) ─────────────── */
 
 const ownerGrant = grantFor('owner');
 
-test("platform ops rbac: sanity — owner's computed grant is large but excludes platformops:console:read", () => {
+test("platform ops rbac: sanity — owner's computed grant is large and includes platformops:console:read", () => {
   assert.ok(ownerGrant.length > 100, 'owner should still hold nearly every other permission');
-  assert.ok(!ownerGrant.includes(PLATFORM_OPS_PERMISSION));
+  assert.ok(ownerGrant.includes(PLATFORM_OPS_PERMISSION));
 });
 
 for (const route of ROUTES) {
-  test(`platform ops rbac: PlatformOpsController.${route} — denied for owner (full grant, minus vault plaintext AND platform ops)`, () => {
+  test(`platform ops rbac: PlatformOpsController.${route} — permitted for owner's real grant`, () => {
     const p = principal({ roles: ['owner'], permissions: ownerGrant });
-    assertForbidden(() => guard.canActivate(fakeContext(route, p)));
+    assert.equal(guard.canActivate(fakeContext(route, p)), true);
   });
 }
+
+test('platform ops rbac: only platform_super_admin and owner hold platformops:console:read', () => {
+  const holders = ROLES.filter((r) => grantFor(r.code).includes(PLATFORM_OPS_PERMISSION)).map((r) => r.code).sort();
+  assert.deepEqual(holders, ['owner', 'platform_super_admin']);
+});
 
 /* ── denied: admin (iam:* only — never matches platformops:) ───────────────────────────── */
 

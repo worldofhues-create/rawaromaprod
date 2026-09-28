@@ -1,7 +1,8 @@
 /**
  * Lane token-rp (RawProd release fix) — the access token no longer carries every permission.
  *
- * An owner holds 257 permissions; carried inline they made a 12,355-byte JWT, over nginx's 8 KB
+ * An owner holds 258 permissions (257 until lane platform-roles added platformops:console:read,
+ * 2026-09-28); carried inline they made a 12,355-byte JWT, over nginx's 8 KB
  * default header limit, so owners got "400 Request Header Or Cookie Too Large" on their first
  * write. The token now carries `roles` + `pv` + only the vault-scoped subset (`formula:*`/
  * `vault:*`). On the main app box `JwtAuthGuard` resolves the permission set from the token's
@@ -191,10 +192,10 @@ class OtherProcessResolver extends RolePermissionResolver {
 
 /* ── 1. size ───────────────────────────────────────────────────────────────────────────── */
 
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 257 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 258 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
-  assert.equal(ownerGrant.length, 257);
+  assert.equal(ownerGrant.length, 258);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

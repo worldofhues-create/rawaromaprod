@@ -84,8 +84,8 @@ async function grantRole(
       `SECURITY: role '${role.code}' must not be granted ${VAULT_PLAINTEXT_PERMISSION} — only ${VAULT_PLAINTEXT_ROLES.join('/')} may hold Vault plaintext access (§107)`,
     );
   }
-  // HARD INVARIANT (§113): only platform_super_admin may hold the Platform Ops console
-  // permission — NOT owner (whose blanket grant excludes it explicitly) or any other role.
+  // HARD INVARIANT (§113): only PLATFORM_OPS_ROLES (platform_super_admin + owner, the
+  // read-only console) may hold the Platform Ops console permission — no other role.
   if (!PLATFORM_OPS_ROLES.includes(role.code) && granted.some((p) => p.code === PLATFORM_OPS_PERMISSION)) {
     throw new Error(
       `SECURITY: role '${role.code}' must not be granted ${PLATFORM_OPS_PERMISSION} — only ${PLATFORM_OPS_ROLES.join('/')} may hold Platform Ops access (§113)`,

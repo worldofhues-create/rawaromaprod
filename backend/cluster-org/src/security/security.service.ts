@@ -86,7 +86,8 @@ const VAULT_FORMULA_SENSITIVE = (code: string): boolean =>
 const VAULT_FORMULA_ALLOWED_ROLES = ['formulator', 'vault_approver'];
 
 const PLATFORMOPS_SENSITIVE = (code: string): boolean => code.startsWith('platformops:');
-const PLATFORMOPS_ALLOWED_ROLES = ['platform_super_admin'];
+// Mirrors scripts/ra-roles.ts PLATFORM_OPS_ROLES (owner added 2026-09-28, lane platform-roles).
+const PLATFORMOPS_ALLOWED_ROLES = ['platform_super_admin', 'owner'];
 
 /** Target roles for user_role_mapping that get an explicit allow-list EXCEPTION to the
  * ordinary "you can only grant a subset of your own permissions" rule (security review

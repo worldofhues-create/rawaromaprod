@@ -1,14 +1,15 @@
-/* Platform Operations console — installable PWA for platform_super_admin only. Built from
- * EXISTING admin/platform endpoints (backend/backend-kernel/src/health,
+/* Platform Operations console — installable PWA for platform_super_admin and owner. Built
+ * from EXISTING admin/platform endpoints (backend/backend-kernel/src/health,
  * backend/cluster-platform/src/flags, backend/api/src/audit). No business-data caching
  * (see sw.js — API calls are network-only); no tenant business data or Formula Vault
- * plaintext is ever requested or rendered here (this console has no formula:* permission
- * at all — platform_super_admin's grant is `platform:flag:write` + `iam:user_master:read`
- * only, per scripts/ra-roles.ts).
+ * plaintext is ever requested or rendered here (this console calls no formula:* route at
+ * all — platform_super_admin's grant is `platform:flag:write` + `iam:user_master:read` +
+ * `platformops:console:read` only, per scripts/ra-roles.ts).
  *
  * Tenant list, provider health, deeper (outbox/worker-lag) diagnostics, and deployment/build
  * identity are backed by `backend/api/src/platform-ops` (§6/§113 — `platformops:console:read`,
- * platform_super_admin only, fail-closed for every other role). A caller who reaches this
+ * held by platform_super_admin and owner only — PLATFORM_OPS_ROLES — fail-closed for every
+ * other role). A caller who reaches this
  * console without that permission (e.g. holding only `iam:user_master:read`) still sees an
  * honest "unavailable — missing permission" card on those screens rather than a silent 403 or
  * fabricated data; "no fake data, no dead controls" still holds.
@@ -516,6 +517,8 @@
   }
 
   /* ── audit & support (real route, honestly not-implemented server-side today) ─────────────── */
+  // A 501 from the route means "not built yet", not "you can't" — the card says so in plain
+  // words, whatever the server's message. Any other failure keeps its own message.
   async function screenSupport() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('support', content);
@@ -526,10 +529,9 @@
       content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Login history'])]), h('table', {}, [h('tbody', {}, rows)])]));
     } catch (e) {
       content.innerHTML = '';
-      content.appendChild(notBuilt(
-        'Login history unavailable',
-        (e instanceof PlatformError ? e.message : 'Not available yet.'),
-      ));
+      content.appendChild((e instanceof PlatformError && e.status === 501)
+        ? notBuilt('Login history', 'Login history isn\'t recorded yet.')
+        : notBuilt('Login history didn\'t load', (e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.')));
     }
   }
 
