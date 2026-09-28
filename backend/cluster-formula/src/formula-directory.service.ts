@@ -43,6 +43,14 @@ export interface FormulaVersionLabel {
 export interface FormulaLabel {
   formulaId: string;
   formulaCode: string | null;
+  /**
+   * Lane produce (2026-09-29): the formula's CURRENT version when it is APPROVED or LOCKED — the
+   * one a master run may be started against — as id + number only; null when there is none (no
+   * current version, or it is still a draft/under review). What the "Produce next" plan uses to
+   * pre-fill a run and to say, plainly, that no approved formula exists yet. An old Vault that
+   * does not send it reads as null (no approved formula) on the main box.
+   */
+  approvedVersion?: { formulaVersionId: string; versionNumber: number | null } | null;
 }
 
 export interface FormulaLabelsQuery {
@@ -124,12 +132,27 @@ export class FormulaDirectoryService {
           .where(inArray(formulaVersion.formulaVersionId, versionIds))
       : [];
 
-    const formulas = formulaIds.length
+    const formulaRows = formulaIds.length
       ? await this.db
-          .select({ formulaId: formulaMaster.formulaId, formulaCode: formulaMaster.formulaCode })
+          .select({
+            formulaId: formulaMaster.formulaId,
+            formulaCode: formulaMaster.formulaCode,
+            currentVersionId: formulaMaster.currentVersionId,
+            currentVersionNumber: formulaVersion.versionNumber,
+            currentVersionStatus: formulaVersion.status,
+          })
           .from(formulaMaster)
+          .leftJoin(formulaVersion, eq(formulaVersion.formulaVersionId, formulaMaster.currentVersionId))
           .where(inArray(formulaMaster.formulaId, formulaIds))
       : [];
+    const formulas: FormulaLabel[] = formulaRows.map((f) => ({
+      formulaId: f.formulaId,
+      formulaCode: f.formulaCode,
+      approvedVersion:
+        f.currentVersionId && (f.currentVersionStatus === 'APPROVED' || f.currentVersionStatus === 'LOCKED')
+          ? { formulaVersionId: f.currentVersionId, versionNumber: f.currentVersionNumber ?? null }
+          : null,
+    }));
 
     let recent: FormulaLabels['recent'] = null;
     if (query.recent) {

@@ -21,10 +21,13 @@ export const QC_BATCH_RELEASED = 'qc.batch.released' as const;
 export const COMPLIANCE_CERTIFICATE_CALCULATED = 'compliance.certificate.calculated' as const;
 export const COMPLIANCE_EVENT_TYPES = [QC_BATCH_RELEASED, COMPLIANCE_CERTIFICATE_CALCULATED] as const;
 
-/** The envelope `aggregate.type` each compliance event is reported under. */
+/** The envelope `aggregate.type` each compliance event is reported under — DOCS-001 (ALEMBIC
+ *  docs/bridge/COMPLIANCE_FACTS.md): `qc_batch` + RawProd's batch COA uuid for a QC verdict,
+ *  `product` + RawProd's product uuid for a calculation (lane produce reconciled the latter, which
+ *  lane/compliance-rp had reported as `compliance_certificate` + an emission id). */
 export const COMPLIANCE_AGGREGATE_TYPES: Record<(typeof COMPLIANCE_EVENT_TYPES)[number], string> = {
   [QC_BATCH_RELEASED]: 'qc_batch',
-  [COMPLIANCE_CERTIFICATE_CALCULATED]: 'compliance_certificate',
+  [COMPLIANCE_CERTIFICATE_CALCULATED]: 'product',
 };
 
 /* ── qc.batch.released ─────────────────────────────────────────────────────────────────────── */

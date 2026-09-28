@@ -124,7 +124,14 @@ export class BridgeRelayService implements OnModuleDestroy {
       };
       const rawPayload = { ...(ev.payload as Record<string, unknown>) };
       const version = typeof rawPayload._bridge_version === 'number' ? rawPayload._bridge_version : 1;
-      delete rawPayload._bridge_version; // transport metadata, not part of the safe payload
+      // Lane produce: a fact (fg.batch.received) is keyed to its own aggregate but belongs to a
+      // requirement's journey — the emitter names that journey's correlation id and org here.
+      const metaCorrelation = typeof rawPayload._correlation_id === 'string' ? rawPayload._correlation_id : null;
+      const metaOrg = typeof rawPayload._org_id === 'string' ? rawPayload._org_id : null;
+      // Transport metadata, not part of the safe payload.
+      delete rawPayload._bridge_version;
+      delete rawPayload._correlation_id;
+      delete rawPayload._org_id;
 
       const req = ev.aggregateId
         ? (await this.db.select({ orgId: productionRequirement.orgId }).from(productionRequirement)
@@ -139,16 +146,17 @@ export class BridgeRelayService implements OnModuleDestroy {
       // event-type convention is PascalCase starting with the aggregate's noun (Production*,
       // SalesOrder*, …), so a type this relay doesn't recognize as production-requirement-shaped
       // is reported as the aggregate it actually names instead of a silently wrong guess.
-      const complianceType = (bridgeContracts.COMPLIANCE_AGGREGATE_TYPES as Record<string, string>)[ev.type];
+      const complianceType = (bridgeContracts.COMPLIANCE_AGGREGATE_TYPES as Record<string, string>)[ev.type]
+        ?? (ev.type === bridgeContracts.FG_BATCH_RECEIVED ? bridgeContracts.FG_BATCH_AGGREGATE_TYPE : undefined);
       const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order' : 'production_requirement');
-      const orgId = req?.orgId ?? (await this.fallbackOrgId());
+      const orgId = req?.orgId ?? metaOrg ?? (await this.fallbackOrgId());
 
       const body = JSON.stringify({
         event_id: ev.id,
         version,
         type: ev.type,
         org_id: orgId,
-        correlation_id: rawPayload.correlation_id ?? ev.aggregateId,
+        correlation_id: metaCorrelation ?? rawPayload.correlation_id ?? ev.aggregateId,
         causation_id: null,
         occurred_at: ev.occurredAt.toISOString(),
         source: 'rawprod',

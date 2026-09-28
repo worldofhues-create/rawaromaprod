@@ -42,6 +42,7 @@ import { BridgeModule } from './bridge/bridge.module.js';
 import { AutomationModule } from './automation/automation.module.js';
 import { MaterialCatalogueSyncModule } from './vault-bridge/material-catalogue-sync.module.js';
 import { ComplianceCertificateSyncModule } from './vault-bridge/compliance-certificate-sync.module.js';
+import { ShelfModule } from './shelf/shelf.module.js';
 
 @Module({
   imports: [
@@ -80,6 +81,8 @@ import { ComplianceCertificateSyncModule } from './vault-bridge/compliance-certi
     // Pulls the Vault's calculated IFRA/allergen certificates (numbers only) over the same signed
     // channel and emits compliance.certificate.calculated toward ALEMBIC per product.
     ComplianceCertificateSyncModule,
+    // Lane produce: delivers queued pick-to-light commands (controller URL or the simulator).
+    ShelfModule,
   ],
 })
 export class WorkerModule {}

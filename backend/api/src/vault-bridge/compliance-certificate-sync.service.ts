@@ -13,9 +13,12 @@
  *             ALEMBIC relay delivers it) and records the (certificate, product) emission. A product
  *             linked to a formula later still receives the current certificate on the next round.
  *
- * The emitted payload carries the certificate numbers, the product's code and SKU codes, and the
- * Vault's opaque formulaVersionRef — never the formula id this box used to find the products
- * (assertNoFormulaContent refuses the emission otherwise).
+ * The emitted payload is the DOCS-001 wire shape (lane produce; docs/bridge/COMPLIANCE_FACTS.md):
+ * `product_ref: { factory_sku }`, the formula version NUMBER and the Vault's opaque
+ * formula_version_ref, IFRA limits for all 18 categories / allergen rows for all 26 EU allergens as
+ * strings — never the formula id this box used to find the products (assertNoFormulaContent
+ * refuses the emission otherwise). A certificate ALEMBIC would refuse (no amendment, a category or
+ * allergen the Vault did not calculate, no version number) is logged and not emitted.
  *
  * Runs in the worker (WorkerModule). Does nothing when this box has no VAULT_API_INTERNAL_URL /
  * INTERNAL_BRIDGE_KEY (single-box dev).
@@ -42,6 +45,7 @@ interface PendingEmission {
   cert_values: unknown;
   calculated_at: Date | string;
   formula_version_ref: string;
+  formula_version_number: number | null;
 }
 
 /** Pure: the `compliance.certificate.calculated` payload for one product. Throws if the result
@@ -68,6 +72,20 @@ export function buildCertificatePayload(input: {
   if (problems.length > 0) throw new Error(`certificate payload invalid: ${problems.join(', ')}`);
   bridgeContracts.assertNoFormulaContent(payload);
   return payload;
+}
+
+/** Pure: the DOCS-001 wire payload for one product (the product's first SKU code is the
+ *  `factory_sku` ALEMBIC maps). Throws `CertificateWireError` when ALEMBIC would refuse it. */
+export function buildCertificateWire(
+  internal: bridgeContracts.ComplianceCertificatePayload,
+  skuCodes: string[],
+  formulaVersionNumber: number | null,
+): bridgeContracts.CertificateCalculatedWire {
+  const wire = bridgeContracts.toCertificateCalculatedWire(internal, {
+    factorySku: skuCodes[0] ?? '', formulaVersion: formulaVersionNumber,
+  });
+  bridgeContracts.assertNoFormulaContent(wire);
+  return wire;
 }
 
 @Injectable()
@@ -143,10 +161,12 @@ export class ComplianceCertificateSyncService implements OnModuleInit, OnModuleD
         for (const c of page) {
           await tx.execute(sql`
             insert into bridge.compliance_certificate
-              (certificate_id, vault_seq, formula_id, formula_version_ref, kind, amendment, cert_values, calculated_at)
-            values (${c.certificateId}::uuid, ${c.seq}, ${c.formulaId}::uuid, ${c.formulaVersionRef}, ${c.kind},
+              (certificate_id, vault_seq, formula_id, formula_version_ref, formula_version_number, kind, amendment, cert_values, calculated_at)
+            values (${c.certificateId}::uuid, ${c.seq}, ${c.formulaId}::uuid, ${c.formulaVersionRef},
+                    ${c.formulaVersionNumber ?? null}::int, ${c.kind},
                     ${c.amendment}, ${JSON.stringify(c.values)}::jsonb, ${c.calculatedAt}::timestamptz)
-            on conflict (certificate_id) do nothing
+            on conflict (certificate_id) do update
+              set formula_version_number = coalesce(bridge.compliance_certificate.formula_version_number, excluded.formula_version_number)
           `);
         }
         const maxSeq = Math.max(...page.map((c) => c.seq));
@@ -166,12 +186,12 @@ export class ComplianceCertificateSyncService implements OnModuleInit, OnModuleD
     const due = (await this.db.execute(sql`
       with latest as (
         select distinct on (formula_id, kind) certificate_id, formula_id, kind, amendment, cert_values,
-               calculated_at, formula_version_ref
+               calculated_at, formula_version_ref, formula_version_number
           from bridge.compliance_certificate
          order by formula_id, kind, vault_seq desc
       )
       select l.certificate_id::text as certificate_id, p.product_id::text as product_id, p.product_code,
-             l.kind, l.amendment, l.cert_values, l.calculated_at, l.formula_version_ref
+             l.kind, l.amendment, l.cert_values, l.calculated_at, l.formula_version_ref, l.formula_version_number
         from latest l
         join packaging.product_master p on p.formula_id = l.formula_id and p.product_code is not null
        where not exists (
@@ -186,12 +206,14 @@ export class ComplianceCertificateSyncService implements OnModuleInit, OnModuleD
       const skuCodes = ((await this.db.execute(sql`
         select sku_code from packaging.product_sku where product_id = ${d.product_id} and sku_code is not null order by sku_code
       `)) as unknown as { sku_code: string }[]).map((r) => r.sku_code);
-      let payload: bridgeContracts.ComplianceCertificatePayload;
+      let payload: bridgeContracts.CertificateCalculatedWire;
       try {
-        payload = buildCertificatePayload({
+        const internal = buildCertificatePayload({
           productRef: d.product_code, skuCodes, kind: d.kind, amendment: d.amendment, values: d.cert_values,
           calculatedAt: d.calculated_at, formulaVersionRef: d.formula_version_ref,
         });
+        // Lane produce: DOCS-001 is what ALEMBIC parses (docs/bridge/COMPLIANCE_FACTS.md).
+        payload = buildCertificateWire(internal, skuCodes, d.formula_version_number);
       } catch (err) {
         // Never emitted, never marked emitted: it stays visible here until the Vault supersedes it.
         this.logger.error(`certificate ${d.certificate_id} for product ${d.product_code} not emitted: ${(err as Error).message}`);
@@ -205,7 +227,8 @@ export class ComplianceCertificateSyncService implements OnModuleInit, OnModuleD
           returning emission_id::text as emission_id
         `)) as unknown as { emission_id: string }[];
         if (!claimed[0]) return; // another worker emitted it first
-        await emitBridgeManualEvent(tx, bridgeContracts.COMPLIANCE_CERTIFICATE_CALCULATED, claimed[0].emission_id, payload as unknown as Record<string, unknown>);
+        // DOCS-001: aggregate `product` + RawProd's product uuid (the relay maps the type).
+        await emitBridgeManualEvent(tx, bridgeContracts.COMPLIANCE_CERTIFICATE_CALCULATED, d.product_id, payload as unknown as Record<string, unknown>);
         emitted++;
       });
     }

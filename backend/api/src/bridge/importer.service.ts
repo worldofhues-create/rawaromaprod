@@ -12,7 +12,9 @@
  */
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { eq, sql } from 'drizzle-orm';
-import { PG_CLIENT } from '@core/backend-kernel';
+import { PG_CLIENT, recordProduceAlert } from '@core/backend-kernel';
+import { bridge as bridgeContracts } from '@core/contracts';
+import { PRODUCE_ALERT_ROLES } from '@ra/cluster-production';
 import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { BRIDGE_DB, bridgeSchema, type BridgeDb } from './bridge.tokens.js';
@@ -20,8 +22,8 @@ import { openSecret } from './secret-box.js';
 import { verifyBody } from './signing.js';
 import {
   validateEnvelope, INBOUND_FROM_ALEMBIC, decideInbound, decideAcceptance,
-  validateInboundPayload, isPermanentDbError, BRIDGE_CODES,
-  type LocalStatus, type BridgeEnvelope,
+  validateInboundPayload, isPermanentDbError, BRIDGE_CODES, normalizeRequirementPayload,
+  type LocalStatus, type BridgeEnvelope, type NormalizedRequirementFields,
 } from './contract.js';
 import { convertQty } from './quantity.js';
 
@@ -172,22 +174,29 @@ export class ImporterService {
   }
 
   private async applyCreated(tx: Tx, env: BridgeEnvelope): Promise<void> {
-    const p = env.payload;
-    const mappedSku = String(p.mapped_sku ?? '');
+    const n = normalizeRequirementPayload(env.payload);
+    const mappedSku = n.mappedSku ?? '';
     const exists = await this.skuExists(mappedSku);
     const ack = decideAcceptance(exists);
+    const neededBy = new Date(String(n.neededBy));
 
     await tx.insert(productionRequirement).values({
       alembicRequirementId: env.aggregate.id,
       orgId: env.orgId,
       correlationId: env.correlationId,
-      orderRef: String(p.order_ref ?? ''),
+      orderRef: n.orderRef ?? '',
       mappedSku,
-      qty: String(p.qty ?? '0'),
-      uom: String(p.uom ?? ''),
-      packSize: p.pack_size ? String(p.pack_size) : null,
-      neededBy: new Date(String(p.needed_by)),
-      priority: String(p.priority ?? 'normal'),
+      qty: n.qty ?? '0',
+      uom: n.uom ?? '',
+      packSize: n.packSize ?? null,
+      neededBy,
+      priority: n.priority ?? 'normal',
+      priorityRank: n.priorityRank ?? null,
+      priorityReason: n.priorityReason ?? null,
+      orderValueInr: n.orderValueInr ?? null,
+      orderRefs: n.orderRefs ?? (n.orderRef ? [n.orderRef] : null),
+      qtyKg: n.qtyKg ?? (String(n.uom ?? '').toLowerCase() === 'kg' ? n.qty ?? null : null),
+      lotPolicy: n.lotPolicy ?? null,
       lifecycleStatus: exists ? 'ACCEPTED' : 'REJECTED_MAPPING',
       statusReason: exists ? null : 'mapped_sku not found in packaging.product_sku',
       lastAppliedVersion: '1',
@@ -204,6 +213,41 @@ export class ImporterService {
         _bridge_version: 1,
       },
     });
+
+    if (exists) await this.alertOnArrival(tx, env.aggregate.id, n, neededBy);
+  }
+
+  /**
+   * Lane produce — "alerts to PRODUCE": a requirement that lands high value (ALEMBIC's reason, or
+   * an order of ₹25,000 or more) or already past its need-by date raises a live alert on every
+   * factory console (and an email to the same roles). Once per requirement (dedupe key).
+   */
+  private async alertOnArrival(tx: Tx, requirementId: string, n: NormalizedRequirementFields, neededBy: Date | null): Promise<void> {
+    const what = `${n.mappedSku ?? ''}${n.packSize ? ` (${n.packSize})` : ''}`;
+    const qty = n.qtyKg ? `${Number(n.qtyKg)} kg` : `${n.qty ?? ''} ${n.uom ?? ''}`.trim();
+    const orders = (n.orderRefs ?? (n.orderRef ? [n.orderRef] : [])).join(', ');
+    const due = (neededBy ?? (n.neededBy ? new Date(n.neededBy) : null))?.toISOString().slice(0, 10) ?? 'the agreed date';
+    if (bridgeContracts.isHighValue(n.priorityReason, n.orderValueInr)) {
+      const value = n.orderValueInr ? ` · ₹${Number(n.orderValueInr).toLocaleString('en-IN')}` : '';
+      await recordProduceAlert(tx, {
+        kind: 'high_value_requirement', severity: 'high',
+        title: `High-value order to produce: ${what}`,
+        detail: `${qty} for ${orders || 'an ALEMBIC order'}${value} · needed by ${due}`,
+        roles: PRODUCE_ALERT_ROLES, refType: 'production_requirement', refId: requirementId,
+        dedupeKey: `high_value:${requirementId}`,
+      });
+    }
+    if (neededBy && neededBy.getTime() < Date.now()) {
+      await recordProduceAlert(tx, {
+        kind: 'overdue_requirement', severity: 'high',
+        title: `Overdue on arrival: ${what}`,
+        detail: `${qty} for ${orders || 'an ALEMBIC order'} was needed by ${due}`,
+        roles: PRODUCE_ALERT_ROLES, refType: 'production_requirement', refId: requirementId,
+        dedupeKey: `overdue:${requirementId}`,
+      });
+      await tx.update(productionRequirement).set({ overdueAlertedAt: new Date() })
+        .where(eq(productionRequirement.alembicRequirementId, requirementId));
+    }
   }
 
   /** Atomically allocates the next outbound envelope version for `aggregateId` and
@@ -218,16 +262,36 @@ export class ImporterService {
   }
 
   private async applyChanged(tx: Tx, env: BridgeEnvelope): Promise<void> {
+    const n = normalizeRequirementPayload(env.payload);
     const p = env.payload;
     await tx.update(productionRequirement).set({
-      mappedSku: p.mapped_sku ? String(p.mapped_sku) : undefined,
-      qty: p.qty !== undefined ? String(p.qty) : undefined,
-      uom: p.uom ? String(p.uom) : undefined,
-      packSize: p.pack_size !== undefined ? String(p.pack_size) : undefined,
-      neededBy: p.needed_by ? new Date(String(p.needed_by)) : undefined,
-      priority: p.priority ? String(p.priority) : undefined,
+      mappedSku: n.mappedSku,
+      qty: n.qty,
+      uom: n.uom,
+      packSize: p.pack_size !== undefined ? n.packSize ?? null : undefined,
+      neededBy: n.neededBy ? new Date(n.neededBy) : undefined,
+      priority: n.priority,
+      priorityRank: n.priorityRank,
+      priorityReason: n.priorityReason,
+      orderValueInr: n.orderValueInr,
+      orderRefs: n.orderRefs,
+      qtyKg: n.qtyKg,
+      lotPolicy: n.lotPolicy,
+      // A new need-by date may make it overdue again later: re-arm the overdue alert.
+      overdueAlertedAt: n.neededBy ? null : undefined,
       lastAppliedVersion: sql`${productionRequirement.lastAppliedVersion} + 1`,
     }).where(eq(productionRequirement.alembicRequirementId, env.aggregate.id));
+    if (bridgeContracts.isHighValue(n.priorityReason, n.orderValueInr)) {
+      const req = (await tx.select().from(productionRequirement)
+        .where(eq(productionRequirement.alembicRequirementId, env.aggregate.id)).limit(1))[0];
+      if (req && req.lifecycleStatus === 'ACCEPTED') {
+        await this.alertOnArrival(tx, env.aggregate.id, {
+          ...n, mappedSku: req.mappedSku, packSize: req.packSize, qty: req.qty, uom: req.uom,
+          qtyKg: req.qtyKg, orderRefs: (req.orderRefs as string[] | null) ?? [req.orderRef],
+          neededBy: req.neededBy ? new Date(req.neededBy).toISOString() : undefined,
+        }, null); // high value only: overdue after a change is the overdue sweep's job
+      }
+    }
   }
 
   private async applyCancelled(tx: Tx, env: BridgeEnvelope): Promise<void> {

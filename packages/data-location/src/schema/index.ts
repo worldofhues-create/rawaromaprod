@@ -18,3 +18,11 @@ export {
   storageLocationStatusMaster,
   storageLocationMaster,
 } from "./storage.js";
+export {
+  rackWalkOrder,
+  shelfTask,
+  fgBinStock,
+  pickLightConfig,
+  pickLightCommand,
+  pickLightSimState,
+} from "./shelf.js";

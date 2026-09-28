@@ -97,6 +97,9 @@ export const RA_PERMISSIONS: string[] = [
   'location:rack_master:write',
   'location:shelf_master:read',
   'location:shelf_master:write',
+  // Lane produce (2026-09-29): put-away / pick / move tasks at the physical shelves.
+  'location:shelf_task:read',
+  'location:shelf_task:write',
   'location:storage_location_master:read',
   'location:storage_location_master:write',
   'location:storage_location_status_master:read',

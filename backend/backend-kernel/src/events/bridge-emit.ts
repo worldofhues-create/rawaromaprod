@@ -47,8 +47,8 @@ interface EmittedVersionRow {
 }
 
 /**
- * Emits `type` toward ALEMBIC for whatever `bridge.production_requirement` row is linked
- * to `productionOrderId` (its `production_order_id` column), inside the caller's own
+ * Emits `type` toward ALEMBIC for every `bridge.production_requirement` row linked to
+ * `productionOrderId` (its `production_order_id` column), inside the caller's own
  * transaction. No-ops when `productionOrderId` is null/undefined, or when no requirement
  * is linked to it.
  *
@@ -69,32 +69,50 @@ export async function emitBridgeOutbound(
 ): Promise<void> {
   if (!productionOrderId) return; // not bridge-originated — nothing to emit
 
+  // Lane produce: one master run may serve SEVERAL requirements (the "Produce next" plan extends
+  // an open run of the same approved formula version instead of starting a second one), so every
+  // requirement linked to the order hears about it — each with its own version counter. Ordered
+  // so concurrent callers always lock the rows in the same order.
   const linked = (await tx.execute(sql`
     select alembic_requirement_id, correlation_id
       from bridge.production_requirement
      where production_order_id = ${productionOrderId}
-     limit 1
+     order by alembic_requirement_id
   `)) as unknown as LinkedRequirementRow[];
-  const requirement = linked[0];
-  if (!requirement) return; // no requirement fulfilled by this order — nothing to emit
+  for (const requirement of linked) {
+    await emitBridgeToRequirement(tx, type, requirement.alembic_requirement_id, extraPayload, requirement.correlation_id);
+  }
+}
 
+/**
+ * Emits `type` toward ALEMBIC for ONE requirement (lane produce): used where only a newly linked
+ * requirement must hear an event — extending an open master run with another requirement tells
+ * that requirement `ProductionScheduled`, not every requirement the run already serves. Same
+ * version counter and payload rules as `emitBridgeOutbound`. No-op for an unknown requirement.
+ */
+export async function emitBridgeToRequirement(
+  tx: BridgeEmitTx,
+  type: string,
+  alembicRequirementId: string,
+  extraPayload: Record<string, unknown> = {},
+  knownCorrelationId?: string,
+): Promise<void> {
   const versioned = (await tx.execute(sql`
     update bridge.production_requirement
        set last_emitted_version = last_emitted_version + 1
-     where alembic_requirement_id = ${requirement.alembic_requirement_id}
-     returning last_emitted_version
-  `)) as unknown as EmittedVersionRow[];
-  const version = versioned[0] ? Number(versioned[0].last_emitted_version) : 1;
-
+     where alembic_requirement_id = ${alembicRequirementId}
+     returning last_emitted_version, correlation_id
+  `)) as unknown as Array<EmittedVersionRow & { correlation_id: string }>;
+  const row = versioned[0];
+  if (!row) return;
   const payload = JSON.stringify({
     ...extraPayload,
-    correlation_id: requirement.correlation_id,
-    _bridge_version: version,
+    correlation_id: knownCorrelationId ?? row.correlation_id,
+    _bridge_version: Number(row.last_emitted_version),
   });
-
   await tx.execute(sql`
     insert into bridge.outbox (type, aggregate_id, payload)
-    values (${type}, ${requirement.alembic_requirement_id}, ${payload}::jsonb)
+    values (${type}, ${alembicRequirementId}, ${payload}::jsonb)
   `);
 }
 

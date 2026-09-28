@@ -17,7 +17,7 @@
  *                                    certificate on the next sweep.
  *   vault_sync_cursor                the last Vault seq pulled (one row, id 'default').
  */
-import { bigint, index, jsonb, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk } from "@core/data-kernel";
 import { bridge } from "./_schema.js";
 
@@ -28,6 +28,9 @@ export const complianceCertificate = bridge.table(
     vaultSeq: bigint("vault_seq", { mode: "number" }).notNull(),
     formulaId: uuid("formula_id").notNull(),
     formulaVersionRef: varchar("formula_version_ref", { length: 80 }).notNull(),
+    // Lane produce: the version NUMBER ALEMBIC prints ("Calculated from formula v3", DOCS-001).
+    // A number, not formula content; null for a certificate pulled before the Vault sent it.
+    formulaVersionNumber: integer("formula_version_number"),
     kind: varchar("kind", { length: 10 }).notNull(),
     amendment: varchar("amendment", { length: 60 }),
     certValues: jsonb("cert_values").notNull(),

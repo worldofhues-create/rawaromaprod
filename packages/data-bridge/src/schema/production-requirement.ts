@@ -11,7 +11,7 @@
  * importer validates it exists before accepting (rejects with
  * ProductionRequirementRejectedMapping otherwise, never a guess).
  */
-import { index, numeric, text, timestamp, uuid, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, numeric, text, timestamp, uuid, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { bridge } from "./_schema.js";
 
@@ -31,6 +31,22 @@ export const productionRequirement = bridge.table(
     packSize: varchar("pack_size", { length: 50 }),
     neededBy: timestamp("needed_by", { withTimezone: true }).notNull(),
     priority: varchar("priority", { length: 20 }).notNull().default("normal"),
+
+    // Lane produce (owner requirement 2026-09-29; migration 2026-09-29-produce.sql): the fields
+    // ALEMBIC (lane/fulfil) adds to ProductionRequirementCreated/Changed. ALEMBIC ranks — RawProd
+    // orders its production queue by priority_rank, then needed_by, then arrival, and never
+    // re-ranks. order_value_inr is kept only to count/alert "high value" (>= ₹25,000).
+    priorityRank: integer("priority_rank"),
+    priorityReason: varchar("priority_reason", { length: 30 }),
+    orderValueInr: numeric("order_value_inr", { precision: 18, scale: 2 }),
+    orderRefs: jsonb("order_refs"), // string[] — every commercial order this requirement serves
+    qtyKg: numeric("qty_kg", { precision: 18, scale: 4 }),
+    lotPolicy: varchar("lot_policy", { length: 20 }),
+    // Why the "Produce next" one-click plan could not proceed (e.g. NO_APPROVED_FORMULA), and when.
+    produceBlockReason: varchar("produce_block_reason", { length: 60 }),
+    produceBlockedAt: timestamp("produce_blocked_at", { withTimezone: true }),
+    // Set once the requirement's "overdue" alert has been raised (so it is raised once).
+    overdueAlertedAt: timestamp("overdue_alerted_at", { withTimezone: true }),
 
     // Mirrors the ALEMBIC lifecycle vocabulary exactly (requirement.ts on that side),
     // so a support engineer reading either database sees the same word for the same fact.
@@ -53,5 +69,6 @@ export const productionRequirement = bridge.table(
     uniqueIndex("bridge_production_requirement_alembic_id_uq").on(t.alembicRequirementId),
     index("bridge_production_requirement_status_idx").on(t.lifecycleStatus),
     index("bridge_production_requirement_order_idx").on(t.orderRef),
+    index("bridge_production_requirement_queue_idx").on(t.priorityRank, t.neededBy, t.createdDt),
   ],
 );

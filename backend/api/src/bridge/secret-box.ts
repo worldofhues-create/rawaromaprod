@@ -34,11 +34,15 @@ function kek(): Buffer {
   return key;
 }
 
+/** Lane produce: the pick-to-light controller's HMAC secret is sealed under the same KEK but a
+ *  different AAD, so a blob sealed for one connector never opens as the other's. */
+export const PICK_LIGHT_AAD = 'location:pick_light:hmac_secret';
+
 /** Seals `value`. Returns a self-describing base64 blob: iv || tag || ciphertext. */
-export function sealSecret(value: string): string {
+export function sealSecret(value: string, context?: string): string {
   const iv = randomBytes(IV_BYTES);
   const cipher = createCipheriv('aes-256-gcm', kek(), iv);
-  cipher.setAAD(AAD);
+  cipher.setAAD(context ? Buffer.from(context, 'utf8') : AAD);
   const ciphertext = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
   const tag = cipher.getAuthTag();
   return Buffer.concat([iv, tag, ciphertext]).toString('base64');
@@ -47,14 +51,14 @@ export function sealSecret(value: string): string {
 /** Opens a blob `sealSecret` produced. Returns null on any failure (wrong key, altered
  *  bytes, wrong context) rather than throwing — the caller treats "cannot open" the same
  *  as "not configured", never surfacing which of the two it was. */
-export function openSecret(sealed: string): string | null {
+export function openSecret(sealed: string, context?: string): string | null {
   try {
     const buf = Buffer.from(sealed, 'base64');
     const iv = buf.subarray(0, IV_BYTES);
     const tag = buf.subarray(IV_BYTES, IV_BYTES + TAG_BYTES);
     const ciphertext = buf.subarray(IV_BYTES + TAG_BYTES);
     const decipher = createDecipheriv('aes-256-gcm', kek(), iv);
-    decipher.setAAD(AAD);
+    decipher.setAAD(context ? Buffer.from(context, 'utf8') : AAD);
     decipher.setAuthTag(tag);
     return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString('utf8');
   } catch {

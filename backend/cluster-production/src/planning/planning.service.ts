@@ -24,7 +24,7 @@ import { ConflictException, ForbiddenException, Inject, Injectable } from '@nest
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
-import { VAULT_PORT, type VaultPort } from '@ra/cluster-formula';
+import { VAULT_PORT, type PickLine, type VaultPort } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { paginate, num, type Page } from '../_helpers.js';
@@ -42,6 +42,9 @@ const {
   productionOrderIngredients,
   outbox,
 } = productionSchema;
+
+/** The transaction handle PlanningService's `*Tx` methods run on. */
+export type Tx = Parameters<Parameters<ProductionDb['transaction']>[0]>[0];
 
 @Injectable()
 export class PlanningService {
@@ -166,7 +169,13 @@ export class PlanningService {
    * production.order.created. Returns 403 if the formula version is not approved/locked.
    */
   async createOrder(body: CreateOrder, principal: AuthPrincipal) {
-    const picks = await this.vault.resolvePickList(body.formulaVersionId, body.orderQty, {
+    const picks = await this.resolvePicks(body.formulaVersionId, body.orderQty, principal);
+    return this.db.transaction((tx) => this.insertOrderTx(tx, body, picks, principal));
+  }
+
+  /** The coded bill of materials for `orderQty` from the Vault; 403 if the version is not approved. */
+  async resolvePicks(formulaVersionId: string, orderQty: number, principal: AuthPrincipal): Promise<PickLine[]> {
+    const picks = await this.vault.resolvePickList(formulaVersionId, orderQty, {
       actorId: principal.userId,
     });
     if (!picks) {
@@ -174,90 +183,129 @@ export class PlanningService {
         'formula version not approved/locked — cannot start production',
       );
     }
+    return picks;
+  }
 
-    return this.db.transaction(async (tx) => {
-      const order = (
-        await tx
-          .insert(productionOrder)
-          .values({
-            productionOrderId: uuidv7(),
-            productionPlanItemId: body.productionPlanItemId ?? null,
-            formulaVersionId: body.formulaVersionId,
-            locationId: body.locationId ?? null,
-            orderQty: num(body.orderQty),
-            uomId: body.uomId ?? null,
-            // PLANNING (not PENDING): the pick-list step is gated on PLANNING/INPROGRESS, so a new
-            // order must start here or it's a dead-end (audit H-C5). generatePickList → INPROGRESS.
-            status: 'PLANNING',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0];
-      if (!order) throw new Error('insert failed: production_order');
-
-      const productionOrderId = order.productionOrderId;
-
-      for (const pick of picks) {
-        await tx.insert(productionOrderIngredients).values({
-          productionOrderIngredientId: uuidv7(),
-          productionOrderId,
-          materialId: pick.materialId,
-          requiredQty: pick.requiredQty,
-          issuedQty: false,
+  /**
+   * The order write half of `createOrder`, inside the caller's transaction (lane produce: the
+   * "Produce next" plan creates the plan item and the run in ONE transaction with it).
+   */
+  async insertOrderTx(tx: Tx, body: CreateOrder, picks: PickLine[], principal: AuthPrincipal) {
+    const order = (
+      await tx
+        .insert(productionOrder)
+        .values({
+          productionOrderId: uuidv7(),
+          productionPlanItemId: body.productionPlanItemId ?? null,
+          formulaVersionId: body.formulaVersionId,
+          locationId: body.locationId ?? null,
+          orderQty: num(body.orderQty),
           uomId: body.uomId ?? null,
-          status: 'PENDING',
+          // PLANNING (not PENDING): the pick-list step is gated on PLANNING/INPROGRESS, so a new
+          // order must start here or it's a dead-end (audit H-C5). generatePickList → INPROGRESS.
+          status: 'PLANNING',
           createdBy: principal.userId,
           updatedBy: principal.userId,
-        });
-      }
+        })
+        .returning()
+    )[0];
+    if (!order) throw new Error('insert failed: production_order');
 
-      await recordOutbox(
-        tx,
-        outbox,
-        productionEvents.orderCreated,
-        {
-          productionOrderId,
-          formulaVersionId: body.formulaVersionId,
-          ingredientCount: picks.length,
-        },
+    const productionOrderId = order.productionOrderId;
+    await this.insertIngredientsTx(tx, productionOrderId, picks, body.uomId ?? null, principal);
+
+    await recordOutbox(
+      tx,
+      outbox,
+      productionEvents.orderCreated,
+      {
         productionOrderId,
-      );
+        formulaVersionId: body.formulaVersionId,
+        ingredientCount: picks.length,
+      },
+      productionOrderId,
+    );
 
-      // RP-EMIT (lane F6): if this order schedules production against an ALEMBIC-originated
-      // requirement, link this order to it (guarded so a retry never re-links an
-      // already-linked requirement to a different order) and emit ProductionScheduled toward
-      // ALEMBIC, in this SAME transaction — a rollback of the order rolls back the link and
-      // the emission too. No alembicRequirementId → this is RawProd-internal production;
-      // emitBridgeOutbound's own lookup also no-ops if nothing is linked.
-      if (body.alembicRequirementId) {
-        // Security review R1 #3: the link used to match only "not yet linked", with no check
-        // on lifecycle_status and no check on how many rows it actually touched — so scheduling
-        // against a requirement that was already REJECTED_MAPPING'd or CANCELLED (or a bad/
-        // unknown id) silently no-opped instead of failing loudly. Now the UPDATE also requires
-        // lifecycle_status = 'ACCEPTED', and a zero-row result (not found / wrong status /
-        // already linked) throws instead of continuing as if the link had succeeded.
-        const linked = (await tx.execute(sql`
-          update bridge.production_requirement
-             set production_order_id = ${productionOrderId}
-           where alembic_requirement_id = ${body.alembicRequirementId}
-             and production_order_id is null
-             and lifecycle_status = 'ACCEPTED'
-           returning alembic_requirement_id
-        `)) as unknown as Array<{ alembic_requirement_id: string }>;
-        if (linked.length === 0) {
-          throw new ConflictException(
-            `Bridge requirement ${body.alembicRequirementId} could not be linked to a new production order: it does not exist, is not in ACCEPTED lifecycle status, or is already linked to another order.`,
-          );
-        }
-      }
-      await emitBridgeOutbound(tx, 'ProductionScheduled', productionOrderId, {
-        production_order_id: productionOrderId,
-        formula_version_id: body.formulaVersionId,
-      });
-
-      return { order, ingredientCount: picks.length };
+    // RP-EMIT (lane F6): if this order schedules production against an ALEMBIC-originated
+    // requirement, link this order to it (guarded so a retry never re-links an
+    // already-linked requirement to a different order) and emit ProductionScheduled toward
+    // ALEMBIC, in this SAME transaction — a rollback of the order rolls back the link and
+    // the emission too. No alembicRequirementId → this is RawProd-internal production;
+    // emitBridgeOutbound's own lookup also no-ops if nothing is linked.
+    if (body.alembicRequirementId) await this.linkRequirementTx(tx, body.alembicRequirementId, productionOrderId);
+    // Lane produce: the payload names the run only. `formula_version_id` used to ride along — a
+    // field from RawProd's formula.* schema, which docs/bridge/EVENT_CONTRACT.md says must never
+    // cross the bridge, and which ALEMBIC never read.
+    await emitBridgeOutbound(tx, 'ProductionScheduled', productionOrderId, {
+      production_order_id: productionOrderId,
     });
+
+    return { order, ingredientCount: picks.length };
+  }
+
+  /**
+   * Links an ACCEPTED, unlinked requirement to `productionOrderId`, or throws.
+   * Security review R1 #3: the link used to match only "not yet linked", with no check on
+   * lifecycle_status and no check on how many rows it actually touched — so scheduling against a
+   * requirement that was already REJECTED_MAPPING'd or CANCELLED (or a bad/unknown id) silently
+   * no-opped instead of failing loudly. Now the UPDATE also requires lifecycle_status =
+   * 'ACCEPTED', and a zero-row result (not found / wrong status / already linked) throws.
+   */
+  async linkRequirementTx(tx: Tx, alembicRequirementId: string, productionOrderId: string): Promise<void> {
+    const linked = (await tx.execute(sql`
+      update bridge.production_requirement
+         set production_order_id = ${productionOrderId},
+             produce_block_reason = null, produce_blocked_at = null
+       where alembic_requirement_id = ${alembicRequirementId}
+         and production_order_id is null
+         and lifecycle_status = 'ACCEPTED'
+       returning alembic_requirement_id
+    `)) as unknown as Array<{ alembic_requirement_id: string }>;
+    if (linked.length === 0) {
+      throw new ConflictException(
+        `Bridge requirement ${alembicRequirementId} could not be linked to a new production order: it does not exist, is not in ACCEPTED lifecycle status, or is already linked to another order.`,
+      );
+    }
+  }
+
+  /**
+   * Lane produce — grows an open (PLANNING, no pick list yet) run to `newQty`: its bill of
+   * materials is replaced by the Vault's lines for the new quantity (`picks`, resolved by the
+   * caller before the transaction) and its order_qty updated. Refused once the run has left
+   * PLANNING: materials may already be picked against the old quantity.
+   */
+  async extendOrderTx(tx: Tx, productionOrderId: string, expectedQty: string, newQty: number, picks: PickLine[], principal: AuthPrincipal) {
+    const order = (await tx.select().from(productionOrder)
+      .where(eq(productionOrder.productionOrderId, productionOrderId)).for('update').limit(1))[0];
+    if (!order) throw new ConflictException(`production order ${productionOrderId} no longer exists`);
+    if (order.status !== 'PLANNING') {
+      throw new ConflictException(`production order ${productionOrderId} has left PLANNING (${order.status}); it cannot be extended — plan a new run.`);
+    }
+    if (Number(order.orderQty ?? 0) !== Number(expectedQty)) {
+      throw new ConflictException(`production order ${productionOrderId} changed while it was being extended; try again.`);
+    }
+    await tx.delete(productionOrderIngredients).where(eq(productionOrderIngredients.productionOrderId, productionOrderId));
+    await this.insertIngredientsTx(tx, productionOrderId, picks, order.uomId ?? null, principal);
+    const updated = (await tx.update(productionOrder)
+      .set({ orderQty: num(newQty), updatedBy: principal.userId, updatedDt: new Date() })
+      .where(eq(productionOrder.productionOrderId, productionOrderId)).returning())[0]!;
+    return { order: updated, ingredientCount: picks.length };
+  }
+
+  private async insertIngredientsTx(tx: Tx, productionOrderId: string, picks: PickLine[], uomId: string | null, principal: AuthPrincipal) {
+    for (const pick of picks) {
+      await tx.insert(productionOrderIngredients).values({
+        productionOrderIngredientId: uuidv7(),
+        productionOrderId,
+        materialId: pick.materialId,
+        requiredQty: pick.requiredQty,
+        issuedQty: false,
+        uomId,
+        status: 'PENDING',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      });
+    }
   }
 
   /* ── production order ingredients (CRUD reads) ───────────────────── */

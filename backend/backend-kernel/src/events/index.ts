@@ -15,6 +15,12 @@ export {
 } from './outbox.recorder.js';
 export {
   emitBridgeOutbound,
+  emitBridgeToRequirement,
   emitBridgeManualEvent,
   type BridgeEmitTx,
 } from './bridge-emit.js';
+export {
+  recordProduceAlert,
+  type ProduceAlertInput,
+  type ProduceAlertKind,
+} from './produce-alert.js';

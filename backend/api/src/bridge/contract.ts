@@ -6,6 +6,9 @@
  * defect here is exactly the kind of thing the two-process contract test in
  * `bridge.contract.spec.ts` exists to catch before either service is running.
  */
+import { bridge as bridgeContracts } from '@core/contracts';
+
+const { LEGACY_PRIORITIES, LOT_POLICIES, isRequirementPriority } = bridgeContracts;
 
 export const INBOUND_FROM_ALEMBIC = [
   'ProductionRequirementCreated',
@@ -43,6 +46,10 @@ export const OUTBOUND_TO_ALEMBIC = [
   // production_requirement: each is its own aggregate (the batch COA / the certificate emission).
   'qc.batch.released',
   'compliance.certificate.calculated',
+  // Lane produce (owner requirement 2026-09-29): a finished-good batch was put away on a rack —
+  // ALEMBIC allocates it to the orders waiting for it. A fact about the FG batch (aggregate
+  // `fg_batch`), not a requirement step. Payload: @core/contracts bridge.FgBatchReceivedPayload.
+  'fg.batch.received',
 ] as const;
 export type OutboundToAlembic = (typeof OUTBOUND_TO_ALEMBIC)[number];
 
@@ -121,7 +128,7 @@ export function validateEnvelope(raw: unknown, allowedTypes: readonly string[]):
  * required ones are not. */
 export type PayloadProblem = `${string}:${'missing' | 'invalid'}`;
 
-const PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const;
+const PRIORITIES = LEGACY_PRIORITIES;
 const isNonEmptyString = (v: unknown, max = 200): v is string =>
   typeof v === 'string' && v.trim().length > 0 && v.length <= max;
 const isPositiveQty = (v: unknown): boolean => {
@@ -134,8 +141,80 @@ const isIsoInstant = (v: unknown): boolean =>
   && /^\d{4}-\d{2}-\d{2}([T ][0-9:.]+(Z|[+-]\d{2}:?\d{2})?)?$/.test(v)
   && !Number.isNaN(Date.parse(v));
 
+/* ── Lane produce: the fields ALEMBIC (lane/fulfil) adds to a requirement ─────
+ *
+ *   priority   { rank: int, reason: 'high_value'|'fifo'|'promised_date', order_value_inr: number }
+ *              (the v1 one-word priority — low|normal|high|urgent — is still accepted)
+ *   needed_by  date
+ *   order_refs [string]         every commercial order the requirement serves
+ *   sku, pack_size, qty_kg      the factory SKU, its pack size, the quantity in kg
+ *   lot_policy 'fifo'
+ *
+ * The v1 fields stay authoritative when present; the new ones fill them in when a sender omits
+ * them (order_ref <- order_refs[0], mapped_sku <- sku, qty/uom <- qty_kg/'kg'), so a payload in
+ * either shape normalizes to the same requirement row. */
+const isOrderRefs = (v: unknown): boolean =>
+  Array.isArray(v) && v.length >= 1 && v.length <= 500 && v.every((r) => isNonEmptyString(r, 100));
+const isLegacyPriority = (v: unknown): boolean => typeof v === 'string' && (PRIORITIES as readonly string[]).includes(v);
+const isPriority = (v: unknown): boolean => isLegacyPriority(v) || isRequirementPriority(v);
+const isLotPolicy = (v: unknown): boolean => typeof v === 'string' && (LOT_POLICIES as readonly string[]).includes(v);
+
+/** The requirement row's fields, from either payload shape (see the block comment above). */
+export interface NormalizedRequirementFields {
+  orderRef?: string;
+  mappedSku?: string;
+  qty?: string;
+  uom?: string;
+  packSize?: string | null;
+  neededBy?: string;
+  /** The legacy varchar column: the v1 word, or the new reason ('high_value' | 'fifo' | 'promised_date'). */
+  priority?: string;
+  priorityRank?: number | null;
+  priorityReason?: string | null;
+  orderValueInr?: string | null;
+  orderRefs?: string[];
+  qtyKg?: string | null;
+  lotPolicy?: string | null;
+}
+
+/** Normalizes a Created/Changed payload; only fields PRESENT in the payload are returned. */
+export function normalizeRequirementPayload(p: Record<string, unknown>): NormalizedRequirementFields {
+  const out: NormalizedRequirementFields = {};
+  const has = (k: string) => p[k] !== undefined && p[k] !== null && p[k] !== '';
+  const refs = isOrderRefs(p.order_refs) ? (p.order_refs as string[]).map((r) => r.trim()) : undefined;
+  if (refs) out.orderRefs = refs;
+  if (has('order_ref')) out.orderRef = String(p.order_ref);
+  else if (refs) out.orderRef = refs[0];
+  if (has('mapped_sku')) out.mappedSku = String(p.mapped_sku);
+  else if (has('sku')) out.mappedSku = String(p.sku);
+  if (has('qty_kg')) out.qtyKg = String(p.qty_kg);
+  if (has('qty')) {
+    out.qty = String(p.qty);
+    if (has('uom')) out.uom = String(p.uom);
+  } else if (has('qty_kg')) {
+    out.qty = String(p.qty_kg);
+    out.uom = 'kg';
+  } else if (has('uom')) out.uom = String(p.uom);
+  if (p.pack_size !== undefined) out.packSize = p.pack_size === null || p.pack_size === '' ? null : String(p.pack_size);
+  if (has('needed_by')) out.neededBy = String(p.needed_by);
+  if (isRequirementPriority(p.priority)) {
+    out.priority = p.priority.reason;
+    out.priorityRank = p.priority.rank;
+    out.priorityReason = p.priority.reason;
+    out.orderValueInr = String(p.priority.order_value_inr);
+  } else if (isLegacyPriority(p.priority)) {
+    out.priority = String(p.priority);
+  }
+  if (has('lot_policy')) out.lotPolicy = String(p.lot_policy);
+  return out;
+}
+
 export function validateInboundPayload(type: string, payload: Record<string, unknown>): readonly PayloadProblem[] {
   const problems: PayloadProblem[] = [];
+  const present = (field: string) => {
+    const v = payload[field];
+    return !(v === undefined || v === null || v === '');
+  };
   const need = (field: string, ok: (v: unknown) => boolean) => {
     const v = payload[field];
     if (v === undefined || v === null || v === '') problems.push(`${field}:missing`);
@@ -145,26 +224,39 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
     const v = payload[field];
     if (v !== undefined && v !== null && !ok(v)) problems.push(`${field}:invalid`);
   };
+  /** `primary` is required unless `fallback` (the new-contract field that fills it) is present. */
+  const needEither = (primary: string, ok: (v: unknown) => boolean, fallback: string, okFallback: (v: unknown) => boolean) => {
+    if (present(primary)) { if (!ok(payload[primary])) problems.push(`${primary}:invalid`); }
+    else if (present(fallback)) { if (!okFallback(payload[fallback])) problems.push(`${fallback}:invalid`); }
+    else problems.push(`${primary}:missing`);
+  };
   const packSize = (v: unknown) => (typeof v === 'string' && v.length <= 50) || (typeof v === 'number' && Number.isFinite(v));
-  const priority = (v: unknown) => typeof v === 'string' && (PRIORITIES as readonly string[]).includes(v);
+  const newFields = () => {
+    optional('priority', isPriority);
+    optional('order_refs', isOrderRefs);
+    optional('sku', (v) => isNonEmptyString(v));
+    optional('qty_kg', isPositiveQty);
+    optional('lot_policy', isLotPolicy);
+    optional('pack_size', packSize);
+  };
 
   switch (type) {
     case 'ProductionRequirementCreated':
-      need('order_ref', (v) => isNonEmptyString(v, 100));
-      need('mapped_sku', (v) => isNonEmptyString(v));
-      need('qty', isPositiveQty);
-      need('uom', (v) => isNonEmptyString(v, 20));
+      needEither('order_ref', (v) => isNonEmptyString(v, 100), 'order_refs', isOrderRefs);
+      needEither('mapped_sku', (v) => isNonEmptyString(v), 'sku', (v) => isNonEmptyString(v));
+      if (present('qty') || !present('qty_kg')) {
+        need('qty', isPositiveQty);
+        need('uom', (v) => isNonEmptyString(v, 20));
+      }
       need('needed_by', isIsoInstant);
-      optional('pack_size', packSize);
-      optional('priority', priority);
+      newFields();
       break;
     case 'ProductionRequirementChanged':
       optional('mapped_sku', (v) => isNonEmptyString(v));
       optional('qty', isPositiveQty);
       optional('uom', (v) => isNonEmptyString(v, 20));
       optional('needed_by', isIsoInstant);
-      optional('pack_size', packSize);
-      optional('priority', priority);
+      newFields();
       break;
     case 'ProductionRequirementCancelled':
       optional('reason', (v) => typeof v === 'string' && v.length <= 1000);
@@ -180,7 +272,7 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       // validateEnvelope has already refused a type outside INBOUND_FROM_ALEMBIC.
       break;
   }
-  return problems;
+  return [...new Set(problems)];
 }
 
 /* The machine-readable refusal vocabulary both sides of the bridge share

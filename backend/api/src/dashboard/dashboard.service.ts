@@ -525,10 +525,44 @@ export class DashboardService {
       { kind: 'stock', severity: 'med', title: 'Low stock / reorder', count: num(lowStock[0]?.c), sub: 'open stock requirements', for: ['procurement', 'warehouse'] },
       { kind: 'expiry', severity: 'high', title: 'Expiry warnings', count: num(expiring[0]?.c), sub: 'RM batches expiring within 30 days', for: ['warehouse', 'receiving'] },
     ];
+    all.push(...(await this.produceAlerts()));
     const alerts = all
       .filter((a) => a.count > 0 && (isOwner || a.for.some((r) => roles.has(r))))
       .map(({ for: _f, ...a }) => a);
     return { alerts, total: alerts.reduce((s, a) => s + a.count, 0) };
+  }
+
+  /**
+   * Lane produce (owner requirement 2026-09-29): "alerts to PRODUCE" in every console's bell —
+   * high-value and overdue requirements still to make, products blocked for want of an approved
+   * formula, batches that failed QC (labelling blocked), and the put-aways / picks waiting at the
+   * shelves. Live counts; the toast/sound feed is GET /v1/produce/alerts.
+   */
+  private async produceAlerts(): Promise<Array<{ kind: string; severity: string; title: string; count: number; sub: string; for: string[] }>> {
+    const sql = this.sql;
+    const factory = ['production', 'compounding', 'qc', 'packaging', 'warehouse', 'filling'];
+    const [open] = await sql`
+      select count(*) filter (where (r.priority_reason = 'high_value' or r.order_value_inr >= 25000) and r.production_order_id is null)::int as high_value,
+             count(*) filter (where r.needed_by < now() and not exists (
+               select 1 from production.oil_batch_master b join packaging.package_order po on po.oil_batch_id = b.oil_batch_id
+                 join packaging.finished_good_batch_master f on f.package_order_id = po.package_order_id
+                 join location.fg_bin_stock st on st.finished_good_batch_id = f.finished_good_batch_id and st.qty > 0
+                where b.production_order_id = r.production_order_id))::int as overdue,
+             count(*) filter (where r.production_order_id is null and r.produce_block_reason is not null)::int as blocked
+        from bridge.production_requirement r
+       where r.lifecycle_status = 'ACCEPTED'`;
+    const [coa] = await sql`select count(*) filter (where status = 'REJECTED' or (status = 'TESTED' and overall_result = 'FAIL'))::int as failed from production.batch_coa`;
+    const [shelf] = await sql`
+      select count(*) filter (where kind = 'PUTAWAY')::int as putaway, count(*) filter (where kind = 'PICK')::int as pick
+        from location.shelf_task where status = 'OPEN'`;
+    return [
+      { kind: 'produce', severity: 'high', title: 'High-value orders to produce', count: num(open?.high_value), sub: 'ALEMBIC orders of ₹25,000+ not yet planned', for: factory },
+      { kind: 'produce', severity: 'high', title: 'Overdue to produce', count: num(open?.overdue), sub: 'past their need-by date, not yet on a shelf', for: factory },
+      { kind: 'formula', severity: 'high', title: 'Blocked: no approved formula', count: num(open?.blocked), sub: 'a formulator must seal and approve one', for: ['production', 'formulator', 'vault_approver'] },
+      { kind: 'coa', severity: 'high', title: 'Batches failed QC', count: num(coa?.failed), sub: 'labelling is blocked until a re-test passes', for: ['qc', 'production', 'packaging'] },
+      { kind: 'putaway', severity: 'med', title: 'Awaiting put-away', count: num(shelf?.putaway), sub: 'released finished goods to shelve', for: ['warehouse', 'packaging'] },
+      { kind: 'pick', severity: 'med', title: 'Awaiting pick', count: num(shelf?.pick), sub: 'picks for ALEMBIC orders at the shelves', for: ['warehouse', 'sales'] },
+    ];
   }
 
   /** The email-notification log (what the worker generated/dispatched). Owner-gated at the route. */

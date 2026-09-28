@@ -50,6 +50,10 @@ before(async () => {
   await ensureSchema();
   const sql = testClient();
   svc = new DashboardService(sql, vault);
+  // The packaging stage lists the first three FG batch numbers; earlier runs of this file on a
+  // reused test database leave their own `00000000-FREAD-*` rows behind, which would outsort this
+  // run's seeded batch at random. Clear them so the seeded batch is the only one of its kind.
+  await sql`delete from packaging.finished_good_batch_master where batch_number like '00000000-FREAD-%'`;
   // A run far in the future so it heads the runs table (order by actual_start_dt desc).
   const orderId = randomUUID();
   await sql`insert into production.production_order (production_order_id, formula_version_id, order_qty, status, actual_start_dt)

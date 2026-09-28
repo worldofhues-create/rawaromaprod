@@ -22,4 +22,5 @@ export {
 } from "./batch.js";
 export { packagingQc } from "./qc.js";
 export { fgLabelRecord } from "./label.js";
+export { productDgInfo } from "./dg.js";
 export { outbox, auditEvents } from "./crosscutting.js";

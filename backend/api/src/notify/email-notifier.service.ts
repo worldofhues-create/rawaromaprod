@@ -34,7 +34,17 @@ const RULES: Record<string, { subject: string; roles: string[]; cta: string; scr
   'inventory.grn.created':    { subject: 'Goods received (GRN raised)', roles: ['warehouse', 'qc', 'owner'], cta: 'Run incoming QC before releasing to stock.', screen: 'Goods receipt' },
 };
 const COND_TYPE = 'production.qc.recorded'; // only notify on FAIL/HOLD
-const TYPES = [...Object.keys(RULES), COND_TYPE];
+/** Lane produce: recordProduceAlert's email events. Subject = the alert's title; recipients = the
+ *  alert's own roles + owner; one email per alert (the alert itself is deduplicated). */
+const PRODUCE_TYPES: Record<string, { cta: string; screen: string }> = {
+  'production.produce.high_value_requirement': { cta: 'Plan it first: open Produce next and create the run.', screen: 'Produce next' },
+  'production.produce.overdue_requirement': { cta: 'Expedite: plan, compound, release and shelve it, or tell ALEMBIC the new date.', screen: 'Produce next' },
+  'production.produce.formula_needed': { cta: 'Seal and approve a formula for this product in the Vault (a formulator drafts, a vault approver approves).', screen: 'Vault · Formulas' },
+  'production.produce.qc_failed': { cta: 'Re-test or disposition the batch; it cannot be labelled until QC releases it.', screen: 'Batch COA' },
+  'production.produce.label_blocked': { cta: 'Do not label this batch: it failed QC.', screen: 'Batch COA' },
+  'production.produce.fg_received_not_sent': { cta: 'Fix the SKU pack size / unit so the quantity reads in kg, then put the batch away again.', screen: 'Put-away & pick' },
+};
+const TYPES = [...Object.keys(RULES), COND_TYPE, ...Object.keys(PRODUCE_TYPES)];
 const SCHEMAS = ['procurement', 'quality', 'production', 'packaging', 'sales', 'formula', 'inventory'];
 
 /**
@@ -221,6 +231,15 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
       const res = String(payload.result ?? '');
       if (!/FAIL|HOLD/i.test(res)) return;
       rule = { subject: `Production QC ${res.toUpperCase()} — action needed`, roles: ['qc', 'production', 'owner'], cta: 'Review the oil batch and decide rework / reject.', screen: 'Production QC' };
+    }
+    const produce = PRODUCE_TYPES[r.type];
+    if (produce) {
+      const roles = [...new Set([...(Array.isArray(payload.roles) ? (payload.roles as string[]) : []), 'owner'])];
+      rule = { subject: String(payload.title ?? 'Production alert'), roles, cta: produce.cta, screen: produce.screen };
+      const intended = await this.emailsForRoles(rule.roles);
+      const body = this.body(rule.subject, String(payload.detail ?? ''), {}, rule.cta, rule.screen);
+      await this.deliver(r.id, r.type, rule.subject, body, intended);
+      return;
     }
     if (!rule) return;
     const intended = await this.emailsForRoles(rule.roles);

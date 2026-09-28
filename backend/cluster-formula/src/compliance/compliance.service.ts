@@ -103,6 +103,8 @@ export interface InternalCertificate {
   certificateId: string;
   formulaId: string;
   formulaVersionRef: string;
+  /** Lane produce: the version NUMBER ALEMBIC prints ("formula v3"); null if unknown. */
+  formulaVersionNumber: number | null;
   kind: CertificateKindName;
   amendment: string | null;
   values: unknown;
@@ -503,10 +505,12 @@ export class ComplianceService {
 
   /** The certificates calculated after `afterSeq` — the main box's pull (internal channel). */
   async certificatesAfter(afterSeq: number, limit: number): Promise<InternalCertificate[]> {
-    const rows = await this.db.select().from(complianceCertificate)
+    const rows = await this.db.select({ c: complianceCertificate, versionNumber: formulaVersion.versionNumber }).from(complianceCertificate)
+      .leftJoin(formulaVersion, eq(formulaVersion.formulaVersionId, complianceCertificate.formulaVersionId))
       .where(gt(complianceCertificate.seq, afterSeq)).orderBy(asc(complianceCertificate.seq)).limit(Math.min(Math.max(limit, 1), 200));
-    return rows.map((r) => ({
+    return rows.map(({ c: r, versionNumber }) => ({
       seq: Number(r.seq), certificateId: r.certificateId, formulaId: r.formulaId, formulaVersionRef: r.formulaVersionRef,
+      formulaVersionNumber: versionNumber ?? null,
       kind: r.kind as CertificateKindName, amendment: r.amendment, values: r.certValues, calculatedAt: r.calculatedAt.toISOString(),
     }));
   }

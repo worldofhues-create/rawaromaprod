@@ -123,23 +123,33 @@ test('a passed batch is released once: one qc.batch.released with the contract p
   const events = await outboxFor(row.batchCoaId);
   assert.equal(events.length, 1);
   assert.equal(events[0]!.type, 'qc.batch.released');
-  const payload = events[0]!.payload as contracts.QcBatchReleasedPayload;
-  assert.deepEqual(contracts.validateQcBatchReleased(payload), []);
+  // Lane produce: what crosses is the DOCS-001 wire shape ALEMBIC parses
+  // (docs/bridge/COMPLIANCE_FACTS.md) — the owner's Althair sample, field for field.
+  const payload = events[0]!.payload as contracts.QcBatchReleasedWire;
+  assert.deepEqual(contracts.checkQcBatchReleasedWire(payload), []);
   assert.doesNotThrow(() => contracts.assertNoFormulaContent(payload));
-  assert.equal(payload.batchNo, f.batch.batchNumber);
-  assert.equal(payload.productRef, f.productCode);
-  assert.deepEqual(payload.skuCodes, [`${f.productCode}-25KG`, `${f.productCode}-5KG`]);
-  assert.deepEqual(payload.results, [
-    { test: 'specific_gravity_20_4', value: 0.995, unit: null, specMin: 0.95, specMax: 1.5, pass: true },
-    { test: 'flash_point_pmcc', value: 116, unit: '°C', specMin: 110, specMax: 120, pass: true },
-  ]);
-  assert.deepEqual(payload.photos, [
-    { url: 'https://files.example.invalid/a140226.jpg', assetRef: `document:${docId}`, caption: 'Retained sample' },
-    { url: 'https://files.example.invalid/label.jpg', caption: null },
-  ]);
-  assert.equal(payload.productionDate, '2026-02-14');
-  assert.equal(payload.bestBefore, '2028-02-14');
-  assert.equal(payload.releasedBy, qc.userId);
+  assert.deepEqual({ ...payload, released_at: 'X' }, {
+    batch_no: f.batch.batchNumber,
+    product_ref: { factory_sku: `${f.productCode}-25KG` },
+    status: 'passed',
+    results: [
+      { key: 'odour', label: 'Odour description', value: 'Warm Spicy Vanilla Fragrance', pass: true },
+      { key: 'colour_appearance', label: 'Colour and appearance', value: 'Deep Brown', pass: true },
+      { key: 'specific_gravity', label: 'Specific Gravity at 20/4°C', value: '0.995', unit: null, method: null,
+        spec: { min: '0.950', max: '1.500' }, pass: true },
+      { key: 'flash_point', label: 'Zero Reference Flash Point', value: '116.0', unit: '°C', method: 'Pensky-Martens, closed cup',
+        spec: { min: '110.0', max: '120.0' }, pass: true },
+    ],
+    photos: [
+      { url: 'https://files.example.invalid/a140226.jpg', asset_ref: `document:${docId}`, caption: 'Retained sample', result_key: null },
+      { url: 'https://files.example.invalid/label.jpg', asset_ref: null, caption: null, result_key: null },
+    ],
+    production_date: '2026-02-14',
+    best_before: '2028-02-14',
+    released_at: 'X',
+    qc_record_ref: row.batchCoaId,
+  });
+  assert.ok(!Number.isNaN(Date.parse(payload.released_at)));
   assert.ok(!JSON.stringify(payload).includes(f.formulaId), 'the formula id must never cross the bridge');
 
   const second = await coa.releaseCoa(row.batchCoaId, qc);
@@ -206,7 +216,7 @@ test('the relay delivers qc.batch.released signed over the exact bytes, as aggre
   assert.deepEqual(envelope.aggregate, { type: 'qc_batch', id: row.batchCoaId });
   assert.equal(envelope.correlation_id, row.batchCoaId);
   assert.equal(envelope.org_id, TENANT); // no requirement to take it from → the configured tenant
-  assert.deepEqual(contracts.validateQcBatchReleased(envelope.payload), []);
+  assert.deepEqual(contracts.checkQcBatchReleasedWire(envelope.payload), []);
   const published = await testClient()`select published_at from bridge.outbox where id = ${event!.id}`;
   assert.ok(published[0]!.published_at);
 });

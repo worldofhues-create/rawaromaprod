@@ -8,10 +8,18 @@
 import { Controller, Get } from '@nestjs/common';
 import { Permissions } from '@core/backend-kernel';
 import { PlatformOpsService } from './platform-ops.service.js';
+import { BridgeHealthService } from './bridge-health.service.js';
 
 @Controller('v1/platform')
 export class PlatformOpsController {
-  constructor(private readonly ops: PlatformOpsService) {}
+  constructor(private readonly ops: PlatformOpsService, private readonly bridge: BridgeHealthService) {}
+
+  /** Lane produce: the ALEMBIC bridge's health and counters (counts/timestamps only). */
+  @Permissions('platformops:console:read')
+  @Get('bridge')
+  bridgeHealth() {
+    return this.bridge.health();
+  }
 
   @Permissions('platformops:console:read')
   @Get('tenants')

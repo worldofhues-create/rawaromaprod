@@ -17,3 +17,18 @@ export {
   type ProductionLookup,
   PRODUCTION_LOOKUP,
 } from './public-api.js';
+export {
+  ProduceQueueService,
+  PRODUCE_ALERT_ROLES,
+  FORMULA_ALERT_ROLES,
+  BLOCK_MESSAGES,
+  countersOf,
+  queueStage,
+  requirementKg,
+  type QueueRow,
+  type QueueCounters,
+  type QueueStage,
+} from './produce/produce-queue.service.js';
+export { ProducePlanService, PlanBlockedException, type PlanResult } from './produce/produce-plan.service.js';
+export { PlanningService } from './planning/planning.service.js';
+export { CoaService, QC_ALERT_ROLES } from './coa/coa.service.js';

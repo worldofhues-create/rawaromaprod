@@ -62,6 +62,11 @@ export const batchCoa = production.table(
     testedDt: timestamp("tested_dt", { withTimezone: true }).notNull().defaultNow(),
     releasedBy: uuid("released_by"), // soft ref → iam.user_master
     releasedDt: timestamp("released_dt", { withTimezone: true }),
+    // Lane produce: QC's FAIL verdict (status REJECTED). A rejected batch is never labelled; a
+    // re-test that passes can still be released later (ALEMBIC takes the latest verdict).
+    rejectedBy: uuid("rejected_by"), // soft ref → iam.user_master
+    rejectedDt: timestamp("rejected_dt", { withTimezone: true }),
+    rejectReason: text("reject_reason"),
     ...metaColumns(),
   },
   (t) => [

@@ -10,6 +10,8 @@ import { CoaService } from './coa.service.js';
 import {
   listCoaQuery,
   recordBatchCoa,
+  rejectBatchCoa,
+  type RejectBatchCoa,
   upsertProductQcSpec,
   type ListCoaQuery,
   type RecordBatchCoa,
@@ -75,5 +77,16 @@ export class CoaController {
   @Post('v1/batch-coas/:id/release')
   release(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.coa.releaseCoa(id, principal);
+  }
+
+  /** Lane produce: QC's FAIL verdict. Same permission as release — both are the QC decision. */
+  @Permissions('production:batch_coa:release')
+  @Post('v1/batch-coas/:id/reject')
+  reject(
+    @Param('id') id: string,
+    @Body(new ZodValidationPipe(rejectBatchCoa)) body: RejectBatchCoa,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.coa.rejectCoa(id, body.reason, principal);
   }
 }

@@ -58,6 +58,7 @@ import { FactsModule } from './facts/facts.module.js';
 import { PlatformOpsModule } from './platform-ops/platform-ops.module.js';
 import { TutorialModule } from './tutorial/tutorial.module.js';
 import { AriaBridgeModule } from './aria/aria-bridge.module.js';
+import { ShelfModule } from './shelf/shelf.module.js';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { AriaBridgeModule } from './aria/aria-bridge.module.js';
     SalesModule,
     DashboardModule,
     PackagingQcModule,
+    ShelfModule,
     InventoryViewModule,
     FgStockModule,
     EditModule,

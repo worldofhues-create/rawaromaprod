@@ -145,7 +145,8 @@ function readAllowedHostsEnv(): string | undefined {
     .process?.env?.BRIDGE_WEBHOOK_ALLOWED_HOSTS;
 }
 
-const safeWebhookUrl = z
+/** Exported (lane produce) so the pick-to-light controller URL gets the identical SSRF guard. */
+export const safeWebhookUrl = z
   .string()
   .min(1)
   .superRefine((value, ctx) => {
@@ -191,3 +192,20 @@ export const configureBridgeRequest = z.object({
 });
 
 export type ConfigureBridgeRequest = z.infer<typeof configureBridgeRequest>;
+
+/**
+ * `PUT /v1/shelf/pick-light/config` (lane produce, owner decision 2026-09-29) — the pick-to-light
+ * controller, configured in the app like every other connector: no `.env`, no redeploy.
+ *   mode 'off'        nothing is sent (commands are still recorded, so the shelf display works);
+ *   mode 'simulator'  commands are signed and applied to the built-in simulator the Shelf display
+ *                     shows — the same bytes a real controller would receive;
+ *   mode 'http'       commands are POSTed, HMAC-signed, to `controllerUrl` (same SSRF guard as the
+ *                     bridge webhook: https, no private/loopback/metadata host unless allow-listed).
+ */
+export const configurePickLightRequest = z.object({
+  mode: z.enum(["off", "simulator", "http"]),
+  controllerUrl: safeWebhookUrl.optional().nullable(),
+  hmacSecret: z.string().min(16).max(512).optional(),
+});
+
+export type ConfigurePickLightRequest = z.infer<typeof configurePickLightRequest>;

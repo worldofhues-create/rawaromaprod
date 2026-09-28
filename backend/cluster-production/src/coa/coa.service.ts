@@ -15,6 +15,15 @@
  *                     with 409 and emits nothing. A second release of a released batch is a no-op
  *                     (no second event).
  *
+ * Lane produce (2026-09-29): what crosses the bridge is the DOCS-001 wire shape ALEMBIC parses
+ * (`bridge.toQcBatchReleasedWire`, docs/bridge/COMPLIANCE_FACTS.md) — snake_case, numbers as the
+ * strings they print, `product_ref: { factory_sku }` — and BOTH verdicts are sent: `reject` is QC's
+ * FAIL verdict (status REJECTED, a reason kept here), emitted as `status: 'failed'` so ALEMBIC
+ * refuses a COA for the batch. A rejected batch alerts QC/production/packaging and is never
+ * labelled (FgLabelService requires a RELEASED COA); a later re-test can still pass and be
+ * released, which ALEMBIC takes as the latest verdict. Each verdict also tells every ALEMBIC
+ * requirement the batch's run serves (`QcStatusChanged`).
+ *
  * Product resolution: the batch's production order → plan item → formula_id → the product(s)
  * whose product_master.formula_id is that formula. When the chain yields exactly one product it is
  * used; a caller-named product must be one of the chain's products when the chain yields any.
@@ -32,12 +41,15 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { emitBridgeManualEvent, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeManualEvent, emitBridgeOutbound, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import type { ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
 
 const { productQcSpec, batchCoa, batchCoaPhoto, oilBatchMaster } = productionSchema;
+
+/** Who hears that a batch failed QC: QC decides, production reworks, packaging must not label. */
+export const QC_ALERT_ROLES = ['qc', 'production', 'packaging'];
 
 type Tx = Parameters<Parameters<ProductionDb['transaction']>[0]>[0];
 
@@ -200,8 +212,10 @@ export class CoaService {
         productionDate, bestBefore, overallResult: overall,
         testedBy: principal.userId, testedDt: new Date(), status: 'TESTED', updatedBy: principal.userId,
       };
+      // A re-test (TESTED, or REJECTED by an earlier verdict) replaces the results and clears the
+      // earlier verdict: the new result stands on its own until QC decides again.
       const coa = existing
-        ? (await tx.update(batchCoa).set({ ...values, updatedDt: new Date() }).where(eq(batchCoa.batchCoaId, existing.batchCoaId)).returning())[0]!
+        ? (await tx.update(batchCoa).set({ ...values, rejectedBy: null, rejectedDt: null, rejectReason: null, updatedDt: new Date() }).where(eq(batchCoa.batchCoaId, existing.batchCoaId)).returning())[0]!
         : (await tx.insert(batchCoa).values({ batchCoaId: uuidv7(), oilBatchId: body.oilBatchId, createdBy: principal.userId, ...values }).returning())[0]!;
 
       await tx.delete(batchCoaPhoto).where(eq(batchCoaPhoto.batchCoaId, coa.batchCoaId));
@@ -210,6 +224,15 @@ export class CoaService {
           batchCoaPhotoId: uuidv7(), batchCoaId: coa.batchCoaId, documentId: p.documentId ?? null,
           url: p.url ?? null, caption: p.caption ?? null, status: 'ACTIVE',
           createdBy: principal.userId, updatedBy: principal.userId,
+        });
+      }
+      if (coa.overallResult !== 'PASS') {
+        await recordProduceAlert(tx, {
+          kind: 'qc_failed', severity: 'high',
+          title: `QC failed: batch ${batch.batchNumber ?? body.oilBatchId}`,
+          detail: `Failed ${failedTests(coa).join(', ')} — labelling is blocked until a re-test passes and QC releases it.`,
+          roles: QC_ALERT_ROLES, refType: 'batch_coa', refId: coa.batchCoaId,
+          dedupeKey: `qc_failed:${coa.batchCoaId}:${coa.testedDt.getTime()}`,
         });
       }
       return { coa, failedTests: failedTests(coa) };
@@ -253,7 +276,15 @@ export class CoaService {
       });
       const problems = bridgeContracts.validateQcBatchReleased(payload);
       if (problems.length > 0) throw new ConflictException(`The release could not be sent: incomplete ${problems.join(', ')}.`);
-      bridgeContracts.assertNoFormulaContent(payload);
+      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes);
+      if (!factorySku) throw new ConflictException('The product has no SKU code; ALEMBIC cannot map a QC release without one.');
+      const wire = bridgeContracts.toQcBatchReleasedWire(payload, {
+        status: 'passed', factorySku, qcRecordRef: coa.batchCoaId,
+        colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+      });
+      const wireProblems = bridgeContracts.checkQcBatchReleasedWire(wire);
+      if (wireProblems.length > 0) throw new ConflictException(`The release could not be sent: ${wireProblems.join(', ')}.`);
+      bridgeContracts.assertNoFormulaContent(wire);
 
       const released = (
         await tx.update(batchCoa)
@@ -262,12 +293,92 @@ export class CoaService {
           .returning()
       )[0];
       if (!released) throw new ConflictException('This batch was changed by another request; reload and try again.');
-      await emitBridgeManualEvent(tx, bridgeContracts.QC_BATCH_RELEASED, batchCoaId, payload as unknown as Record<string, unknown>);
+      await emitBridgeManualEvent(tx, bridgeContracts.QC_BATCH_RELEASED, batchCoaId, wire as unknown as Record<string, unknown>);
+      await emitBridgeOutbound(tx, 'QcStatusChanged', batch.productionOrderId, { qc_status: 'passed', batch_no: batch.batchNumber ?? null });
       return { coa: released, emitted: true };
     });
   }
 
+  /**
+   * POST /v1/batch-coas/:id/reject — QC's FAIL verdict (lane produce). Allowed on a TESTED record
+   * (whatever its measured result: QC may reject a batch whose numbers are in spec). Emits
+   * `qc.batch.released` with `status: 'failed'` (DOCS-001: ALEMBIC takes both verdicts),
+   * `QcStatusChanged: failed` to the requirements the run serves, and a QC-failed alert; the batch
+   * can no longer be labelled. Already rejected → returned as-is, nothing emitted again.
+   */
+  async rejectCoa(batchCoaId: string, reason: string, principal: AuthPrincipal) {
+    return this.db.transaction(async (tx) => {
+      const coa = (await tx.select().from(batchCoa).where(eq(batchCoa.batchCoaId, batchCoaId)).for('update').limit(1))[0];
+      if (!coa) throw new NotFoundException(`batch COA not found: ${batchCoaId}`);
+      if (coa.status === 'REJECTED') return { coa, emitted: false };
+      if (coa.status === 'RELEASED') throw new ConflictException('This batch has already been released; a released batch cannot be rejected here.');
+      const batch = (await tx.select().from(oilBatchMaster).where(eq(oilBatchMaster.oilBatchId, coa.oilBatchId)).limit(1))[0];
+      if (!batch) throw new NotFoundException(`oil batch not found: ${coa.oilBatchId}`);
+      const product = await this.product(tx, coa.productId);
+      const skuCodes = ((await tx.execute(sql`
+        select sku_code from packaging.product_sku where product_id = ${coa.productId} and sku_code is not null order by sku_code
+      `)) as unknown as { sku_code: string }[]).map((r) => r.sku_code);
+      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes);
+      const photos = await tx.select().from(batchCoaPhoto).where(eq(batchCoaPhoto.batchCoaId, batchCoaId));
+      const docPaths = new Map<string, string | null>();
+      for (const p of photos) if (p.documentId) docPaths.set(p.documentId, await this.documentPath(tx, p.documentId));
+      const rejectedAt = new Date();
+
+      const rejected = (
+        await tx.update(batchCoa)
+          .set({ status: 'REJECTED', rejectedBy: principal.userId, rejectedDt: rejectedAt, rejectReason: reason, updatedBy: principal.userId, updatedDt: rejectedAt })
+          .where(and(eq(batchCoa.batchCoaId, batchCoaId), eq(batchCoa.status, 'TESTED')))
+          .returning()
+      )[0];
+      if (!rejected) throw new ConflictException('This batch was changed by another request; reload and try again.');
+
+      let emitted = false;
+      if (factorySku && product?.product_code) {
+        const internal = buildQcBatchReleasedPayload({
+          batchNo: batch.batchNumber ?? '', productRef: product.product_code, skuCodes, coa,
+          photos: photos.map((p) => ({ documentId: p.documentId, url: p.url, caption: p.caption, documentPath: p.documentId ? docPaths.get(p.documentId) ?? null : null })),
+          releasedAt: rejectedAt, releasedBy: principal.userId, releasedByName: null,
+        });
+        const wire = bridgeContracts.toQcBatchReleasedWire(internal, {
+          status: 'failed', factorySku, qcRecordRef: coa.batchCoaId,
+          colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+        });
+        if (bridgeContracts.checkQcBatchReleasedWire(wire).length === 0) {
+          bridgeContracts.assertNoFormulaContent(wire);
+          await emitBridgeManualEvent(tx, bridgeContracts.QC_BATCH_RELEASED, batchCoaId, wire as unknown as Record<string, unknown>);
+          emitted = true;
+        }
+      }
+      await emitBridgeOutbound(tx, 'QcStatusChanged', batch.productionOrderId, { qc_status: 'failed', batch_no: batch.batchNumber ?? null });
+      await recordProduceAlert(tx, {
+        kind: 'qc_failed', severity: 'high',
+        title: `QC rejected batch ${batch.batchNumber ?? coa.oilBatchId}`,
+        detail: `${reason} — labelling is blocked; production decides rework or disposal.`,
+        roles: QC_ALERT_ROLES, refType: 'batch_coa', refId: coa.batchCoaId,
+        dedupeKey: `qc_rejected:${coa.batchCoaId}:${rejectedAt.getTime()}`,
+      });
+      return { coa: rejected, emitted };
+    });
+  }
+
   /* ── helpers ─────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * The factory SKU a QC fact names (DOCS-001 `product_ref.factory_sku`): the SKU of an ALEMBIC
+   * requirement the batch's run serves, when that SKU belongs to this product; otherwise the
+   * product's first SKU code. The batch number is what ALEMBIC matches a COA on; the SKU only
+   * has to resolve to the product.
+   */
+  private async factorySku(tx: Tx, oilBatchId: string, productSkuCodes: string[]): Promise<string | null> {
+    const linked = ((await tx.execute(sql`
+      select r.mapped_sku
+        from production.oil_batch_master b
+        join bridge.production_requirement r on r.production_order_id = b.production_order_id
+       where b.oil_batch_id = ${oilBatchId}
+       order by r.priority_rank nulls last, r.needed_by, r.created_dt
+    `)) as unknown as { mapped_sku: string }[]).map((r) => r.mapped_sku);
+    return linked.find((s) => productSkuCodes.includes(s)) ?? productSkuCodes[0] ?? null;
+  }
 
   private async resolveProduct(tx: Tx, oilBatchId: string, requested: string | undefined): Promise<string> {
     const candidates = await this.candidateProducts(tx, oilBatchId);

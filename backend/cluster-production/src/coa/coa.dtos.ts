@@ -46,6 +46,12 @@ export type RecordBatchCoa = z.infer<typeof recordBatchCoa>;
 
 export const listCoaQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  status: z.enum(['TESTED', 'RELEASED']).optional(),
+  status: z.enum(['TESTED', 'RELEASED', 'REJECTED']).optional(),
 });
 export type ListCoaQuery = z.infer<typeof listCoaQuery>;
+
+/** Lane produce: QC's FAIL verdict — the reason is kept on the record and sent nowhere else. */
+export const rejectBatchCoa = z.object({
+  reason: z.string().trim().min(3).max(1000),
+});
+export type RejectBatchCoa = z.infer<typeof rejectBatchCoa>;

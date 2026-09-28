@@ -32,6 +32,9 @@ import { WeighingController } from './weighing/weighing.controller.js';
 import { WeighingService } from './weighing/weighing.service.js';
 import { CoaController } from './coa/coa.controller.js';
 import { CoaService } from './coa/coa.service.js';
+import { ProduceController } from './produce/produce.controller.js';
+import { ProduceQueueService } from './produce/produce-queue.service.js';
+import { ProducePlanService } from './produce/produce-plan.service.js';
 import { ProductionLookupService } from './production-lookup.service.js';
 import { PRODUCTION_LOOKUP } from './public-api.js';
 import { ProductionVaultPort } from './vault/production-vault-port.js';
@@ -47,6 +50,7 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
     BatchController,
     WeighingController,
     CoaController,
+    ProduceController,
   ],
   providers: [
     {
@@ -61,9 +65,11 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
     BatchService,
     WeighingService,
     CoaService,
+    ProduceQueueService,
+    ProducePlanService,
     ProductionLookupService,
     { provide: PRODUCTION_LOOKUP, useExisting: ProductionLookupService },
   ],
-  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP],
+  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP, ProduceQueueService],
 })
 export class ProductionModule {}

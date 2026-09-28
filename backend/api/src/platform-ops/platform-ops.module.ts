@@ -9,10 +9,12 @@ import { ClusterOrgModule } from '@ra/cluster-org';
 import { BridgeModule } from '../bridge/bridge.module.js';
 import { PlatformOpsController } from './platform-ops.controller.js';
 import { PlatformOpsService } from './platform-ops.service.js';
+import { BridgeHealthService } from './bridge-health.service.js';
+import { ShelfModule } from '../shelf/shelf.module.js';
 
 @Module({
-  imports: [ClusterOrgModule, BridgeModule],
+  imports: [ClusterOrgModule, BridgeModule, ShelfModule],
   controllers: [PlatformOpsController],
-  providers: [PlatformOpsService],
+  providers: [PlatformOpsService, BridgeHealthService],
 })
 export class PlatformOpsModule {}
