@@ -195,7 +195,11 @@ test('demo-seed: nothing written outside the demo org', async () => {
   const demoOrg = orgs[0]!;
   assert.equal(demoOrg.organizationCode, 'ALEMBIC-OS-DEMO-FACTORY');
 
-  const users = await orgDb().select().from(userMaster);
+  /* Only the users THIS seed wrote. The runner shares one database across every test file, and
+     other files create their own throwaway users (audit.test.ts's `lh-read-*`, with no org), so a
+     scan of the whole table measured test ordering rather than the seed. */
+  const users = (await orgDb().select().from(userMaster)).filter(
+    (u) => u.email?.endsWith('@demo.rawprod.local') || u.email === 'demo@demo.alembic.invalid');
   assert.ok(users.length > 0, 'expected demo users to exist');
   for (const u of users) {
     assert.equal(
