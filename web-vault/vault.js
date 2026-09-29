@@ -339,6 +339,8 @@
     plus: 'M12 5v14M5 12h14',
     help: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM9.5 9a2.5 2.5 0 0 1 5 0c0 1.5-2.5 2-2.5 3.5M12 17h.01',
   };
+  // The dock's glyph set (dock.js) gives every section its own artwork.
+  if (window.RaDock) Object.keys(RaDock.GLYPHS).forEach(function (k) { if (!ICONS[k]) ICONS[k] = RaDock.GLYPHS[k]; });
 
   function toast(msg, bad) {
     var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]);
@@ -482,18 +484,24 @@
 
   var NAV = [
     { id: 'formulas', label: 'Formulas', icon: 'lock', need: null },
-    { id: 'audit-access', label: 'Access audit', icon: 'clipboard', need: 'formula:actual:read' },
-    { id: 'audit-mfg', label: 'Production audit', icon: 'activity', need: 'formula:actual:read' },
+    { id: 'audit-access', label: 'Access audit', icon: 'eye', need: 'formula:actual:read' },
+    { id: 'audit-mfg', label: 'Production audit', icon: 'factory', need: 'formula:actual:read' },
     // Owner ruling 2026-09-28: raw-material compliance data and the IFRA/allergen certificates the
     // Vault calculates from it (formulator / vault_approver only — `vault:*` permissions).
     { id: 'compliance', label: 'Compliance data', icon: 'shield', need: 'vault:rm_compliance:read' },
-    { id: 'certificates', label: 'Certificates', icon: 'layers', need: 'vault:rm_compliance:read' },
+    { id: 'certificates', label: 'Certificates', icon: 'award', need: 'vault:rm_compliance:read' },
     { id: 'missing', label: 'Missing data', icon: 'alert', need: 'vault:compliance_calc:read' },
     // Lane produce (owner requirement 2026-09-29): products the factory cannot make because no
     // approved formula exists for them — the formulators' and approvers' alert.
-    { id: 'needed', label: 'Formula needed', icon: 'alert', need: 'formula:formula_version:read' },
+    { id: 'needed', label: 'Formula needed', icon: 'filePlus', need: 'formula:formula_version:read' },
   ];
   var formulaNeeded = { count: null };
+  // Quick-access dock (dock.js): at most eight primary destinations, then All sections and Ask
+  // Aria. The Vault holds seven, so the dock is its whole visible list, capped all the same.
+  function dockNav() {
+    var v = visibleNav(), keys = RaDock.pick(v.map(function (n) { return n.id; }), v.map(function (n) { return n.id; }), null);
+    return keys.map(function (k) { return v.filter(function (n) { return n.id === k; })[0]; });
+  }
 
   /* ---- reference shell kit — vanilla port of rac-console.jsx (BrandMark, rail toggle, QuickDock,
    * ExpandSheet markup, usePageEnter), the same markup web/shell.js renders; this console shares
@@ -520,7 +528,7 @@
     var r = document.getElementById('pv-rail');
     if (r) { if (railOpen) { r.removeAttribute('inert'); r.removeAttribute('aria-hidden'); } else { r.setAttribute('inert', ''); r.setAttribute('aria-hidden', 'true'); } }
     var t = document.getElementById('pv-dock-toggle');
-    if (t) { t.setAttribute('aria-pressed', String(railOpen)); t.setAttribute('aria-label', railOpen ? 'Hide navigation' : 'Show navigation'); }
+    if (t) { t.setAttribute('aria-pressed', String(railOpen)); t.setAttribute('aria-label', railOpen ? 'Hide sections' : 'All sections'); }
   }
   function setRail(v) { railOpen = v; applyRail(); }
   function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === '#/' + id) { render(); return; } location.hash = '#/' + id; }
@@ -591,7 +599,7 @@
       ariaMount(v[1]); ariaApi.setContext(ariaCtx); ariaApi.open();
     }).catch(function () { toast('Aria didn\'t load. Try again.', true); });
   }
-  // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
+  // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–8 dock destinations, ⌘/ the
   // go-to palette; Escape closes.
   document.addEventListener('keydown', function (e) {
     if (!session.token) return;
@@ -601,14 +609,14 @@
     if (e.key === 'k' || e.key === 'K') { e.preventDefault(); toggleAria(); return; }
     if (e.key === '/') { e.preventDefault(); openPalette(); return; }
     if (e.key === '\\') { e.preventDefault(); setRail(!railOpen); return; }
-    var i = parseInt(e.key, 10), v = visibleNav();
+    var i = parseInt(e.key, 10), v = dockNav();
     if (i >= 1 && i <= 9 && v[i - 1]) { e.preventDefault(); go(v[i - 1].id); }
   });
   function closePalette() { var w = document.getElementById('pv-cmdk'); if (w) w.remove(); }
   // Go-to palette (⌘/): every destination this role holds, filterable, Enter to go.
   function openPalette() {
     if (document.getElementById('pv-cmdk')) { closePalette(); return; }
-    var v = visibleNav(), idx = 0, rows = [];
+    var v = visibleNav(), dk = dockNav(), idx = 0, rows = [];
     var q = h('input', { type: 'text', placeholder: 'Go to…', 'aria-label': 'Go to', autocomplete: 'off' });
     var list = h('ul', { role: 'listbox' });
     var wrap = h('div', { id: 'pv-cmdk' }, [h('div', { class: 'xp-scrim open', onclick: closePalette }),
@@ -620,7 +628,7 @@
       list.innerHTML = '';
       rows.forEach(function (n, i) {
         list.appendChild(h('li', {}, [h('button', { type: 'button', class: i === idx ? 'on' : '', onclick: function () { closePalette(); go(n.id); } },
-          [icon(ICONS[n.icon], 15), n.label, h('span', { class: 'sc' }, ['⌘' + (v.indexOf(n) + 1)])])]));
+          [icon(ICONS[n.icon], 15), n.label, dk.indexOf(n) >= 0 ? h('span', { class: 'sc' }, ['⌘' + (dk.indexOf(n) + 1)]) : null])]));
       });
     }
     q.addEventListener('input', function () { idx = 0; paint(); });
@@ -644,12 +652,11 @@
   }, { passive: true });
 
   // The reference Admin/Agent shell, 1:1: rail · top bar (platform brand, page title) · region ·
-  // floating glass dock (brand tile, rail toggle, destinations with ⌘1–9, command palette). Below
-  // 1024 the dock is the reference tab bar, keeping the first destinations (HOT) plus Sections.
+  // floating glass dock (brand tile, All sections, ≤8 destinations with ⌘1–8, Ask Aria). Below
+  // 1024 the dock is the tab bar: the first RaDock.PHONE destinations, Ask Aria and More.
   function renderShell(activeView, contentEl) {
     root.innerHTML = '';
-    var visible = visibleNav();
-    var HOT = {}; visible.slice(0, 3).forEach(function (n) { HOT[n.id] = 1; });
+    var visible = visibleNav(), docked = dockNav();
     var navButtons = visible.map(function (n) {
       var badge = n.id === 'needed' && formulaNeeded.count ? h('span', { class: 'chip r', style: 'margin-left:auto', 'aria-label': formulaNeeded.count + ' products need a formula' }, [String(formulaNeeded.count)]) : null;
       return h('button', { type: 'button', class: 'ri' + (n.id === activeView ? ' on' : ''), 'aria-current': n.id === activeView ? 'page' : null,
@@ -684,13 +691,13 @@
     var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()])]), bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
       [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Formulas', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
-       h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'Show navigation', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
-         [raw(CI.menu), h('span', { class: 'kb' }, ['Sections', h('span', { class: 'kc' }, [' · ⌘\\'])])]),
+       h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'All sections', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
+         [raw(CI.menu), h('span', { class: 'kb' }, [h('span', { class: 'kb-d' }, ['All sections']), h('span', { class: 'kb-m' }, ['More']), h('span', { class: 'kc' }, [' · ⌘\\'])])]),
        h('span', { class: 'sep' })]
-      .concat(visible.map(function (n, i) {
+      .concat(docked.map(function (n, i) {
         var on = n.id === activeView;
-        return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (HOT[n.id] ? ' hot' : ''), 'aria-label': n.label, 'aria-pressed': String(on), onclick: function () { go(n.id); } },
-          [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, i < 9 ? h('span', { class: 'kc' }, [' · ⌘' + (i + 1)]) : null])]);
+        return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (i < RaDock.PHONE ? ' hot' : ''), 'data-dock': n.id, 'aria-label': n.label, 'aria-pressed': String(on), 'aria-current': on ? 'page' : null, onclick: function () { go(n.id); } },
+          [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, h('span', { class: 'kc' }, [' · ⌘' + (i + 1)])])]);
       }))
       .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Aria', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
     var handle = h('button', { type: 'button', class: 'dock-handle', 'aria-label': 'Show quick access dock', onclick: function () { document.body.classList.remove('dock-away'); } }, [h('i')]);

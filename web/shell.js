@@ -119,6 +119,9 @@
    * defines one fixed palette (no dark-mode tokens), so dark mode is retired along with the skins. */
 
   var ICONS = { grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z', layers: 'M12 2 2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5', lock: 'M5 11h14v10H5zM8 11V7a4 4 0 0 1 8 0v4', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75', shield: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z', clipboard: 'M9 4h6v3H9zM8 5H6a1 1 0 0 0-1 1v14a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V6a1 1 0 0 0-1-1h-2', sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6', truck: 'M1 4h13v11H1zM14 8h4l3 3v4h-7zM6 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0M21 18a2 2 0 1 1-4 0 2 2 0 0 1 4 0', box: 'M21 8 12 3 3 8v8l9 5 9-5V8zM3 8l9 5 9-5M12 13v8', flask: 'M9 3h6M10 3v6L5 19a1 1 0 0 0 1 1.5h12A1 1 0 0 0 19 19l-5-10V3M7.5 14h9', beaker: 'M6 3h12M8 3v7l-3 8a1 1 0 0 0 1 1.3h12A1 1 0 0 0 19 18l-3-8V3', droplet: 'M12 3l5.5 6.5a7 7 0 1 1-11 0z', tag: 'M20.6 13.4 12 22l-9-9V3h10l7.6 7.6a2 2 0 0 1 0 2.8zM7 7h.01', refresh: 'M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5', list: 'M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01', calendar: 'M3 5h18v16H3zM3 9h18M8 3v4M16 3v4', activity: 'M22 12h-4l-3 9L9 3l-3 9H2', bell: 'M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0', search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.3-4.3', logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9', pkg: 'M16 3 4 7v10l8 4 8-4V7zM4 7l8 4 8-4M12 11v10', building: 'M3 21h18M6 21V4h8v17M14 9h4v12M9 8h.01M9 12h.01M9 16h.01', sun: 'M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', moon: 'M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z', shelf: 'M3 7h18M3 12h18M3 17h18M7 7v10M17 7v10', mappin: 'M12 21s7-5.5 7-11a7 7 0 1 0-14 0c0 5.5 7 11 7 11zM12 10.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5', panel: 'M4 4h16v16H4zM10 4v16', alert: 'M12 9v4M12 17h.01M10.3 3.3 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.3a2 2 0 0 0-3.4 0z' };
+  // The dock's glyph set (web/dock.js) gives every section its own artwork; the console's own
+  // names above win where both define one.
+  if (window.RaDock) Object.keys(RaDock.GLYPHS).forEach(function (k) { if (!ICONS[k]) ICONS[k] = RaDock.GLYPHS[k]; });
   function icon(k, sz) { return '<svg width="' + (sz || 18) + '" height="' + (sz || 18) + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="' + (ICONS[k] || ICONS.grid) + '"/></svg>'; }
 
   // Status → .chip tone variant (COMPONENT_PARITY_MATRIX.json "Chip": n/b/g/a/r/p/k, admin.css:
@@ -144,92 +147,92 @@
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
   var ROLES = {
     superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
-      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
+      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'listcheck', '/v1/production-plan-items'],
       ['runs', 'Master runs', 'layers', '/v1/production-orders'],
-      ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'sliders', '/v1/uoms'],
-      ['mtypes', 'Material types', 'sliders', '/v1/material-types'], ['mcats', 'Categories', 'sliders', '/v1/material-categories'],
-      ['msubcats', 'Sub-categories', 'sliders', '/v1/material-subcategories'], ['mgroups', 'Material groups', 'sliders', '/v1/material-groups'],
-      ['mqcspec', 'Material QC specs', 'flask', '/v1/material-qc-specifications'], ['mstorage', 'Storage rules', 'box', '/v1/material-storage-rules'],
-      ['maliases', 'RM aliases', 'lock', '/v1/rm-aliases'],
-      ['splitc', 'Split containers', 'layers', '/v1/batch-container-mappings'],
-      ['geotypes', 'Geo levels', 'sliders', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'building', '/v1/geo-regions'],
-      ['sorders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'], ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'],
-      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'],
-      ['trace', 'Traceability', 'activity', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
-      ['docs', 'Documents', 'clipboard', '/v1/document-registry'],
-      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'clipboard', '/v1/formula-event-hist'],
-      ['wtrail', 'Write audit trail', 'clipboard', '/v1/audit-events'],
+      ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'ruler', '/v1/uoms'],
+      ['mtypes', 'Material types', 'shapes', '/v1/material-types'], ['mcats', 'Categories', 'folder', '/v1/material-categories'],
+      ['msubcats', 'Sub-categories', 'folderTree', '/v1/material-subcategories'], ['mgroups', 'Material groups', 'venn', '/v1/material-groups'],
+      ['mqcspec', 'Material QC specs', 'testtube', '/v1/material-qc-specifications'], ['mstorage', 'Storage rules', 'thermo', '/v1/material-storage-rules'],
+      ['maliases', 'RM aliases', 'key', '/v1/rm-aliases'],
+      ['splitc', 'Split containers', 'split', '/v1/batch-container-mappings'],
+      ['geotypes', 'Geo levels', 'map', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'globe', '/v1/geo-regions'],
+      ['sorders', 'Sales orders', 'cart', '/v1/sales-orders'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'], ['ddocs', 'Dispatch docs', 'fileText', '/v1/dispatch-documents'],
+      ['fgstock', 'FG stock (ATP)', 'boxes', '/v1/fg-stock'],
+      ['trace', 'Traceability', 'branch', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
+      ['docs', 'Documents', 'archive', '/v1/document-registry'],
+      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'history', '/v1/formula-event-hist'],
+      ['wtrail', 'Write audit trail', 'edit', '/v1/audit-events'],
       ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
-      ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
-      ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
-      ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
+      ['weigh', 'Weighing', 'scale', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
+      ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
+      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
-      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shield', '/v1/approval-matrix'],
-      ['orgs', 'Organizations', 'building', '/v1/organizations'], ['bunits', 'Business units', 'building', '/v1/business-units'],
-      ['loctypes', 'Location types', 'sliders', '/v1/location-types'], ['locations', 'Locations', 'building', '/v1/locations'],
-      ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'sliders', '/v1/uoms'],
-      ['contacts', 'Contacts', 'users', '/v1/contacts'], ['countries', 'Countries', 'building', '/v1/countries'],
-      ['docs', 'Documents', 'clipboard', '/v1/document-registry'], ['loginhist', 'Login history', 'activity', '/v1/login-history'],
-      ['wtrail', 'Write audit trail', 'clipboard', '/v1/audit-events'] ] },
+      ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
+      ['orgs', 'Organizations', 'building', '/v1/organizations'], ['bunits', 'Business units', 'briefcase', '/v1/business-units'],
+      ['loctypes', 'Location types', 'signpost', '/v1/location-types'], ['locations', 'Locations', 'mappin', '/v1/locations'],
+      ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'ruler', '/v1/uoms'],
+      ['contacts', 'Contacts', 'idcard', '/v1/contacts'], ['countries', 'Countries', 'flag', '/v1/countries'],
+      ['docs', 'Documents', 'archive', '/v1/document-registry'], ['loginhist', 'Login history', 'login', '/v1/login-history'],
+      ['wtrail', 'Write audit trail', 'edit', '/v1/audit-events'] ] },
     procurement: { label: 'Procurement', dept: 'Procurement', user: 'Procurement', nav: [
-      ['planning', 'Stock planning', 'grid', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'activity', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'list', '/v1/purchase-requests'],
-      ['rfq', 'RFQs', 'list', '/v1/rfqs'], ['quotes', 'Quotations', 'calendar', '/v1/quotations'],
-      ['qitems', 'Quotation items', 'list', '/v1/quotation-items'], ['negotiate', 'Negotiation', 'activity', '/v1/vendor-negotiations'],
-      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'], ['advpay', 'Advance payments', 'clipboard', '/v1/po-advance-payments'],
-      ['vendors', 'Suppliers', 'truck', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'users', '/v1/vendor-contacts'],
+      ['planning', 'Stock planning', 'clipList', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'refresh', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'filePlus', '/v1/purchase-requests'],
+      ['rfq', 'RFQs', 'send', '/v1/rfqs'], ['quotes', 'Quotations', 'receipt', '/v1/quotations'],
+      ['qitems', 'Quotation items', 'listcheck', '/v1/quotation-items'], ['negotiate', 'Negotiation', 'chat', '/v1/vendor-negotiations'],
+      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'], ['advpay', 'Advance payments', 'wallet', '/v1/po-advance-payments'],
+      ['vendors', 'Suppliers', 'store', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'idcard', '/v1/vendor-contacts'],
       ['vmap', 'Vendor materials', 'link', '/v1/vendor-rm-mappings'],
-      ['ratehist', 'Rate history', 'list', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'activity', '/v1/vendor-performance'],
-      ['settle', 'Settlements', 'clipboard', '/v1/vendor-credit-notes'], ['rejgrns', 'Rejected GRNs', 'alert', '/v1/qc-rejected-grns'],
-      ['vledger', 'Vendor ledger', 'clipboard', '/v1/vendor-ledger'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
+      ['ratehist', 'Rate history', 'trend', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'chart', '/v1/vendor-performance'],
+      ['settle', 'Settlements', 'coins', '/v1/vendor-credit-notes'], ['rejgrns', 'Rejected GRNs', 'alert', '/v1/qc-rejected-grns'],
+      ['vledger', 'Vendor ledger', 'book', '/v1/vendor-ledger'], ['materials', 'Materials', 'box', '/v1/materials'] ] },
     receiving: { label: 'Receiving', dept: 'Receiving', user: 'Receiving', nav: [
       ['vdispatch', 'Vendor dispatch', 'truck', '/v1/vendor-dispatches'],
-      ['gate', 'Gate entries', 'truck', '/v1/gate-entries'], ['grns', 'Goods receipt', 'clipboard', '/v1/grns'],
-      ['grnitems', 'Qty verification', 'activity', '/v1/grn-items'],
-      ['batches', 'Batches', 'layers', '/v1/rm-batches'], ['containers', 'Containers', 'box', '/v1/grn-containers'] ] },
+      ['gate', 'Gate entries', 'door', '/v1/gate-entries'], ['grns', 'Goods receipt', 'inbox', '/v1/grns'],
+      ['grnitems', 'Qty verification', 'listcheck', '/v1/grn-items'],
+      ['batches', 'Batches', 'layers', '/v1/rm-batches'], ['containers', 'Containers', 'drum', '/v1/grn-containers'] ] },
     qc: { label: 'QC Laboratory', dept: 'Quality Control', user: 'QC', nav: [
-      ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipboard', '/v1/qc-result-details'],
-      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
-      ['qcparams', 'QC parameters', 'list', '/v1/qc-parameters'],
+      ['queue', 'Test queue', 'flask', '/v1/qc-inspections'], ['results', 'Results', 'clipCheck', '/v1/qc-result-details'],
+      ['prodqc', 'Production QC', 'microscope', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
+      ['qcparams', 'QC parameters', 'filter', '/v1/qc-parameters'],
       // Owner ruling 2026-09-28: COA data per finished batch (results, photos, release → ALEMBIC).
-      ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'] ] },
+      ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'award', '/v1/batch-coas'] ] },
     production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
       ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
-      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'list', '/v1/production-plan-items'],
+      ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'listcheck', '/v1/production-plan-items'],
       ['runs', 'Production orders', 'layers', '/v1/production-orders', true], ['orderitems', 'Order ingredients', 'list', '/v1/production-order-ingredients', true],
-      ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['pickitems', 'Pick list items', 'list', '/v1/material-pick-list-items'],
-      ['issues', 'Material issues', 'box', '/v1/material-issues'],
-      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'],
+      ['picks', 'Pick lists', 'clipList', '/v1/material-pick-lists'], ['pickitems', 'Pick list items', 'listnum', '/v1/material-pick-list-items'],
+      ['issues', 'Material issues', 'boxOut', '/v1/material-issues'],
+      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions', true], ['weigh', 'Weighing', 'scale', '/v1/weighing-records'],
       ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'],
-      ['prodqc', 'Production QC', 'activity', '/v1/production-qc'], ['capas', 'CAPA', 'shield', '/v1/qc-capas'],
-      ['coa', 'Batch COA', 'clipboard', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
+      ['prodqc', 'Production QC', 'microscope', '/v1/production-qc'], ['capas', 'CAPA', 'wrench', '/v1/qc-capas'],
+      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
     warehouse: { label: 'Warehouse', dept: 'Warehouse', user: 'Warehouse', nav: [
-      ['stock', 'Stock (FEFO)', 'box', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
-      ['movements', 'Movements', 'activity', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
-      ['reserve', 'Reservations', 'lock', '/v1/stock-reservations'], ['counts', 'Stock counts', 'clipboard', '/v1/stock-audits'],
+      ['stock', 'Stock (FEFO)', 'boxes', '/v1/inventory-availability'], ['rm', 'RM batches', 'layers', '/v1/rm-batches'],
+      ['movements', 'Movements', 'move', '/v1/inventory-transactions'], ['adjust', 'Adjustments', 'sliders', '/v1/stock-adjustments'],
+      ['reserve', 'Reservations', 'lock', '/v1/stock-reservations'], ['counts', 'Stock counts', 'hash', '/v1/stock-audits'],
       ['transfers', 'Transfers', 'refresh', '/v1/stock-transfers'],
-      ['warehouses', 'Warehouses', 'building', '/v1/warehouses'], ['floors', 'Floors', 'layers', '/v1/floors'],
-      ['zones', 'Zones', 'grid', '/v1/zones'], ['racks', 'Racks', 'shelf', '/v1/racks'],
-      ['shelves', 'Shelves', 'shelf', '/v1/shelves'], ['bins', 'Bins', 'box', '/v1/bins'] ] },
+      ['warehouses', 'Warehouses', 'warehouse', '/v1/warehouses'], ['floors', 'Floors', 'floors', '/v1/floors'],
+      ['zones', 'Zones', 'zone', '/v1/zones'], ['racks', 'Racks', 'rack', '/v1/racks'],
+      ['shelves', 'Shelves', 'shelf', '/v1/shelves'], ['bins', 'Bins', 'bin', '/v1/bins'] ] },
     compounding: { label: 'Compounding', dept: 'Compounding', user: 'Compounding', nav: [
-      ['work', 'Worksheets', 'beaker', '/v1/production-order-ingredients', true], ['orders', 'Production orders', 'grid', '/v1/production-orders'],
-      ['picks', 'Pick lists', 'list', '/v1/material-pick-lists'], ['issues', 'Material issues', 'box', '/v1/material-issues'],
-      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions'], ['weigh', 'Weighing', 'sliders', '/v1/weighing-records'],
+      ['work', 'Worksheets', 'beaker', '/v1/production-order-ingredients', true], ['orders', 'Production orders', 'layers', '/v1/production-orders'],
+      ['picks', 'Pick lists', 'clipList', '/v1/material-pick-lists'], ['issues', 'Material issues', 'boxOut', '/v1/material-issues'],
+      ['mixing', 'Mixing sessions', 'flask', '/v1/mixing-sessions'], ['weigh', 'Weighing', 'scale', '/v1/weighing-records'],
       ['oil', 'Oil batches', 'droplet', '/v1/oil-batches'] ] },
     filling: { label: 'Filling', dept: 'Filling', user: 'Filling', nav: [
-      ['tickets', 'Fill tickets', 'droplet', '/v1/filling-sessions'], ['orders', 'Package orders', 'box', '/v1/package-orders'],
-      ['oil', 'Bulk lots', 'layers', '/v1/oil-batches'] ] },
+      ['tickets', 'Fill tickets', 'ticket', '/v1/filling-sessions'], ['orders', 'Package orders', 'package', '/v1/package-orders'],
+      ['oil', 'Bulk lots', 'droplet', '/v1/oil-batches'] ] },
     packaging: { label: 'Packaging', dept: 'Packaging', user: 'Packaging', nav: [
-      ['orders', 'Pack orders', 'box', '/v1/package-orders'], ['fg', 'Finished goods', 'pkg', '/v1/finished-good-batches'],
-      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
+      ['orders', 'Pack orders', 'package', '/v1/package-orders'], ['fg', 'Finished goods', 'packageCheck', '/v1/finished-good-batches'],
+      ['fgstock', 'FG stock (ATP)', 'boxes', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
       ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
-      ['pkgqc', 'Packaging QC', 'flask', '/v1/packaging-qc'], ['products', 'Products', 'tag', '/v1/products'],
-      ['skus', 'Product SKUs', 'tag', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'layers', '/v1/packaging-boms'] ] },
+      ['pkgqc', 'Packaging QC', 'scan', '/v1/packaging-qc'], ['products', 'Products', 'bottle', '/v1/products'],
+      ['skus', 'Product SKUs', 'barcode', '/v1/product-skus'], ['pkgbom', 'Packaging BOM', 'tree', '/v1/packaging-boms'] ] },
     sales: { label: 'Sales & Dispatch', dept: 'Sales & Dispatch', user: 'Sales', nav: [
-      ['orders', 'Sales orders', 'clipboard', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
-      ['fgstock', 'FG stock (ATP)', 'box', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
-      ['transporters', 'Transporters', 'building', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'],
-      ['ddocs', 'Dispatch docs', 'clipboard', '/v1/dispatch-documents'] ] }
+      ['orders', 'Sales orders', 'cart', '/v1/sales-orders'], ['customers', 'Customers', 'users', '/v1/customers'],
+      ['fgstock', 'FG stock (ATP)', 'boxes', '/v1/fg-stock'], ['fgreserve', 'FG reservations', 'lock', '/v1/fg-reservations'],
+      ['transporters', 'Transporters', 'route', '/v1/transporters'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'],
+      ['ddocs', 'Dispatch docs', 'fileText', '/v1/dispatch-documents'] ] }
   };
   // Curated, readable columns per endpoint (DB field names). Fallback = a smart generic picker.
   var COLS = {
@@ -329,7 +332,7 @@
   // Every role opens on a rich, DB-aggregated dashboard (endpoint sentinel '__dash__' → /v1/dashboard).
   Object.keys(ROLES).forEach(function (k) {
     var label = k === 'warehouse' ? 'Floor map' : 'Dashboard';
-    var ic = k === 'warehouse' ? 'mappin' : (k === 'superadmin' ? 'activity' : 'grid');
+    var ic = k === 'warehouse' ? 'mappin' : 'grid';
     ROLES[k].nav.unshift(['dashboard', label, ic, '__dash__']);
   });
   // G4: "Tutorials" — added to every role's nav the same way Dashboard is above (a nav tuple
@@ -337,7 +340,7 @@
   // permission gate — nav ITEMS aren't individually permission-filtered anywhere else in this
   // file either; loadTutorialView (web/tutorial.js, loaded after this file) itself decides which
   // lessons a session may actually see, same split as __dash__/loadDashboard).
-  Object.keys(ROLES).forEach(function (k) { ROLES[k].nav.push(['tutorial', 'Tutorials', 'clipboard', '__tutorial__']); });
+  Object.keys(ROLES).forEach(function (k) { ROLES[k].nav.push(['tutorial', 'Tutorials', 'bookOpen', '__tutorial__']); });
   // LANE D1: the demo showcase opens the owner's screens; the server keeps it read-only and masked (no writes, no formula access).
   var VIEW = { owner: 'superadmin', showcase: 'superadmin' };
   function roleView(r) { return VIEW[r] || r; }
@@ -415,7 +418,8 @@
     bell: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M6.4 9.4a5.6 5.6 0 1 1 11.2 0c0 4.6 1.9 5.6 1.9 5.6H4.5s1.9-1 1.9-5.6"/><path d="M10.2 18.4a1.9 1.9 0 0 0 3.6 0"/></svg>',
     search: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>',
     arrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M5 12h13"/><path d="m12.5 5.5 6.5 6.5-6.5 6.5"/></svg>',
-    spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l1.7 6 5.9.7-4.4 4 1.3 5.8L12 15.9 7.5 18.9l1.3-5.8-4.4-4 5.9-.7z"/></svg>'
+    spark: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2.4l1.7 6 5.9.7-4.4 4 1.3 5.8L12 15.9 7.5 18.9l1.3-5.8-4.4-4 5.9-.7z"/></svg>',
+    pin: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 17v5M9 3h6l-1 6 4 4H6l4-4z"/></svg>'
   };
   window.RA_CI = CI; // ws-*.js dialogs use the same close glyph
   // BrandMark — the lockup, one builder so it can't drift.
@@ -462,6 +466,7 @@
   function openPalette() {
     if ($('ra-cmdk')) { closePalette(); return; }
     var R = ROLES[st.role]; if (!R) return;
+    var dk = dockKeys();
     var wrap = document.createElement('div'); wrap.id = 'ra-cmdk';
     wrap.innerHTML = '<div class="xp-scrim open" data-cmdk-x></div>' +
       '<div class="glass glass-deep cmdk" role="dialog" aria-modal="true" aria-label="Go to">' +
@@ -475,7 +480,7 @@
       if (idx >= rows.length) idx = 0;
       list.innerHTML = rows.map(function (n, i) {
         return '<li><button type="button" data-go="' + n[0] + '" class="' + (i === idx ? 'on' : '') + '">' + icon(n[2], 15) + n[1] +
-          (R.nav.indexOf(n) < 9 ? '<span class="sc">⌘' + (R.nav.indexOf(n) + 1) + '</span>' : '') + '</button></li>';
+          (dk.indexOf(n[0]) >= 0 ? '<span class="sc">⌘' + (dk.indexOf(n[0]) + 1) + '</span>' : '') + '</button></li>';
       }).join('') || '<li class="loading" style="padding:var(--s-base)">No match</li>';
       [].forEach.call(list.querySelectorAll('[data-go]'), function (b) { b.onclick = function () { go(b.getAttribute('data-go')); }; });
     }
@@ -588,38 +593,93 @@
   }
 
   /* ---------------- render: shell + data view ---------------- */
+  /* ---------------- quick-access dock (model: web/dock.js) ----------------
+   * The dock carries at most RaDock.MAX (8) primary destinations — the role's defaults below, or
+   * the person's own pins (the pin beside each section in the sections sheet, kept per person in
+   * localStorage) — then "All sections" (the rail as a sheet, ⌘\) and Ask Aria (⌘K). Every other
+   * section stays in the sheet and the ⌘/ go-to palette. Below 1024px it is the tab bar: the first
+   * RaDock.PHONE destinations, Ask Aria and More. Keys a session does not hold are skipped. */
+  var DOCK_DEFAULTS = {
+    superadmin: ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders', 'notifs'],
+    admin: ['dashboard', 'users', 'roles', 'perms', 'approvals', 'locations', 'loginhist', 'wtrail'],
+    procurement: ['dashboard', 'planning', 'reorder', 'prs', 'rfq', 'pos', 'vendors', 'rejgrns'],
+    receiving: ['dashboard', 'vdispatch', 'gate', 'grns', 'grnitems', 'batches', 'containers'],
+    qc: ['dashboard', 'queue', 'results', 'prodqc', 'samples', 'coa', 'coaspec'],
+    production: ['dashboard', 'produce', 'bridgereq', 'plans', 'runs', 'mixing', 'prodqc', 'coa'],
+    warehouse: ['dashboard', 'stock', 'shelftasks', 'racklayout', 'shelfdisplay', 'movements', 'transfers', 'counts'],
+    compounding: ['dashboard', 'produce', 'work', 'orders', 'picks', 'issues', 'mixing', 'weigh'],
+    filling: ['dashboard', 'tickets', 'orders', 'oil', 'shelfdisplay'],
+    packaging: ['dashboard', 'orders', 'fg', 'fgstock', 'labels', 'pkgqc', 'shelftasks', 'shelfdisplay'],
+    sales: ['dashboard', 'orders', 'customers', 'fgstock', 'dispatch', 'ddocs', 'shelftasks', 'shelfdisplay']
+  };
+  function dockStore() { try { return window.localStorage; } catch (e) { return null; } }
+  function dockStoreKey() {
+    var u = (session && session.user) || {};
+    return RaDock.storageKey('factory', st.role, u.id || u.userId || u.email || u.userName);
+  }
+  function dockPins() { return RaDock.loadPins(dockStore(), dockStoreKey()); }
+  function dockKeys() {
+    var R = ROLES[st.role]; if (!R) return [];
+    return RaDock.pick(R.nav.map(function (n) { return n[0]; }), DOCK_DEFAULTS[st.role], dockPins());
+  }
+  function dockNav() {
+    var R = ROLES[st.role]; if (!R) return [];
+    return dockKeys().map(function (k) { return R.nav.filter(function (n) { return n[0] === k; })[0]; });
+  }
+  // The rail rows: each section plus its pin (a sibling button, never nested in the nav button).
+  function railNavHtml(R) {
+    var dk = dockKeys(), custom = !!(dockPins() || []).length;
+    return R.nav.map(function (n) {
+      var on = st.nav === n[0], pinned = dk.indexOf(n[0]) >= 0;
+      // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
+      // target/action steps use to locate this real nav button (web/tutorial.js).
+      return '<div class="ri-row"><button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
+        icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>' +
+        '<button type="button" class="ri-pin' + (pinned ? ' on' : '') + '" data-pin="' + n[0] + '" aria-pressed="' + pinned + '"' +
+          ' aria-label="' + (pinned ? 'Unpin ' : 'Pin ') + escHtml(n[1]) + (pinned ? ' from' : ' to') + ' the dock" title="' + (pinned ? 'Unpin from dock' : 'Pin to dock') + '">' + CI.pin + '</button></div>';
+    }).join('') + (custom ? '<button type="button" class="ri ri-reset" id="ra-dock-reset">' + icon('refresh', 14) + '<span class="nm">Reset dock to defaults</span></button>' : '');
+  }
+  function dockInnerHtml() {
+    var items = dockNav();
+    return '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
+      '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="All sections" aria-pressed="false">' + CI.menu +
+        '<span class="kb"><span class="kb-d">All sections</span><span class="kb-m">More</span><span class="kc"> · ⌘\\</span></span></button>' +
+      '<span class="sep"></span>' +
+      items.map(function (n, i) {
+        var on = st.nav === n[0];
+        return '<button type="button" data-nav="' + n[0] + '" data-dock="' + n[0] + '" class="qb' + (on ? ' on' : '') + (i < RaDock.PHONE ? ' hot' : '') + '"' +
+          ' aria-label="' + escHtml(n[1]) + '" aria-pressed="' + on + '"' + (on ? ' aria-current="page"' : '') + '>' +
+          icon(n[2], 17) + '<span class="kb">' + n[1] + '<span class="kc"> · ⌘' + (i + 1) + '</span></span></button>';
+      }).join('') +
+      '<span class="sep"></span>' +
+      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Aria">' + CI.cmd + '<span class="kb">Ask Aria<span class="kc"> · ⌘K</span></span></button>';
+  }
+  // Pin / unpin from the sections sheet: repaint the rail rows and the dock only (the page stays).
+  function togglePin(k) {
+    var r = RaDock.togglePin(dockKeys(), k);
+    if (r.full) { toast('The dock holds ' + RaDock.MAX + ' sections. Unpin one first.', 'bad'); return; }
+    RaDock.savePins(dockStore(), dockStoreKey(), r.pins.length ? r.pins : null);
+    refreshNav('[data-pin="' + k + '"]');
+  }
+  function refreshNav(focusSel) {
+    var R = ROLES[st.role]; if (!R) return;
+    if ($('ra-railnav')) $('ra-railnav').innerHTML = railNavHtml(R);
+    if ($('ra-dock')) $('ra-dock').innerHTML = dockInnerHtml();
+    wireNav(); applyResponsive();
+    var f = focusSel && document.querySelector(focusSel); if (f) f.focus();
+  }
+
+  /* ---------------- render: shell + data view ---------------- */
   // The reference Admin/Agent shell, 1:1: a rail (collapsed by default — body.rail-off — so the
   // floating dock is the navigation), a top bar (platform brand, page title, page actions), the
-  // region, the floating glass dock (brand tile, rail toggle, destinations with ⌘1–9, command
-  // palette). Nav items are NOT filtered client-side beyond "what this session's permission-driven
-  // ROLES entry contains" — the server enforces per-action authorization. The dock carries the
-  // SAME `R.nav` set as the rail; below 1024 it becomes the reference's tab bar, keeping the
-  // first destinations (HOT) plus "Sections", which opens the rail as a drawer.
+  // region, the floating glass dock (above). Nav items are NOT filtered client-side beyond "what
+  // this session's permission-driven ROLES entry contains" — the server enforces per-action
+  // authorization.
   function shell() {
     $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
     var prevIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st._prevNav);
     var curIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st.nav);
-    var navHtml = R.nav.map(function (n) {
-      var on = st.nav === n[0];
-      // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
-      // target/action steps use to locate this real nav button (web/tutorial.js).
-      return '<button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
-        icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>';
-    }).join('');
-    var HOT = {}; R.nav.slice(0, 3).forEach(function (n) { HOT[n[0]] = 1; });
-    var dockHtml =
-      '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
-      '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="Show navigation" aria-pressed="false">' + CI.menu + '<span class="kb">Sections<span class="kc"> · ⌘\\</span></span></button>' +
-      '<span class="sep"></span>' +
-      R.nav.map(function (n, i) {
-        var on = st.nav === n[0];
-        return '<button type="button" data-nav="' + n[0] + '" class="qb' + (on ? ' on' : '') + (HOT[n[0]] ? ' hot' : '') + '"' +
-          ' aria-label="' + n[1] + '" aria-pressed="' + on + '"' + (on ? ' aria-current="page"' : '') + '>' +
-          icon(n[2], 17) + '<span class="kb">' + n[1] + (i < 9 ? '<span class="kc"> · ⌘' + (i + 1) + '</span>' : '') + '</span></button>';
-      }).join('') +
-      '<span class="sep"></span>' +
-      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Aria">' + CI.cmd + '<span class="kb">Ask Aria<span class="kc"> · ⌘K</span></span></button>';
     // Workspace switcher: multi-role staff switch workspaces with no second login (addendum
     // §5/§8) — a RawProd composition in the top bar next to the page title.
     var roles = (session && session.availableRoles) || [st.role];
@@ -633,7 +693,7 @@
         '<button type="button" class="rail-min" id="ra-burger" aria-label="Minimise navigation">' + CI.collapse + '</button>' +
         '<button type="button" class="rb" id="ra-home" style="padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%" aria-label="Dashboard">' +
           brandMark('Factory', true) + '</button>' +
-        '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div>' + navHtml + '</div></div>' +
+        '<div class="rail-deep"><div><div class="rs">' + R.dept.toUpperCase() + '</div><div id="ra-railnav">' + railNavHtml(R) + '</div></div></div>' +
         '<div class="rme">' +
           '<span class="av">' + initials + '</span>' +
           '<span class="who">' + R.user + '<small>' + R.label + '</small></span>' +
@@ -658,7 +718,7 @@
         '<div class="content"><section class="pageview" id="ra-view"></section></div>' +
       '</div>' +
       '<button type="button" class="dock-handle" id="ra-dock-handle" aria-label="Show quick access dock"><i></i></button>' +
-      '<div class="glass glass-deep qdock" id="ra-dock" role="toolbar" aria-label="Quick access">' + dockHtml + '</div>';
+      '<div class="glass glass-deep qdock" id="ra-dock" role="toolbar" aria-label="Quick access">' + dockInnerHtml() + '</div>';
     wireShell();
     if (prevIdx >= 0 && curIdx >= 0 && prevIdx !== curIdx) pageEnter($('ra-view'), curIdx > prevIdx ? 'r' : 'l');
     st._prevNav = st.nav;
@@ -2219,11 +2279,18 @@
     st.role = newRole; st.nav = ROLES[newRole].nav[0][0]; st.search = '';
     shell();
   }
-  function wireShell() {
+  function wireNav() {
     [].forEach.call(document.querySelectorAll('[data-nav]'), function (b) { b.onclick = function () { navTo(b.getAttribute('data-nav')); }; });
+    [].forEach.call(document.querySelectorAll('[data-pin]'), function (b) { b.onclick = function (e) { e.stopPropagation(); togglePin(b.getAttribute('data-pin')); }; });
+    var reset = $('ra-dock-reset'); if (reset) reset.onclick = function () { RaDock.savePins(dockStore(), dockStoreKey(), null); refreshNav('#ra-railnav .ri-pin'); };
     var home = function () { navTo(ROLES[st.role].nav[0][0]); };
     if ($('ra-home')) $('ra-home').onclick = home;
     if ($('ra-dock-home')) $('ra-dock-home').onclick = home;
+    var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
+    if ($('ra-aria-dock')) $('ra-aria-dock').onclick = toggleAria;
+  }
+  function wireShell() {
+    wireNav();
     $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
@@ -2235,19 +2302,17 @@
     // The rail's own .rail-min only closes it; the dock's toggle opens and closes it (desktop:
     // body.rail-off folds the grid track; phone: body.rail-open slides it in as a drawer).
     var burger = $('ra-burger'); if (burger) burger.onclick = function () { st.drawer = false; applyResponsive(); };
-    var dockToggle = $('ra-dock-toggle'); if (dockToggle) dockToggle.onclick = function () { st.drawer = !st.drawer; applyResponsive(); };
     var bg = $('ra-drawer-bg'); if (bg) bg.onclick = function () { st.drawer = false; applyResponsive(); };
     var handle = $('ra-dock-handle'); if (handle) handle.onclick = function () { document.body.classList.remove('dock-away'); };
     if ($('ra-aria')) $('ra-aria').onclick = toggleAria;
-    if ($('ra-aria-dock')) $('ra-aria-dock').onclick = toggleAria;
     if (_aria) { _aria.setContext(ariaContext()); }
     applyResponsive();
     applyNetBanner();
   }
   if (!window.__raRailKeyWired) {
     window.__raRailKeyWired = true;
-    // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–9 destinations, ⌘/ the
-    // go-to palette; Escape closes.
+    // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–8 the dock's
+    // destinations, ⌘/ the go-to palette; Escape closes.
     document.addEventListener('keydown', function (e) {
       if (e.key === 'Escape' && _aria && _aria.isOpen()) { _aria.close(); return; }
       if (e.key === 'Escape' && st.drawer) { st.drawer = false; applyResponsive(); return; }
@@ -2255,8 +2320,8 @@
       if (e.key === 'k' || e.key === 'K') { e.preventDefault(); toggleAria(); return; }
       if (e.key === '/') { e.preventDefault(); openPalette(); return; }
       if (e.key === '\\') { e.preventDefault(); st.drawer = !st.drawer; applyResponsive(); return; }
-      var i = parseInt(e.key, 10), R = ROLES[st.role];
-      if (i >= 1 && i <= 9 && R && R.nav[i - 1]) { e.preventDefault(); navTo(R.nav[i - 1][0]); }
+      var i = parseInt(e.key, 10), dn = dockNav();
+      if (i >= 1 && i <= 9 && dn[i - 1]) { e.preventDefault(); navTo(dn[i - 1][0]); }
     });
     // Dock retract (reference QuickDock): while the desktop rail is open the dock steps out of the
     // way at rest and returns when the pointer nears the bottom edge. With the rail folded the dock
@@ -2283,7 +2348,7 @@
       if (open) { side.removeAttribute('inert'); side.removeAttribute('aria-hidden'); }
       else { side.setAttribute('inert', ''); side.setAttribute('aria-hidden', 'true'); }
     }
-    var t = $('ra-dock-toggle'); if (t) { t.setAttribute('aria-pressed', String(open)); t.setAttribute('aria-label', open ? 'Hide navigation' : 'Show navigation'); }
+    var t = $('ra-dock-toggle'); if (t) { t.setAttribute('aria-pressed', String(open)); t.setAttribute('aria-label', open ? 'Hide sections' : 'All sections'); }
   }
   // Truthful offline/degraded banner (addendum §13): says exactly what it is — the last data
   // loaded — and never implies anything typed while offline is queued for later replay, because

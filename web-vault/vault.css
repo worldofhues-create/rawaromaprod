@@ -94,3 +94,40 @@ label.field textarea{min-height:64px;padding:var(--s-tight) 10px;border-radius:6
 .reveal-panel .hd{display:flex;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-tight);font:var(--w-med) var(--t-cap)/1 var(--ui);color:var(--red)}
 .reveal-panel table{min-width:0}
 tbody tr[tabindex],tbody tr.go{cursor:pointer}
+
+/* ---------------- quick-access dock (web/dock.js) ----------------
+ * Owner 2026-09-29: "dock is abnormally huge, it won't be responsive". The dock now carries at most
+ * eight primary destinations + "All sections" + Ask Aria. Same block, verbatim, in
+ * web/ui-contract/shell.css, web-platform/platform.css and web-vault/vault.css.
+ * - Labels: the reference shows a destination's label on hover only; keyboard focus shows it too.
+ * - Desktop: the pill can never be wider than the window.
+ * - Below 1024px: the tab bar (first four destinations, Ask Aria, More). "More" replaces the
+ *   desktop "All sections" label and sits last, as a tab bar's overflow tab does.
+ * - --dock-runway: the region's bottom padding, so the last row never sits under the dock (the
+ *   same token ALEMBIC's console.css defines, safe-area aware on phones). */
+:root{--dock-runway:108px}
+body .content,body .main > .content{padding-bottom:var(--dock-runway) !important;scroll-padding-bottom:var(--dock-runway)}
+.qdock{max-width:calc(100vw - 32px)}
+.qdock .qb:focus-visible .kb{opacity:1;transform:translateX(-50%) translateY(0)}
+.qdock .qb .kb-m{display:none}
+@media (max-width:1023px){
+  :root{--dock-runway:calc(92px + env(safe-area-inset-bottom,0px))}
+  .qdock{max-width:100%;overflow:hidden}
+  .qdock .qb .kb-d{display:none}
+  .qdock .qb .kb-m{display:inline}
+  .qdock .dk-navtoggle{order:10}
+  .qdock .qb .kb .kb-d,.qdock .qb .kb .kb-m{position:static}
+}
+/* sections sheet: the pin beside each section (Factory) */
+.ri-row{position:relative}
+.ri-row > .ri{padding-right:38px}
+.ri-pin{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:#9D9D95;display:grid;place-items:center;cursor:pointer;opacity:0;transition:opacity .15s,background .15s,color .15s}
+.ri-pin svg{width:14px;height:14px;display:block}
+.ri-row:hover .ri-pin,.ri-row:focus-within .ri-pin,.ri-pin.on{opacity:1}
+.ri-pin:hover{background:var(--rail-2);color:#fff}
+.ri-pin.on{color:var(--accent)}
+.ri-row > .ri.on + .ri-pin{color:#26262B}
+.ri-row > .ri.on + .ri-pin:hover{background:rgba(38,38,43,.12)}
+.ri-pin:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px;opacity:1}
+.ri-reset{margin-top:8px}
+@media (pointer:coarse){ .ri-pin{opacity:1;width:40px;height:40px} .ri-row > .ri{padding-right:48px} }

@@ -46,10 +46,10 @@
 
   /* ── navigation: add the four screens to the roles that do this work ────────────────── */
   var NAV = {
-    produce: ['produce', 'Produce next', 'activity', '__produce__'],
-    shelftasks: ['shelftasks', 'Put-away & pick', 'shelf', '__shelftasks__'],
-    racklayout: ['racklayout', 'Rack layout', 'layers', '__racklayout__'],
-    shelfdisplay: ['shelfdisplay', 'Shelf display', 'panel', '__shelfdisplay__']
+    produce: ['produce', 'Produce next', 'zap', '__produce__'],
+    shelftasks: ['shelftasks', 'Put-away & pick', 'boxIn', '__shelftasks__'],
+    racklayout: ['racklayout', 'Rack layout', 'layout', '__racklayout__'],
+    shelfdisplay: ['shelfdisplay', 'Shelf display', 'monitor', '__shelfdisplay__']
   };
   var BY_ROLE = {
     superadmin: ['produce', 'shelftasks', 'racklayout', 'shelfdisplay'],
