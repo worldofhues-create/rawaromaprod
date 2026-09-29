@@ -46,10 +46,44 @@ Field rules:
 
 | Type | When | Payload |
 |---|---|---|
-| `ProductionRequirementCreated` | A commercial order line's mapped SKU has insufficient FG and no open requirement exists yet for it | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` |
-| `ProductionRequirementChanged` | Qty, needed-by, or priority changes on a requirement RawProd has not yet moved past `PLANNED` | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` |
+| `ProductionRequirementCreated` | A commercial order line's mapped SKU has insufficient FG and no open requirement exists yet for it | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` + the produce-to-order fields below |
+| `ProductionRequirementChanged` | Qty, needed-by, or priority changes on a requirement RawProd has not yet moved past `PLANNED` | `{ requirement_id, order_ref, mapped_sku, qty, uom, pack_size, needed_by, priority }` + the produce-to-order fields below (each optional) |
 | `ProductionRequirementCancelled` | The originating commercial order is cancelled/returned before FG is allocated | `{ requirement_id, order_ref, reason }` |
 | `ProductionRequirementFulfilled` | ALEMBIC posted the goods receipt of the factory FG (the physical hand-over). `version` = ALEMBIC's previous outbound version for the aggregate + 1 (normally 2). RawProd sets the requirement `COMPLETE` (terminal: any later non-duplicate event parks `out_of_order`), marks active FG reservations of the linked production order `HANDED_OVER` (+ consumption row), and emits `ProductionRequirementCompleted` once. `received_qty` is in `uom` (ALEMBIC reports kg) and is converted into the requirement's own unit (mg) before it is compared; a unit pair that cannot be converted never completes the requirement. No RawProd sales order is involved. | `{ requirement_id, order_ref, received_qty, uom, receipt_ref, received_at }` |
+
+### Produce-to-order fields (owner requirement 2026-09-29; ALEMBIC lane/fulfil, RawProd lane/produce)
+
+ALEMBIC ranks the factory's work — FIFO, with high-value orders first (owner decision
+2026-09-29: an order of **₹25,000 or more** is high value) — and RawProd honours the rank; it never
+re-ranks. `ProductionRequirementCreated` / `Changed` carry, in addition to the fields above:
+
+```jsonc
+{
+  "priority":   { "rank": 1, "reason": "high_value", "order_value_inr": 48500 },
+                              // rank: integer >= 0, lower is produced first
+                              // reason: "high_value" | "fifo" | "promised_date"
+                              // order_value_inr: number >= 0 (the order's value in INR)
+  "needed_by":  "2026-10-05", // date (or ISO instant)
+  "order_refs": ["SO-1001", "SO-1007"],   // every commercial order this requirement serves (>= 1)
+  "sku":        "ALTHAIR-25KG",           // the factory SKU (== mapped_sku)
+  "pack_size":  "25 kg",
+  "qty_kg":     75,                       // the quantity in kilograms, > 0
+  "lot_policy": "fifo"                    // the only value: allocate the oldest lot first
+}
+```
+
+Rules (RawProd `backend/api/src/bridge/contract.ts`, `validateInboundPayload` /
+`normalizeRequirementPayload`):
+
+- The v1 one-word `priority` (`low|normal|high|urgent`) is still accepted; the object form above
+  replaces it. Any malformed new field is a PERMANENT refusal (`400`,
+  `BRIDGE_PERMANENT_INVALID_PAYLOAD`, `detail` names the field).
+- The v1 fields stay authoritative when present. When a sender omits them, the new ones fill them
+  in: `order_ref` ← `order_refs[0]`, `mapped_sku` ← `sku`, `qty`/`uom` ← `qty_kg`/`kg`.
+- RawProd orders its production queue by `priority.rank`, then `needed_by`, then arrival.
+- A requirement that arrives high value, or already past `needed_by`, raises one alert on every
+  factory console (and an email to the same roles); one that passes its date later is raised once
+  by the overdue sweep.
 
 ## Event types — RawProd → ALEMBIC
 
@@ -68,79 +102,56 @@ Field rules:
 | `ProductionRequirementCancelledAck` | Acknowledges an ALEMBIC-initiated cancellation |
 | `ProductionRequirementCompleted` | `{ requirement_id, correlation_id, order_ref, receipt_ref }` — RawProd applied `ProductionRequirementFulfilled`; exactly once per requirement. `Dispatched` remains for manual-continuity sales orders only. |
 
-All carry `{ requirement_id }` at minimum, correlated by `correlation_id`.
+All carry `{ requirement_id }` at minimum, correlated by `correlation_id`. `ProductionScheduled`
+carries `{ production_order_id }` (it no longer carries `formula_version_id` — a field from
+RawProd's `formula.*` schema, which the Envelope rules above forbid). One master run may serve
+several requirements: every requirement linked to the run hears each step (each with its own
+`version`), and a requirement that JOINS an open run hears `ProductionScheduled` once.
 
-## Compliance documents — RawProd → ALEMBIC (owner rulings 2026-09-28)
+Three further RawProd → ALEMBIC types are **facts**, not requirement steps, and carry no
+`requirement_id`:
 
-ALEMBIC issues the Certificate of Analysis, the IFRA Standards certificate and the allergen
-declaration; RawProd supplies the data. Two event types, each its own aggregate (not a
-production requirement), `version` 1, `correlation_id` = `aggregate.id`, `org_id` = the
-deployment's ALEMBIC tenant (`ALEMBIC_ASSERTION_TENANT_ID`, else the org of the requirements
-ALEMBIC has sent). Shapes and validators: `packages/contracts/src/clusters/bridge/compliance-events.ts`
-(RawProd). **ALEMBIC must add both types to its `INBOUND_EVENT_TYPES`** — until it does, it
-refuses them as `BRIDGE_PERMANENT_UNKNOWN_TYPE` and RawProd parks them (replayable, same
-`event_id`, once ALEMBIC accepts them).
+- `qc.batch.released` (a batch's QC verdict and results — both verdicts, `passed` and `failed` —
+  the only source a Certificate of Analysis is issued from) and `compliance.certificate.calculated`
+  (the Vault's IFRA or allergen result, which supersedes values entered by hand). Their payloads,
+  aggregates and responses are in `COMPLIANCE_FACTS.md` beside this file (DOCS-001), mirrored
+  verbatim from ALEMBIC. RawProd builds them with `bridge.toQcBatchReleasedWire` /
+  `bridge.toCertificateCalculatedWire` (`packages/contracts/src/clusters/bridge/produce-events.ts`)
+  and checks each against ALEMBIC's own parse rules before it is written to the outbox.
+- `fg.batch.received` — below.
 
-| Type | `aggregate.type` / `aggregate.id` | When |
-|---|---|---|
-| `qc.batch.released` | `qc_batch` / RawProd `batch_coa_id` | QC released a finished (oil) batch whose every test passed. A failed batch is never released and never emitted. Exactly once per batch. |
-| `compliance.certificate.calculated` | `compliance_certificate` / a RawProd emission id | The Vault calculated a new IFRA or allergen certificate for a formula's current approved version; one event per product made from that formula. A recalculation that changes nothing emits nothing. |
+## `fg.batch.received` — RawProd → ALEMBIC (owner requirement 2026-09-29)
 
-`qc.batch.released` payload:
-
-```jsonc
-{
-  "batchNo": "A140226",
-  "productRef": "ALTHAIR",                       // RawProd packaging.product_master.product_code
-  "skuCodes": ["ALTHAIR-25KG", "ALTHAIR-5KG"],   // every product_sku.sku_code = ALEMBIC's mapped_sku values
-  "results": [
-    { "test": "specific_gravity_20_4", "value": 0.995, "unit": null, "specMin": 0.95, "specMax": 1.5, "pass": true },
-    { "test": "flash_point_pmcc", "value": 116, "unit": "°C", "specMin": 110, "specMax": 120, "pass": true }
-  ],
-  "colourAppearance": "Deep Brown",
-  "odourDescription": "Warm Spicy Vanilla Fragrance",
-  "photos": [
-    { "url": "https://…/a140226.jpg", "assetRef": "document:<platform.document_master id>", "caption": "Retained sample" }
-  ],                                             // each photo has a url, an assetRef, or both
-  "productionDate": "2026-02-14",                // yyyy-mm-dd
-  "bestBefore": "2028-02-14",                    // productionDate + the product's shelf life (months)
-  "releasedAt": "2026-02-15T09:30:00.000Z",
-  "releasedBy": "<RawProd user id>",
-  "releasedByName": "QC Analyst"                 // or null
-}
-```
-
-Specific gravity is a dimensionless ratio at 20/4 °C, hence `unit: null`. Spec limits are
-inclusive (a result on the limit passes). Colour/appearance and odour are pass/fail
-conformance calls by the analyst; the batch's overall result is PASS only when all four pass.
-
-`compliance.certificate.calculated` payload:
+Sent when a QC-released finished-good batch is **put away on a rack** at the factory (the put-away
+is confirmed at the shelf by scanning the bin), so ALEMBIC can allocate it to the orders waiting for
+it (lot policy FIFO). One event per put-away: a batch split across two bins sends two.
 
 ```jsonc
 {
-  "productRef": "ALTHAIR",
-  "skuCodes": ["ALTHAIR-25KG"],
-  "kind": "ifra",                                // "ifra" | "allergen"
-  "amendment": "51",                             // IFRA: amendment in force; allergen: the regulated-list reference; or null
-  "values": [ { "category": "1", "limitPct": 0 }, { "category": "4", "limitPct": 25 } ],
-  //  allergen: [ { "name": "Cinnamal", "cas": "104-55-2", "natural": 0.02, "synthetic": "A", "total": 0.02 } ]
-  "calculatedAt": "2026-08-31T10:00:00.000Z",
-  "formulaVersionRef": "fvr_<32 hex>"            // opaque, Vault-keyed; equal = same formula version
+  "event_id": "uuid", "version": 1, "type": "fg.batch.received",
+  "org_id": "uuid",            // the requirement's org when the batch's run serves one, else the deployment's tenant
+  "correlation_id": "uuid",    // the correlation_id of the requirement the batch's run serves (else the FG batch id)
+  "causation_id": null,
+  "occurred_at": "2026-10-03T11:20:00.000Z", "source": "rawprod",
+  "aggregate": { "type": "fg_batch", "id": "<RawProd finished_good_batch_id>" },
+  "payload": {
+    "batch_no":    "FG-A140226",      // the FG batch number printed on the label (the lot code)
+    "sku":         "ALTHAIR-25KG",    // RawProd's factory SKU == ALEMBIC's mapped_sku
+    "pack_size":   "25 kg",           // the SKU's pack size, or null
+    "qty_kg":      100,               // the quantity put away, in kg (a count × a pack size written as a mass,
+                                      // or a mass unit converted) — never guessed: when neither holds the
+                                      // event is not sent and the factory is told why
+    "rack":        "R01-S2-B3",       // the bin it went on: rack, shelf, bin (a code that already carries
+                                      // its parent's is not repeated)
+    "released_at": "2026-10-02T09:30:00.000Z"   // when QC released the batch — FIFO age
+  }
 }
 ```
 
-IFRA `values` has one entry per category 1, 2, 3, 4, 5A–5D, 6, 7A, 7B, 8, 9, 10A, 10B, 11A,
-11B, 12: the maximum use level of the fragrance in that product category, %, floored to 2
-decimals, 0 where an ingredient is prohibited, 100 where nothing is restricted. Allergen
-`values` has one entry per allergen on the Vault's regulated list, % in the fragrance, `"A"`
-when zero or at/below the Vault's reporting threshold.
-
-**No formula content, ever.** Neither payload carries an ingredient, a material id/code/name,
-a percentage of an ingredient, a formula id/code/name or a formula version id. The emitters
-run `assertNoFormulaContent` on every payload and refuse to emit one that fails it. The
-calculation itself runs only inside the Vault; the main box pulls the certificate numbers over
-the signed internal channel (`POST /internal/vault/compliance-certificates`, INTERNAL_BRIDGE_KEY
-HMAC + nonce — the Vault never calls the main box, the main box never opens the Vault DB).
+Exactly those six payload fields (`bridge.validateFgBatchReceived`). No formula content, ever
+(`assertNoFormulaContent`). **ALEMBIC must add `fg.batch.received` to its inbound event types**
+(lane/fulfil) — until it does it answers `BRIDGE_PERMANENT_UNKNOWN_TYPE` and RawProd parks the
+event (replayable, same `event_id`, once ALEMBIC accepts it).
 
 ## Transport
 

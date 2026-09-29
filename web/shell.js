@@ -664,6 +664,9 @@
     st._prevNav = st.nav;
     loadView();
     loadAlerts();
+    // Lane produce: the bell stays live (a new high-value / overdue requirement, a failed batch)
+    // without a navigation; loadAlerts plays the sound when the count goes up.
+    if (!st._alertPoll) st._alertPoll = setInterval(function () { if (session && !document.hidden) loadAlerts(); }, 30000);
     // G4: WelcomePanel-equivalent — offer the current workspace's tutorial once, only when no
     // progress row of any status exists yet for it (see web/tutorial.js).
     if (typeof tutorialMaybeShowWelcome === 'function') tutorialMaybeShowWelcome();
@@ -896,6 +899,8 @@
     [].forEach.call(document.querySelectorAll('#ra-view [data-work-nav]'), function (el) {
       el.onclick = function () { navTo(el.getAttribute('data-work-nav')); };
     });
+    // Lane produce: workspace modules add their own dashboard strips (e.g. "Produce next").
+    (window.RA_DASH_HOOKS || []).forEach(function (fn) { try { fn(V, role, p); } catch (e) { /* a strip never breaks the dashboard */ } });
   }
   // The role's actionable queue: clickable tiles from the role-filtered alerts.
   function myWorkPanel(ad) {
@@ -2009,6 +2014,9 @@
     // ReferenceError. RA_VIEWS/registerViews (this file's window.RA hook) is NOT wired into this
     // render path yet (see that var's own comment above) — this is the real dispatch.
     if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials aren\'t available in this build.')); }
+    // Lane produce: a workspace module (ws-produce.js) renders its own sentinel views
+    // (__produce__, __shelftasks__, __racklayout__, __shelfdisplay__) through RA_VIEWS.
+    if (typeof item[3] === 'string' && /^__[a-z]+__$/.test(item[3]) && typeof RA_VIEWS[item[3]] === 'function') return RA_VIEWS[item[3]](item, $('ra-view'));
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
     if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
     var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
@@ -2174,7 +2182,10 @@
       approval: ['purchase-orders', 'purchase-requests', 'rfqs'],
       qc: ['qc-inspections', 'packaging-qc', 'production-qc', 'qc-result'],
       stock: ['stock-requirements', 'inventory-batches', '/v1/materials'],
-      expiry: ['rm-batches', 'inventory-batches', 'rm-batch']
+      expiry: ['rm-batches', 'inventory-batches', 'rm-batch'],
+      // Lane produce: the produce / shelf alerts open the screen that resolves them.
+      produce: ['__produce__'], formula: ['__produce__'], coa: ['batch-coas'],
+      putaway: ['__shelftasks__'], pick: ['__shelftasks__']
     }[kind] || [];
     for (var f = 0; f < frags.length; f++) {
       for (var i = 0; i < nav.length; i++) { if (String(nav[i][3]).indexOf(frags[f]) >= 0) return nav[i][0]; }

@@ -525,7 +525,9 @@ export class DashboardService {
       { kind: 'stock', severity: 'med', title: 'Low stock / reorder', count: num(lowStock[0]?.c), sub: 'open stock requirements', for: ['procurement', 'warehouse'] },
       { kind: 'expiry', severity: 'high', title: 'Expiry warnings', count: num(expiring[0]?.c), sub: 'RM batches expiring within 30 days', for: ['warehouse', 'receiving'] },
     ];
-    all.push(...(await this.produceAlerts()));
+    // The produce counts read lane-produce tables (2026-09-29-produce.sql); if the migration has not
+    // reached this database yet, the rest of the bell still answers.
+    all.push(...(await this.produceAlerts().catch(() => [])));
     const alerts = all
       .filter((a) => a.count > 0 && (isOwner || a.for.some((r) => roles.has(r))))
       .map(({ for: _f, ...a }) => a);

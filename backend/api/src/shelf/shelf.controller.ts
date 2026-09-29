@@ -30,6 +30,12 @@ export class ShelfController {
     return this.layout.locations(zone || null);
   }
 
+  @Permissions('location:shelf_task:read')
+  @Get('v1/shelf/bin-stock')
+  binStock(@Query('code') code?: string) {
+    return this.tasks.binStock(code ?? '');
+  }
+
   @Permissions('location:bin_master:read')
   @Get('v1/shelf/resolve')
   resolve(@Query('code') code?: string) {

@@ -68,7 +68,9 @@ afterAll(async () => {
 test('labels: a version is its formula code + version number + status, a formula its code — no name', async () => {
   const labels = await directory.labels({ formulaVersionIds: [versionId, uuidv7()], formulaIds: [formulaId, uuidv7()] });
   assert.deepEqual(labels.versions, [{ formulaVersionId: versionId, formulaId, formulaCode, versionNumber: 3, status: 'APPROVED' }]);
-  assert.deepEqual(labels.formulas, [{ formulaId, formulaCode }]);
+  // Lane produce: a formula also names its current APPROVED version (id + number) — what the
+  // factory's "Produce next" plans a run against; still no name.
+  assert.deepEqual(labels.formulas, [{ formulaId, formulaCode, approvedVersion: { formulaVersionId: versionId, versionNumber: 3 } }]);
   assert.equal(labels.recent, null, 'the recent block only when asked');
   assert.doesNotMatch(JSON.stringify(labels), new RegExp(SECRET_NAME));
 });

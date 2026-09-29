@@ -5,9 +5,9 @@
  *   - same-origin static (manifest/icons) → stale-while-revalidate.
  *   - API calls (the backend origin) → network-only (never cached; data stays live + per-session).
  */
-const CACHE = 'ra-shell-v92'; // v92: merge focus.js (v91 focus) + batch COA/QC spec screens (v91 compliance). v90: UX-H Aria answers via /v1/aria
+const CACHE = 'ra-shell-v93'; // v93: ws-produce.js (Produce next, shelves, labels, live produce alerts). v92: merge focus.js (v91 focus) + batch COA/QC spec screens (v91 compliance). v90: UX-H Aria answers via /v1/aria
 const SHELL = [
-  '/', '/index.html', '/sound.js', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js',
+  '/', '/index.html', '/sound.js', '/shell.js', '/ws-supply.js', '/ws-mfg.js', '/ws-platform.js', '/ws-produce.js',
   '/qrcode.js', '/focus.js', '/manifest.webmanifest', '/ui-contract/aria-panel.js', '/ui-contract/aria-panel.css',
   // UX-D: the RAW welcome, the logo and the one icon set (ALEMBIC release/ui/BRAND_ASSETS.md).
   '/rac-preload.js', '/logo/brand.css',

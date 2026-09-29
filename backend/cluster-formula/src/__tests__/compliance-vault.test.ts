@@ -192,7 +192,9 @@ test('what the main box pulls: numbers + opaque ref + formula id only — never 
   const pulled = (await compliance.certificatesAfter(Math.min(...seqs) - 1, 200)).filter((c) => c.formulaId === f.formulaId);
   assert.equal(pulled.length, 2);
   for (const c of pulled) {
-    assert.deepEqual(Object.keys(c).sort(), ['amendment', 'calculatedAt', 'certificateId', 'formulaId', 'formulaVersionRef', 'kind', 'seq', 'values']);
+    // Lane produce: + the version NUMBER (DOCS-001 prints "formula v3") — still never the version id.
+    assert.deepEqual(Object.keys(c).sort(), ['amendment', 'calculatedAt', 'certificateId', 'formulaId', 'formulaVersionNumber', 'formulaVersionRef', 'kind', 'seq', 'values']);
+    assert.equal(typeof c.formulaVersionNumber, 'number');
     const json = JSON.stringify(c);
     for (const secret of [M.m1, M.m3, f.formulaVersionId, '37.5', '62.5']) assert.ok(!json.includes(secret), `leaked ${secret}`);
   }

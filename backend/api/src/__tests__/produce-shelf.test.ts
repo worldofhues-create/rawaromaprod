@@ -267,6 +267,9 @@ test('move, and sheets in rack walking order', async () => {
 
   const tb = sheet.items[0]!;
   await tasks.completePutaway(tb.shelfTaskId, near.bins[0]!, worker);
+  const onBin = await tasks.binStock(near.bins[0]!.toLowerCase());
+  assert.equal(onBin.bin.label, near.bins[0]);
+  assert.deepEqual(onBin.items.map((i) => [i.finishedGoodBatchId, i.qty]), [[b.fgBatchId, 4]]);
   const moved = await tasks.move({ finishedGoodBatchId: b.fgBatchId, fromBinCode: near.bins[0]!, toBinCode: far.bins[0]!, qty: 1 }, worker);
   assert.equal(moved.task.kind, 'MOVE');
   assert.equal(moved.task.status, 'DONE');

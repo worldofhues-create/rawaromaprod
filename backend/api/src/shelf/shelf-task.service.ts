@@ -542,6 +542,22 @@ export class ShelfTaskService {
 
   /* ── lists, sheets, the shelf display ────────────────────────────────────────────────── */
 
+  /** What is on one bin (scanned or typed code): each FG batch and its quantity. */
+  async binStock(code: string) {
+    const bin = await this.layout.resolve(code);
+    const items = (await this.db.execute(sql`
+      select st.finished_good_batch_id::text as "finishedGoodBatchId", f.batch_number as "batchNo", s.sku_code as sku,
+             s.pack_size as "packSize", st.qty::float as qty, u.uom_code as uom, f.manufacturing_date as "manufacturingDate"
+        from location.fg_bin_stock st
+        join packaging.finished_good_batch_master f on f.finished_good_batch_id = st.finished_good_batch_id
+        left join packaging.product_sku s on s.product_sku_id = f.product_sku_id
+        left join platform.uom_master u on u.uom_id = st.uom_id
+       where st.bin_id = ${bin.binId}::uuid and st.qty > 0
+       order by f.manufacturing_date asc nulls last, st.put_away_dt asc
+    `)) as unknown as Array<Record<string, unknown>>;
+    return { bin, items };
+  }
+
   /** QC-released FG batches not (fully) on a shelf yet — the "ready for put-away" list. */
   async readyForPutaway(limit = 200) {
     const rows = (await this.db.execute(sql`

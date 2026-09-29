@@ -166,8 +166,11 @@
    * (the rows array) + `meta.cursor`, so `api()` already returns the array — reading `.items` off it
    * was always undefined and every list/audit screen rendered empty. */
   function pageItems(page) { return Array.isArray(page) ? page : ((page && page.items) || []); }
-  /** ONLY `/auth/alembic-assertion` and `/me` — the main app box (`MAIN_API`), the one process
-   * that holds `iam.user_master` (see this section's header comment). */
+  /** The main app box (`MAIN_API`): `/auth/alembic-assertion` and `/me` (it holds
+   * `iam.user_master`), and — lane produce, 2026-09-29 — `GET /v1/produce/formula-needs`, the
+   * factory's list of products blocked for want of an approved formula (product code, SKU, how
+   * much is waiting; nothing from the Vault). The browser asks the main box; the Vault box still
+   * never calls it. */
   function mainApi(path, opts) { return callTunnel(mainTunnel, path, opts); }
 
   /* ---------------------------------------------------------------------------------------
@@ -486,7 +489,11 @@
     { id: 'compliance', label: 'Compliance data', icon: 'shield', need: 'vault:rm_compliance:read' },
     { id: 'certificates', label: 'Certificates', icon: 'layers', need: 'vault:rm_compliance:read' },
     { id: 'missing', label: 'Missing data', icon: 'alert', need: 'vault:compliance_calc:read' },
+    // Lane produce (owner requirement 2026-09-29): products the factory cannot make because no
+    // approved formula exists for them — the formulators' and approvers' alert.
+    { id: 'needed', label: 'Formula needed', icon: 'alert', need: 'formula:formula_version:read' },
   ];
+  var formulaNeeded = { count: null };
 
   /* ---- reference shell kit — vanilla port of rac-console.jsx (BrandMark, rail toggle, QuickDock,
    * ExpandSheet markup, usePageEnter), the same markup web/shell.js renders; this console shares
@@ -644,8 +651,9 @@
     var visible = visibleNav();
     var HOT = {}; visible.slice(0, 3).forEach(function (n) { HOT[n.id] = 1; });
     var navButtons = visible.map(function (n) {
+      var badge = n.id === 'needed' && formulaNeeded.count ? h('span', { class: 'chip r', style: 'margin-left:auto', 'aria-label': formulaNeeded.count + ' products need a formula' }, [String(formulaNeeded.count)]) : null;
       return h('button', { type: 'button', class: 'ri' + (n.id === activeView ? ' on' : ''), 'aria-current': n.id === activeView ? 'page' : null,
-         onclick: function () { go(n.id); } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label])]);
+         onclick: function () { go(n.id); } }, [icon(ICONS[n.icon]), h('span', { class: 'nm' }, [n.label]), badge]);
     });
     var rail = h('nav', { class: 'rail', id: 'pv-rail', 'aria-label': 'Vault navigation' }, [
       h('button', { type: 'button', class: 'rail-min', 'aria-label': 'Minimise navigation', onclick: function () { setRail(false); } }, [raw(CI.collapse)]),
@@ -1397,6 +1405,43 @@
     }
   }
 
+  /* ── Formula needed (lane produce): what the factory cannot make yet ───────────────────── */
+  async function screenNeeded() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('needed', content);
+    try {
+      var rows = await mainApi('/v1/produce/formula-needs');
+      formulaNeeded.count = rows.length;
+      var trs = rows.map(function (r) {
+        return h('tr', {}, [td('Product', r.productCode, 'mono'), td('SKUs', (r.skuCodes || []).join(', '), 'mono'),
+          td('Orders waiting', String(r.requirementCount)), td('kg waiting', String(Math.round(Number(r.qtyKg || 0) * 1000) / 1000)),
+          td('Earliest need', r.earliestNeededBy ? String(r.earliestNeededBy).slice(0, 10) : '—'),
+          td('Priority', r.highValue ? 'High value' : '—')]);
+      });
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Formula needed']), h('span', { class: 'n' }, [rows.length + ' product(s)'])]),
+        h('p', { class: 'card-note' }, ['ALEMBIC orders for these products are waiting: the factory tried to plan a run and found no approved formula in the Vault. A formulator seals one, a vault approver approves it (two people), and the product is linked to it — then the factory plans the run with one click.']),
+        rows.length ? simpleTable(['Product', 'SKUs', 'Orders waiting', 'kg waiting', 'Earliest need', 'Priority'], trs)
+          : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing is waiting on a formula'])]),
+      ]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('The formula-needed list didn\'t load', e.message));
+    }
+  }
+  /* Poll it (60 s) for the badge; a new product on the list plays the alert and says so. */
+  async function pollNeeded() {
+    if (!session.token || document.hidden || !hasPerm('formula:formula_version:read')) return;
+    try {
+      var rows = await mainApi('/v1/produce/formula-needs');
+      var before = formulaNeeded.count;
+      formulaNeeded.count = rows.length;
+      if (before !== null && rows.length > before) toast(rows.length + ' product(s) need an approved formula — the factory is waiting', true);
+      // The rail badge shows the new count the next time a screen renders.
+    } catch (e) { /* the main box is optional for this console; try again later */ }
+  }
+  setInterval(pollNeeded, 60000);
+
   /* ---------------------------------------------------------------------------------------
    * 6. bootstrap + route render
    * --------------------------------------------------------------------------------------- */
@@ -1414,6 +1459,8 @@
     if (r.view === 'compliance') return screenCompliance();
     if (r.view === 'certificates') return screenCertificates();
     if (r.view === 'missing') return screenMissing();
+    if (r.view === 'needed') return screenNeeded();
+    if (formulaNeeded.count === null) pollNeeded();
     return screenFormulas();
   }
 

@@ -270,6 +270,10 @@
     { id: 'flags', label: 'Feature flags', icon: 'sliders', need: 'platform:flag:write' },
     { id: 'tenants', label: 'Tenants', icon: 'building' },
     { id: 'providers', label: 'Providers', icon: 'activity' },
+    // Lane produce (owner requirement 2026-09-29): the ALEMBIC bridge's health and counters, and
+    // the pick-to-light connector (device-agnostic HTTP + HMAC, or the built-in simulator).
+    { id: 'bridge', label: 'ALEMBIC bridge', icon: 'activity', need: 'platformops:console:read' },
+    { id: 'picklight', label: 'Pick-to-light', icon: 'panel', need: 'platform:flag:write' },
     { id: 'deploy', label: 'Build', icon: 'tag' },
     { id: 'support', label: 'Login history', icon: 'clipboard' },
     // G4: in-app tutorial. No `need` — screenTutorial() itself decides which lessons (if any)
@@ -683,6 +687,99 @@
       content.innerHTML = ''; content.appendChild(notBuilt('Providers didn\'t load', e.message));
     }
   }
+  /* ── ALEMBIC bridge health (GET /v1/platform/bridge — counts and timestamps only) ─────────── */
+  async function screenBridge() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('bridge', content);
+    if (!hasPerm('platformops:console:read')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Bridge unavailable', 'Your role doesn\'t include this.'));
+      return;
+    }
+    try {
+      var b = await api('/v1/platform/bridge');
+      var tile = function (k, v, tone) { return h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, [k]), h('div', { class: 'v' }, [tone ? h('span', { class: 'chip ' + tone }, [String(v)]) : String(v)])]); };
+      var q = b.queue || {};
+      var pl = b.pickLight;
+      var grid = h('div', { class: 'health-grid' }, [
+        tile('Connector', b.connector.configured ? (b.connector.enabled ? 'on' : 'configured, off') : 'not configured', b.connector.configured && b.connector.enabled ? 'g' : 'r'),
+        tile('Inbound 24 h', b.inbound.last24h + ' (' + b.inbound.applied24h + ' applied)'),
+        tile('Inbound parked', b.inbound.parked, b.inbound.parked ? 'a' : 'g'),
+        tile('Last from ALEMBIC', fmtDt(b.inbound.lastAt)),
+        tile('Outbound waiting', b.outbound.waiting, b.outbound.waiting > 20 ? 'a' : 'g'),
+        tile('Outbound parked', b.outbound.parked, b.outbound.parked ? 'r' : 'g'),
+        tile('Delivered 24 h', b.outbound.delivered24h),
+        tile('Last delivered', fmtDt(b.outbound.lastDeliveredAt)),
+        tile('Open requirements', q.open != null ? q.open : '—'),
+        tile('kg to produce', q.kgToProduce != null ? q.kgToProduce : '—'),
+        tile('Overdue', q.overdue != null ? q.overdue : '—', q.overdue ? 'r' : 'g'),
+        tile('High value', q.highValue != null ? q.highValue : '—', q.highValue ? 'a' : 'g'),
+        tile('Blocked (no formula)', q.blocked != null ? q.blocked : '—', q.blocked ? 'r' : 'g'),
+        tile('Pick-to-light', pl ? pl.mode + (pl.parked ? ' · ' + pl.parked + ' parked' : '') : '—', pl && pl.mode !== 'off' ? 'g' : 'n'),
+      ]);
+      var mix = (b.outbound.byType24h || []).map(function (t) {
+        return h('tr', {}, [h('td', { class: 'mono', 'data-label': 'Event' }, [t.type]), h('td', { 'data-label': 'Sent' }, [String(t.count)]), h('td', { 'data-label': 'Delivered' }, [String(t.delivered)])]);
+      });
+      var reasons = (b.outbound.parkedByReason || []).concat((b.inbound.parkedByReason || []).map(function (r) { return { reason: 'inbound: ' + r.reason, count: r.count }; }));
+      var reqs = (b.requirements || []).map(function (r) { return h('span', { class: 'chip n', style: 'margin-right:6px' }, [r.status + ' ' + r.count]); });
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC bridge']), h('span', { class: 'n' }, ['as of ' + fmtDt(b.at)])]), grid]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Requirements by status'])]), h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm)' }, reqs.length ? reqs : ['None yet'])]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['RawProd → ALEMBIC, last 24 h'])]),
+        mix.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Event']), h('th', {}, ['Sent']), h('th', {}, ['Delivered'])])]), h('tbody', {}, mix)]) : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing sent in 24 h'])])]));
+      if (reasons.length) content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Parked, by reason'])]),
+        h('table', {}, [h('tbody', {}, reasons.map(function (r) { return h('tr', {}, [h('td', { class: 'mono' }, [String(r.reason)]), h('td', {}, [String(r.count)])]); }))])]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Bridge health didn\'t load', e.message));
+    }
+  }
+
+  /* ── pick-to-light connector (in-app: no .env, no redeploy) ─────────────────────────────── */
+  async function screenPickLight() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('picklight', content);
+    if (!hasPerm('platform:flag:write')) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Pick-to-light unavailable', 'Your role doesn\'t include this.'));
+      return;
+    }
+    try {
+      var s = await api('/v1/shelf/pick-light');
+      var mode = h('select', { class: 'fld', style: 'width:100%' }, [
+        h('option', { value: 'off' }, ['Off — record commands only']),
+        h('option', { value: 'simulator' }, ['Simulator — the Shelf display shows lit bins']),
+        h('option', { value: 'http' }, ['Controller — POST signed commands to a URL']),
+      ]);
+      mode.value = s.mode;
+      var url = h('input', { class: 'fld', style: 'width:100%', placeholder: 'https://controller.example/api/light', value: s.controllerUrl || '' });
+      var secret = h('input', { class: 'fld', style: 'width:100%', type: 'password', autocomplete: 'new-password', placeholder: s.hasSecret ? 'set — leave blank to keep' : 'at least 16 characters' });
+      var bin = h('input', { class: 'fld', style: 'width:160px', placeholder: 'bin code (optional)' });
+      var err = h('div', { class: 'err' });
+      var save = h('button', { class: 'btn p', onclick: async function () {
+        err.textContent = '';
+        var body = { mode: mode.value, controllerUrl: url.value.trim() || null };
+        if (secret.value) body.hmacSecret = secret.value;
+        try { await api('/v1/shelf/pick-light/config', { method: 'PUT', body: body }); toast('Saved'); screenPickLight(); }
+        catch (e) { err.textContent = e.message; }
+      } }, ['Save']);
+      var test = h('button', { class: 'btn', onclick: async function () {
+        try { var r = await api('/v1/shelf/pick-light/test', { method: 'POST', body: { binCode: bin.value.trim() || null } }); toast('Test light queued for ' + (r.queued.bin || r.queued.rack)); }
+        catch (e) { toast(e.message, true); }
+      } }, ['Send test light']);
+      var row = function (k, el) { return h('label', { style: 'display:flex;flex-direction:column;gap:5px;margin-bottom:12px' }, [h('span', { style: 'font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)' }, [k]), el]); };
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Pick-to-light']), h('span', { class: 'n' }, [s.pending + ' waiting · ' + s.parked + ' parked · last sent ' + fmtDt(s.lastSentAt)])]),
+        h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm);max-width:560px' }, [
+          h('p', { class: 't-cap' }, ['Every put-away and pick lights its bin (blue = put away, green = pick) and turns it off when done. Each command is POSTed as JSON {task_id, rack, shelf, bin, qty, colour} with X-PickLight-Signature: sha256=<HMAC of the raw body>. Any controller that speaks this can be used; the simulator shows the same commands on the Shelf display.']),
+          row('Mode', mode), row('Controller URL (https)', url), row('Shared secret', secret), err,
+          h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, [save, bin, test]),
+          h('p', { class: 't-cap', style: 'margin-top:10px' }, ['Configured ' + fmtDt(s.configuredAt) + (s.configuredBy ? ' by ' + s.configuredBy : '') + '. The secret is sealed and never shown again.']),
+        ]),
+      ]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Pick-to-light didn\'t load', e.message));
+    }
+  }
+
   async function screenDeploy() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('deploy', content);
@@ -894,6 +991,8 @@
     if (v === 'tutorial') return screenTutorial();
     if (v === 'tenants') return screenTenants();
     if (v === 'providers') return screenProviders();
+    if (v === 'bridge') return screenBridge();
+    if (v === 'picklight') return screenPickLight();
     if (v === 'deploy') return screenDeploy();
     if (v === 'support') return screenSupport();
     return screenHealth();
