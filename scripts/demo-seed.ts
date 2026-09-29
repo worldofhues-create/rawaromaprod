@@ -111,6 +111,7 @@ import { MixingService } from '../backend/cluster-production/src/mixing/mixing.s
 import { WeighingService } from '../backend/cluster-production/src/weighing/weighing.service.js';
 import { PickingService } from '../backend/cluster-production/src/picking/picking.service.js';
 import { BatchService as ProductionBatchService } from '../backend/cluster-production/src/batch/batch.service.js';
+import { CoaService } from '../backend/cluster-production/src/coa/coa.service.js';
 import * as productionSchema from '@ra/data-production';
 
 // ── packaging ────────────────────────────────────────────────────────────────
@@ -479,6 +480,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
     const pickingService = new PickingService(productionDb, staticFormulaPort);
     const weighingService = new WeighingService(productionDb, staticFormulaPort);
     const productionBatchService = new ProductionBatchService(productionDb);
+    const coaService = new CoaService(productionDb);
     const packagingCatalogService = new PackagingCatalogService(packagingDb);
     const packagingOrdersService = new PackagingOrdersService(packagingDb);
     const packagingBatchService = new PackagingBatchService(packagingDb);
@@ -507,7 +509,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
       requirementService, rfqService, poService, gateService, grnService, stockService,
       inventoryService,
       inspectionsService, planningService,
-      mixingService, pickingService, productionBatchService, packagingCatalogService,
+      mixingService, pickingService, productionBatchService, coaService, packagingCatalogService,
       packagingOrdersService, packagingBatchService, reservationService, salesMastersService,
       salesOrdersService, dispatchService, packagingQcService, fgLabelService, weighingService, tutorialService, importerService,
       configAdminService, materialShortageService, quarantineIntakeService,
@@ -629,6 +631,7 @@ interface Ctx {
     mixingService: MixingService;
     pickingService: PickingService;
     productionBatchService: ProductionBatchService;
+    coaService: CoaService;
     packagingCatalogService: PackagingCatalogService;
     packagingOrdersService: PackagingOrdersService;
     packagingBatchService: PackagingBatchService;
@@ -1802,6 +1805,24 @@ async function ensureBridgeProductionAndFactory(
       oilBatchId, observedValue: 0.98, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(75 - i * 2).toISOString(),
     }, users.qc);
     await ctx.svc.productionBatchService.transitionOilBatch(oilBatchId, 'RELEASED', users.qc);
+
+    // Lane produce: QC certification is the gate to labelling and put-away. Record the batch's
+    // certificate-of-analysis results (within the product's spec) and RELEASE it through the
+    // same CoaService the Factory's Batch COA screen uses — which also emits qc.batch.released
+    // (DOCS-001) toward ALEMBIC and QcStatusChanged to the requirement, exactly as live. The
+    // product spec is an upsert and this whole block runs only on the pass that produces the
+    // batch, so a second seed run adds nothing (run twice → identical counts).
+    const productId = ((await ctx.sql`select product_id::text as id from packaging.product_sku where product_sku_id = ${skuId}`)[0] as { id: string }).id;
+    await ctx.svc.coaService.upsertSpec(productId, {
+      sgMin: 0.95, sgMax: 1.05, flashPointMinC: 90, flashPointMaxC: 120, shelfLifeMonths: 36,
+      colourAppearanceStandard: 'Pale yellow, clear liquid', odourStandard: 'Conforms to the standard sample',
+    }, users.qc);
+    const recorded = await ctx.svc.coaService.recordCoa({
+      oilBatchId, productId, sgResult: 0.97 + (i % 5) * 0.005, flashPointResultC: 98 + (i % 7),
+      colourAppearance: 'Pale yellow, clear liquid', colourAppearancePass: true,
+      odourDescription: 'Conforms to the standard sample', odourPass: true, photos: [],
+    }, users.qc);
+    await ctx.svc.coaService.releaseCoa(recorded.coa.batchCoaId, users.qc);
 
     const packageOrder = await ctx.svc.packagingOrdersService.createPackageOrder({
       productSkuId: skuId, oilBatchId, orderQty: Math.floor(orderQty * 0.9), plannedStartDt: ago(60 - i * 2).toISOString(),
