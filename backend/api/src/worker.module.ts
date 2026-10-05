@@ -44,6 +44,7 @@ import { MaterialCatalogueSyncModule } from './vault-bridge/material-catalogue-s
 import { ComplianceCertificateSyncModule } from './vault-bridge/compliance-certificate-sync.module.js';
 import { ShelfModule } from './shelf/shelf.module.js';
 import { ProduceSweepModule } from './produce/produce-sweep.module.js';
+import { RuhWorkerModule } from './ruh/ruh.module.js';
 
 @Module({
   imports: [
@@ -86,6 +87,9 @@ import { ProduceSweepModule } from './produce/produce-sweep.module.js';
     // raises the overdue-requirement alert (and its email) once, even with no console open.
     ShelfModule,
     ProduceSweepModule,
+    // Always-on Ruh (owner rulings 2026-10-06): the watch engine (interval is a Ruh setting; 0 = off)
+    // and the durable C3 queue toward ALEMBIC, retried with backoff until delivered.
+    RuhWorkerModule,
   ],
 })
 export class WorkerModule {}

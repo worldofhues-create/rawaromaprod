@@ -61,6 +61,7 @@ import { AriaBridgeModule } from './aria/aria-bridge.module.js';
 import { ShelfModule } from './shelf/shelf.module.js';
 import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
 import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
+import { RuhModule } from './ruh/ruh.module.js';
 
 @Module({
   imports: [
@@ -105,6 +106,9 @@ import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
     PlatformOpsModule,
     TutorialModule,
     AriaBridgeModule,
+    // Always-on Ruh (owner rulings 2026-10-06): the panel's routes, and the guard interceptor that
+    // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
+    RuhModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up
