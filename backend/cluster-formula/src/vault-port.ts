@@ -50,6 +50,7 @@ import type { FormulaShellsBody } from './formula.dtos.js';
 import type { ShellResult } from './setup/formula-setup.service.js';
 import type { CatalogueUpdate } from './facts-bridge/material-catalogue.js';
 import type { InternalCertificate } from './compliance/compliance.service.js';
+import type { VaultRuhCounts, VaultRuhOverride } from './setup/ruh-vault.service.js';
 
 /** DI token for `VaultPort`. Inject with `@Inject(VAULT_PORT)`. */
 export const VAULT_PORT = Symbol('VAULT_PORT');
@@ -93,6 +94,7 @@ export const VAULT_INTERNAL_PATHS = {
   materialCatalogue: '/internal/vault/material-catalogue',
   complianceCertificates: '/internal/vault/compliance-certificates',
   formulaDirectory: '/internal/vault/formula-directory',
+  ruhSync: '/internal/vault/ruh-sync',
 } as const;
 
 /** Lane vaultsetup: the PUBLIC Vault routes the main box calls AS a service principal (a bearer
@@ -185,6 +187,13 @@ export class VaultApiClient {
       limit,
       cursor: cursor ?? null,
     });
+    return data.result;
+  }
+
+  /** Ruh (owner rulings 2026-10-06): the Vault's overrides after `afterSeq` and its counts (never
+   *  a formula name or content); carries the bulk-approval threshold the Vault applies. */
+  async ruhSync(body: { afterSeq: number; limit: number; bulkApproveMinVersions: number | null }, opts: { timeoutMs?: number } = {}): Promise<{ overrides: VaultRuhOverride[]; counts: VaultRuhCounts }> {
+    const data = await this.post<{ result: { overrides: VaultRuhOverride[]; counts: VaultRuhCounts } }>(VAULT_INTERNAL_PATHS.ruhSync, body, opts.timeoutMs);
     return data.result;
   }
 

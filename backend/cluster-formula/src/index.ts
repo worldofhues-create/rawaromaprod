@@ -45,6 +45,15 @@ export {
 // Owner ruling 2026-09-28: raw-material compliance data + the IFRA/allergen certificate engine
 // (Vault box only), and the certificate shape the main box pulls over the signed channel.
 export { ComplianceService, type InternalCertificate } from './compliance/compliance.service.js';
+// Always-on Ruh on the Vault box: the bulk-approval warning, the override log the main box pulls
+// (counts and the typed reason only), and the Vault's counts for Ruh's insights.
+export {
+  RuhVaultService,
+  RUH_VAULT_BULK_ACTION,
+  type VaultRisk,
+  type VaultRuhCounts,
+  type VaultRuhOverride,
+} from './setup/ruh-vault.service.js';
 export {
   IFRA_CATEGORIES,
   calculateAllergens,

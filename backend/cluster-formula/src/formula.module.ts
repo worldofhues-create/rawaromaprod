@@ -61,6 +61,7 @@ import { ComplianceController } from './compliance/compliance.controller.js';
 import { ComplianceService } from './compliance/compliance.service.js';
 import { FormulaSetupController } from './setup/formula-setup.controller.js';
 import { FormulaSetupService } from './setup/formula-setup.service.js';
+import { RuhVaultService } from './setup/ruh-vault.service.js';
 import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
@@ -149,6 +150,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     FormulaDirectoryService,
     ComplianceService,
     FormulaSetupService,
+    RuhVaultService,
     VaultSecurityAuditSink,
     { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
@@ -163,6 +165,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     SECURITY_AUDIT_SINK,
     FormulaDirectoryService,
     ComplianceService,
+    RuhVaultService,
     ...(VAULT_MODE ? [MaterialCatalogue] : []),
   ],
 })

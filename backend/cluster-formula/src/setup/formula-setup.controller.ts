@@ -15,7 +15,7 @@
  * window the client can stretch.
  */
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { CurrentUser, FreshAuth, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, DomainError, FreshAuth, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { ComplianceService } from '../compliance/compliance.service.js';
 import {
   approveBatchBody,
@@ -26,12 +26,17 @@ import {
   type RecipeImportBody,
 } from '../formula.dtos.js';
 import { FormulaSetupService } from './formula-setup.service.js';
+import { RUH_VAULT_BULK_ACTION, RuhVaultService } from './ruh-vault.service.js';
+
+/** A typed reason to continue past a Ruh warning is at least this long (contract C4). */
+const RUH_REASON_MIN = 8;
 
 @Controller()
 export class FormulaSetupController {
   constructor(
     private readonly setup: FormulaSetupService,
     private readonly compliance: ComplianceService,
+    private readonly ruh: RuhVaultService,
   ) {}
 
   @Permissions('formula:formula_master:write', 'formula:formula_version:write', 'formula:formula_ingredients:write')
@@ -62,12 +67,25 @@ export class FormulaSetupController {
   @FreshAuth()
   @Post('v1/formula-versions/approve-batch')
   async approveBatch(@Body(new ZodValidationPipe(approveBatchBody)) body: ApproveBatchBody, @CurrentUser() principal: AuthPrincipal) {
+    // Ruh (owner rulings 2026-10-06): many at once while the IFRA/allergen calculation shows
+    // warnings → a warning with the risks; with a typed reason it proceeds and the admins are told.
+    // Every existing rule below (author ≠ approver, fresh sign-in, submitted-only) is unchanged.
+    const risks = await this.ruh.bulkApproveRisks(body.versionIds).catch(() => []);
+    const reason = body.ruhOverride?.reason?.trim() ?? '';
+    if (risks.length > 0 && reason.length < RUH_REASON_MIN) {
+      throw new DomainError('RUH_CONFIRM_REQUIRED',
+        reason ? `Type a reason of at least ${RUH_REASON_MIN} characters to continue.` : 'Ruh has a warning about this approval. Read it, then type why you are going ahead.',
+        409, { risks, action: RUH_VAULT_BULK_ACTION, actionLabel: `approve ${body.versionIds.length} recipes at once` });
+    }
     const results = await this.setup.approveMany(body.versionIds, body.remarks, principal);
     // Same as the single approve route: each newly approved formula's certificates are
     // recalculated off the request path (a calculation failure never fails an approval).
     for (const r of results) {
       if (r.approved && r.formulaId) this.compliance.recalculateFormulaInBackground(r.formulaId, 'version_approved', principal.userId);
     }
-    return { results, approved: results.filter((r) => r.approved).length, refused: results.filter((r) => !r.approved).length };
+    const approved = results.filter((r) => r.approved).length;
+    const refused = results.length - approved;
+    if (risks.length > 0) await this.ruh.recordOverride({ principal, action: RUH_VAULT_BULK_ACTION, reason, risks, approved, refused });
+    return { results, approved, refused };
   }
 }

@@ -27,6 +27,10 @@
  *   POST /internal/vault/formula-directory — the formula list (code, status, approved/latest
  *        version number) for the main box's Formula dropdown and product -> formula link (lane
  *        vaultsetup). Never a formula name, never content.
+ *   POST /internal/vault/ruh-sync — Ruh (owner rulings 2026-10-06): the overrides of Ruh warnings
+ *        made on this box after a cursor (action, actor id, the typed reason, the risks in numbers),
+ *        the Vault's counts (recipes awaiting approval, recipes needed, incomplete calculations), and
+ *        it stores the bulk-approval threshold the main box sends. Never a formula name or content.
  *   POST /internal/vault/material-catalogue — the main box PUSHES the material id/code/name
  *        catalogue the Vault console's picker searches (a digest probe, or one part of a full
  *        replacement — facts-bridge/material-catalogue.ts). The Vault never calls the main box.
@@ -54,6 +58,7 @@ import {
   FormulaDirectoryService,
   MATERIAL_CATALOGUE_PART_SIZE,
   MaterialCatalogue,
+  RuhVaultService,
   type AccessAuditPage,
   type CodedInstruction,
   type CodedMaterialLine,
@@ -63,6 +68,8 @@ import {
   type FormulaLookup,
   type InternalCertificate,
   type ReadContext,
+  type VaultRuhCounts,
+  type VaultRuhOverride,
 } from '@ra/cluster-formula';
 
 const readContext = z.object({
@@ -120,6 +127,12 @@ const formulaDirectoryBody = z
   })
   .strict();
 
+const ruhSyncBody = z.object({
+  afterSeq: z.number().int().min(0),
+  limit: z.number().int().min(1).max(200),
+  bulkApproveMinVersions: z.number().int().min(1).max(200).nullable(),
+}).strict();
+
 const complianceCertificatesBody = z.object({
   afterSeq: z.number().int().min(0),
   limit: z.number().int().min(1).max(200),
@@ -154,7 +167,16 @@ export class VaultPortInternalController {
     @Inject(FormulaDirectoryService) private readonly directory: FormulaDirectoryService,
     @Inject(MaterialCatalogue) private readonly catalogue: MaterialCatalogue,
     @Inject(ComplianceService) private readonly compliance: ComplianceService,
+    @Inject(RuhVaultService) private readonly ruh: RuhVaultService,
   ) {}
+
+  /** Ruh: overrides after a cursor + the Vault's counts (never a formula name or content). */
+  @Post('ruh-sync')
+  async ruhSync(
+    @Body(new ZodValidationPipe(ruhSyncBody)) body: z.infer<typeof ruhSyncBody>,
+  ): Promise<{ result: { overrides: VaultRuhOverride[]; counts: VaultRuhCounts } }> {
+    return { result: await this.ruh.sync(body) };
+  }
 
   @Post('compliance-certificates')
   async complianceCertificates(

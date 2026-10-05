@@ -201,6 +201,9 @@ export const approveBatchBody = z
   .object({
     versionIds: z.array(z.string().uuid()).min(1).max(200),
     remarks: z.string().max(2000).optional(),
+    // Always-on Ruh (owner rulings 2026-10-06): the typed reason to continue past a Ruh warning.
+    // A warning never blocks; the reason is kept and the admins are alerted.
+    ruhOverride: z.object({ reason: z.string().trim().max(1000) }).strict().optional(),
   })
   .strict();
 export type ApproveBatchBody = z.infer<typeof approveBatchBody>;
