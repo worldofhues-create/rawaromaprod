@@ -496,6 +496,9 @@
     if (st.nav === 'shelfdisplay') loadView();
   }
 
+  // Factory setup (ws-setup.js) offers the same bin QR labels right after a rack layout is built.
+  window.RA.printBinLabels = printBinLabels;
+
   window.RA.registerViews({
     __produce__: viewProduce,
     __shelftasks__: viewShelfTasks,
