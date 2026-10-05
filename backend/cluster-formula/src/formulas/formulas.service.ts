@@ -19,7 +19,7 @@ import { type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { MASTERDATA_LOOKUP, type MasterdataLookup, type MaterialRef } from '@ra/cluster-masterdata';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from '../formula.tokens.js';
-import { KMS_PORT, type KmsPort } from '../crypto/kms.port.js';
+import { KMS_PORT, type KmsPort, type WrappedKey } from '../crypto/kms.port.js';
 import { seal } from '../crypto/vault-crypto.js';
 import { VaultService } from '../vault.service.js';
 import type {
@@ -43,7 +43,7 @@ const {
 } = formulaSchema;
 
 /** The drizzle transaction handle for this cluster's schema (for the in-tx locked checks). */
-type Tx = Parameters<Parameters<FormulaDb['transaction']>[0]>[0];
+export type Tx = Parameters<Parameters<FormulaDb['transaction']>[0]>[0];
 
 export interface Page<T> {
   items: T[];
@@ -99,45 +99,61 @@ export class FormulasService {
     const formulaVaultId = uuidv7();
     const { wrapped } = await this.kms.generateDek({ formulaId, vaultId: formulaVaultId });
 
-    return this.db.transaction(async (tx) => {
-      const formula = (
-        await tx
-          .insert(formulaMaster)
-          .values({
-            formulaId,
-            formulaTypeId: body.formulaTypeId ?? null,
-            formulaCode: body.formulaCode,
-            formulaName: body.formulaName,
-            formulaOwnerUserId: body.formulaOwnerUserId ?? principal.userId,
-            currentVersionId: null,
-            status: 'ACTIVE',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0];
-      if (!formula) throw new Error('insert failed: formula_master');
+    return this.db.transaction((tx) => this.createFormulaTx(tx, body, principal, { formulaId, formulaVaultId }, wrapped));
+  }
 
-      await tx.insert(formulaVault).values({
-        formulaVaultId,
-        formulaId,
-        encryptionKeyRef: this.kms.keyRef,
-        vaultLocation: JSON.stringify(wrapped),
-        status: 'ACTIVE',
-        createdBy: principal.userId,
-        updatedBy: principal.userId,
-      });
+  /**
+   * The in-transaction half of `createFormula`: the FORMULA_MASTER row, its FORMULA_VAULT row
+   * (the already-wrapped DEK — generate it with `kms.generateDek({formulaId, vaultId})` BEFORE
+   * opening the transaction, so the KMS encryption context is bound to these exact ids) and the
+   * audit row. Lane vaultsetup's shell step calls it inside its own, larger transaction (formula +
+   * version + product link commit together or not at all).
+   */
+  async createFormulaTx(
+    tx: Tx,
+    body: CreateFormula,
+    principal: AuthPrincipal,
+    ids: { formulaId: string; formulaVaultId: string },
+    wrapped: WrappedKey,
+  ) {
+    const { formulaId, formulaVaultId } = ids;
+    const formula = (
+      await tx
+        .insert(formulaMaster)
+        .values({
+          formulaId,
+          formulaTypeId: body.formulaTypeId ?? null,
+          formulaCode: body.formulaCode,
+          formulaName: body.formulaName,
+          formulaOwnerUserId: body.formulaOwnerUserId ?? principal.userId,
+          currentVersionId: null,
+          status: 'ACTIVE',
+          createdBy: principal.userId,
+          updatedBy: principal.userId,
+        })
+        .returning()
+    )[0];
+    if (!formula) throw new Error('insert failed: formula_master');
 
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.created',
-        entityType: 'formula_master',
-        entityId: formulaId,
-      });
-
-      // Return the master only — the vault row (key material) never leaves the cluster.
-      return formula;
+    await tx.insert(formulaVault).values({
+      formulaVaultId,
+      formulaId,
+      encryptionKeyRef: this.kms.keyRef,
+      vaultLocation: JSON.stringify(wrapped),
+      status: 'ACTIVE',
+      createdBy: principal.userId,
+      updatedBy: principal.userId,
     });
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.created',
+      entityType: 'formula_master',
+      entityId: formulaId,
+    });
+
+    // Return the master only — the vault row (key material) never leaves the cluster.
+    return formula;
   }
 
   async listFormulas(query: ListQuery): Promise<Page<typeof formulaMaster.$inferSelect>> {
@@ -162,31 +178,34 @@ export class FormulasService {
    * reason (the demo's factory phase references this version's id from production orders
    * without ever querying `vault_demo`). Never reachable via the Zod-validated HTTP DTO. */
   async createVersion(body: CreateVersion, principal: AuthPrincipal, overrideVersionId?: string) {
-    return this.db.transaction(async (tx) => {
-      const versionId = overrideVersionId ?? uuidv7();
-      const row = (
-        await tx
-          .insert(formulaVersion)
-          .values({
-            formulaVersionId: versionId,
-            formulaId: body.formulaId,
-            versionNumber: body.versionNumber,
-            status: 'DRAFT',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0];
-      if (!row) throw new Error('insert failed: formula_version');
+    return this.db.transaction((tx) => this.createVersionTx(tx, body, principal, overrideVersionId));
+  }
 
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.version.created',
-        entityType: 'formula_version',
-        entityId: versionId,
-      });
-      return row;
+  /** The in-transaction half of `createVersion` (a DRAFT version + its audit row). */
+  async createVersionTx(tx: Tx, body: CreateVersion, principal: AuthPrincipal, overrideVersionId?: string) {
+    const versionId = overrideVersionId ?? uuidv7();
+    const row = (
+      await tx
+        .insert(formulaVersion)
+        .values({
+          formulaVersionId: versionId,
+          formulaId: body.formulaId,
+          versionNumber: body.versionNumber,
+          status: 'DRAFT',
+          createdBy: principal.userId,
+          updatedBy: principal.userId,
+        })
+        .returning()
+    )[0];
+    if (!row) throw new Error('insert failed: formula_version');
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.version.created',
+      entityType: 'formula_version',
+      entityId: versionId,
     });
+    return row;
   }
 
   async listVersions(query: ListQuery): Promise<Page<typeof formulaVersion.$inferSelect>> {
@@ -234,48 +253,63 @@ export class FormulasService {
 
   /** POST /v1/formula-versions/:id/ingredients — seal each ingredient under the formula DEK. */
   async addIngredients(versionId: string, body: AddIngredients, principal: AuthPrincipal) {
-    return this.db.transaction(async (tx) => {
-      const version = await this.lockDraftVersionTx(tx, versionId);
-      const dek = await this.vault.getDekForFormula(version.formulaId, tx);
+    return this.db.transaction((tx) => this.sealIngredientsTx(tx, versionId, body.ingredients, principal));
+  }
 
-      const values = body.ingredients.map((ing) => {
-        const sealed = seal({ materialId: ing.materialId, percentage: ing.percentage }, dek);
-        return {
-          formulaIngredientsId: uuidv7(),
-          formulaVersionId: versionId,
-          encPayload: sealed.encPayload,
-          encIv: sealed.encIv,
-          encTag: sealed.encTag,
-          sequenceNo: ing.sequenceNo ?? null,
-          status: 'ACTIVE',
-          createdBy: principal.userId,
-          updatedBy: principal.userId,
-        };
-      });
-      await tx.insert(formulaIngredients).values(values);
+  /**
+   * The in-transaction half of `addIngredients`: re-locks the version (DRAFT only, FOR UPDATE),
+   * seals every ingredient under the formula's DEK, and records the event + audit rows. Each
+   * sealed row's `created_by` is the sealing principal — ApprovalsService.approveVersion reads it
+   * to refuse an approval by anyone who supplied recipe content (lane vaultsetup).
+   * `remarks` overrides the event-history line (default "N ingredient(s) sealed").
+   */
+  async sealIngredientsTx(
+    tx: Tx,
+    versionId: string,
+    ingredients: AddIngredients['ingredients'],
+    principal: AuthPrincipal,
+    opts: { remarks?: string; eventType?: string } = {},
+  ) {
+    const version = await this.lockDraftVersionTx(tx, versionId);
+    const dek = await this.vault.getDekForFormula(version.formulaId, tx);
 
-      await tx.insert(formulaEventHist).values({
-        formulaEventHistId: uuidv7(),
-        formulaId: version.formulaId,
+    const values = ingredients.map((ing) => {
+      const sealed = seal({ materialId: ing.materialId, percentage: ing.percentage }, dek);
+      return {
+        formulaIngredientsId: uuidv7(),
         formulaVersionId: versionId,
-        eventType: 'INGREDIENTS_SEALED',
-        eventDt: new Date(),
-        performedBy: principal.userId,
-        remarks: `${values.length} ingredient(s) sealed`,
+        encPayload: sealed.encPayload,
+        encIv: sealed.encIv,
+        encTag: sealed.encTag,
+        sequenceNo: ing.sequenceNo ?? null,
         status: 'ACTIVE',
         createdBy: principal.userId,
         updatedBy: principal.userId,
-      });
-
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.ingredients.sealed',
-        entityType: 'formula_version',
-        entityId: versionId,
-      });
-
-      return { sealed: values.length };
+      };
     });
+    await tx.insert(formulaIngredients).values(values);
+
+    await tx.insert(formulaEventHist).values({
+      formulaEventHistId: uuidv7(),
+      formulaId: version.formulaId,
+      formulaVersionId: versionId,
+      eventType: opts.eventType ?? 'INGREDIENTS_SEALED',
+      eventDt: new Date(),
+      performedBy: principal.userId,
+      remarks: opts.remarks ?? `${values.length} ingredient(s) sealed`,
+      status: 'ACTIVE',
+      createdBy: principal.userId,
+      updatedBy: principal.userId,
+    });
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.ingredients.sealed',
+      entityType: 'formula_version',
+      entityId: versionId,
+    });
+
+    return { sealed: values.length };
   }
 
   /** Structure-only listing — ids + sequence, never ciphertext. */
@@ -351,34 +385,37 @@ export class FormulasService {
   /* ── stages + sealed stage ingredients ───────────────────────────── */
 
   async createStage(body: CreateStage, principal: AuthPrincipal) {
-    return this.db.transaction(async (tx) => {
-      await this.lockDraftVersionTx(tx, body.formulaVersionId);
-      const stageId = uuidv7();
-      const row = (
-        await tx
-          .insert(formulaStageMaster)
-          .values({
-            formulaStageId: stageId,
-            formulaVersionId: body.formulaVersionId,
-            stageName: body.stageName,
-            sequenceNo: body.sequenceNo ?? null,
-            stageInstructions: body.stageInstructions ?? null,
-            status: 'ACTIVE',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0];
-      if (!row) throw new Error('insert failed: formula_stage_master');
+    return this.db.transaction((tx) => this.createStageTx(tx, body, principal));
+  }
 
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.stage.created',
-        entityType: 'formula_stage',
-        entityId: stageId,
-      });
-      return row;
+  /** The in-transaction half of `createStage` (DRAFT versions only). */
+  async createStageTx(tx: Tx, body: CreateStage, principal: AuthPrincipal) {
+    await this.lockDraftVersionTx(tx, body.formulaVersionId);
+    const stageId = uuidv7();
+    const row = (
+      await tx
+        .insert(formulaStageMaster)
+        .values({
+          formulaStageId: stageId,
+          formulaVersionId: body.formulaVersionId,
+          stageName: body.stageName,
+          sequenceNo: body.sequenceNo ?? null,
+          stageInstructions: body.stageInstructions ?? null,
+          status: 'ACTIVE',
+          createdBy: principal.userId,
+          updatedBy: principal.userId,
+        })
+        .returning()
+    )[0];
+    if (!row) throw new Error('insert failed: formula_stage_master');
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.stage.created',
+      entityType: 'formula_stage',
+      entityId: stageId,
     });
+    return row;
   }
 
   async listStages(versionId: string) {
@@ -391,43 +428,51 @@ export class FormulasService {
 
   /** POST /v1/formula-stages/:id/ingredients — seal each stage ingredient under the DEK. */
   async addStageIngredients(stageId: string, body: AddStageIngredients, principal: AuthPrincipal) {
-    return this.db.transaction(async (tx) => {
-      const stage = (
-        await tx
-          .select()
-          .from(formulaStageMaster)
-          .where(eq(formulaStageMaster.formulaStageId, stageId))
-          .limit(1)
-      )[0];
-      if (!stage) throw new NotFoundException(`formula_stage not found: ${stageId}`);
-      const version = await this.lockDraftVersionTx(tx, stage.formulaVersionId!);
-      const dek = await this.vault.getDekForFormula(version.formulaId, tx);
+    return this.db.transaction((tx) => this.sealStageIngredientsTx(tx, stageId, body.ingredients, principal));
+  }
 
-      const values = body.ingredients.map((ing) => {
-        const sealed = seal({ materialId: ing.materialId, percentage: ing.percentage }, dek);
-        return {
-          formulaStageIngredientsId: uuidv7(),
-          formulaStageId: stageId,
-          encPayload: sealed.encPayload,
-          encIv: sealed.encIv,
-          encTag: sealed.encTag,
-          sequenceNo: ing.sequenceNo ?? null,
-          status: 'ACTIVE',
-          createdBy: principal.userId,
-          updatedBy: principal.userId,
-        };
-      });
-      await tx.insert(formulaStageIngredients).values(values);
+  /** The in-transaction half of `addStageIngredients` (the stage's version must be DRAFT). */
+  async sealStageIngredientsTx(
+    tx: Tx,
+    stageId: string,
+    ingredients: AddStageIngredients['ingredients'],
+    principal: AuthPrincipal,
+  ) {
+    const stage = (
+      await tx
+        .select()
+        .from(formulaStageMaster)
+        .where(eq(formulaStageMaster.formulaStageId, stageId))
+        .limit(1)
+    )[0];
+    if (!stage) throw new NotFoundException(`formula_stage not found: ${stageId}`);
+    const version = await this.lockDraftVersionTx(tx, stage.formulaVersionId!);
+    const dek = await this.vault.getDekForFormula(version.formulaId, tx);
 
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.stage_ingredients.sealed',
-        entityType: 'formula_stage',
-        entityId: stageId,
-      });
-
-      return { sealed: values.length };
+    const values = ingredients.map((ing) => {
+      const sealed = seal({ materialId: ing.materialId, percentage: ing.percentage }, dek);
+      return {
+        formulaStageIngredientsId: uuidv7(),
+        formulaStageId: stageId,
+        encPayload: sealed.encPayload,
+        encIv: sealed.encIv,
+        encTag: sealed.encTag,
+        sequenceNo: ing.sequenceNo ?? null,
+        status: 'ACTIVE',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      };
     });
+    await tx.insert(formulaStageIngredients).values(values);
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.stage_ingredients.sealed',
+      entityType: 'formula_stage',
+      entityId: stageId,
+    });
+
+    return { sealed: values.length };
   }
 
   /* ── owner read: the actual (decrypted) recipe ───────────────────── */

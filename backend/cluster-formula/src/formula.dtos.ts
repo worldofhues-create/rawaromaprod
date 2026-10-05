@@ -153,3 +153,54 @@ export const decideCopyRequest = z.object({
   copyNotes: z.string().optional(),
 });
 export type DecideCopyRequest = z.infer<typeof decideCopyRequest>;
+
+/* ── formula setup (lane vaultsetup, owner decisions 2026-10-05) ───────────────────────── */
+
+/** How the factory catalogue classified a product (setup/formula-setup.service.ts). */
+export const SHELL_KINDS = ['single_chemical', 'blend'] as const;
+export type ShellKind = (typeof SHELL_KINDS)[number];
+
+/** POST /v1/formula-shells — one shell (formula + DRAFT v1) per product that has no formula yet.
+ *  Sent by the main box as the Ruh service principal; any formulator may call it too. */
+export const formulaShellsBody = z
+  .object({
+    products: z
+      .array(
+        z
+          .object({
+            productId: z.string().uuid(),
+            productCode: z.string().trim().min(1).max(50),
+            productName: z.string().trim().max(200).nullable().optional(),
+            kind: z.enum(SHELL_KINDS),
+            /** single_chemical only: the product's own material (masterdata.material id). */
+            materialId: z.string().uuid().nullable().optional(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(200),
+  })
+  .strict();
+export type FormulaShellsBody = z.infer<typeof formulaShellsBody>;
+
+/** POST /v1/formula-recipes/import — `commit: false` previews (parse + match + checks, nothing
+ *  written); `commit: true` seals every recipe in ONE transaction, or nothing when any line or
+ *  recipe has a blocking problem. `submit` (default true) sends each sealed version for review. */
+export const recipeImportBody = z
+  .object({
+    csv: z.string().min(1).max(2_000_000),
+    commit: z.boolean().default(false),
+    submit: z.boolean().default(true),
+  })
+  .strict();
+export type RecipeImportBody = z.infer<typeof recipeImportBody>;
+
+/** POST /v1/formula-versions/approve-batch — one fresh sign-in, many approvals, each its own
+ *  transaction and its own audit row (setup/formula-setup.service.ts approveMany). */
+export const approveBatchBody = z
+  .object({
+    versionIds: z.array(z.string().uuid()).min(1).max(200),
+    remarks: z.string().max(2000).optional(),
+  })
+  .strict();
+export type ApproveBatchBody = z.infer<typeof approveBatchBody>;

@@ -1,7 +1,9 @@
 /**
  * Minimal RFC-4180 CSV reader for the Vault's compliance-data imports: comma-separated, optional
  * double-quoted fields ("" escapes a quote), CRLF or LF, first row = header (case-insensitive,
- * trimmed, spaces → underscores). Pure; no dependency.
+ * trimmed, spaces → underscores). Pure; no dependency. `delimiter` (default ',') lets the recipe
+ * import (setup/recipe-csv.ts) read the tab-separated text a spreadsheet copy produces, and
+ * semicolon-separated exports, with the same quoting rules.
  */
 export interface CsvTable {
   readonly header: string[];
@@ -11,7 +13,7 @@ export interface CsvTable {
 
 export const MAX_IMPORT_ROWS = 5000;
 
-export function parseCsv(text: string): CsvTable {
+export function parseCsv(text: string, delimiter: ',' | '\t' | ';' = ','): CsvTable {
   const records: { line: number; fields: string[] }[] = [];
   let field = '';
   let fields: string[] = [];
@@ -31,7 +33,7 @@ export function parseCsv(text: string): CsvTable {
       continue;
     }
     if (c === '"') inQuotes = true;
-    else if (c === ',') { fields.push(field); field = ''; }
+    else if (c === delimiter) { fields.push(field); field = ''; }
     else if (c === '\r') continue;
     else if (c === '\n') {
       fields.push(field); records.push({ line: recordLine, fields }); fields = []; field = '';

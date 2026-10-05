@@ -30,13 +30,13 @@
  * Everything mutating runs in one transaction so the outbox event commits iff its cause did.
  */
 import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from '../formula.tokens.js';
 import { formulaEvents } from '../formula.events.js';
 import { VaultService } from '../vault.service.js';
-import { paginate, type Page } from '../formulas/formulas.service.js';
+import { paginate, type Page, type Tx } from '../formulas/formulas.service.js';
 import type {
   ApproveVersion,
   CreateCopyRequest,
@@ -47,8 +47,17 @@ import type {
   SubmitForReview,
 } from '../formula.dtos.js';
 
-const { formulaVersion, formulaMaster, formulaApproval, formulaCopyRequest, formulaEventHist, outbox } =
-  formulaSchema;
+const {
+  formulaVersion,
+  formulaMaster,
+  formulaApproval,
+  formulaCopyRequest,
+  formulaEventHist,
+  formulaIngredients,
+  formulaStageMaster,
+  formulaStageIngredients,
+  outbox,
+} = formulaSchema;
 
 /** §109.8 — statuses a version can still be DECIDED from (approve/reject/submit-for-review).
  * Anything else (APPROVED/LOCKED/SUPERSEDED/REJECTED/ARCHIVED) is already decided/terminal. */
@@ -98,6 +107,25 @@ export class ApprovalsService {
         });
         throw new ForbiddenException(
           'segregation of duties: the author of this formula version cannot approve it (§108)',
+        );
+      }
+      // Lane vaultsetup (owner decision 2026-10-05, "Ruh drafts, one person approves"): a version
+      // can now be AUTHORED by one principal (the Ruh service account drafts every product's
+      // shell) while its recipe is SEALED by another (the formulator who uploads it). §108's
+      // intent is that whoever put the recipe there is not the one who approves it, so anyone
+      // who sealed an ingredient or a stage ingredient on this version is refused exactly like
+      // its author. Read under the version's row lock: sealing needs the same lock (DRAFT only).
+      if (await this.sealedBy(tx, versionId, principal.userId)) {
+        await this.vault.writeStandaloneAudit({
+          actorId: principal.userId,
+          action: 'formula.version.approve.self_refused',
+          entityType: 'formula_version',
+          entityId: versionId,
+          reason: 'approver sealed recipe content on this version',
+          result: 'refuse',
+        });
+        throw new ForbiddenException(
+          'segregation of duties: you sealed ingredients on this formula version, so someone else must approve it (§108)',
         );
       }
 
@@ -315,54 +343,75 @@ export class ApprovalsService {
    * forced through it.
    */
   async submitForReview(versionId: string, body: SubmitForReview, principal: AuthPrincipal) {
-    return this.db.transaction(async (tx) => {
-      const version = (
-        await tx
-          .select()
-          .from(formulaVersion)
-          .where(eq(formulaVersion.formulaVersionId, versionId))
-          .for('update')
-          .limit(1)
-      )[0];
-      if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
-      if (version.status !== 'DRAFT' && version.status !== 'VERSIONED') {
-        throw new ConflictException(
-          `formula_version cannot be submitted for review from status=${version.status}: ${versionId}`,
-        );
-      }
+    return this.db.transaction((tx) => this.submitForReviewTx(tx, versionId, body, principal));
+  }
 
-      const now = new Date();
-      const updated = (
-        await tx
-          .update(formulaVersion)
-          .set({ status: 'REVIEW', submittedBy: principal.userId, submittedDt: now, updatedBy: principal.userId })
-          .where(eq(formulaVersion.formulaVersionId, versionId))
-          .returning()
-      )[0];
-      if (!updated) throw new Error('update failed: formula_version');
+  /** The in-transaction half of `submitForReview` (lane vaultsetup's shell and recipe-import
+   *  steps submit inside their own transaction). */
+  async submitForReviewTx(tx: Tx, versionId: string, body: SubmitForReview, principal: AuthPrincipal) {
+    const version = (
+      await tx
+        .select()
+        .from(formulaVersion)
+        .where(eq(formulaVersion.formulaVersionId, versionId))
+        .for('update')
+        .limit(1)
+    )[0];
+    if (!version) throw new NotFoundException(`formula_version not found: ${versionId}`);
+    if (version.status !== 'DRAFT' && version.status !== 'VERSIONED') {
+      throw new ConflictException(
+        `formula_version cannot be submitted for review from status=${version.status}: ${versionId}`,
+      );
+    }
 
-      await tx.insert(formulaEventHist).values({
-        formulaEventHistId: uuidv7(),
-        formulaId: version.formulaId,
-        formulaVersionId: versionId,
-        eventType: 'VERSION_SUBMITTED_FOR_REVIEW',
-        eventDt: now,
-        performedBy: principal.userId,
-        remarks: body.remarks ?? null,
-        status: 'ACTIVE',
-        createdBy: principal.userId,
-        updatedBy: principal.userId,
-      });
+    const now = new Date();
+    const updated = (
+      await tx
+        .update(formulaVersion)
+        .set({ status: 'REVIEW', submittedBy: principal.userId, submittedDt: now, updatedBy: principal.userId })
+        .where(eq(formulaVersion.formulaVersionId, versionId))
+        .returning()
+    )[0];
+    if (!updated) throw new Error('update failed: formula_version');
 
-      await this.vault.writeAudit(tx, {
-        actorId: principal.userId,
-        action: 'formula.version.submitted_for_review',
-        entityType: 'formula_version',
-        entityId: versionId,
-      });
-
-      return updated;
+    await tx.insert(formulaEventHist).values({
+      formulaEventHistId: uuidv7(),
+      formulaId: version.formulaId,
+      formulaVersionId: versionId,
+      eventType: 'VERSION_SUBMITTED_FOR_REVIEW',
+      eventDt: now,
+      performedBy: principal.userId,
+      remarks: body.remarks ?? null,
+      status: 'ACTIVE',
+      createdBy: principal.userId,
+      updatedBy: principal.userId,
     });
+
+    await this.vault.writeAudit(tx, {
+      actorId: principal.userId,
+      action: 'formula.version.submitted_for_review',
+      entityType: 'formula_version',
+      entityId: versionId,
+    });
+
+    return updated;
+  }
+
+  /** True when `userId` sealed any ingredient or stage ingredient on this version. */
+  private async sealedBy(tx: Tx, versionId: string, userId: string): Promise<boolean> {
+    const own = await tx
+      .select({ id: formulaIngredients.formulaIngredientsId })
+      .from(formulaIngredients)
+      .where(and(eq(formulaIngredients.formulaVersionId, versionId), eq(formulaIngredients.createdBy, userId)))
+      .limit(1);
+    if (own.length > 0) return true;
+    const staged = await tx
+      .select({ id: formulaStageIngredients.formulaStageIngredientsId })
+      .from(formulaStageIngredients)
+      .innerJoin(formulaStageMaster, eq(formulaStageMaster.formulaStageId, formulaStageIngredients.formulaStageId))
+      .where(and(eq(formulaStageMaster.formulaVersionId, versionId), eq(formulaStageIngredients.createdBy, userId)))
+      .limit(1);
+    return staged.length > 0;
   }
 
   /**

@@ -24,6 +24,9 @@
  *        cursor (the certificate `seq`), oldest first: kind, amendment, the calculated numbers, the
  *        opaque formula version ref, and the formula id the main box maps to its products. Never an
  *        ingredient, a material, a percentage or a formula version id (owner ruling 2026-09-28).
+ *   POST /internal/vault/formula-directory — the formula list (code, status, approved/latest
+ *        version number) for the main box's Formula dropdown and product -> formula link (lane
+ *        vaultsetup). Never a formula name, never content.
  *   POST /internal/vault/material-catalogue — the main box PUSHES the material id/code/name
  *        catalogue the Vault console's picker searches (a digest probe, or one part of a full
  *        replacement — facts-bridge/material-catalogue.ts). The Vault never calls the main box.
@@ -55,6 +58,7 @@ import {
   type CodedInstruction,
   type CodedMaterialLine,
   type CodedPickLine,
+  type FormulaDirectoryPage,
   type FormulaLabels,
   type FormulaLookup,
   type InternalCertificate,
@@ -108,6 +112,13 @@ const accessAuditBody = z.object({
   limit: z.number().int().min(1).max(500),
   cursor: z.string().regex(/^\d{1,9}$/).nullable().optional(),
 });
+
+const formulaDirectoryBody = z
+  .object({
+    limit: z.number().int().min(1).max(500),
+    cursor: z.string().regex(/^\d{1,9}$/).nullable().optional(),
+  })
+  .strict();
 
 const complianceCertificatesBody = z.object({
   afterSeq: z.number().int().min(0),
@@ -198,6 +209,13 @@ export class VaultPortInternalController {
     @Body(new ZodValidationPipe(formulaLabelsBody)) body: z.infer<typeof formulaLabelsBody>,
   ): Promise<{ result: FormulaLabels }> {
     return { result: await this.directory.labels(body) };
+  }
+
+  @Post('formula-directory')
+  async formulaDirectory(
+    @Body(new ZodValidationPipe(formulaDirectoryBody)) body: z.infer<typeof formulaDirectoryBody>,
+  ): Promise<{ result: FormulaDirectoryPage }> {
+    return { result: await this.directory.directory(body.limit, body.cursor) };
   }
 
   @Post('access-audit')
