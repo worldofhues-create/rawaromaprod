@@ -1550,7 +1550,7 @@
 
   function recipeUploadCard() {
     var file = h('input', { type: 'file', accept: '.csv,.tsv,.txt,text/csv,text/plain' });
-    var text = h('textarea', { class: 'fld', rows: '8', style: 'width:100%;font-family:var(--font-mono)', placeholder: 'product_code,material_code,percentage\nOUD-01,RM-001,12.5\n,RM-014,87.5' });
+    var text = h('textarea', { class: 'fld', rows: '8', style: 'width:100%;box-sizing:border-box;min-height:150px;margin-top:8px;font-family:var(--font-mono)', placeholder: 'product_code,material_code,percentage\nOUD-01,RM-001,12.5\n,RM-014,87.5' });
     file.addEventListener('change', function () {
       var f = file.files && file.files[0]; if (!f) return;
       var rd = new FileReader(); rd.onload = function () { text.value = String(rd.result || ''); }; rd.readAsText(f);
