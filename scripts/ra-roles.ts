@@ -372,6 +372,9 @@ export const ROLES: RoleDef[] = [
         'production:product_qc_spec:read',
         'production:batch_coa:read',
       ),
+      // Lane vaultsetup (owner decisions 2026-10-05): production links products to their Vault
+      // formulas and drafts the formula shells (as Ruh) — never the formula content itself.
+      oneOf('packaging:product_formula_link:read', 'packaging:product_formula_link:write'),
       oneOf(
         'quality:qc_capa:read',
         'quality:qc_inspections:read',
