@@ -53,6 +53,12 @@ function draft(over: Partial<InsightDraft> & { dedupeKey: string }): InsightDraf
 const open = async (key: string) => (await testClient()`select * from platform.ruh_insight where dedupe_key = ${key} order by created_at`) as Array<Record<string, unknown>>;
 const queued = async (key: string) => (await testClient()`select op, payload from bridge.ruh_signal where dedupe_key = ${key} and delivered_at is null order by seq`) as Array<{ op: string; payload: C3Signal | null }>;
 const KINDS = ['production.late', 'qc.coa_missing', 'shelf.tasks_overdue'];
+/** A full list (no `since`): never the "unchanged" short answer. */
+async function full(p: Parameters<RuhInsightsService['list']>[0], o: Parameters<RuhInsightsService['list']>[1] = {}) {
+  const r = await store.list(p, o);
+  assert.ok(!r.unchanged);
+  return r;
+}
 
 before(async () => {
   await ensureSchema();
@@ -135,8 +141,8 @@ test('a person\'s decision holds until the finding clears or gets worse; an ende
   await store.sync(KINDS, [s]);
   const sid = String((await open('late:s'))[0]!.ruh_insight_id);
   await store.act(prod, sid, 'snooze', { minutes: 30 });
-  assert.equal((await store.list(prod)).counts.warn, (await store.list(prod)).items.filter((i) => i.status === 'open' && i.severity === 'warn').length);
-  assert.equal((await store.list(prod)).items.find((i) => i.id === sid)!.status, 'snoozed');
+  assert.equal((await full(prod)).counts.warn, (await full(prod)).items.filter((i) => i.status === 'open' && i.severity === 'warn').length);
+  assert.equal((await full(prod)).items.find((i) => i.id === sid)!.status, 'snoozed');
   await store.sync(KINDS, [s], new Date(Date.now() + 31 * 60_000).toISOString());
   assert.equal((await open('late:s'))[0]!.status, 'open', 'snooze over');
 });
@@ -148,16 +154,15 @@ test('list: by role, owner sees all, most serious first, per console, cheap when
     draft({ dedupeKey: 'w:1', kind: 'shelf.tasks_overdue', audienceRoles: ['warehouse'] }),
     draft({ dedupeKey: 'v:1', kind: 'qc.coa_missing', console: 'platform', audienceRoles: ['production'] }),
   ]);
-  const p = await store.list(prod);
-  assert.ok(!p.unchanged);
+  const p = await full(prod);
   assert.deepEqual(p.items.map((i) => i.title && i.severity), ['urgent', 'warn', 'suggest']);
   assert.ok(p.items.every((i) => i.kind !== 'shelf.tasks_overdue'), 'a warehouse note is not shown to production');
   assert.deepEqual(p.counts, { urgent: 1, warn: 1, suggest: 1, info: 0 });
   assert.equal(p.top, 'urgent');
-  assert.equal((await store.list(owner)).items.length, 4);
-  assert.deepEqual((await store.list(prod, { console: 'platform' })).items.map((i) => i.kind), ['qc.coa_missing']);
+  assert.equal((await full(owner)).items.length, 4);
+  assert.deepEqual((await full(prod, { console: 'platform' })).items.map((i) => i.kind), ['qc.coa_missing']);
   assert.deepEqual(await store.list(prod, { since: p.rev }), { unchanged: true, rev: p.rev });
-  assert.equal((await store.list(wh)).items.length, 1);
+  assert.equal((await full(wh)).items.length, 1);
 });
 
 test('act: only someone the note is for; audited; a second decision is refused; done/dismiss resolve the mirror', async () => {
