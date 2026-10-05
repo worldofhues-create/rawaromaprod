@@ -91,7 +91,11 @@
         return tunnel(path, opts, true);
       }
     }
-    return { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
+    var out = { status: inner.status, json: inner.body ? JSON.parse(inner.body) : null };
+    // Always-on Ruh (owner rulings 2026-10-06): a guarded action answered RUH_CONFIRM_REQUIRED —
+    // RuhConfirm (ruh.js) shows the risks, and with a typed reason the same call goes again.
+    if (window.RaRuh && RaRuh.needsConfirm(out) && !opts.ruhConfirmed) return RaRuh.guard(out, opts, function (o) { return tunnel(path, o); });
+    return out;
   }
   // Tiny registration API for the ws-*.js workspace modules (scaffolding for future lanes —
   // U2/U3/U4 restyling Procurement/Receiving/Warehouse, QC/Production/Packaging/Dispatch, and
@@ -708,6 +712,7 @@
           '<h1 id="ra-title">' + R.label + '</h1>' +
           '<span style="flex:1"></span>' +
           switcher +
+          '<span id="ra-ruh-slot"></span>' +
           '<button type="button" class="gbtn acc" id="ra-aria" aria-label="Ask Aria">' + CI.spark + ' Ask Aria</button>' +
           '<div style="position:relative">' +
             '<button type="button" id="ra-bell" class="gbtn" title="Alerts" aria-label="Alerts">' + CI.bell +
@@ -2167,7 +2172,7 @@
     // detail" — the tr itself is the trigger, kept keyboard-operable with tabindex + Enter/Space
     // since it's not a native button; aria-expanded reflects open/closed state for AT).
     var clickable = !!DETAIL[item[3]];
-    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; return '<tr' + (clickable ? ' id="' + k + '" data-k="' + k + '" class="ra-drow" style="cursor:pointer" tabindex="0" aria-expanded="false"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; var rid = guessId(r); return '<tr' + (rid ? ' data-rid="' + escHtml(rid) + '"' : '') + (clickable ? ' id="' + k + '" data-k="' + k + '" class="ra-drow" style="cursor:pointer" tabindex="0" aria-expanded="false"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
       (hasActions ? '<td class="r">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
@@ -2291,7 +2296,7 @@
   }
   function wireShell() {
     wireNav();
-    $('ra-logout').onclick = function () { ariaReset(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
+    $('ra-logout').onclick = function () { ariaReset(); if (window.RaRuh) RaRuh.stop(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
     /* Focus mode switch (focus.js), between the sound switch and Sign out. */
@@ -2306,6 +2311,8 @@
     var handle = $('ra-dock-handle'); if (handle) handle.onclick = function () { document.body.classList.remove('dock-away'); };
     if ($('ra-aria')) $('ra-aria').onclick = toggleAria;
     if (_aria) { _aria.setContext(ariaContext()); }
+    // Always-on Ruh: its badge sits in the top bar (never a dock entry); the panel opens from it.
+    var ruhSlot = $('ra-ruh-slot'); if (ruhSlot && window.RaRuh) ruhSlot.parentNode.replaceChild(RaRuh.badge('gbtn'), ruhSlot);
     applyResponsive();
     applyNetBanner();
   }
@@ -2405,9 +2412,42 @@
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
-    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); });
+    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); ruhStart(); ruhFollowHash(); });
     return true;
   }
+
+  /* ---------------- Always-on Ruh (owner rulings 2026-10-06) ----------------
+   * ruh.js draws the badge, the panel, the urgent pop-up and RuhConfirm; this console hands it the
+   * tunnel and the way to open a note's screen: `#/go/<section>[|<section>…][/<record id>]` opens
+   * the first of those sections this workspace has, then finds the record on it. */
+  function ruhStart() {
+    if (!window.RaRuh) return;
+    RaRuh.start({
+      console: 'factory',
+      call: function (method, path, body) { return tunnel(path, body === undefined ? { method: method } : { method: method, body: body }); },
+      open: function (i) { return ruhOpen(i.deepLink); },
+      canSettings: function () { return can('platform:ruh_setting:write'); },
+      toast: function (msg, bad) { toast(msg, bad ? 'bad' : ''); },
+    });
+  }
+  function ruhOpen(link) {
+    var m = /^#\/go\/([^/]+)(?:\/(.+))?$/.exec(String(link || ''));
+    if (!m || !st.role) return false;
+    var R = ROLES[st.role]; if (!R) return false;
+    var key = m[1].split('|').filter(function (k) { return R.nav.some(function (n) { return n[0] === k; }); })[0];
+    if (!key) return false;
+    if (st.nav === key) loadView(); else navTo(key);
+    if (m[2]) RaRuh.focusRecord(decodeURIComponent(m[2]), $('ra-view'));
+    return true;
+  }
+  /** A link from ALEMBIC or another console (`https://rawfactory…/#/go/…`): open it once signed in. */
+  function ruhFollowHash() {
+    if (!/^#\/go\//.test(location.hash)) return;
+    var link = location.hash;
+    history.replaceState(null, '', location.pathname + location.search);
+    if (!ruhOpen(link)) toast('That screen is not part of your workspace.', '');
+  }
+  window.addEventListener('hashchange', function () { if (session && st.role) ruhFollowHash(); });
 
   // PB-04 / SB-02: a redirect back from ALEMBIC's "Open Factory" lands here with
   // `#assertion=<token>` in the URL fragment (never a query string a server would log).

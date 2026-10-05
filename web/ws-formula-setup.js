@@ -112,7 +112,7 @@
         ? '<span title="Formula code only — the recipe stays in the Vault">' + icon('lock', 12) + ' ' + mono(p.formula.formulaCode + (p.formula.approvedVersionNumber != null ? ' v' + p.formula.approvedVersionNumber : '')) + '</span>'
         : (p.formulaId ? muted('(Vault did not answer)') : muted('—'));
       var link = canWrite ? '<button type="button" class="btn sm" data-link="' + p.productId + '">' + (p.formulaId ? 'Replace formula…' : 'Link formula…') + '</button>' : '';
-      return '<tr><td>' + pick + '</td><td>' + mono(p.productCode || '') + '<div class="t-cap">' + escHtml(p.productName || '') + '</div></td>' +
+      return '<tr data-ruh-id="' + escHtml(p.productId) + '"><td>' + pick + '</td><td>' + mono(p.productCode || '') + '<div class="t-cap">' + escHtml(p.productName || '') + '</div></td>' +
         '<td>' + mono((p.skuCodes || []).join(', ')) + '</td><td>' + chip(sg[0], sg[1]) + '</td><td>' + formulaCell + '</td>' +
         '<td>' + kindCell + '</td><td>' + matCell + '</td><td class="r">' + (link || muted('—')) + '</td></tr>';
     }).join('');

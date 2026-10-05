@@ -68,7 +68,11 @@
       if (rr.status < 400 && d && d.accessToken) { session.token = d.accessToken; return tunnel(path, opts, true); }
     }
     var body = inner.body ? JSON.parse(inner.body) : null;
-    return { status: inner.status, json: body };
+    var out = { status: inner.status, json: body };
+    // Always-on Ruh (owner rulings 2026-10-06): a guarded action answered RUH_CONFIRM_REQUIRED —
+    // RuhConfirm (ruh.js) shows the risks, and with a typed reason the same call goes again.
+    if (window.RaRuh && RaRuh.needsConfirm(out) && !opts.ruhConfirmed) return RaRuh.guard(out, opts, function (o) { return tunnel(path, o); });
+    return out;
   }
   function PlatformError(code, message, status) { this.code = code; this.message = message; this.status = status; }
   PlatformError.prototype = Object.create(Error.prototype);
@@ -115,6 +119,8 @@
   function clearSession() { session.token = null; session.email = null; session.roles = []; session.permissions = []; }
   function logout() {
     restoreTried = true; // never silently restore what the person just ended
+    if (window.RaRuh) RaRuh.stop();
+    ruhOn = false;
     clearSession();
     tunnel('/auth/logout', { method: 'POST' }).catch(function () {});
     location.hash = ''; render();
@@ -467,6 +473,8 @@
       h('h1', {}, [label]),
       h('span', { class: 'chip n' }, ['Internal']),
       h('span', { style: 'flex:1' }),
+      // Always-on Ruh: a quiet badge in the top bar (never a dock entry); the panel opens from it.
+      window.RaRuh ? RaRuh.badge('gbtn') : null,
       h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
     ]);
     var view = h('section', { class: 'pageview' }, [contentEl]);
@@ -987,6 +995,25 @@
     ]));
   }
 
+  /* ---- Always-on Ruh (owner rulings 2026-10-06): ruh.js draws the badge, panel, urgent pop-up and
+   * RuhConfirm; this console hands it the tunnel and opens a note's screen (`#/<section>`). ---- */
+  var ruhOn = false;
+  function ruhStart() {
+    if (ruhOn || !window.RaRuh) return;
+    ruhOn = true;
+    RaRuh.start({
+      console: 'platform',
+      call: function (method, path, body) { return tunnel(path, body === undefined ? { method: method } : { method: method, body: body }); },
+      open: function (i) {
+        var m = /^#\/([a-z-]+)/.exec(String(i.deepLink || ''));
+        if (!m || !visibleNav().some(function (n) { return n.id === m[1]; })) return false;
+        go(m[1]); return true;
+      },
+      canSettings: function () { return hasPerm('platform:ruh_setting:write'); },
+      toast: function (msg, bad) { toast(msg, bad); },
+    });
+  }
+
   async function render() {
     if (!session.token) {
       if (await tryConsumeAssertion()) { render(); return; }
@@ -994,6 +1021,7 @@
       renderLogin();
       return;
     }
+    ruhStart();
     var v = currentView();
     if (v === 'flags') return screenFlags();
     if (v === 'tutorial') return screenTutorial();

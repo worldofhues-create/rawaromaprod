@@ -154,6 +154,10 @@
    * generic catch-all. */
   async function callTunnel(tunnel, path, opts) {
     var r = await tunnel(path, opts);
+    // Always-on Ruh (owner rulings 2026-10-06): a guarded action answered RUH_CONFIRM_REQUIRED —
+    // RuhConfirm (ruh.js) shows the risks, and with a typed reason the same call goes again on the
+    // same channel. A warning never blocks; every rule the Vault enforces still applies.
+    if (window.RaRuh && RaRuh.needsConfirm(r) && !(opts && opts.ruhConfirmed)) r = await RaRuh.guard(r, opts || {}, function (o) { return tunnel(path, o); });
     if (r.status >= 400) {
       var err = (r.json && r.json.error) || {};
       throw new VaultError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status);
@@ -204,6 +208,8 @@
   }
 
   function logout() {
+    if (window.RaRuh) RaRuh.stop();
+    ruhOn = false;
     session.token = null; session.iat = 0; session.email = null; session.userId = null; session.roles = []; session.permissions = [];
     location.hash = '';
     render();
@@ -695,6 +701,9 @@
       h('h1', {}, [label]),
       
       h('span', { style: 'flex:1' }),
+      // Always-on Ruh: a quiet badge in the top bar (never a dock entry). In the Vault it shows
+      // the Vault's own notes only — counts, never formula content.
+      window.RaRuh ? RaRuh.badge('gbtn') : null,
       h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
     ]);
     var view = h('section', { class: 'pageview' }, [contentEl]);
@@ -1725,12 +1734,34 @@
   /* ---------------------------------------------------------------------------------------
    * 6. bootstrap + route render
    * --------------------------------------------------------------------------------------- */
+  /* ---- Always-on Ruh (owner rulings 2026-10-06): ruh.js draws the badge, panel, urgent pop-up and
+   * RuhConfirm. Its notes come from the MAIN box (the channel this console already signs in
+   * through), filtered to the Vault's own: counts of recipes waiting, needed or incomplete — never
+   * a formula's name or content. A note opens its Vault screen (`#/<section>`). ---- */
+  var ruhOn = false;
+  function ruhStart() {
+    if (ruhOn || !window.RaRuh) return;
+    ruhOn = true;
+    RaRuh.start({
+      console: 'vault',
+      call: function (method, path, body) { return mainTunnel(path, body === undefined ? { method: method } : { method: method, body: body }); },
+      open: function (i) {
+        var m = /^#\/([a-z-]+)/.exec(String(i.deepLink || ''));
+        if (!m || !visibleNav().some(function (n) { return n.id === m[1]; })) return false;
+        go(m[1]); return true;
+      },
+      canSettings: function () { return false; },
+      toast: function (msg, bad) { toast(msg, bad); },
+    });
+  }
+
   async function render() {
     if (!session.token) {
       if (await tryConsumeAssertion()) { render(); return; }
       renderLogin();
       return;
     }
+    ruhStart();
     var r = currentRoute();
     if (r.view === 'formula' && r.id) return screenFormula(r.id);
     if (r.view === 'version' && r.id) return screenVersion(r.id);

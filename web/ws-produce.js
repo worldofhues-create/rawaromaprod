@@ -110,7 +110,7 @@
       if (canInstr && r.productionOrderId && String(r.runStatus || '').toUpperCase() === 'INPROGRESS') acts.push('<button class="ra-act btn sm" data-instr="' + r.productionOrderId + '">Coded instruction</button>');
       if (canPick && r.stage === 'ON_SHELF') acts.push('<button class="ra-act btn sm" data-pick="' + r.alembicRequirementId + '">Pick</button>');
       var overdue = r.overdue ? ' style="color:var(--red);font-weight:var(--w-med)"' : '';
-      return '<tr>' +
+      return '<tr data-ruh-id="' + escHtml(r.alembicRequirementId) + '">' +
         '<td style="white-space:nowrap">' + mono('#' + r.position) + '</td>' +
         '<td>' + priorityCell(r) + '</td>' +
         '<td style="white-space:nowrap">' + mono(r.sku) + (r.packSize ? '<div style="color:var(--ink-3);font-size:var(--t-cap)">' + escHtml(r.packSize) + '</div>' : '') + '</td>' +
@@ -195,7 +195,7 @@
       btn('', 'Go', 'p', ' type="submit"') + '</form><div id="pv-scan-state" style="margin-top:10px"></div></div></div>' : '';
     function taskRows(list, kind) {
       return list.map(function (t) {
-        return '<tr><td style="white-space:nowrap">' + mono(t.taskNo) + '</td><td style="white-space:nowrap">' + mono(t.batchNo || '') + '</td><td style="white-space:nowrap">' + mono(t.sku || '') + (t.packSize ? ' ' + muted(t.packSize) : '') + '</td>' +
+        return '<tr data-ruh-id="' + escHtml(t.shelfTaskId) + '"><td style="white-space:nowrap">' + mono(t.taskNo) + '</td><td style="white-space:nowrap">' + mono(t.batchNo || '') + '</td><td style="white-space:nowrap">' + mono(t.sku || '') + (t.packSize ? ' ' + muted(t.packSize) : '') + '</td>' +
           '<td>' + mono(num(t.qty) + ' ' + (t.uom || '')) + '</td><td>' + (t.label ? '<span style="font:var(--w-med) var(--t-h3)/1 var(--font-mono)">' + escHtml(t.label) + '</span>' : chip('a', 'bin not assigned')) + '</td>' +
           '<td>' + (t.reference ? escHtml(t.reference) : muted('—')) + '</td><td class="r">' + (canWrite ? '<button class="btn sm p" data-do="' + t.shelfTaskId + '" data-kind="' + kind + '">Confirm</button> <button class="btn sm" data-cancel="' + t.shelfTaskId + '">Cancel</button>' : muted('—')) + '</td></tr>';
       }).join('');
