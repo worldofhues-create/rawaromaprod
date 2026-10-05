@@ -34,15 +34,10 @@
  * such; nothing is answered locally.
  */
 import { Inject, Injectable, Logger, Optional } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
-import { eq } from 'drizzle-orm';
 import type { Sql } from 'postgres';
 import { ConfigService, PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
-import { BRIDGE_DB, bridgeSchema, type BridgeDb } from '../bridge/bridge.tokens.js';
-import { openSecret } from '../bridge/secret-box.js';
-import { signBody } from '../bridge/signing.js';
-
-const { connectorConfig } = bridgeSchema;
+import { BRIDGE_DB, type BridgeDb } from '../bridge/bridge.tokens.js';
+import { alembicLink, alembicUrl, signedBridgeHeaders } from '../bridge/alembic-call.js';
 
 /** ALEMBIC's receiving route, on the origin of the configured bridge webhook. */
 export const ALEMBIC_ARIA_PATH = '/api/v1/internal/rawprod/copilot/ask';
@@ -106,20 +101,7 @@ function unavailable(reason: AriaUnavailableReason, message?: string): AriaAskRe
 
 /** Where ALEMBIC answers: the origin of ALEMBIC's own bridge webhook URL. */
 export function alembicAriaUrl(webhookUrl: string | null | undefined): string | null {
-  if (!webhookUrl) return null;
-  try {
-    const u = new URL(webhookUrl);
-    if (u.protocol !== 'https:' && u.protocol !== 'http:') return null;
-    return `${u.origin}${ALEMBIC_ARIA_PATH}`;
-  } catch {
-    return null;
-  }
-}
-
-interface Link {
-  readonly url: string;
-  readonly secret: string;
-  readonly tenantId: string;
+  return alembicUrl(webhookUrl, ALEMBIC_ARIA_PATH);
 }
 
 @Injectable()
@@ -150,17 +132,9 @@ export class AriaBridgeService {
     return row.subject;
   }
 
-  /** The bridge's half of the connection, or null when any piece is missing. */
-  private async link(): Promise<Link | null> {
-    const tenantId = this.config.get('ALEMBIC_ASSERTION_TENANT_ID');
-    if (!tenantId) return null;
-    const config = (await this.bridgeDb.select().from(connectorConfig)
-      .where(eq(connectorConfig.id, 'default')).limit(1))[0];
-    if (!config?.enabled) return null;
-    const url = alembicAriaUrl(config.webhookUrl);
-    const secret = config.hmacSecretSealed ? openSecret(config.hmacSecretSealed) : null;
-    if (!url || !secret) return null;
-    return { url, secret, tenantId };
+  /** The bridge's half of the connection, or null when any piece is missing (bridge/alembic-call.ts). */
+  private link() {
+    return alembicLink(this.bridgeDb, this.config.get('ALEMBIC_ASSERTION_TENANT_ID'), ALEMBIC_ARIA_PATH);
   }
 
   /** Whether the panel should offer Aria at all — the honest fallback is chosen from this. */
@@ -188,20 +162,12 @@ export class AriaBridgeService {
       ...(input.persist ? { persist: true } : {}),
       rawprodUserId: principal.userId,
     });
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const nonce = randomUUID();
 
     let res: Response;
     try {
       res = await this.doFetch(link.url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-bridge-request-id': randomUUID(),
-          'x-bridge-timestamp': timestamp,
-          'x-bridge-nonce': nonce,
-          'x-bridge-signature': signBody(`${timestamp}.${nonce}.${body}`, link.secret),
-        },
+        headers: signedBridgeHeaders(body, link.secret),
         body,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });

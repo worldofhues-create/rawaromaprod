@@ -10,12 +10,11 @@
  * identity beyond the SKU code is sent; only physical figures come back.
  */
 import { Inject, Injectable, Optional } from '@nestjs/common';
-import { randomUUID } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { ConfigService } from '@core/backend-kernel';
 import { BRIDGE_DB, bridgeSchema, type BridgeDb } from '../bridge/bridge.tokens.js';
 import { openSecret } from '../bridge/secret-box.js';
-import { signBody } from '../bridge/signing.js';
+import { signedBridgeHeaders } from '../bridge/alembic-call.js';
 
 export const ALEMBIC_QC_DRAFTS_PATH = '/api/v1/internal/rawprod/factory-setup/qc-drafts';
 export const ALEMBIC_DRAFTS_FETCH = Symbol('ALEMBIC_DRAFTS_FETCH');
@@ -49,17 +48,11 @@ export class AlembicDraftsClient {
       return { ok: false, reason: 'not_configured', message: 'This factory is not connected to ALEMBIC yet, so Ruh cannot draft. Finish the ALEMBIC bridge connection first.' };
     }
     const body = JSON.stringify({ tenantId, subject, skuCodes });
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const nonce = randomUUID();
     let res: Response;
     try {
       res = await this.doFetch(url, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json', 'x-bridge-request-id': randomUUID(),
-          'x-bridge-timestamp': timestamp, 'x-bridge-nonce': nonce,
-          'x-bridge-signature': signBody(`${timestamp}.${nonce}.${body}`, secret),
-        },
+        headers: signedBridgeHeaders(body, secret),
         body,
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
