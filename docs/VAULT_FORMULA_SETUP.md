@@ -37,13 +37,14 @@ A tenant with only one owner/admin cannot complete click 2. That is deliberate (
 ## Day to day
 
 1. **Factory → Formula setup → Products and their formulas.** Tick the products that have no
-   formula, choose **Single chemical** or **Blend** for each (the catalogue's classification
-   pre-fills this once it is wired in, see below), then click **Draft formula shells**. Ruh drafts
+   formula, check **Single chemical** or **Blend** for each (pre-filled from the ALEMBIC
+   catalogue's classification; see below), then click **Draft formula shells**. Ruh drafts
    one Vault formula per product (`F-<product code>`, DRAFT v1), and each product is linked to its
    formula. Each link is audited in `packaging.audit_events`.
    - A single chemical is sealed at once as `[its own material, 100 %, sequence 1]` and sent for
-     approval. Its own material is the one material whose code equals the product code, unless
-     the caller names a different one.
+     approval. Its own material is the catalogue's material for it, else the one material whose
+     code equals the product code, unless the caller names a different one. A catalogue blend
+     is never sealed this way unless the owner overrides the catalogue on screen.
    - A blend is left as an empty DRAFT marked "recipe needed".
    Running it again is safe: a product that already has a shell gets the same shell back.
 2. **Vault → Recipes needed** (formulator). Enter a blend's recipe line by line, or upload many
