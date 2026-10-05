@@ -49,6 +49,9 @@
   <!-- Lane produce (2026-09-29): Produce next, Put-away & pick, Rack layout, Shelf display, label
        printing and the live produce alerts. After the other ws-*.js (it adds to their ROLES/ACTIONS). -->
   <script src="/ws-produce.js"></script>
+  <!-- Lane vaultsetup (2026-10-05): Formula setup — the two-owner "Let Ruh draft formulas" grant,
+       formula shells per product, and the guarded product -> formula link. After ws-produce.js. -->
+  <script src="/ws-formula-setup.js"></script>
   <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
        raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
        ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->

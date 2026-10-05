@@ -106,7 +106,7 @@ test('list: formula state per product and the single-chemical material (the one 
   vaultFormulas.set(linked.formulaId, { formulaCode: 'F-LINKED', approved: null });
   const approved = await productWithSku();
   vaultFormulas.set(approved.formulaId, { formulaCode: 'F-APPROVED', approved: 3 });
-  const { items, vaultError } = await svc.listProducts();
+  const { items, vaultError } = await svc.listProducts({ reveal: true });
   assert.equal(vaultError, null);
   const by = (id: string) => items.find((i) => i.productId === id)!;
   assert.equal(by(none.productId).state, 'none');
@@ -118,6 +118,9 @@ test('list: formula state per product and the single-chemical material (the one 
   assert.equal(by(approved.productId).state, 'approved');
   assert.equal(by(approved.productId).formula?.approvedVersionNumber, 3);
   assert.ok(!JSON.stringify(items).match(/formulaName|percentage/), 'no formula name or content on this box');
+  // A caller without masterdata:material:reveal learns THAT the material was found, never which.
+  const masked = (await svc.listProducts({ reveal: false })).items.find((i) => i.productId === none.productId)!;
+  assert.deepEqual(masked.material, { materialId: matId, materialCode: null, materialName: null });
 });
 
 test('shells: one Ruh token for one Vault call; linked products skipped; unresolvable single chemicals refused up front; links audited; a re-run links nothing twice', async () => {

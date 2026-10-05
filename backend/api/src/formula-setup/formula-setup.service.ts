@@ -85,7 +85,12 @@ export class FormulaSetupService {
     return this.vault;
   }
 
-  async listProducts(): Promise<{ items: SetupProduct[]; vaultError: string | null }> {
+  /**
+   * `reveal` — whether the caller holds masterdata:material:reveal. Without it the single-chemical
+   * material is reported as found (its id, which the global masking interceptor replaces with the
+   * floor alias) but never by code or name: the same masking every other factory read applies.
+   */
+  async listProducts(opts: { reveal: boolean } = { reveal: false }): Promise<{ items: SetupProduct[]; vaultError: string | null }> {
     const rows = (await this.db.execute(sql`
       select p.product_id::text as product_id, p.product_code, p.product_name, p.status, p.formula_id::text as formula_id,
              coalesce((select array_agg(s.sku_code order by s.sku_code) from packaging.product_sku s
@@ -137,7 +142,7 @@ export class FormulaSetupService {
         state: !r.formula_id ? 'none' : label?.approvedVersionNumber != null ? 'approved' : 'linked',
         catalogueKind: kinds.get(r.product_id) ?? null,
         material: r.material_matches === 1 && r.material_id
-          ? { materialId: r.material_id, materialCode: r.material_code, materialName: r.material_name }
+          ? { materialId: r.material_id, materialCode: opts.reveal ? r.material_code : null, materialName: opts.reveal ? r.material_name : null }
           : null,
       };
     });

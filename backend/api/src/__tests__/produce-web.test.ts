@@ -21,7 +21,8 @@ test('Factory: ws-produce.js loads after the other workspace modules and is cach
   assert.ok(at('ws-produce.js') < at('tutorial.js'));
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-produce\.js'/);
-  assert.match(sw, /const CACHE = 'ra-shell-v94'/);
+  // v94 lane produce; v95 lane vaultsetup (ws-formula-setup.js, which loads after ws-produce.js).
+  assert.match(sw, /const CACHE = 'ra-shell-v95'/);
 });
 
 test('Factory: the shell dispatches sentinel views to RA_VIEWS, and ws-produce registers the four screens', () => {

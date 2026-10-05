@@ -50,8 +50,8 @@ export class FormulaSetupController {
 
   @Permissions('packaging:product_formula_link:read')
   @Get('v1/formula-setup/products')
-  products() {
-    return this.setup.listProducts();
+  products(@CurrentUser() principal: AuthPrincipal) {
+    return this.setup.listProducts({ reveal: (principal.permissions ?? []).includes('masterdata:material:reveal') });
   }
 
   @Permissions('packaging:product_formula_link:write')
