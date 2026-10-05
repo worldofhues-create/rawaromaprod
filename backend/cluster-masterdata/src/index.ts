@@ -14,4 +14,5 @@ export {
   type MaterialRef,
   type AliasRef,
   MASTERDATA_LOOKUP,
+  materialMatchKey,
 } from './public-api.js';

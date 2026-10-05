@@ -17,6 +17,7 @@ export {
   formulaEventHist,
 } from "./history.js";
 export { outbox, auditEvents } from "./crosscutting.js";
+export { formulaProductLink } from "./setup.js";
 export {
   rmComplianceProfile,
   rmAllergenComposition,

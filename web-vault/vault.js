@@ -432,6 +432,11 @@
         'Revealing a formula asks for a reason. Who, why and when are logged and can\'t be edited.',
         'You are responsible for any screenshot or copy of revealed content.',
       ]));
+      body.appendChild(howToSection('Recipes', [
+        'Recipes needed lists every factory product\'s formula. Ruh (automation) drafted each one; single chemicals are already sealed at 100 % and only need approving.',
+        'A formulator enters a blend\'s recipe, or uploads many at once as CSV (product_code, material_code or material_name, percentage, optional stage and sequence). The file is read here in the Vault — nothing leaves it.',
+        'Check shows every line: unmatched materials are named, a total that is not 100 % is a warning, a percentage of 0 or less stops the upload. Seal writes every recipe or none.',
+      ]));
       body.appendChild(howToSection('Approvals', [
         'Approvers can approve, reject or lock a submitted version. Authors can\'t approve their own work.',
       ]));
@@ -494,6 +499,11 @@
     // Lane produce (owner requirement 2026-09-29): products the factory cannot make because no
     // approved formula exists for them — the formulators' and approvers' alert.
     { id: 'needed', label: 'Formula needed', icon: 'filePlus', need: 'formula:formula_version:read' },
+    // Lane vaultsetup (owner decisions 2026-10-05, "Ruh drafts, one person approves"): every
+    // factory product's formula shell and its recipe state; the recipe form and the CSV upload
+    // (parsed here in the Vault — no AI); and the one-person bulk approval of submitted recipes.
+    { id: 'recipes', label: 'Recipes needed', icon: 'testtube', need: 'formula:formula_version:read' },
+    { id: 'review', label: 'Approve recipes', icon: 'clipCheck', need: 'formula:formula_approval:write' },
   ];
   var formulaNeeded = { count: null };
   // Quick-access dock (dock.js): at most eight primary destinations, then All sections and Ask
@@ -1412,6 +1422,269 @@
     }
   }
 
+  /* ── Recipes needed + recipe entry/upload (lane vaultsetup) ───────────────────────────── */
+  var RECIPE_STATE = {
+    recipe_needed: ['r', 'Recipe needed'], draft: ['n', 'Draft (sealed)'], in_review: ['a', 'Waiting for approval'],
+    approved: ['g', 'Approved'], archived: ['n', 'Archived'],
+  };
+  var recipesFilter = 'recipe_needed';
+
+  async function screenRecipes() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('recipes', content);
+    var canSeal = hasPerm('formula:formula_ingredients:write');
+    try {
+      var all = await api('/v1/formula-setup/recipes');
+      var counts = {};
+      all.forEach(function (r) { counts[r.state] = (counts[r.state] || 0) + 1; });
+      var shown = recipesFilter === 'all' ? all : all.filter(function (r) { return r.state === recipesFilter; });
+      var tabs = h('div', { style: 'display:flex;gap:6px;flex-wrap:wrap' }, [['recipe_needed', 'Recipe needed'], ['in_review', 'Waiting for approval'], ['approved', 'Approved'], ['all', 'All']].map(function (t) {
+        return h('button', { type: 'button', class: 'btn sm' + (recipesFilter === t[0] ? ' p' : ''), onclick: function () { recipesFilter = t[0]; screenRecipes(); } },
+          [t[1] + ' (' + (t[0] === 'all' ? all.length : (counts[t[0]] || 0)) + ')']);
+      }));
+      var rows = shown.map(function (r) {
+        var sg = RECIPE_STATE[r.state] || ['n', r.state];
+        var v = r.latestVersion;
+        var acts = [];
+        if (canSeal && r.state === 'recipe_needed') acts.push(h('button', { class: 'btn sm p', 'data-recipe': r.formulaId, onclick: function () { recipeDialog(r); } }, ['Enter recipe']));
+        if (v) acts.push(h('button', { class: 'btn sm', onclick: function () { location.hash = '#/version/' + v.formulaVersionId; } }, ['Open']));
+        return h('tr', {}, [
+          td('Product', h('span', {}, [h('span', { class: 'mono' }, [r.productCode]), h('div', { style: 'color:var(--ink-3)' }, [r.productName || ''])])),
+          td('Kind', r.kind === 'single_chemical' ? 'Single chemical' : 'Blend'),
+          td('Formula', r.formulaCode, 'mono'),
+          td('Version', v ? 'v' + v.versionNumber + ' · ' + v.sealedCount + ' line(s)' : '—'),
+          td('State', h('span', { class: 'chip ' + sg[0] }, [sg[1]])),
+          td('', h('div', { style: 'display:flex;gap:6px;justify-content:flex-end' }, acts)),
+        ]);
+      });
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Recipes needed']), h('span', { class: 'n' }, [all.length + ' product formula(s)'])]),
+        h('p', { class: 'card-note' }, ['Ruh (automation) drafted one formula per factory product. Single chemicals are sealed at 100 % and wait for approval; blends need their recipe. ' +
+          (canSeal ? 'Enter one here, or upload many below.' : 'A formulator enters the recipes; an approver approves them.')]),
+        tabs,
+        h('div', { style: 'margin-top:10px' }, [simpleTable(['Product', 'Kind', 'Formula', 'Version', 'State', ''], rows)]),
+      ]));
+      if (canSeal) content.appendChild(recipeUploadCard());
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Recipes didn\'t load', e.message));
+    }
+  }
+
+  /** One CSV cell, quoted when it needs to be (RFC-4180). */
+  function csvCell(v) { var t = String(v == null ? '' : v); return /[",\r\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t; }
+
+  /** A material search that keeps the whole row (code AND name), for the recipe form. */
+  function recipeMaterialField(onPick) {
+    var input = h('input', { class: 'fld', placeholder: 'Search material', autocomplete: 'off', style: 'width:100%' });
+    var list = h('select', { class: 'fld', size: '4', style: 'width:100%;display:none;margin-top:4px' });
+    var found = [], timer = null;
+    input.addEventListener('input', function () {
+      var q = input.value.trim(); if (timer) clearTimeout(timer);
+      if (q.length < 2) { list.style.display = 'none'; return; }
+      timer = setTimeout(function () {
+        api('/v1/vault/materials?q=' + encodeURIComponent(q) + '&limit=20').then(function (mats) {
+          found = mats || []; list.innerHTML = '';
+          found.forEach(function (m, i) { list.appendChild(h('option', { value: String(i) }, [(m.materialCode || '—') + ' — ' + (m.materialName || '')])); });
+          list.style.display = found.length ? '' : 'none';
+        }).catch(function () { list.style.display = 'none'; });
+      }, 220);
+    });
+    list.addEventListener('change', function () {
+      var m = found[Number(list.value)]; if (!m) return;
+      input.value = (m.materialCode || '') + (m.materialName ? ' — ' + m.materialName : '');
+      list.style.display = 'none'; onPick(m);
+    });
+    return h('div', {}, [input, list]);
+  }
+
+  /** The recipe form for one product: lines of material + % (+ stage), a live total, then the same
+   *  server-side check and seal as the upload (it is sent as a one-recipe CSV). */
+  function recipeDialog(r) {
+    openDialog('Recipe — ' + r.productCode, function (body, close) {
+      var lines = [];
+      var rowsEl = h('div', { style: 'display:flex;flex-direction:column;gap:8px' });
+      var total = h('p', { style: 'margin:8px 0 0;font-weight:var(--w-med)' });
+      var err = h('div', { class: 'err' });
+      var out = h('div', {});
+      function recount() {
+        var sum = lines.reduce(function (s, l) { var n = Number(l.pct.value); return s + (isFinite(n) ? Math.round(n * 1e6) : 0); }, 0) / 1e6;
+        total.textContent = 'Total: ' + sum + ' %' + (Math.round(sum * 1e6) === 1e8 ? '' : ' — not 100 %');
+        total.style.color = Math.round(sum * 1e6) === 1e8 ? 'var(--ink-2)' : 'var(--amber)';
+      }
+      function addLine() {
+        var line = { mat: null };
+        line.pct = h('input', { class: 'fld', type: 'number', step: 'any', min: '0', placeholder: '%', style: 'width:90px' });
+        line.stage = h('input', { class: 'fld', placeholder: 'Stage (optional)', style: 'width:140px' });
+        line.pct.addEventListener('input', recount);
+        var row = h('div', { style: 'display:grid;grid-template-columns:1fr auto auto auto;gap:6px;align-items:start' }, [
+          recipeMaterialField(function (m) { line.mat = m; }), line.pct, line.stage,
+          h('button', { class: 'btn sm', 'aria-label': 'Remove line', onclick: function () { lines.splice(lines.indexOf(line), 1); row.remove(); recount(); } }, ['×']),
+        ]);
+        lines.push(line); rowsEl.appendChild(row); recount();
+      }
+      body.appendChild(h('p', { style: 'color:var(--ink-2);margin-bottom:10px' }, ['Sealed as you, then sent for approval. Someone other than you approves it.']));
+      body.appendChild(rowsEl);
+      body.appendChild(h('button', { class: 'btn sm', style: 'margin-top:8px', onclick: addLine }, ['+ Line']));
+      body.appendChild(total); body.appendChild(err); body.appendChild(out);
+      function csv() {
+        var head = 'formula_code,material_code,material_name,percentage,stage,sequence';
+        return [head].concat(lines.map(function (l, i) {
+          return [r.formulaCode, l.mat && l.mat.materialCode || '', l.mat && !l.mat.materialCode ? l.mat.materialName : '', l.pct.value, l.stage.value.trim(), i + 1].map(csvCell).join(',');
+        })).join('\n');
+      }
+      var check = h('button', { class: 'btn p' }, ['Check']);
+      check.addEventListener('click', function () {
+        err.textContent = '';
+        if (!lines.length) { err.textContent = 'Add at least one line.'; return; }
+        if (lines.some(function (l) { return !l.mat; })) { err.textContent = 'Pick a material on every line.'; return; }
+        runImport(csv(), out, function () { close(); screenRecipes(); });
+      });
+      body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [check, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
+      addLine();
+    });
+  }
+
+  var RECIPE_HELP = 'Columns: product_code (or formula_code), material_code or material_name, percentage — optional stage and sequence. ' +
+    'Comma, tab (paste from a spreadsheet) or semicolon separated. A blank product cell repeats the line above. Floor codes are not accepted here.';
+
+  function recipeUploadCard() {
+    var file = h('input', { type: 'file', accept: '.csv,.tsv,.txt,text/csv,text/plain' });
+    var text = h('textarea', { class: 'fld', rows: '8', style: 'width:100%;box-sizing:border-box;min-height:150px;margin-top:8px;font-family:var(--font-mono)', placeholder: 'product_code,material_code,percentage\nOUD-01,RM-001,12.5\n,RM-014,87.5' });
+    file.addEventListener('change', function () {
+      var f = file.files && file.files[0]; if (!f) return;
+      var rd = new FileReader(); rd.onload = function () { text.value = String(rd.result || ''); }; rd.readAsText(f);
+    });
+    var out = h('div', {});
+    var check = h('button', { class: 'btn' }, ['Check']);
+    check.addEventListener('click', function () {
+      if (!text.value.trim()) { out.innerHTML = ''; out.appendChild(h('div', { class: 'err' }, ['Paste or choose a file first.'])); return; }
+      runImport(text.value, out, function () { text.value = ''; screenRecipes(); });
+    });
+    return h('div', { class: 'card', id: 'recipe-upload' }, [
+      h('div', { class: 'card-hd' }, [h('h2', {}, ['Upload recipes']), h('span', { class: 'chip n' }, ['Read in the Vault'])]),
+      h('p', { class: 'card-note' }, [RECIPE_HELP]),
+      file, text,
+      h('div', { style: 'display:flex;gap:8px;margin-top:10px' }, [check]),
+      out,
+    ]);
+  }
+
+  /** Check (preview) a recipe CSV, show the review, and seal on confirmation — always the same
+   *  server path: POST /v1/formula-recipes/import (commit false, then true). */
+  async function runImport(csvText, out, onSealed) {
+    out.innerHTML = '';
+    var submit = h('input', { type: 'checkbox', checked: 'checked' });
+    try {
+      var r = await api('/v1/formula-recipes/import', { method: 'POST', body: { csv: csvText, commit: false, submit: true } });
+      if (r.fileErrors && r.fileErrors.length) {
+        r.fileErrors.forEach(function (m) { out.appendChild(h('div', { class: 'err' }, [m])); });
+        return;
+      }
+      var lineRows = r.rows.map(function (x) {
+        var mat = x.materialId ? (x.materialCode || '') + (x.materialName ? ' · ' + x.materialName : '') : x.material;
+        var problem = x.error ? h('span', {}, [h('span', { class: 'chip r' }, [x.error]),
+          x.suggestions && x.suggestions.length ? h('div', { style: 'color:var(--ink-3);margin-top:4px' }, ['Did you mean: ' + x.suggestions.map(function (s) { return (s.materialCode || '') + ' ' + (s.materialName || ''); }).join(' · ')]) : null])
+          : h('span', { class: 'chip g' }, ['OK']);
+        return h('tr', { class: x.error ? 'bad' : null }, [td('Line', x.line, 'mono'), td('Formula', x.productCode || x.formulaCode || x.target, 'mono'), td('Material', mat),
+          td('%', x.percentage), td('Stage', x.stage), td('Check', problem)]);
+      });
+      var recipeRows = r.recipes.map(function (x) {
+        var notes = x.errors.map(function (m) { return h('div', { class: 'chip r', style: 'margin:2px 0' }, [m]); })
+          .concat(x.warnings.map(function (m) { return h('div', { class: 'chip a', style: 'margin:2px 0' }, [m]); }));
+        return h('tr', {}, [td('Formula', (x.productCode ? x.productCode + ' · ' : '') + (x.formulaCode || ''), 'mono'), td('Lines', x.lineCount), td('Total %', x.total),
+          td('Into', 'v' + x.version.versionNumber + (x.version.create ? ' (new)' : '')), td('Notes', notes.length ? h('div', {}, notes) : h('span', { class: 'chip g' }, ['OK']))]);
+      });
+      out.appendChild(h('p', { class: 'card-note' }, [r.errorCount ? (r.errorCount + ' problem(s) to fix — nothing will be sealed until the file is clean.')
+        : ('Ready: ' + r.recipes.length + ' recipe(s), ' + r.rows.length + ' line(s)' + (r.warningCount ? ', ' + r.warningCount + ' warning(s) — check them before sealing.' : '.'))]));
+      out.appendChild(simpleTable(['Formula', 'Lines', 'Total %', 'Into', 'Notes'], recipeRows));
+      out.appendChild(h('div', { style: 'margin-top:10px' }, [simpleTable(['Line', 'Formula', 'Material', '%', 'Stage', 'Check'], lineRows)]));
+      if (!r.errorCount) {
+        var seal = h('button', { class: 'btn p', id: 'recipe-seal' }, [r.warningCount ? 'Seal anyway' : 'Seal ' + r.recipes.length + ' recipe(s)']);
+        seal.addEventListener('click', async function () {
+          seal.disabled = true;
+          try {
+            var done = await api('/v1/formula-recipes/import', { method: 'POST', body: { csv: csvText, commit: true, submit: submit.checked } });
+            if (!done.committed) { seal.disabled = false; toast((done.errorCount || 0) + ' problem(s) — nothing sealed. Check again.', true); return; }
+            toast(done.recipes.length + ' recipe(s) sealed' + (submit.checked ? ' and sent for approval' : ''));
+            onSealed && onSealed();
+          } catch (e) { seal.disabled = false; toast(e.message, true); }
+        });
+        out.appendChild(h('div', { style: 'display:flex;gap:12px;align-items:center;margin-top:12px' }, [seal, h('label', { style: 'display:flex;gap:6px;align-items:center' }, [submit, 'Send for approval'])]));
+      }
+    } catch (e) {
+      out.appendChild(h('div', { class: 'err' }, [e.message]));
+    }
+  }
+
+  /* ── Approve recipes: one person, one fresh sign-in, many approvals (lane vaultsetup) ─────── */
+  async function screenReview() {
+    var content = h('div', {}, [skeletonCard()]);
+    renderShell('review', content);
+    try {
+      var items = await api('/v1/formula-review-queue');
+      var picked = {};
+      var countEl = h('span', {});
+      var approveBtn = h('button', { class: 'btn g', id: 'review-approve' }, ['Approve selected']);
+      function refreshCount() {
+        var n = Object.keys(picked).filter(function (k) { return picked[k]; }).length;
+        countEl.textContent = n + ' selected'; approveBtn.disabled = n === 0;
+      }
+      var eligible = items.filter(function (x) { return !x.blockedReason; });
+      var all = h('input', { type: 'checkbox', 'aria-label': 'Select every version you may approve' });
+      var boxes = [];
+      all.addEventListener('change', function () { boxes.forEach(function (b) { b.box.checked = all.checked; picked[b.id] = all.checked; }); refreshCount(); });
+      var rows = items.map(function (x) {
+        var box = h('input', { type: 'checkbox', 'aria-label': 'Approve ' + (x.productCode || x.formulaCode) });
+        if (x.blockedReason) { box.disabled = true; box.title = x.blockedReason; }
+        else { boxes.push({ id: x.formulaVersionId, box: box }); box.addEventListener('change', function () { picked[x.formulaVersionId] = box.checked; refreshCount(); }); }
+        var by = function (id) { return id === session.userId ? 'You' : (id ? String(id).slice(0, 8) : '—'); };
+        return h('tr', { 'data-version': x.formulaVersionId }, [
+          td('', box),
+          td('Product', x.productCode || '—', 'mono'),
+          td('Formula', (x.formulaCode || '') + ' v' + x.versionNumber, 'mono'),
+          td('Kind', x.kind === 'single_chemical' ? 'Single chemical' : x.kind === 'blend' ? 'Blend' : '—'),
+          td('Recipe', x.sealedCount + ' line(s)' + (x.note ? ' · ' + x.note : '')),
+          td('Drafted by', by(x.authorId)),
+          td('Sealed by', (x.sealedBy || []).map(by).join(', ')),
+          td('Status', x.blockedReason ? h('span', { class: 'chip a' }, [x.blockedReason]) : statusChip(x.status)),
+          td('', h('button', { class: 'btn sm', onclick: function () { location.hash = '#/version/' + x.formulaVersionId; } }, ['Open'])),
+        ]);
+      });
+      var out = h('div', {});
+      approveBtn.addEventListener('click', async function () {
+        var ids = Object.keys(picked).filter(function (k) { return picked[k]; });
+        if (!ids.length) return;
+        var remarks = window.prompt('Remarks for these ' + ids.length + ' approval(s) (optional):');
+        if (remarks === null) return;
+        approveBtn.disabled = true; out.innerHTML = '';
+        try {
+          // ONE fresh sign-in covers this one request; each version is then approved (and audited)
+          // on its own by the server — the same rules as approving one at a time.
+          var res = await withFreshAuth(function () {
+            return api('/v1/formula-versions/approve-batch', { method: 'POST', body: { versionIds: ids, remarks: remarks.trim() || undefined } });
+          });
+          toast(res.approved + ' approved' + (res.refused ? ' · ' + res.refused + ' refused' : ''), !!res.refused);
+          var bad = res.results.filter(function (x) { return !x.approved; });
+          if (bad.length) {
+            out.appendChild(simpleTable(['Version', 'Why not'], bad.map(function (x) { return h('tr', {}, [td('Version', String(x.formulaVersionId).slice(0, 8), 'mono'), td('Why not', x.error)]); })));
+          } else { screenReview(); }
+        } catch (e) { approveBtn.disabled = false; toast(e.message, true); }
+      });
+      refreshCount();
+      content.innerHTML = '';
+      content.appendChild(h('div', { class: 'card' }, [
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Approve recipes']), h('span', { class: 'n' }, [items.length + ' waiting · ' + eligible.length + ' you may approve'])]),
+        h('p', { class: 'card-note' }, ['Recipes sent for approval. You cannot approve one you drafted or sealed. Approving asks for a fresh sign-in once; every approval is recorded under your name.']),
+        h('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:10px' }, [h('label', { style: 'display:flex;gap:6px;align-items:center' }, [all, 'Select all']), countEl, approveBtn]),
+        simpleTable(['', 'Product', 'Formula', 'Kind', 'Recipe', 'Drafted by', 'Sealed by', 'Status', ''], rows),
+        out,
+      ]));
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('The approval list didn\'t load', e.message));
+    }
+  }
+
   /* ── Formula needed (lane produce): what the factory cannot make yet ───────────────────── */
   async function screenNeeded() {
     var content = h('div', {}, [skeletonCard()]);
@@ -1467,6 +1740,8 @@
     if (r.view === 'certificates') return screenCertificates();
     if (r.view === 'missing') return screenMissing();
     if (r.view === 'needed') return screenNeeded();
+    if (r.view === 'recipes') return screenRecipes();
+    if (r.view === 'review') return screenReview();
     if (formulaNeeded.count === null) pollNeeded();
     return screenFormulas();
   }

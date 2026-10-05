@@ -53,6 +53,8 @@ const USER_SAFE = {
   // edit.service.ts) so an admin screen can show whether a row is bound to an ALEMBIC
   // identity, without exposing anything secret (it is an identity label, not a credential).
   alembicSubject: userMaster.alembicSubject,
+  // Lane vaultsetup: HUMAN or SERVICE ("Ruh (automation)") — shown, never editable here.
+  accountKind: userMaster.accountKind,
   status: userMaster.status,
   createdDt: userMaster.createdDt,
   updatedDt: userMaster.updatedDt,
@@ -102,6 +104,12 @@ const VAULT_AUTHORITY_ROLES = ['formulator', 'vault_approver'];
 const VAULT_GRANT_TTL_HOURS = 72;
 
 const OWNER_ADMIN = ['owner', 'admin'];
+
+/** Lane vaultsetup: the only role a SERVICE account (iam.user_master.account_kind) may ever hold
+ * — "Ruh drafts, one person approves". A service principal can draft and seal; it can never
+ * approve (vault_approver), administer, or hold any other role. Enforced on request AND on
+ * approval of a grant, and for the ordinary (non-Vault) role path too. */
+export const SERVICE_ACCOUNT_ROLES = ['formulator'];
 
 /**
  * OPERATIONAL NOTE — single-admin tenants: approveVaultRoleGrant requires an owner/admin who is
@@ -218,6 +226,9 @@ export class SecurityService {
   async changeUserEmail(userId: string, newEmail: string, principal: AuthPrincipal): Promise<SafeUser> {
     const target = await this.getUserById(userId);
     if (!target) throw DomainError.notFound(`User not found: ${userId}`);
+    if (target.accountKind === 'SERVICE') {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'This is a service account — it has no email to change and can never sign in.');
+    }
 
     const vaultRoles = await this.db
       .select({ code: roleMaster.roleCode })
@@ -465,6 +476,7 @@ export class SecurityService {
     )[0];
     if (!role) throw DomainError.notFound('Role not found');
     const targetCode = String(role.roleCode ?? '').toLowerCase();
+    await this.assertServiceAccountRole(body.userId, targetCode, principal);
     const granterRoles = (principal.roles ?? []).map((r) => r.toLowerCase());
     const PRIVILEGED = ['owner', 'super_admin', 'superadmin'];
     if (PRIVILEGED.includes(targetCode) && !granterRoles.includes(targetCode)) {
@@ -574,6 +586,61 @@ export class SecurityService {
         .catch(() => {});
     }
     return inserted;
+  }
+
+  /**
+   * Lane vaultsetup: a SERVICE account (the non-login "Ruh (automation)" principal) may hold
+   * SERVICE_ACCOUNT_ROLES (`formulator`) only. Any other role — vault_approver above all, but
+   * also owner/admin or any factory role — is refused and the attempt recorded on the Vault's
+   * tamper-evident audit chain. A HUMAN target is unaffected.
+   */
+  private async assertServiceAccountRole(userId: string, roleCode: string, principal: AuthPrincipal): Promise<void> {
+    const target = (
+      await this.db.select({ accountKind: userMaster.accountKind }).from(userMaster).where(eq(userMaster.userId, userId)).limit(1)
+    )[0];
+    if (target?.accountKind !== 'SERVICE' || SERVICE_ACCOUNT_ROLES.includes(roleCode)) return;
+    if (this.auditSink) {
+      await this.auditSink
+        .record({
+          actorId: principal.userId,
+          action: 'security.service_role.refused',
+          entityType: 'user_master',
+          entityId: userId,
+          reason: `refused role "${roleCode}" for a service account (only ${SERVICE_ACCOUNT_ROLES.join(', ')} is allowed)`,
+          result: 'refuse',
+        })
+        .catch(() => {});
+    }
+    throw DomainError.forbidden(
+      'AUTH_FORBIDDEN',
+      `A service account may only hold the ${SERVICE_ACCOUNT_ROLES.join('/')} role — it can draft formulas but never approve or administer anything.`,
+    );
+  }
+
+  /**
+   * Who may approve a PENDING Vault-role grant request (lane vaultsetup's "Let Ruh draft
+   * formulas" card shows the names): every active HUMAN owner/admin who is not the requester, not
+   * the target, and not in the requester's account-creation chain — exactly the people
+   * approveVaultRoleGrant would accept. Read-only; the approval itself re-checks everything.
+   */
+  async vaultGrantApprovers(requestId: string): Promise<Array<{ userId: string; userName: string | null; email: string | null }>> {
+    const request = await this.getVaultRoleGrantRequestById(requestId);
+    if (!request || request.grantStatus !== 'PENDING') return [];
+    const candidates = await this.db
+      .selectDistinct({ userId: userMaster.userId, userName: userMaster.userName, email: userMaster.email, isActive: userMaster.isActive, status: userMaster.status, accountKind: userMaster.accountKind })
+      .from(userRoleMapping)
+      .innerJoin(roleMaster, eq(roleMaster.roleId, userRoleMapping.roleId))
+      .innerJoin(userMaster, eq(userMaster.userId, userRoleMapping.userId))
+      .where(inArray(roleMaster.roleCode, OWNER_ADMIN));
+    const out: Array<{ userId: string; userName: string | null; email: string | null }> = [];
+    for (const c of candidates) {
+      if (c.accountKind !== 'HUMAN' || c.isActive === false) continue;
+      if (c.status && c.status.toUpperCase() !== 'ACTIVE') continue;
+      if (c.userId === request.createdBy || c.userId === request.userId) continue;
+      if (request.createdBy && (await this.isInCreatorChain(c.userId, request.createdBy))) continue;
+      out.push({ userId: c.userId, userName: c.userName, email: c.email });
+    }
+    return out.sort((a, b) => String(a.email).localeCompare(String(b.email)));
   }
 
   /**
@@ -707,6 +774,9 @@ export class SecurityService {
           .where(eq(roleMaster.roleId, request.roleId!))
           .limit(1)
       )[0];
+      // Lane vaultsetup: re-checked at the decision, not only at the request — a SERVICE account
+      // may be granted `formulator` and nothing else, whoever asked and whoever approves.
+      if (request.userId) await this.assertServiceAccountRole(request.userId, String(role?.roleCode ?? '').toLowerCase(), principal);
 
       const actor = principal.userId;
 

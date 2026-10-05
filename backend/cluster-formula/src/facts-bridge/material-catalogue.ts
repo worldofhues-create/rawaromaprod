@@ -28,7 +28,7 @@
  */
 import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException, Injectable, ServiceUnavailableException } from '@nestjs/common';
-import type { AliasRef, MasterdataLookup, MaterialRef } from '@ra/cluster-masterdata';
+import { materialMatchKey, type AliasRef, type MasterdataLookup, type MaterialRef } from '@ra/cluster-masterdata';
 
 /** One catalogue row: what the picker shows. */
 export interface MaterialCatalogueEntry {
@@ -145,6 +145,17 @@ export class MaterialCatalogue implements MasterdataLookup {
       }
     }
     return out;
+  }
+
+  /** Exact, case-insensitive code-or-name match (same normal form and semantics as the main box's
+   *  `MasterdataLookupService.matchMaterials`) — the recipe import's material column. */
+  async matchMaterials(keys: string[]): Promise<MaterialRef[]> {
+    const rows = this.held();
+    const wanted = new Set(keys.map(materialMatchKey).filter(Boolean));
+    if (wanted.size === 0) return [];
+    return rows
+      .filter((r) => wanted.has(materialMatchKey(r.materialCode)) || wanted.has(materialMatchKey(r.materialName)))
+      .map((r) => ({ ...r, uomId: null }));
   }
 
   /** Floor codes (RM aliases) are not pushed to the Vault: the main box resolves them itself

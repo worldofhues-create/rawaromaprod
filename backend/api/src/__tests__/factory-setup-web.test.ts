@@ -26,7 +26,7 @@ test('Factory: ws-setup.js loads after ws-produce.js, before the tutorial, and i
   assert.ok(at('ws-setup.js') < at('tutorial.js'));
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-setup\.js'/);
-  assert.match(sw, /const CACHE = 'ra-shell-v95'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v96'/);
 });
 
 test('Factory setup: registered for owner, QC, warehouse and production; tunnel only; the bin-label printer is shared', () => {

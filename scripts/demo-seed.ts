@@ -403,6 +403,9 @@ const unusedMasterdataLookup: MasterdataLookup = {
   async searchMaterials(): Promise<never> {
     throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
   },
+  async matchMaterials(): Promise<never> {
+    throw new Error('demo-seed vault phase: MasterdataLookup is unavailable (no main-DB credential on the vault box)');
+  },
 };
 
 /**

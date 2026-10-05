@@ -27,6 +27,8 @@ export {
   accessAuditBounds,
   type AccessAuditPage,
   type AccessAuditRow,
+  type FormulaDirectoryEntry,
+  type FormulaDirectoryPage,
   type FormulaLabel,
   type FormulaLabels,
   type FormulaLabelsQuery,
@@ -56,9 +58,25 @@ export {
 export {
   VAULT_PORT,
   VAULT_INTERNAL_PATHS,
+  VAULT_PRINCIPAL_PATHS,
   type PickLine,
   type VaultPort,
   VaultApiClient,
   VaultPortModule,
   VaultSecurityAuditClient,
 } from './vault-port.js';
+// Lane vaultsetup (owner decisions 2026-10-05): formula shells per factory product, the recipe
+// import, the review queue and the one-person bulk approval (Vault box only), plus the shapes the
+// main box's setup screen reads back.
+export {
+  FormulaSetupService,
+  shellFormulaCode,
+  type ShellResult,
+  type ShellState,
+  type ShellView,
+  type ImportResult,
+  type ReviewItem,
+  type BatchApprovalResult,
+} from './setup/formula-setup.service.js';
+export { parseRecipeFile, parsePercent, detectDelimiter, totalPercent, isHundred, type RecipeLine } from './setup/recipe-csv.js';
+export { SHELL_KINDS, type ShellKind, type FormulaShellsBody } from './formula.dtos.js';

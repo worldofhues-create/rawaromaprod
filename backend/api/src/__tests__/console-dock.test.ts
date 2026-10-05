@@ -47,8 +47,8 @@ function factory(): any {
   vm.createContext(ctx);
   const html = read('web/index.html');
   const scripts = [...html.matchAll(/<script src="\/([\w-]+\.js)"/g)].map((m) => m[1] ?? '')
-    .filter((f) => ['dock.js', 'shell.js', 'ws-supply.js', 'ws-mfg.js', 'ws-platform.js', 'ws-produce.js', 'ws-setup.js'].includes(f));
-  assert.deepEqual(scripts, ['dock.js', 'shell.js', 'ws-supply.js', 'ws-mfg.js', 'ws-platform.js', 'ws-produce.js', 'ws-setup.js']);
+    .filter((f) => ['dock.js', 'shell.js', 'ws-supply.js', 'ws-mfg.js', 'ws-platform.js', 'ws-produce.js', 'ws-setup.js', 'ws-formula-setup.js'].includes(f));
+  assert.deepEqual(scripts, ['dock.js', 'shell.js', 'ws-supply.js', 'ws-mfg.js', 'ws-platform.js', 'ws-produce.js', 'ws-setup.js', 'ws-formula-setup.js']);
   for (const f of scripts) vm.runInContext(read(`web/${f}`), ctx, { filename: f });
   ctx.__store = store;
   return ctx;

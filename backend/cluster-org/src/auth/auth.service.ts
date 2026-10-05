@@ -250,12 +250,15 @@ export class AuthService {
           email: userMaster.email,
           passwordHash: userMaster.passwordHash,
           isActive: userMaster.isActive,
+          accountKind: userMaster.accountKind,
         })
         .from(userMaster)
         .where(eq(userMaster.email, identifier))
         .limit(1)
     )[0];
-    if (!row || !row.passwordHash) {
+    // Lane vaultsetup: a SERVICE account never signs in (it has no password either; the same
+    // "invalid credentials" answer, so the refusal reveals nothing about the account).
+    if (!row || !row.passwordHash || row.accountKind === 'SERVICE') {
       this.recordLoginFail(key);
       throw DomainError.unauthorized("AUTH_INVALID_CREDENTIALS", "Invalid credentials");
     }
@@ -417,6 +420,7 @@ export class AuthService {
       isActive: userMaster.isActive,
       status: userMaster.status,
       alembicSubject: userMaster.alembicSubject,
+      accountKind: userMaster.accountKind,
     } as const;
 
     // First: a row already bound to THIS subject is authoritative, regardless of what its
@@ -437,6 +441,11 @@ export class AuthService {
           `No RawProd account is provisioned for ${email}. Ask an administrator to create one before opening this console.`,
           401,
         );
+      }
+      // Lane vaultsetup: a SERVICE account (the non-login Ruh principal) is never bound to an
+      // ALEMBIC identity and never signs in — refused BEFORE the first-bind below.
+      if (byEmail.accountKind === 'SERVICE') {
+        throw DomainError.forbidden('AUTH_FORBIDDEN', 'This is a service account; it cannot sign in.');
       }
       if (byEmail.alembicSubject) {
         // This email already belongs to a row bound to a DIFFERENT ALEMBIC subject. Never
@@ -470,6 +479,9 @@ export class AuthService {
     // table already uses — a row suspended via `status` alone (is_active left true/null) must
     // refuse exactly like one suspended via is_active.
     attempt.userId = row.userId;
+    if (row.accountKind === 'SERVICE') {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'This is a service account; it cannot sign in.');
+    }
     const statusUpper = row.status ? row.status.toUpperCase() : null;
     if (row.isActive === false || (statusUpper !== null && statusUpper !== 'ACTIVE')) {
       throw DomainError.forbidden('AUTH_FORBIDDEN', 'Account inactive');
@@ -533,12 +545,15 @@ export class AuthService {
           userName: userMaster.userName,
           email: userMaster.email,
           isActive: userMaster.isActive,
+          accountKind: userMaster.accountKind,
         })
         .from(userMaster)
         .where(eq(userMaster.userId, claims.sub))
         .limit(1)
     )[0];
     if (!row) throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "User not found");
+    // Lane vaultsetup: no service account ever holds a refresh token; refuse one regardless.
+    if (row.accountKind === 'SERVICE') throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "Service accounts do not hold sessions");
     if (row.isActive === false) throw DomainError.forbidden("AUTH_FORBIDDEN", "Account inactive");
     const roles = await this.rolesFor(row.userId);
     const perms = await this.permissionsFor(row.userId);
@@ -596,12 +611,15 @@ export class AuthService {
     const { userMaster, userRoleMapping, roleMaster } = orgSchema;
     const exists = (
       await this.db
-        .select({ userId: userMaster.userId })
+        .select({ userId: userMaster.userId, accountKind: userMaster.accountKind })
         .from(userMaster)
         .where(eq(userMaster.userId, userId))
         .limit(1)
     )[0];
     if (!exists) throw DomainError.notFound("User not found");
+    if (exists.accountKind === 'SERVICE') {
+      throw DomainError.forbidden('AUTH_FORBIDDEN', 'A service account never has a password.');
+    }
 
     // Rank guard (audit H-S2): only an owner may reset a privileged user's password — otherwise an
     // admin (who holds iam:user_master:write) could overwrite the owner's hash and log in as owner.

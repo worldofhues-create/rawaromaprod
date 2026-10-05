@@ -35,6 +35,19 @@ export interface MasterdataLookup {
    * reads).
    */
   searchMaterials(query: string, limit: number): Promise<MaterialRef[]>;
+  /**
+   * EXACT, case-insensitive match of each key against a material's code OR its name (surrounding
+   * and repeated inner whitespace ignored) — every material that matches any key, same minimal
+   * id + code/name shape. Deterministic (no fuzzy matching): backs the Vault recipe import's
+   * "material code or name" column (lane vaultsetup), where an ambiguous name must be reported,
+   * never guessed. At most 5000 keys per call.
+   */
+  matchMaterials(keys: string[]): Promise<MaterialRef[]>;
+}
+
+/** The normal form `matchMaterials` compares in: trimmed, inner whitespace collapsed, lower-case. */
+export function materialMatchKey(value: string | null | undefined): string {
+  return String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 /** DI token for `MasterdataLookup`. */

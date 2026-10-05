@@ -45,7 +45,9 @@ import {
   type SecurityAuditSink,
 } from '@core/backend-kernel';
 import type { CodedInstruction, CodedMaterialLine, CodedPickLine, ReadContext } from './public-api.js';
-import type { AccessAuditPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
+import type { AccessAuditPage, FormulaDirectoryPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
+import type { FormulaShellsBody } from './formula.dtos.js';
+import type { ShellResult } from './setup/formula-setup.service.js';
 import type { CatalogueUpdate } from './facts-bridge/material-catalogue.js';
 import type { InternalCertificate } from './compliance/compliance.service.js';
 
@@ -90,6 +92,14 @@ export const VAULT_INTERNAL_PATHS = {
   accessAudit: '/internal/vault/access-audit',
   materialCatalogue: '/internal/vault/material-catalogue',
   complianceCertificates: '/internal/vault/compliance-certificates',
+  formulaDirectory: '/internal/vault/formula-directory',
+} as const;
+
+/** Lane vaultsetup: the PUBLIC Vault routes the main box calls AS a service principal (a bearer
+ *  token ServicePrincipalService minted for that one call), so the Vault's own guards check the
+ *  principal's permissions and its audit names that principal — never a signed-channel caller. */
+export const VAULT_PRINCIPAL_PATHS = {
+  formulaShells: '/v1/formula-shells',
 } as const;
 
 /** Upper bound on one Vault round trip (it may include a KMS unwrap). */
@@ -168,8 +178,45 @@ export class VaultApiClient {
     return data.result;
   }
 
+  /** The formula list for the main box's screens (code, status, approved/latest version — no
+   *  name). Offset-paged; lane vaultsetup (the Factory's Formula dropdown). */
+  async formulaDirectory(limit: number, cursor?: string | null): Promise<FormulaDirectoryPage> {
+    const data = await this.post<{ result: FormulaDirectoryPage }>(VAULT_INTERNAL_PATHS.formulaDirectory, {
+      limit,
+      cursor: cursor ?? null,
+    });
+    return data.result;
+  }
+
+  /**
+   * Draft formula shells on the Vault AS the principal whose access token is `bearer` (lane
+   * vaultsetup: the Ruh service principal). A plain authenticated call to the Vault's public route
+   * — the Vault's JwtAuthGuard/PermissionsGuard check that token exactly as for a person, and every
+   * row it writes names that principal. The token is never logged here.
+   */
+  async createFormulaShellsAs(bearer: string, body: FormulaShellsBody): Promise<{ results: ShellResult[] }> {
+    return this.send<{ results: ShellResult[] }>(VAULT_PRINCIPAL_PATHS.formulaShells, JSON.stringify(body), {
+      authorization: `Bearer ${bearer}`,
+    }, VAULT_CALL_TIMEOUT_MS * 4);
+  }
+
   /** One signed POST; returns the response envelope's `data`. */
   private async post<T>(path: string, payload: unknown, timeoutMs: number = VAULT_CALL_TIMEOUT_MS): Promise<T> {
+    const key = this.config.get('INTERNAL_BRIDGE_KEY');
+    this.baseUrl();
+    const body = JSON.stringify(payload);
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const nonce = randomUUID();
+    const signature = computeInternalBridgeSignature(key!, { method: 'POST', path, body, timestamp, nonce });
+    return this.send<T>(path, body, {
+      'x-internal-signature': signature,
+      'x-internal-timestamp': timestamp,
+      'x-internal-nonce': nonce,
+    }, timeoutMs);
+  }
+
+  /** The configured Vault URL, or a 503 naming the deployment gap. */
+  private baseUrl(): string {
     const baseUrl = this.config.get('VAULT_API_INTERNAL_URL');
     const key = this.config.get('INTERNAL_BRIDGE_KEY');
     if (!baseUrl || !key) {
@@ -179,21 +226,17 @@ export class VaultApiClient {
           'Vault (VaultApiClient) — formula reads are unavailable on this box without them.',
       );
     }
-    const body = JSON.stringify(payload);
-    const timestamp = String(Math.floor(Date.now() / 1000));
-    const nonce = randomUUID();
-    const signature = computeInternalBridgeSignature(key, { method: 'POST', path, body, timestamp, nonce });
+    return baseUrl;
+  }
 
+  /** One POST to the Vault with the given auth headers; returns the response envelope's `data`. */
+  private async send<T>(path: string, body: string, headers: Record<string, string>, timeoutMs: number): Promise<T> {
+    const baseUrl = this.baseUrl();
     let res: Response;
     try {
       res = await fetch(`${baseUrl}${path}`, {
         method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-internal-signature': signature,
-          'x-internal-timestamp': timestamp,
-          'x-internal-nonce': nonce,
-        },
+        headers: { 'content-type': 'application/json', ...headers },
         body,
         signal: AbortSignal.timeout(timeoutMs),
       });

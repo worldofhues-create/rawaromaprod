@@ -27,6 +27,7 @@ const { CatalogController } = await import('../catalog/catalog.controller.js');
 const { FormulasController } = await import('../formulas/formulas.controller.js');
 const { ApprovalsController } = await import('../approvals/approvals.controller.js');
 const { ComplianceController } = await import('../compliance/compliance.controller.js');
+const { FormulaSetupController } = await import('../setup/formula-setup.controller.js');
 const { MaterialCatalogue } = await import('../facts-bridge/material-catalogue.js');
 const { FormulaModule, isVaultMode } = await import('../formula.module.js');
 const { MASTERDATA_LOOKUP } = await import('@ra/cluster-masterdata');
@@ -36,10 +37,12 @@ test('VAULT_MODE=true is actually in effect for this process', () => {
 });
 
 // Owner ruling 2026-09-28 added the fourth: the compliance-data / IFRA-allergen calculation
-// screens, which decrypt formulas and therefore live only on the Vault box too.
-test('VAULT_MODE=true: FormulaModule mounts the three formula plaintext controllers + the compliance controller', () => {
+// screens, which decrypt formulas and therefore live only on the Vault box too. Lane vaultsetup
+// (2026-10-05) added the fifth: formula shells, the recipe import, the review queue and the bulk
+// approval — they seal and approve recipes, so they are Vault-box-only too.
+test('VAULT_MODE=true: FormulaModule mounts the three formula plaintext controllers + the compliance + formula-setup controllers', () => {
   const controllers = Reflect.getMetadata('controllers', FormulaModule) as unknown[];
-  assert.deepEqual(controllers, [CatalogController, FormulasController, ApprovalsController, ComplianceController]);
+  assert.deepEqual(controllers, [CatalogController, FormulasController, ApprovalsController, ComplianceController, FormulaSetupController]);
 });
 
 test('VAULT_MODE=true: FormulaModule does NOT import ClusterMasterdataModule (no main-DB credential)', () => {

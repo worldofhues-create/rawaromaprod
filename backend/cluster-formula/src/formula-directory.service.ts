@@ -92,6 +92,27 @@ export interface AccessAuditPage {
   nextCursor: string | null;
 }
 
+/** One formula as the main box's formula list shows it (lane vaultsetup: the Factory's
+ *  "New product" Formula dropdown and the product -> formula link). No name. */
+export interface FormulaDirectoryEntry {
+  formulaId: string;
+  formulaCode: string | null;
+  status: string | null;
+  /** The current APPROVED/LOCKED version (id + number), as FormulaLabel.approvedVersion. */
+  approvedVersion: { formulaVersionId: string; versionNumber: number | null } | null;
+  /** The highest version number and its status ("v2 · REVIEW"). */
+  latestVersionNumber: number | null;
+  latestVersionStatus: string | null;
+}
+
+export interface FormulaDirectoryPage {
+  items: FormulaDirectoryEntry[];
+  nextCursor: string | null;
+}
+
+/** Upper bound on one directory page. */
+export const MAX_DIRECTORY_PAGE = 500;
+
 export const RECENT_FORMULA_CODES = 3;
 export const RECENT_EVENTS = 5;
 /** Upper bound on ids per labels call (the dashboard asks for at most a dozen). */
@@ -177,6 +198,44 @@ export class FormulaDirectoryService {
       formulas,
       recent,
     };
+  }
+
+  /**
+   * The formula list, by code (offset-paged like the access audit): code, status, the approved
+   * version and the latest version's number + status. Never a name, never content.
+   */
+  async directory(limit?: number, cursor?: string | null): Promise<FormulaDirectoryPage> {
+    const lim = Math.min(Math.max(1, Math.trunc(Number(limit) || 100)), MAX_DIRECTORY_PAGE);
+    const offset = Math.min(Math.max(0, parseInt(cursor || '0', 10) || 0), MAX_AUDIT_OFFSET);
+    const rows = (await this.db.execute(sql`
+      select m.formula_id::text as formula_id, m.formula_code, m.status,
+             cv.formula_version_id::text as current_id, cv.version_number as current_number, cv.status as current_status,
+             lv.version_number as latest_number, lv.status as latest_status
+        from formula.formula_master m
+        left join formula.formula_version cv on cv.formula_version_id = m.current_version_id
+        left join lateral (
+          select v.version_number, v.status from formula.formula_version v
+           where v.formula_id = m.formula_id order by v.version_number desc nulls last limit 1
+        ) lv on true
+       order by m.formula_code nulls last, m.formula_id
+       limit ${lim} offset ${offset}
+    `)) as unknown as Array<{
+      formula_id: string; formula_code: string | null; status: string | null;
+      current_id: string | null; current_number: number | null; current_status: string | null;
+      latest_number: number | null; latest_status: string | null;
+    }>;
+    const items: FormulaDirectoryEntry[] = rows.map((r) => ({
+      formulaId: r.formula_id,
+      formulaCode: r.formula_code,
+      status: r.status,
+      approvedVersion:
+        r.current_id && (r.current_status === 'APPROVED' || r.current_status === 'LOCKED')
+          ? { formulaVersionId: r.current_id, versionNumber: r.current_number ?? null }
+          : null,
+      latestVersionNumber: r.latest_number ?? null,
+      latestVersionStatus: r.latest_status ?? null,
+    }));
+    return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
   }
 
   /**

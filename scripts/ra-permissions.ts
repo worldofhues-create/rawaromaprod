@@ -150,6 +150,9 @@ export const RA_PERMISSIONS: string[] = [
   'packaging:packaging_material_master:write',
   'packaging:product_category_master:read',
   'packaging:product_category_master:write',
+  // Lane vaultsetup (2026-10-05): the product -> formula link + formula shells (FormulaSetupController).
+  'packaging:product_formula_link:read',
+  'packaging:product_formula_link:write',
   'packaging:product_master:read',
   'packaging:product_master:write',
   'packaging:product_sku:read',

@@ -60,6 +60,7 @@ import { TutorialModule } from './tutorial/tutorial.module.js';
 import { AriaBridgeModule } from './aria/aria-bridge.module.js';
 import { ShelfModule } from './shelf/shelf.module.js';
 import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
+import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 
 @Module({
   imports: [
@@ -85,6 +86,8 @@ import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
     PackagingQcModule,
     ShelfModule,
     FactorySetupModule,
+    // Lane vaultsetup: product -> formula setup (Ruh shells, the guarded link, GET /v1/formulas).
+    FormulaSetupModule,
     InventoryViewModule,
     FgStockModule,
     EditModule,

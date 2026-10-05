@@ -32,6 +32,16 @@ export const userMaster = iam.table(
      * `backend/api/src/edit/edit.service.ts`).
      */
     alembicSubject: varchar("alembic_subject", { length: 255 }),
+    /**
+     * Lane vaultsetup (owner decision 2026-10-05, "Ruh drafts, one person approves"): HUMAN for
+     * every person; SERVICE for a non-login system principal (today only "Ruh (automation)", the
+     * Formula Vault drafting account). A SERVICE row can never sign in (password, ALEMBIC
+     * assertion, refresh — AuthService refuses each), never gets a password or an email change,
+     * and may only ever hold the `formulator` role, granted through the ordinary two-person
+     * Vault-role grant. Its tokens are minted server-side only, for one Vault call at a time
+     * (ServicePrincipalService.mintVaultToken). scripts/migrations/2026-10-05-formula-setup.sql.
+     */
+    accountKind: varchar("account_kind", { length: 20 }).notNull().default("HUMAN"),
     ...metaColumns(),
   },
   (t) => [
