@@ -176,6 +176,8 @@ export const RA_PERMISSIONS: string[] = [
   'platform:geo_location_master:write',
   'platform:language_master:read',
   'platform:language_master:write',
+  'platform:ruh_setting:read',
+  'platform:ruh_setting:write',
   'platform:timezone_master:read',
   'platform:timezone_master:write',
   'platform:uom_conversion_master:read',

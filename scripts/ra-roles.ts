@@ -540,7 +540,9 @@ export const ROLES: RoleDef[] = [
     code: 'platform_super_admin',
     name: 'Platform Super Admin',
     view: 'platform_ops',
-    select: oneOf('platform:flag:write', 'iam:user_master:read', PLATFORM_OPS_PERMISSION),
+    // Always-on Ruh (owner rulings 2026-10-06): the people who run the platform tune Ruh's
+    // thresholds (watch interval, hours, margins) on the Platform console, beside the flags.
+    select: oneOf('platform:flag:write', 'iam:user_master:read', PLATFORM_OPS_PERMISSION, 'platform:ruh_setting:read', 'platform:ruh_setting:write'),
     sampleEmail: 'platform.admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PLATFORM_ADMIN_PASSWORD',
   },
