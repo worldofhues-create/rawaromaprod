@@ -4,12 +4,16 @@
  * numbers serve the Factory console's checklist and ALEMBIC's Admin summary card (the signed
  * catalogue endpoint's `op: 'status'`).
  *
- * Never a formula: "formulas linked" is a COUNT of products whose product_master.formula_id is
- * set (the Vault lane writes that link); nothing about any formula is read.
+ * Never a formula's content: "formulas linked" counts DISTINCT catalogue products whose
+ * product_master.formula_id is set — the link FormulaSetupService (lane vaultsetup) writes when
+ * Ruh drafts a shell or a person links one. "approved" asks the Vault, over the signed internal
+ * channel, only whether each linked formula has an approved version (VaultApiClient.formulaLabels:
+ * code + version number); null when the Vault is not wired or did not answer.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { VaultApiClient } from '@ra/cluster-formula';
 
 export interface SetupCounts {
   catalogue: { products: number; singleChemicals: number; blends: number; lastSyncedAt: string | null };
@@ -17,15 +21,37 @@ export interface SetupCounts {
   qcSpecs: { products: number; approved: number; proposed: number; missing: number };
   racks: { zones: number; racks: number; bins: number; proposed: boolean };
   pickLight: { mode: 'off' | 'simulator' | 'http' | 'unset' };
-  formulas: { linked: number; products: number };
+  /** approved: linked products whose formula has an approved version (null = the Vault did not answer). */
+  formulas: { linked: number; products: number; approved: number | null };
   blocked: { unknownSku: number; noFormulaLink: number; noApprovedFormula: number; qtyNotInKg: number };
 }
 
 const n = (v: unknown): number => Number(v ?? 0) || 0;
+const LABEL_CHUNK = 200;
 
 @Injectable()
 export class SetupStatusService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
+  constructor(
+    @Inject(PG_CLIENT) private readonly sql: Sql,
+    @Optional() @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'formulaLabels'>,
+  ) {}
+
+  /** How many of these linked products' formulas have an approved version; null when unknown. */
+  private async approvedCount(links: Array<{ formula_id: string }>): Promise<number | null> {
+    if (links.length === 0) return 0;
+    if (!this.vault) return null;
+    const ids = [...new Set(links.map((l) => l.formula_id))];
+    const approved = new Set<string>();
+    try {
+      for (let i = 0; i < ids.length; i += LABEL_CHUNK) {
+        const res = await this.vault.formulaLabels({ formulaIds: ids.slice(i, i + LABEL_CHUNK), formulaVersionIds: [] }, { timeoutMs: 5000 });
+        for (const f of res.formulas) if (f.approvedVersion) approved.add(f.formulaId);
+      }
+    } catch {
+      return null;
+    }
+    return links.filter((l) => approved.has(l.formula_id)).length;
+  }
 
   async counts(): Promise<SetupCounts> {
     const [cat] = (await this.sql`
@@ -63,9 +89,12 @@ export class SetupStatusService {
 
     const [light] = (await this.sql`select mode from location.pick_light_config where id = 'default'`) as Array<{ mode: string }>;
 
-    const [formulas] = (await this.sql`
-      select count(*)::int as products, count(p.formula_id)::int as linked
-        from bridge.catalogue_item c join packaging.product_master p on p.product_id = c.product_id`) as Array<{ products: number; linked: number }>;
+    // One row per catalogue PRODUCT (several ALEMBIC SKUs may land on one product).
+    const formulaRows = (await this.sql`
+      select distinct p.product_id::text as product_id, p.formula_id::text as formula_id
+        from bridge.catalogue_item c join packaging.product_master p on p.product_id = c.product_id`) as Array<{ product_id: string; formula_id: string | null }>;
+    const links = formulaRows.filter((r): r is { product_id: string; formula_id: string } => !!r.formula_id);
+    const formulas = { products: formulaRows.length, linked: links.length, approved: await this.approvedCount(links) };
 
     const [blocked] = (await this.sql`
       select count(*) filter (where lifecycle_status = 'REJECTED_MAPPING')::int as unknown_sku,
@@ -80,7 +109,7 @@ export class SetupStatusService {
       qcSpecs: { products: n(qc?.products), approved: n(qc?.approved), proposed: n(qc?.proposed), missing: Math.max(0, n(qc?.products) - n(qc?.approved) - n(qc?.proposed)) },
       racks: { zones: n(racks?.zones), racks: n(racks?.racks), bins: n(racks?.bins), proposed: Boolean(rackProposal) },
       pickLight: { mode: (light?.mode as SetupCounts['pickLight']['mode']) ?? 'unset' },
-      formulas: { linked: n(formulas?.linked), products: n(formulas?.products) },
+      formulas,
       blocked: { unknownSku: n(blocked?.unknown_sku), noFormulaLink: n(blocked?.no_link), noApprovedFormula: n(blocked?.no_approved), qtyNotInKg: n(blocked?.qty) },
     };
   }

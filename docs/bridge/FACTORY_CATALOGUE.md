@@ -156,6 +156,6 @@ while the draft waited. Bulk approve/reject per screen. Audited (ALEMBIC `audit_
   "qcSpecs": { "products", "approved", "proposed", "missing" },
   "racks": { "zones", "racks", "bins", "proposed" },
   "pickLight": { "mode": "off|simulator|http|unset" },
-  "formulas": { "linked", "products" },
+  "formulas": { "linked", "products", "approved" },   // distinct products; approved = Vault-approved, null when the Vault did not answer
   "blocked": { "unknownSku", "noFormulaLink", "noApprovedFormula", "qtyNotInKg" } }
 ```

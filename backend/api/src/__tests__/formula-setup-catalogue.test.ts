@@ -15,6 +15,8 @@
  *                    refused and never reaches the Vault.
  *   blend            a catalogue blend is NEVER sealed as a single chemical on a plain request; only
  *                    the owner's explicit override does it, and the audit says so.
+ *   checklist        "formulas linked" counts distinct catalogue products with a real link
+ *                    (product_master.formula_id), and how many of those the Vault has approved.
  */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -227,4 +229,33 @@ test('a catalogue single chemical may be drafted as a blend (the safe direction)
   const r = await svc.createShells({ products: [{ productId: single!.product_id!, kind: 'blend' }] }, owner);
   assert.equal(r.results[0]!.outcome, 'created');
   assert.deepEqual(calls[0], [{ productId: single!.product_id!, kind: 'blend', materialId: null }]);
+});
+
+test('checklist: "formulas linked" counts distinct catalogue products with a real link, and the Vault-approved ones', async () => {
+  const before = await status.counts();
+  const [a, b] = await sync([item(), blendItem()]);
+  // A second ALEMBIC SKU on product a: still ONE product.
+  await testClient()`
+    insert into bridge.catalogue_item (alembic_sku_id, sku_code, name, classification, classification_basis, material_id, product_id, synced_by)
+    values (${randomUUID()}, ${'FSD-' + randomUUID().slice(0, 8)}, 'Second pack', 'single_chemical', 'CAS number on file', ${a!.material_id}, ${a!.product_id}, 'test')`;
+  const mid = await status.counts();
+  assert.equal(mid.formulas.products, before.formulas.products + 2);
+  assert.equal(mid.formulas.linked, before.formulas.linked);
+
+  await svc.createShells({ products: [{ productId: a!.product_id! }, { productId: b!.product_id! }] }, owner);
+  const linked = await status.counts();
+  assert.equal(linked.formulas.linked, before.formulas.linked + 2);
+  assert.equal(linked.formulas.products, mid.formulas.products);
+  assert.ok(linked.formulas.approved !== null);
+  const approvedBefore = linked.formulas.approved!;
+
+  approved.add((await formulaOf(a!.product_id!))!);
+  const after = await status.counts();
+  assert.equal(after.formulas.approved, approvedBefore + 1);
+
+  // The Vault not answering is "unknown", never zero.
+  const down = new SetupStatusService(testClient(), { formulaLabels: async () => { throw new Error('vault down'); } } as never);
+  assert.equal((await down.counts()).formulas.approved, null);
+  // No Vault on this box at all: unknown too.
+  assert.equal((await new SetupStatusService(testClient()).counts()).formulas.approved, after.formulas.linked > 0 ? null : 0);
 });

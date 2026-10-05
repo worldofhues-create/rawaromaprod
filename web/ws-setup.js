@@ -57,6 +57,8 @@
     var cat = c.catalogue || {}, packs = c.packs || {}, qc = c.qcSpecs || {}, racks = c.racks || {}, fx = c.formulas || {}, bl = c.blocked || {};
     var mode = (c.pickLight || {}).mode || 'unset';
     var canQc = can('production:product_qc_spec:write'), canRack = canRackWrite();
+    // Formula setup is ws-formula-setup.js's screen (lane vaultsetup): offered where the role has it.
+    var canFormulas = can('packaging:product_formula_link:read') && !!ROLES[st.role] && ROLES[st.role].nav.some(function (n) { return n[0] === 'formulasetup'; });
 
     var steps = [
       step(cat.products > 0, 'Catalogue from ALEMBIC',
@@ -72,8 +74,11 @@
         canRack && !racks.proposed && cat.products > 0 ? btn('id="sv-draft-racks"', 'Ask Ruh for a rack layout', 'sm' + (racks.bins ? '' : ' p')) : ''),
       step(mode !== 'off' && mode !== 'unset', 'Pick-to-light', escHtml(LIGHT[mode] || mode) + (mode === 'simulator' ? '. A hardware controller can be connected later in Platform → Pick-to-light.' : '.')),
       step(true, 'Label printer', 'Nothing to set up: labels print from the browser — 100×50 mm, 100×150 mm, 62 mm continuous or an A4 sheet.'),
-      step(fx.products > 0 && fx.linked === fx.products, 'Formulas linked',
-        escHtml(fx.linked + ' of ' + fx.products + ' products have a formula') + '. Formulas are created and approved in the Vault.'),
+      step(fx.products > 0 && fx.linked === fx.products && fx.approved === fx.products, 'Formulas linked',
+        escHtml(fx.linked + ' of ' + fx.products + ' products have a formula') +
+          (fx.approved == null ? (fx.linked ? ' · the Vault did not say how many are approved' : '') : escHtml(' · ' + fx.approved + ' approved')) +
+          '. Ruh drafts one formula per product from the catalogue\'s single chemical / blend; formulas are approved in the Vault.',
+        canFormulas && fx.linked < fx.products ? btn('id="sv-open-formulas"', 'Open Formula setup', 'sm') : ''),
       step(!(bl.unknownSku || bl.noFormulaLink || bl.noApprovedFormula || bl.qtyNotInKg), 'ALEMBIC requirements blocked',
         escHtml((bl.unknownSku || 0) + ' unknown product · ' + (bl.noFormulaLink || 0) + ' no formula linked · ' + (bl.noApprovedFormula || 0) + ' no approved formula · ' + (bl.qtyNotInKg || 0) + ' quantity not in kg'))
     ];
@@ -85,6 +90,7 @@
       '<div id="sv-qc"></div><div id="sv-racks"></div></div>';
 
     var dq = $('sv-draft-qc'); if (dq) dq.onclick = function () { draftQc(dq); };
+    var of = $('sv-open-formulas'); if (of) of.onclick = function () { navTo('formulasetup'); };
     var dr = $('sv-draft-racks'); if (dr) dr.onclick = function () { draftRacks(dr); };
     if (can('production:product_qc_spec:read')) renderQc(); else $('sv-qc').innerHTML = '';
     if (can('location:rack_master:read')) renderRacks(); else $('sv-racks').innerHTML = '';

@@ -37,7 +37,11 @@ test('Factory setup: registered for owner, QC, warehouse and production; tunnel 
   assert.match(read('web/ws-produce.js'), /window\.RA\.printBinLabels = printBinLabels;/);
   for (const path of ['/v1/factory-setup/checklist', '/v1/factory-setup/qc-proposals/decide', "/v1/factory-setup/rack-proposals/' + p.setupProposalId + '/decide"]) {
     assert.ok(js.includes(path), path);
-  }
+  }  // "Formulas linked" shows the Vault-approved count and opens the Formula setup screen (lane
+  // vaultsetup) only for a role that has it and may read the links.
+  assert.match(js, /fx\.linked === fx\.products && fx\.approved === fx\.products/);
+  assert.match(js, /can\('packaging:product_formula_link:read'\) && !!ROLES\[st\.role\] && ROLES\[st\.role\]\.nav\.some\(function \(n\) \{ return n\[0\] === 'formulasetup'; \}\)/);
+  assert.match(js, /navTo\('formulasetup'\)/);
 });
 
 test('Factory setup: the label printer needs no setup and says so, at the sizes the label screen prints', () => {
