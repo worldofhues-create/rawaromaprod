@@ -11,7 +11,7 @@ export class DomainError extends Error {
     readonly code: ErrorCode,
     message: string,
     readonly status: number = 400,
-    readonly details?: Record<string, string[]>,
+    readonly details?: Readonly<Record<string, unknown>>,
   ) {
     super(message);
     this.name = 'DomainError';

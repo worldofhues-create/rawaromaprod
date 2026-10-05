@@ -2145,3 +2145,98 @@ create table if not exists packaging.audit_events (
   prev_hash text,
   row_hash text
 );
+
+-- Lane ruh-factory (2026-10-06): always-on Ruh — scripts/migrations/2026-10-06-ruh.sql's main block
+-- (gen_random_uuid() for uuidv7(), as everywhere in this harness), plus platform.audit_events
+-- (@core/data-kernel auditTable() shape), where Ruh records insight decisions and overrides.
+create sequence if not exists platform.ruh_insight_rev_seq;
+create table if not exists platform.ruh_insight (
+  ruh_insight_id uuid primary key default gen_random_uuid(),
+  rev bigint not null default nextval('platform.ruh_insight_rev_seq'),
+  kind varchar(80) not null,
+  severity varchar(10) not null,
+  audience_roles text[] not null,
+  console varchar(12) not null,
+  subject jsonb not null,
+  title text not null,
+  body text not null,
+  deep_link text,
+  prediction jsonb,
+  source varchar(20) not null,
+  dedupe_key varchar(200) not null,
+  mirror boolean not null default false,
+  status varchar(12) not null default 'open',
+  snoozed_until timestamptz,
+  acted_by uuid,
+  acted_at timestamptz,
+  act_note text,
+  last_detected_at timestamptz not null default now(),
+  resolved_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists ruh_insight_open_dedupe_uq on platform.ruh_insight (dedupe_key)
+  where status in ('open', 'snoozed');
+create index if not exists ruh_insight_status_idx on platform.ruh_insight (status, severity);
+create index if not exists ruh_insight_rev_idx on platform.ruh_insight (rev);
+create index if not exists ruh_insight_dedupe_idx on platform.ruh_insight (dedupe_key, created_at);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'ruh_insight_shape_chk') then
+    alter table platform.ruh_insight add constraint ruh_insight_shape_chk check (
+      severity in ('info', 'suggest', 'warn', 'urgent')
+      and status in ('open', 'snoozed', 'done', 'dismissed')
+      and console in ('factory', 'platform', 'vault')
+      and source in ('detector', 'override')
+      and (status <> 'snoozed' or snoozed_until is not null)
+      and cardinality(audience_roles) > 0
+    );
+  end if;
+end $$;
+create table if not exists platform.ruh_setting (
+  setting_key varchar(80) primary key,
+  value jsonb not null,
+  updated_by uuid,
+  updated_at timestamptz not null default now()
+);
+create table if not exists bridge.ruh_signal (
+  ruh_signal_id uuid primary key default gen_random_uuid(),
+  seq bigint generated always as identity,
+  op varchar(10) not null,
+  dedupe_key varchar(200) not null,
+  payload jsonb,
+  attempts integer not null default 0,
+  next_attempt_at timestamptz not null default now(),
+  delivered_at timestamptz,
+  parked_at timestamptz,
+  last_error text,
+  last_http_status integer,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create unique index if not exists ruh_signal_pending_uq on bridge.ruh_signal (op, dedupe_key)
+  where delivered_at is null and parked_at is null;
+create unique index if not exists ruh_signal_seq_uq on bridge.ruh_signal (seq);
+create index if not exists ruh_signal_due_idx on bridge.ruh_signal (next_attempt_at)
+  where delivered_at is null and parked_at is null;
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'ruh_signal_shape_chk') then
+    alter table bridge.ruh_signal add constraint ruh_signal_shape_chk check (
+      op in ('signal', 'resolve') and (op <> 'signal' or payload is not null)
+    );
+  end if;
+end $$;
+create table if not exists platform.audit_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  before jsonb,
+  after jsonb,
+  request_id text,
+  ip text,
+  occurred_at timestamptz not null default now(),
+  chain_seq bigint,
+  prev_hash text,
+  row_hash text
+);

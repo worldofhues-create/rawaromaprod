@@ -5,8 +5,9 @@ import { errorCode } from '../registries/error-codes.js';
 export const apiError = z.object({
   code: errorCode,
   message: z.string(),
-  /** Field-level validation issues, keyed by dotted path. */
-  details: z.record(z.array(z.string())).optional(),
+  /** Field-level validation issues, keyed by dotted path — or, for RUH_CONFIRM_REQUIRED, the
+   *  `risks` Ruh found ([{ code, title, detail, severity }]). */
+  details: z.record(z.unknown()).optional(),
   requestId: z.string(),
 });
 export type ApiError = z.infer<typeof apiError>;
