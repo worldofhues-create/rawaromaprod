@@ -13,8 +13,10 @@
 --                     shell was drafted for, and the catalogue's classification of it
 --                     (single_chemical / blend). packages/data-formula/src/schema/setup.ts.
 --
--- No new permission rows here: `packaging:product_formula_link:read|write` are seeded by
--- `pnpm db:seed` (scripts/ra-permissions.ts / ra-roles.ts) — re-run it after this migration.
+-- No new permission rows here: `packaging:product_formula_link:read|write` come from
+-- scripts/ra-permissions.ts / ra-roles.ts. On a fresh database the bootstrap seed adds them. On an
+-- already-seeded database (production), apply the additive grant SQL from
+-- scripts/gen-permission-grants.ts (docs/releases/rc-rp-1005-permission-grants.sql), never db:seed.
 -- The formula schema already default-grants ra_vault (scripts/provision-vault-isolation.sql).
 
 -- @target: main

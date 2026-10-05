@@ -113,7 +113,11 @@ So it is a required bootstrap step, **after the first migrate, on every RawProd 
 (`rawprod` for production, `rawprod_demo` for the demo). It is idempotent: re-running inserts any
 permission a newer release added (`RA_PERMISSIONS` + `CAPABILITY_PERMISSIONS`) and the grants
 that follow from it, and refuses (throws, writes nothing further) if any grant would breach the
-§107/§108/§113 invariants. Re-run it after a deploy that adds permissions.
+§107/§108/§113 invariants. It is a BOOTSTRAP step only: on an already-seeded database
+(production) a release that adds permissions or grants applies the additive, idempotent SQL that
+`pnpm exec tsx scripts/gen-permission-grants.ts --since <the release tag production runs>` prints
+(same catalogue, same invariants, NOT EXISTS-guarded inserts, removals reported but never revoked)
+instead of re-running the seed, which would also reset the owner's password hash.
 
 Its environment, and nothing else:
 
