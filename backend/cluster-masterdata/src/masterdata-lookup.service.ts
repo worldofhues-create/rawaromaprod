@@ -11,7 +11,7 @@ import {
   masterdataSchema,
   type MasterdataDb,
 } from './cluster-masterdata.tokens.js';
-import type { AliasRef, MasterdataLookup, MaterialRef } from './public-api.js';
+import { materialMatchKey, type AliasRef, type MasterdataLookup, type MaterialRef } from './public-api.js';
 
 const { material, rmAlias } = masterdataSchema;
 
@@ -89,5 +89,23 @@ export class MasterdataLookupService implements MasterdataLookup {
       .where(or(sql`${material.materialCode} ilike ${like}`, sql`${material.materialName} ilike ${like}`))
       .orderBy(material.materialCode)
       .limit(cap);
+  }
+
+  async matchMaterials(keys: string[]): Promise<MaterialRef[]> {
+    const wanted = [...new Set(keys.map(materialMatchKey).filter(Boolean))].slice(0, 5000);
+    if (wanted.length === 0) return [];
+    // The same normal form as materialMatchKey, in SQL: trim, collapse whitespace, lower-case.
+    const norm = (col: typeof material.materialCode | typeof material.materialName) =>
+      sql`lower(regexp_replace(btrim(${col}), '\\s+', ' ', 'g'))`;
+    return this.db
+      .select({
+        materialId: material.materialId,
+        materialCode: material.materialCode,
+        materialName: material.materialName,
+        uomId: material.uomId,
+      })
+      .from(material)
+      .where(or(sql`${norm(material.materialCode)} in ${wanted}`, sql`${norm(material.materialName)} in ${wanted}`))
+      .orderBy(material.materialCode);
   }
 }

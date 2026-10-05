@@ -50,6 +50,7 @@ const stubMasterdata = {
   findAliasForMaterial: async () => null,
   findAliasesForMaterials: async () => new Map(),
   searchMaterials: async () => [],
+  matchMaterials: async () => [],
 };
 
 before(async () => {
