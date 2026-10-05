@@ -25,11 +25,13 @@ import { AuthController } from './auth/auth.controller.js';
 import { AuthService } from './auth/auth.service.js';
 import { RolePermissionResolver } from './auth/role-permission.resolver.js';
 import { OrgLookupService } from './cluster-org-lookup.service.js';
+import { ServicePrincipalController } from './service-principal/service-principal.controller.js';
+import { ServicePrincipalService } from './service-principal/service-principal.service.js';
 import { ORG_DB, drizzle, orgSchema } from './cluster-org.tokens.js';
 import { ORG_LOOKUP } from './public-api.js';
 
 @Module({
-  controllers: [OrgController, SecurityController, AuthController],
+  controllers: [OrgController, SecurityController, AuthController, ServicePrincipalController],
   providers: [
     {
       provide: ORG_DB,
@@ -43,7 +45,9 @@ import { ORG_LOOKUP } from './public-api.js';
     { provide: ORG_LOOKUP, useExisting: OrgLookupService },
     RolePermissionResolver,
     { provide: PERMISSION_RESOLVER, useExisting: RolePermissionResolver },
+    ServicePrincipalService,
   ],
-  exports: [ORG_DB, ORG_LOOKUP, OrgService, PERMISSION_RESOLVER],
+  // ServicePrincipalService: backend/api/src/formula-setup mints the Ruh token for its one Vault call.
+  exports: [ORG_DB, ORG_LOOKUP, OrgService, PERMISSION_RESOLVER, ServicePrincipalService],
 })
 export class ClusterOrgModule {}
