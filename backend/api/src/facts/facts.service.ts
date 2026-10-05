@@ -15,23 +15,14 @@
  */
 import { Inject, Injectable } from "@nestjs/common";
 import { PO_OVERDUE_HOURS } from "../automation/automation.constants.js";
-import { eq, lt } from "drizzle-orm";
 import type { Sql } from "postgres";
 import { PG_CLIENT } from "@core/backend-kernel";
-import { BRIDGE_DB, bridgeSchema, type BridgeDb } from "../bridge/bridge.tokens.js";
-import { openSecret } from "../bridge/secret-box.js";
-import { verifyBody } from "../bridge/signing.js";
+import { BRIDGE_DB, type BridgeDb } from "../bridge/bridge.tokens.js";
+import { verifySignedBridgeRequest } from "../bridge/signed-request.js";
 import type { FactKind } from "./facts.contract.js";
 
-const { connectorConfig, factsNonce } = bridgeSchema;
-
-/** S3 security review item 5 — a signed request older than this (by its OWN `x-bridge-
- *  timestamp`) is refused even with a valid signature. Bounds how long a captured, still
- *  validly-signed request body stays presentable at all, before the nonce check even matters. */
-const MAX_TIMESTAMP_AGE_S = 300;
-/** Same margin `alembic-assertion.ts`'s clock-skew tolerance uses — a real clock difference
- *  between two independent boxes must not read as a forged, from-the-future timestamp. */
-const CLOCK_SKEW_TOLERANCE_S = 5;
+/** S3 security review item 5's windows (300 s old, 5 s future) and the single-use nonce now live
+ *  in bridge/signed-request.ts, shared with the factory catalogue endpoint. */
 
 interface Blocker {
   readonly kind: "material_shortage" | "qc_hold" | "pending_approval";
@@ -66,45 +57,9 @@ export class FactsService {
     timestamp: string | null,
     nonce: string | null,
   ): Promise<boolean> {
-    if (!timestamp || !nonce) return false;
-    const timestampSec = Number(timestamp);
-    if (!Number.isFinite(timestampSec)) return false;
-    const nowSec = Math.floor(Date.now() / 1000);
-    if (nowSec - timestampSec > MAX_TIMESTAMP_AGE_S) return false; // too old
-    if (timestampSec - nowSec > CLOCK_SKEW_TOLERANCE_S) return false; // from the future
-
-    const config = (await this.bridgeDb.select().from(connectorConfig)
-      .where(eq(connectorConfig.id, "default")).limit(1))[0];
-    const secret = config?.hmacSecretSealed ? openSecret(config.hmacSecretSealed) : null;
-    if (!config?.enabled || !secret) return false;
-
-    const signedMaterial = `${timestamp}.${nonce}.${rawBody}`;
-    if (!verifyBody(signedMaterial, secret, header)) return false;
-
-    // ONLY NOW — after the signature over timestamp+nonce+body already verified — spend the
-    // nonce. Checking it earlier would let an unauthenticated caller burn nonces for free;
-    // checking it this late still closes the replay window because the signature itself binds
-    // the nonce to this exact body, so an attacker without the secret cannot mint a second,
-    // differently-nonced signature for a captured body.
-    return this.consumeFactsNonce(nonce, timestampSec + MAX_TIMESTAMP_AGE_S);
-  }
-
-  /** Postgres-backed single-use check for the Facts API's `nonce`, the same shape (and the
-   *  same cross-process reasoning) as `AuthService.consumeAssertionJti` in the RawProd auth
-   *  cluster (S3 item 4's sibling fix for item 5). `INSERT ... ON CONFLICT DO NOTHING` is
-   *  atomic across every process sharing this Postgres. */
-  private async consumeFactsNonce(nonce: string, expiresAtSec: number): Promise<boolean> {
-    try {
-      await this.bridgeDb.delete(factsNonce).where(lt(factsNonce.expiresAt, new Date()));
-    } catch {
-      // Best-effort sweep — never let it block or falsely allow the single-use check below.
-    }
-    const inserted = await this.bridgeDb
-      .insert(factsNonce)
-      .values({ nonce, expiresAt: new Date(expiresAtSec * 1000) })
-      .onConflictDoNothing()
-      .returning({ nonce: factsNonce.nonce });
-    return inserted.length > 0;
+    // FACTORY-SETUP: the check itself moved to bridge/signed-request.ts so the factory
+    // catalogue endpoint verifies with the SAME code (one secret, one window, one nonce store).
+    return verifySignedBridgeRequest(this.bridgeDb, rawBody, header, timestamp, nonce);
   }
 
   /**
