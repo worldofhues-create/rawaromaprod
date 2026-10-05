@@ -2029,3 +2029,89 @@ create table if not exists production.production_plan (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- Lane catalogue (2026-10-05): scripts/migrations/2026-10-05-factory-setup.sql, verbatim but for
+-- the id default (gen_random_uuid() for this harness, as elsewhere in this file).
+create table if not exists bridge.catalogue_item (
+  alembic_sku_id uuid primary key,
+  sku_code varchar(50) not null,
+  name text not null,
+  category varchar(100),
+  classification varchar(20) not null,
+  classification_basis text not null,
+  grade varchar(50),
+  cas_number text,
+  cas_source text,
+  density_mg_per_ml integer,
+  density_source text,
+  hazmat jsonb not null default '{}'::jsonb,
+  pack_sizes jsonb not null default '[]'::jsonb,
+  on_hand_kg numeric(18,4) not null default 0,
+  material_id uuid,
+  material_owned boolean not null default false,
+  rm_alias_id uuid,
+  floor_code varchar(30),
+  product_id uuid,
+  product_sku_id uuid,
+  note text,
+  first_synced_at timestamptz not null default now(),
+  synced_at timestamptz not null default now(),
+  synced_by varchar(255) not null
+);
+create unique index if not exists catalogue_item_sku_code_uq on bridge.catalogue_item (sku_code);
+create index if not exists catalogue_item_product_idx on bridge.catalogue_item (product_id);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'catalogue_item_classification_chk') then
+    alter table bridge.catalogue_item add constraint catalogue_item_classification_chk
+      check (classification in ('single_chemical', 'blend'));
+  end if;
+  -- A CAS number travels with the source it is held under, or not at all.
+  if not exists (select 1 from pg_constraint where conname = 'catalogue_item_cas_sourced_chk') then
+    alter table bridge.catalogue_item add constraint catalogue_item_cas_sourced_chk
+      check (cas_number is null or (cas_source is not null and btrim(cas_source) <> ''));
+  end if;
+end $$;
+
+create table if not exists production.setup_proposal (
+  setup_proposal_id uuid primary key default gen_random_uuid(),
+  kind varchar(20) not null,
+  product_id uuid,
+  subject_label text not null,
+  payload jsonb not null,
+  source varchar(20) not null,
+  evidence text not null,
+  proposer varchar(50) not null default 'Ruh',
+  status varchar(20) not null default 'proposed',
+  proposed_dt timestamptz not null default now(),
+  proposed_by varchar(255),
+  decided_by varchar(255),
+  decided_dt timestamptz,
+  decision_note text,
+  applied jsonb
+);
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'setup_proposal_kind_chk') then
+    alter table production.setup_proposal add constraint setup_proposal_kind_chk check (kind in ('qc_spec', 'rack_layout'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'setup_proposal_source_chk') then
+    alter table production.setup_proposal add constraint setup_proposal_source_chk check (source in ('document', 'catalogue fact', 'estimate'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'setup_proposal_status_chk') then
+    alter table production.setup_proposal add constraint setup_proposal_status_chk check (status in ('proposed', 'approved', 'rejected', 'superseded'));
+  end if;
+  -- A decision has a person and an instant, or it is not a decision.
+  if not exists (select 1 from pg_constraint where conname = 'setup_proposal_decided_chk') then
+    alter table production.setup_proposal add constraint setup_proposal_decided_chk
+      check ((status in ('approved', 'rejected')) = (decided_by is not null and decided_dt is not null));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'setup_proposal_qc_has_product_chk') then
+    alter table production.setup_proposal add constraint setup_proposal_qc_has_product_chk
+      check (kind <> 'qc_spec' or product_id is not null);
+  end if;
+end $$;
+-- One open draft per product (QC) and one open rack layout: asking again never stacks drafts.
+create unique index if not exists setup_proposal_open_qc_uq on production.setup_proposal (product_id)
+  where status = 'proposed' and kind = 'qc_spec';
+create unique index if not exists setup_proposal_open_rack_uq on production.setup_proposal (kind)
+  where status = 'proposed' and kind = 'rack_layout';
+create index if not exists setup_proposal_status_idx on production.setup_proposal (kind, status);
+

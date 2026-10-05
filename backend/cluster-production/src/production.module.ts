@@ -70,6 +70,8 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
     ProductionLookupService,
     { provide: PRODUCTION_LOOKUP, useExisting: ProductionLookupService },
   ],
-  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP, ProduceQueueService],
+  // FACTORY-SETUP: CoaService is exported so an approved QC-spec proposal is written through the
+  // same upsertSpec the QC screen uses, as the approving person.
+  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP, ProduceQueueService, CoaService],
 })
 export class ProductionModule {}
