@@ -1151,6 +1151,18 @@ create table if not exists iam.user_master (
 );
 create unique index if not exists user_master_alembic_subject_uq
   on iam.user_master (alembic_subject) where alembic_subject is not null;
+-- Lane vaultsetup (2026-10-05): HUMAN or SERVICE (the non-login "Ruh (automation)" principal) —
+-- scripts/migrations/2026-10-05-formula-setup.sql.
+alter table iam.user_master add column if not exists account_kind varchar(20) not null default 'HUMAN';
+do $$ begin
+  if not exists (select 1 from pg_constraint where conname = 'user_master_account_kind_chk') then
+    alter table iam.user_master add constraint user_master_account_kind_chk check (account_kind in ('HUMAN', 'SERVICE'));
+  end if;
+  if not exists (select 1 from pg_constraint where conname = 'user_master_service_no_login_chk') then
+    alter table iam.user_master add constraint user_master_service_no_login_chk
+      check (account_kind <> 'SERVICE' or (password_hash is null and alembic_subject is null));
+  end if;
+end $$;
 
 -- S3 security review item 4: Postgres-backed single-use store for alembic-assertion `jti`s
 -- (replaces AuthService's old in-process Map). See packages/data-org/src/schema/assertion-jti.ts.
@@ -2028,4 +2040,23 @@ create table if not exists production.production_plan (
   updated_dt timestamptz not null default now(),
   created_by varchar(255),
   updated_by varchar(255)
+);
+
+-- Lane vaultsetup (2026-10-05): packaging.audit_events — @core/data-kernel's auditTable() shape
+-- (packages/data-packaging/src/schema/crosscutting.ts). FormulaSetupService (backend/api/src/
+-- formula-setup) records every product -> formula link change here, before and after.
+create table if not exists packaging.audit_events (
+  id uuid primary key default gen_random_uuid(),
+  actor_id uuid,
+  action text not null,
+  entity_type text not null,
+  entity_id uuid,
+  before jsonb,
+  after jsonb,
+  request_id text,
+  ip text,
+  occurred_at timestamptz not null default now(),
+  chain_seq bigint,
+  prev_hash text,
+  row_hash text
 );
