@@ -5,10 +5,15 @@
  * and codes, and asks the Vault for everything else.
  *
  *   listProducts   every product with its formula state (none / linked / approved), the
- *                  catalogue's single-chemical/blend classification when one is known
- *                  (PRODUCT_KIND_SOURCE — see below), and the material a single-chemical product
- *                  would be sealed from (the material whose code equals the product code).
- *   createShells   for the chosen products with no formula: mint a Ruh token for this ONE call
+ *                  catalogue's single-chemical/blend classification and its basis when the
+ *                  catalogue holds the product (PRODUCT_KIND_SOURCE = bridge.catalogue_item), and
+ *                  the material a single-chemical product would be sealed from: the catalogue's
+ *                  own material for it, else the one material whose code equals the product code.
+ *   createShells   for the chosen products with no formula: the kind is the one asked for, else
+ *                  the catalogue's (a product with neither is refused, never guessed). A product
+ *                  the catalogue classifies as a BLEND is never sealed as a single chemical unless
+ *                  the request says `overrideCatalogue: true` for it (the screen asks the owner
+ *                  first); the link audit records where the kind came from. Then mint a Ruh token for this ONE call
  *                  (ServicePrincipalService — refused until two owners granted Ruh `formulator`),
  *                  ask the Vault to draft the shells AS RUH (POST /v1/formula-shells: the Vault's
  *                  own guards check Ruh's permissions, its audit names Ruh), then link each product
@@ -34,7 +39,7 @@ import { sql } from 'drizzle-orm';
 import { type AuthPrincipal } from '@core/backend-kernel';
 import { VaultApiClient, type FormulaDirectoryPage, type ShellKind, type ShellResult } from '@ra/cluster-formula';
 import { ServicePrincipalService } from '@ra/cluster-org';
-import { FORMULA_SETUP_DB, PRODUCT_KIND_SOURCE, type FormulaSetupDb, type ProductKindSource } from './formula-setup.tokens.js';
+import { FORMULA_SETUP_DB, PRODUCT_KIND_SOURCE, type FormulaSetupDb, type ProductClassification, type ProductKindSource } from './formula-setup.tokens.js';
 
 export interface SetupProduct {
   productId: string;
@@ -51,8 +56,11 @@ export interface SetupProduct {
   state: 'none' | 'linked' | 'approved';
   /** The catalogue's classification, when the catalogue has one (else the owner picks). */
   catalogueKind: ShellKind | null;
-  /** The material a single-chemical product is sealed from: the one material whose code equals
-   *  the product code (null when there is none, or more than one). */
+  /** ALEMBIC's reason for that classification (plain words), when there is one. */
+  catalogueBasis: string | null;
+  /** The material a single-chemical product is sealed from: the catalogue's material for a product
+   *  it classifies as a single chemical, else the one material whose code equals the product code
+   *  (null when there is none, or more than one). */
   material: { materialId: string; materialCode: string | null; materialName: string | null } | null;
 }
 
@@ -127,10 +135,25 @@ export class FormulaSetupService {
         vaultError = (err as Error).message;
       }
     }
-    const kinds = this.kinds ? await this.kinds.kindsFor(rows.map((r) => r.product_id)) : new Map<string, ShellKind>();
+    const classes = await this.classify(rows.map((r) => r.product_id));
+    const catalogueMaterialIds = [...new Set([...classes.values()].map((c) => c.materialId).filter((m): m is string => !!m))];
+    const catalogueMaterials = new Map<string, { code: string | null; name: string | null }>();
+    if (catalogueMaterialIds.length > 0) {
+      const mats = (await this.db.execute(sql`
+        select material_id::text as id, material_code, material_name from masterdata.material where material_id in ${catalogueMaterialIds}
+      `)) as unknown as Array<{ id: string; material_code: string | null; material_name: string | null }>;
+      for (const m of mats) catalogueMaterials.set(m.id, { code: m.material_code, name: m.material_name });
+    }
 
     const items = rows.map((r): SetupProduct => {
       const label = r.formula_id ? labels.get(r.formula_id) ?? null : null;
+      const cls = classes.get(r.product_id) ?? null;
+      const own = cls?.materialId ? catalogueMaterials.get(cls.materialId) : undefined;
+      const material = cls?.materialId && own
+        ? { materialId: cls.materialId, materialCode: opts.reveal ? own.code : null, materialName: opts.reveal ? own.name : null }
+        : r.material_matches === 1 && r.material_id
+          ? { materialId: r.material_id, materialCode: opts.reveal ? r.material_code : null, materialName: opts.reveal ? r.material_name : null }
+          : null;
       return {
         productId: r.product_id,
         productCode: r.product_code,
@@ -140,17 +163,16 @@ export class FormulaSetupService {
         formulaId: r.formula_id,
         formula: label,
         state: !r.formula_id ? 'none' : label?.approvedVersionNumber != null ? 'approved' : 'linked',
-        catalogueKind: kinds.get(r.product_id) ?? null,
-        material: r.material_matches === 1 && r.material_id
-          ? { materialId: r.material_id, materialCode: opts.reveal ? r.material_code : null, materialName: opts.reveal ? r.material_name : null }
-          : null,
+        catalogueKind: cls?.kind ?? null,
+        catalogueBasis: cls?.basis ?? null,
+        material,
       };
     });
     return { items, vaultError };
   }
 
   async createShells(
-    body: { products: Array<{ productId: string; kind: ShellKind; materialId?: string | null }> },
+    body: { products: Array<{ productId: string; kind?: ShellKind | null; materialId?: string | null; overrideCatalogue?: boolean }> },
     principal: AuthPrincipal,
   ): Promise<{ results: ShellOutcome[] }> {
     const vault = this.requireVault();
@@ -160,24 +182,43 @@ export class FormulaSetupService {
         from packaging.product_master p where p.product_id in ${ids}
     `)) as unknown as Array<{ product_id: string; product_code: string | null; product_name: string | null; formula_id: string | null }>;
     const byId = new Map(rows.map((r) => [r.product_id, r]));
+    const classes = await this.classify(rows.map((r) => r.product_id));
 
     const results: ShellOutcome[] = [];
     const inputs: Array<{ productId: string; productCode: string; productName: string | null; kind: ShellKind; materialId: string | null }> = [];
+    const kindSource = new Map<string, string>();
     for (const want of body.products) {
       const p = byId.get(want.productId);
       if (!p) { results.push({ productId: want.productId, productCode: null, outcome: 'error', error: 'No such product.' }); continue; }
       if (!p.product_code) { results.push({ productId: p.product_id, productCode: null, outcome: 'error', error: 'The product has no code.' }); continue; }
       if (p.formula_id) { results.push({ productId: p.product_id, productCode: p.product_code, outcome: 'already_linked', formulaId: p.formula_id }); continue; }
+      const cls = classes.get(p.product_id) ?? null;
+      const kind: ShellKind | null = want.kind ?? cls?.kind ?? null;
+      if (!kind) {
+        results.push({ productId: p.product_id, productCode: p.product_code, outcome: 'error',
+          error: `The catalogue has no classification for ${p.product_code} — choose single chemical or blend.` });
+        continue;
+      }
+      // Never relabel a catalogue blend as a single chemical without the owner saying so.
+      if (cls?.kind === 'blend' && kind === 'single_chemical' && want.overrideCatalogue !== true) {
+        results.push({ productId: p.product_id, productCode: p.product_code, outcome: 'error',
+          error: `The catalogue classifies ${p.product_code} as a blend${cls.basis ? ` (${cls.basis})` : ''} — sealing it as a single chemical needs the owner's explicit override.` });
+        continue;
+      }
       let materialId: string | null = null;
-      if (want.kind === 'single_chemical') {
+      if (kind === 'single_chemical') {
         try {
-          materialId = await this.materialFor(p.product_code, want.materialId ?? null);
+          materialId = await this.materialFor(p.product_code, want.materialId ?? null, cls?.kind === 'single_chemical' ? cls.materialId : null);
         } catch (err) {
           results.push({ productId: p.product_id, productCode: p.product_code, outcome: 'error', error: (err as Error).message });
           continue;
         }
       }
-      inputs.push({ productId: p.product_id, productCode: p.product_code, productName: p.product_name, kind: want.kind, materialId });
+      kindSource.set(p.product_id, !want.kind ? 'from the catalogue'
+        : !cls ? 'chosen by the owner'
+          : cls.kind === kind ? 'as the catalogue says'
+            : `owner override of the catalogue's ${cls.kind === 'blend' ? 'blend' : 'single chemical'}`);
+      inputs.push({ productId: p.product_id, productCode: p.product_code, productName: p.product_name, kind, materialId });
     }
     if (inputs.length === 0) return { results };
 
@@ -197,7 +238,7 @@ export class FormulaSetupService {
         `)) as unknown as unknown[];
         out.set(r.productId, updated.length > 0);
         if (updated.length > 0) {
-          await this.auditLink(tx, principal, r.productId, null, r.formulaId, `formula shell drafted by Ruh (${input?.kind ?? r.kind ?? 'unknown'})`);
+          await this.auditLink(tx, principal, r.productId, null, r.formulaId, `formula shell drafted by Ruh (${input?.kind ?? r.kind ?? 'unknown'}${kindSource.has(r.productId) ? `, ${kindSource.get(r.productId)}` : ''})`);
         }
       }
       return out;
@@ -218,9 +259,17 @@ export class FormulaSetupService {
     return { results };
   }
 
-  /** The product's own material: the one the caller named (must exist), else the one material
-   *  whose code equals the product code. */
-  private async materialFor(productCode: string, named: string | null): Promise<string> {
+  /** The catalogue's classification of these products (none without a PRODUCT_KIND_SOURCE). */
+  private async classify(productIds: string[]): Promise<Map<string, ProductClassification>> {
+    if (!this.kinds || productIds.length === 0) return new Map();
+    return this.kinds.classify(productIds);
+  }
+
+  /** The product's own material: the one the caller named (must exist), else the catalogue's
+   *  material for it (verified to exist when classified), else the one material whose code equals
+   *  the product code. */
+  private async materialFor(productCode: string, named: string | null, fromCatalogue: string | null): Promise<string> {
+    if (!named && fromCatalogue) return fromCatalogue;
     if (named) {
       const hit = (await this.db.execute(sql`select material_id::text as id from masterdata.material where material_id = ${named}::uuid`)) as unknown as Array<{ id: string }>;
       if (!hit[0]) throw new BadRequestException('The chosen material does not exist.');

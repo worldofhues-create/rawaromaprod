@@ -3,6 +3,8 @@
  *
  *   GET  /v1/formula-setup/products     products + formula state + catalogue kind   packaging:product_formula_link:read
  *   POST /v1/formula-setup/shells       draft shells as Ruh, link each product      packaging:product_formula_link:write
+ *                                       (kind defaults to the catalogue's; a catalogue blend is sealed as a
+ *                                       single chemical only with overrideCatalogue: true)
  *   POST /v1/products/:id/formula-link  set or replace one product's formula        packaging:product_formula_link:write
  *   GET  /v1/formulas                   the formula list (code/status, no name)     packaging:product_formula_link:read
  *
@@ -22,8 +24,11 @@ const shellsBody = z
         z
           .object({
             productId: z.string().uuid(),
-            kind: z.enum(SHELL_KINDS),
+            // Omitted = the catalogue's classification (refused for a product the catalogue lacks).
+            kind: z.enum(SHELL_KINDS).nullable().optional(),
             materialId: z.string().uuid().nullable().optional(),
+            // Required to seal a product the catalogue classifies as a blend as a single chemical.
+            overrideCatalogue: z.boolean().optional(),
           })
           .strict(),
       )

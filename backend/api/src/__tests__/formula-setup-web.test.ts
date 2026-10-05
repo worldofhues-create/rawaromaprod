@@ -41,6 +41,11 @@ test('Factory: the screen — two-owner Ruh card, shells, guarded link; tunnel o
   assert.ok(!/formulaName|formula_name|percentage/.test(js), 'the factory never reads a formula name or a percentage');
   // The approval is the EXISTING two-person route — no Ruh-specific shortcut.
   assert.ok(!/ruh\/approve/.test(js));
+  // The kind defaults to the catalogue's; a catalogue blend sealed as a single chemical is sent as an
+  // explicit override (the server refuses it otherwise) and the confirmation says so.
+  assert.match(js, /var kind = p\.catalogueKind \|\| 'blend';/);
+  assert.match(js, /if \(body\.kind === 'single_chemical' && p\.catalogueKind === 'blend'\) body\.overrideCatalogue = true;/);
+  assert.match(js, /blends in the ALEMBIC catalogue — you are overriding it/);
   // Products table row action, gated by the new permission.
   assert.match(js, /ACTIONS\['\/v1\/products'\]/);
   assert.match(js, /perm: 'packaging:product_formula_link:write'/);

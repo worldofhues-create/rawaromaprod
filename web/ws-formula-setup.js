@@ -102,7 +102,7 @@
         ? '<select class="fld fs-kind" data-id="' + p.productId + '" aria-label="Kind of ' + escHtml(p.productCode) + '">' +
             '<option value="blend"' + (kind === 'blend' ? ' selected' : '') + '>Blend</option>' +
             '<option value="single_chemical"' + (kind === 'single_chemical' ? ' selected' : '') + '>Single chemical</option></select>' +
-            (p.catalogueKind ? '<div class="t-cap">from the catalogue</div>' : '')
+            (p.catalogueKind ? '<div class="t-cap"' + (p.catalogueBasis ? ' title="' + escHtml(p.catalogueBasis) + '"' : '') + '>from the catalogue</div>' : '')
         : muted(p.catalogueKind === 'single_chemical' ? 'Single chemical' : p.catalogueKind === 'blend' ? 'Blend' : '—');
       // Without masterdata:material:reveal the server says only THAT the material was found (masked).
       var matCell = !p.material ? muted('no material with this code')
@@ -161,11 +161,16 @@
       var p = FS.products[id] || {};
       var body = { productId: id, kind: sel ? sel.value : 'blend' };
       if (body.kind === 'single_chemical' && p.material && p.material.materialId) body.materialId = p.material.materialId;
+      // The owner changed a catalogue blend to a single chemical on this screen: say so explicitly
+      // (the server refuses to seal a catalogue blend otherwise).
+      if (body.kind === 'single_chemical' && p.catalogueKind === 'blend') body.overrideCatalogue = true;
       return body;
     });
     if (!picks.length) { toast('Tick at least one product.', 'bad'); return; }
     var singles = picks.filter(function (p) { return p.kind === 'single_chemical'; }).length;
-    raConfirm('Ruh drafts ' + picks.length + ' formula(s): ' + singles + ' single chemical(s) sealed at 100 % and sent for approval, ' + (picks.length - singles) + ' blend(s) waiting for a recipe in the Vault.', function () {
+    var overrides = picks.filter(function (p) { return p.overrideCatalogue; }).length;
+    raConfirm('Ruh drafts ' + picks.length + ' formula(s): ' + singles + ' single chemical(s) sealed at 100 % and sent for approval, ' + (picks.length - singles) + ' blend(s) waiting for a recipe in the Vault.' +
+      (overrides ? ' ' + overrides + ' of the single chemicals are blends in the ALEMBIC catalogue — you are overriding it.' : ''), function () {
       btn.disabled = true; btn.textContent = 'Drafting…';
       tunnel('/v1/formula-setup/shells', { method: 'POST', body: { products: picks } }).then(function (res) {
         btn.disabled = false; btn.textContent = 'Draft formula shells';

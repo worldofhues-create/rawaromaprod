@@ -70,11 +70,35 @@ reason is required, and the before/after is audited. The generic edit route stil
 
 ## Classification from the catalogue
 
-`POST /v1/formula-setup/shells` always takes the kind explicitly per product
-(`{ productId, kind: 'single_chemical' | 'blend', materialId? }`). When the catalogue sync stores its
-classification, provide a `ProductKindSource` under `PRODUCT_KIND_SOURCE` in
-`backend/api/src/formula-setup/formula-setup.module.ts`. It returns
-`Map<productId, 'single_chemical' | 'blend'>`, and the setup screen pre-fills from it.
+The ALEMBIC catalogue sync stores each product's `single_chemical` / `blend` classification in
+`bridge.catalogue_item` (see `docs/bridge/FACTORY_CATALOGUE.md`). `CatalogueProductKindSource`
+(`backend/api/src/formula-setup/catalogue-kind.source.ts`) reads it, and
+`formula-setup.module.ts` provides it under `PRODUCT_KIND_SOURCE`.
+
+- **Formula setup screen.** Each product shows the catalogue's kind, marked "from the catalogue"
+  (hover shows ALEMBIC's reason), and the kind picker starts on it. A product the catalogue does not
+  hold has no kind; the picker starts on Blend, which is the safe choice because a blend is never
+  sealed.
+- **Own material.** A single chemical is sealed at 100 % of the catalogue's material for it. If the
+  catalogue has no material for it, the fallback is the one material whose code equals the product
+  code.
+- **`POST /v1/formula-setup/shells`** takes `{ productId, kind?, materialId?, overrideCatalogue? }`
+  per product. When `kind` is left out, the catalogue's kind is used. A product with neither is
+  refused ("choose single chemical or blend"), and nothing for it reaches the Vault.
+- **A catalogue blend is never sealed as a single chemical** unless `overrideCatalogue: true` is
+  sent for that product. The screen sends it only when the owner changes a catalogue blend to
+  Single chemical, and the confirmation says so. Otherwise the request is refused per product, with
+  the catalogue's reason. Going the other way (a catalogue single chemical drafted as a blend) is
+  always allowed.
+- **Conflicting catalogue rows.** If several catalogue rows on one product disagree on the kind, the
+  product has no kind, and the system never guesses one.
+- **Audit.** The link audit row says where the kind came from: from the catalogue, as the catalogue
+  says, chosen by the owner, or owner override of the catalogue's blend or single chemical.
+- **Factory setup checklist.** "Formulas linked" counts distinct catalogue products that have a
+  real `product_master.formula_id` link. It also shows how many of those formulas the Vault has
+  approved (`formulas.approved`, which is null when the Vault did not answer). The step is done only
+  when every product is linked and approved, and it opens Formula setup for roles that have that
+  screen.
 
 ## Where it lives
 
