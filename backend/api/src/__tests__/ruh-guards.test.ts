@@ -37,7 +37,7 @@ const config = { get: (k: string) => env[k] } as never;
 let settings: RuhSettingsService;
 let guards: RuhGuardsService;
 let interceptor: RuhGuardInterceptor;
-const actor = principal({ userId: randomUUID(), roles: ['production', 'warehouse', 'qc'], permissions: [] });
+const actor = principal({ userId: randomUUID(), roles: ['production', 'warehouse', 'qc'], permissions: ['location:rack_master:write', 'location:shelf_master:write', 'location:bin_master:write'] });
 const ACTOR_EMAIL = `guard-${actor.userId.slice(0, 6)}@rawaroma.test`;
 
 interface Outcome { ran: boolean; body: Record<string, unknown>; error?: DomainError; result?: unknown }
@@ -201,6 +201,9 @@ test('editing / removing a rack, shelf or bin that holds stock → warn (urgent 
   await assertWarnsThenProceeds('PATCH', '/v1/masters/:resource/:id', { resource: 'bins', id: ids[0]!.bin }, { binName: 'New name' }, 'location.edit_stocked', 'LOCATION_EDIT_WITH_STOCK');
   await assertQuiet('PATCH', '/v1/masters/:resource/:id', { resource: 'bins', id: ids[1]!.bin }, { status: 'INACTIVE' }, 'location.edit_stocked');
   await assertQuiet('PATCH', '/v1/masters/:resource/:id', { resource: 'materials', id: randomUUID() }, { status: 'INACTIVE' }, 'location.edit_stocked');
+  // Someone who may not edit racks learns nothing about their stock from Ruh: the service refuses them.
+  const ev = await guards.evaluate(guards.match('PATCH', '/v1/masters/:resource/:id')!, { params: { resource: 'racks', id: ids[0]!.rack }, body: { status: 'INACTIVE' }, principal: principal({ roles: ['sales'], permissions: [] }) });
+  assert.deepEqual(ev.risks, []);
 });
 
 test('pick-to-light off / simulator in production → warn; outside production (by default) or unchanged → quiet', async () => {

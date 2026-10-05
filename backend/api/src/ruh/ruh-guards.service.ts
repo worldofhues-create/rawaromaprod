@@ -299,6 +299,10 @@ export class RuhGuardsService {
     const kind = resource === 'racks' ? 'rack' : resource === 'shelves' ? 'shelf' : resource === 'bins' ? 'bin' : null;
     const subject: RuhSubject = { type: kind ?? resource, id };
     if (!kind || !UUID.test(id)) return none(`edit ${resource}`, subject);
+    // This route checks its permission inside the service (per resource): Ruh says nothing about a
+    // location's stock to someone who may not edit it — the service refuses them as before.
+    const perm = `location:${kind}_master:write`;
+    if (!(c.principal.permissions ?? []).includes(perm) && !(c.principal.roles ?? []).includes('owner')) return none(`edit ${resource}`, subject);
     const bins = kind === 'bin' ? this.sql`select ${id}::uuid as bin_id`
       : kind === 'shelf' ? this.sql`select bin_id from location.bin_master where shelf_id = ${id}::uuid`
         : this.sql`select b.bin_id from location.bin_master b join location.shelf_master sh on sh.shelf_id = b.shelf_id where sh.rack_id = ${id}::uuid`;
