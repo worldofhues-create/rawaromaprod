@@ -267,3 +267,12 @@ test('catalogue: both new permissions are in the seed catalogue; no Vault role a
     for (const role of ['formulator', 'vault_approver', 'admin', 'compounding']) assert.ok(!grant(role).includes(p), `${role} ${p}`);
   }
 });
+
+test('boundary: the main-box module never touches the formula schema or Vault crypto (it holds codes and ids only)', async () => {
+  const { readFileSync } = await import('node:fs');
+  for (const rel of ['formula-setup.service.ts', 'formula-setup.controller.ts', 'formula-setup.module.ts', 'formula-setup.tokens.ts']) {
+    const src = readFileSync(new URL(`../formula-setup/${rel}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /\bformula\.(formula_|audit_events|outbox)/, `${rel}: no formula-schema SQL on the main box`);
+    assert.doesNotMatch(src, /crypto\/(vault|kek|dek|kms)|FORMULA_KEK|FormulaModule|FORMULA_DB/, `${rel}: no Vault crypto, DB or module`);
+  }
+});
