@@ -27,7 +27,7 @@ import { CoaService } from '@ra/cluster-production';
 import { shelfDb } from '../shelf/shelf.tokens.js';
 import { ShelfLayoutService } from '../shelf/shelf-layout.service.js';
 import { PickLightService } from '../shelf/pick-light.service.js';
-import { FactoryCatalogueService } from '../factory-setup/catalogue.service.js';
+import { FactoryCatalogueService, type ItemResult } from '../factory-setup/catalogue.service.js';
 import { SetupStatusService } from '../factory-setup/setup-status.service.js';
 import { FactorySetupService } from '../factory-setup/setup.service.js';
 import { AlembicDraftsClient } from '../factory-setup/alembic-drafts.client.js';
@@ -107,6 +107,8 @@ function signed(body: unknown, o: { ts?: number; nonce?: string; secret?: string
 }
 
 const send = (body: unknown, o?: Parameters<typeof signed>[1]) => { const [r, s, t, n] = signed(body, o); return catalogue.handle(r, s, t, n); };
+/** The per-item results of a 200 answer. */
+const res = (r: { body: unknown }): ItemResult[] => (r.body as { results: ItemResult[] }).results;
 const upsert = (items: CatalogueItem[], subject: string | null = null) => send({ tenantId: TENANT, subject, op: 'upsert', items });
 
 /* ── the contract (pure) ─────────────────────────────────────────────────────────────── */
@@ -184,7 +186,7 @@ test('upsert: material + floor code + product (no formula) + factory SKU == the 
   const it = item();
   const first = await upsert([it]);
   assert.equal(first.status, 200);
-  const r = (first.body as { results: Array<Record<string, string>> }).results[0]!;
+  const r = res(first)[0]!;
   assert.equal(r.outcome, 'created');
   assert.equal(r.floor_code, floorCodeFor(it.sku_code));
   const [sku] = await sql`select s.sku_code, s.pack_size, p.formula_id, p.product_code from packaging.product_sku s join packaging.product_master p on p.product_id = s.product_id where s.product_sku_id = ${r.product_sku_id}`;
@@ -198,7 +200,7 @@ test('upsert: material + floor code + product (no formula) + factory SKU == the 
   assert.deepEqual(events.map((e) => e.type), ['masterdata.alias.created', 'masterdata.material.created']);
 
   const again = await upsert([it]);
-  assert.equal((again.body as { results: Array<Record<string, string>> }).results[0]!.outcome, 'unchanged');
+  assert.equal(res(again)[0]!.outcome, 'unchanged');
   for (const [table, col] of [['masterdata.material', 'material_code'], ['packaging.product_master', 'product_code'], ['packaging.product_sku', 'sku_code']] as const) {
     const n = await sql`select count(*)::int as n from ${sql.unsafe(table)} where ${sql.unsafe(col)} = ${it.sku_code}`;
     assert.equal(n[0]!.n, 1, `${table} has one row`);
@@ -206,7 +208,7 @@ test('upsert: material + floor code + product (no formula) + factory SKU == the 
   assert.equal((await sql`select count(*)::int as n from masterdata.rm_alias where material_id = ${r.material_id}`)[0]!.n, 1);
 
   const renamed = await upsert([{ ...it, name: 'Hedione Renamed', cas_number: null, cas_source: null }]);
-  assert.equal((renamed.body as { results: Array<Record<string, string>> }).results[0]!.outcome, 'updated');
+  assert.equal(res(renamed)[0]!.outcome, 'updated');
   const [mat2] = await sql`select material_name, cas_number from masterdata.material where material_id = ${r.material_id}`;
   assert.equal(mat2!.material_name, 'Hedione Renamed');
   assert.equal(mat2!.cas_number, null, 'a CAS number ALEMBIC no longer holds is not kept on a material the bridge made');
@@ -220,7 +222,7 @@ test('a product made by hand under the same code is linked, never rewritten, and
   const productId = randomUUID(); const skuId = randomUUID(); const formulaId = randomUUID();
   await sql`insert into packaging.product_master (product_id, formula_id, product_code, product_name, status) values (${productId}, ${formulaId}, ${it.sku_code}, 'Hand made', 'ACTIVE')`;
   await sql`insert into packaging.product_sku (product_sku_id, product_id, sku_code, pack_size, status) values (${skuId}, ${productId}, ${it.sku_code}, '25 kg', 'ACTIVE')`;
-  const r = ((await upsert([it])).body as { results: Array<Record<string, string>> }).results[0]!;
+  const r = res(await upsert([it]))[0]!;
   assert.equal(r.outcome, 'linked');
   assert.equal(r.product_id, productId);
   assert.equal(r.product_sku_id, skuId);
@@ -234,9 +236,9 @@ test('a factory code already held by another ALEMBIC product is refused for that
   await upsert([a]);
   const b = item({ sku_code: a.sku_code });
   const c = item();
-  const res = ((await upsert([b, c])).body as { results: Array<Record<string, string>> }).results;
-  assert.equal(res[0]!.outcome, 'refused');
-  assert.equal(res[1]!.outcome, 'created');
+  const out = res(await upsert([b, c]));
+  assert.equal(out[0]!.outcome, 'refused');
+  assert.equal(out[1]!.outcome, 'created');
 });
 
 test('pick-to-light: the setup default is the on-screen simulator when unset, and a chosen mode is never changed', async () => {
@@ -272,7 +274,7 @@ test('QC drafts: asked of ALEMBIC (signed), stored as proposals, never a spec un
   const sql = testClient();
   // Every product already in the shared test DB gets a spec-less draft too; answer for all of them.
   const it = item();
-  const r = ((await upsert([it])).body as { results: Array<Record<string, string>> }).results[0]!;
+  const r = res(await upsert([it]))[0]!;
   draftsReply = (codes) => ({
     ok: true, ai: 'used',
     items: codes.map((c) => ({
@@ -330,8 +332,8 @@ test('QC drafts: ALEMBIC unreachable or not connected drafts nothing and says wh
 test('a rejected QC draft writes no spec; a spec entered meanwhile is never overwritten by a draft', async () => {
   const sql = testClient();
   const qc = principal({ userId: randomUUID(), roles: ['qc'], permissions: ['production:product_qc_spec:write'] });
-  const a = ((await upsert([item()])).body as { results: Array<Record<string, string>> }).results[0]!;
-  const b = ((await upsert([item()])).body as { results: Array<Record<string, string>> }).results[0]!;
+  const a = res(await upsert([item()]))[0]!;
+  const b = res(await upsert([item()]))[0]!;
   const draft = { sg_min: field(0.9, 'estimate', 'e'), sg_max: field(0.92, 'estimate', 'e'), flash_point_min_c: field(70, 'estimate', 'e'), flash_point_max_c: field(80, 'estimate', 'e'), shelf_life_months: field(12, 'estimate', 'e') };
   const ids: string[] = [];
   for (const p of [a, b]) {
@@ -341,9 +343,9 @@ test('a rejected QC draft writes no spec; a spec entered meanwhile is never over
   await setup.decideQc([ids[0]!], 'reject', 'not ours', qc);
   assert.equal(await coa.getSpec(a.product_id!), null);
   await coa.upsertSpec(b.product_id!, { sgMin: 1.0, sgMax: 1.02, flashPointMinC: 100, flashPointMaxC: 110, shelfLifeMonths: 36 }, qc);
-  const res = await setup.decideQc([ids[1]!], 'approve', null, qc);
-  assert.equal(res.approved, 0);
-  assert.match(res.refused[0]!.reason, /already has a QC spec/);
+  const decided = await setup.decideQc([ids[1]!], 'approve', null, qc);
+  assert.equal(decided.approved, 0);
+  assert.match(decided.refused[0]!.reason, /already has a QC spec/);
   assert.equal(Number((await coa.getSpec(b.product_id!))!.sgMin), 1.0);
 });
 
