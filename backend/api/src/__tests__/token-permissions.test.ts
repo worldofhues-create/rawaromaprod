@@ -197,10 +197,11 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 267 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 269 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
-  assert.equal(ownerGrant.length, 267);
+  // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
+  assert.equal(ownerGrant.length, 269);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

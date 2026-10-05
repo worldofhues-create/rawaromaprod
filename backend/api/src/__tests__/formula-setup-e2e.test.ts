@@ -246,10 +246,20 @@ test('1. two owners grant Ruh formulator — the requester cannot approve their 
 });
 
 test('2. before any formula, Produce next is blocked: NO_FORMULA_LINK', async () => {
-  const res = await main('POST', `/v1/produce/requirements/${REQ.blend}/plan`, people.production, {});
+  // Always-on Ruh (2026-10-06): the single-chemical order ranks ahead of the blend and is still
+  // waiting, so planning the blend first is a Ruh WARNING (409 RUH_CONFIRM_REQUIRED with the risk).
+  // With a typed reason the request goes on to the service — whose own block holds exactly as before.
+  const warned = await main('POST', `/v1/produce/requirements/${REQ.blend}/plan`, people.production, {});
+  assert.equal(warned.status, 409, JSON.stringify(warned.json));
+  assert.equal(warned.json.error.code, 'RUH_CONFIRM_REQUIRED');
+  assert.ok(warned.json.error.details.risks.some((r: { code: string }) => r.code === 'HIGHER_PRIORITY_WAITING'));
+  const res = await main('POST', `/v1/produce/requirements/${REQ.blend}/plan`, people.production, { ruhOverride: { reason: 'blend first on purpose' } });
   assert.equal(res.status, 409, JSON.stringify(res.json));
+  assert.notEqual(res.json.error.code, 'RUH_CONFIRM_REQUIRED', 'past Ruh, the service itself refuses');
   const [r] = await mainSql`select produce_block_reason from bridge.production_requirement where alembic_requirement_id = ${REQ.blend}`;
   assert.equal(r!.produce_block_reason, 'NO_FORMULA_LINK');
+  const told = await mainSql`select 1 from platform.audit_events where action = 'ruh.override' and entity_id = ${REQ.blend}::uuid`;
+  assert.equal(told.length, 0, 'the action did not happen, so there was no override to report');
 });
 
 test('3. production drafts the shells as Ruh: both products linked; the block becomes NO_APPROVED_FORMULA', async () => {
