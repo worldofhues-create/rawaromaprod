@@ -86,7 +86,7 @@ test('the route table (what the address bar says for the main screens)', () => {
     ['warehouse', 'stock', '#/warehouse/stock'], ['warehouse', 'shelftasks', '#/warehouse/put-away-and-pick'], ['procurement', 'rfq', '#/procurement/quote-requests'],
     ['procurement', 'pos', '#/procurement/purchase-orders'], ['receiving', 'grns', '#/receiving/goods-receipts'], ['receiving', 'batches', '#/receiving/raw-material-batches'],
     ['packaging', 'orders', '#/packaging/packing-orders'], ['filling', 'orders', '#/filling/packing-orders'], ['sales', 'orders', '#/sales/sales-orders'],
-    ['compounding', 'orders', '#/compounding/production-orders'], ['admin', 'loginhist', '#/admin/login-history'], ['superadmin', 'formulasetup', '#/owner/formula-setup'],
+    ['compounding', 'orders', '#/compounding/production-orders'], ['admin', 'loginhist', '#/admin/sign-in-history'], ['superadmin', 'formulasetup', '#/owner/formula-setup'],
   ];
   for (const [role, key, hash] of table) assert.equal(map(role, key), hash, `${role}/${key}`);
 });

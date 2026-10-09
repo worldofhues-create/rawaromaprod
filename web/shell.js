@@ -150,7 +150,7 @@
   /* ---------------- role → nav → real endpoints (Phase-1 modules, DB-driven) ---------------- */
   // nav tuple: [key, label, icon, endpoint, masked?]. Aligned to the Phase-1 module per role.
   var ROLES = {
-    superadmin: { label: 'Super Admin', dept: 'Controller', user: 'Owner', nav: [
+    superadmin: { label: 'Owner', dept: 'Whole factory', user: 'Owner', nav: [
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'listcheck', '/v1/production-plan-items'],
       ['runs', 'Master runs', 'layers', '/v1/production-orders'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['uom', 'Units', 'ruler', '/v1/uoms'],
@@ -381,6 +381,8 @@
     if (k === 'daysToExpiry') { var d = Number(v); var c = d <= 30 ? 'var(--red)' : (d <= 90 ? 'var(--amber)' : 'var(--ink-2)'); return '<span style="font-weight:var(--w-med);color:' + c + '">' + (d <= 0 ? 'EXPIRED' : escCell(d) + ' d') + '</span>'; }
     if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (a <= 0 ? 'var(--red)' : 'var(--green)') + '">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r); }
     if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (sh > 0 ? 'var(--red)' : 'var(--ink-3)') + '">' + (sh > 0 ? '▲ ' : '') + escCell(v) + '</span>'; }
+    // Money and rates read as money: grouped digits, no trailing zeros (130200.0000 → 1,30,200).
+    if (/(amount|total|rate|price|balance|ledger)$/i.test(k) && !/date|dt$/i.test(k) && String(v).trim() !== '' && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 })) + '</span>';
     if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r);
     // The chip says the status in words (screen-guide.js); the code stays in the row for search/sort.
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus' || k === 'lifecycleStatus' || (k === 'result' && /^[A-Z_]+$/.test(String(v)))) { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(statusWord(v)) + '</span>'; }
@@ -1419,8 +1421,9 @@
     var cfg = DETAIL[endpoint]; if (!cfg) return '';
     var skip = {}; skip[cfg.idKey] = 1;
     var cells = Object.keys(row).filter(function (k) {
-      var v = row[k]; if (skip[k]) return false; if (v == null || v === '') return false;
-      if (/Id$/.test(k) && isUuid(v)) return false;
+      var v = row[k]; if (skip[k] || HIDE[k] || sensitive(k)) return false; if (v == null || v === '') return false;
+      // Internal ids (who created it, which row it links to) mean nothing to a person reading the record.
+      if (isUuid(v) || (typeof v === 'object')) return false;
       return true;
     }).map(function (k) {
       return '<div><div class="sect" style="margin-bottom:4px">' + label(k) + '</div><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui);color:var(--ink);word-break:break-word">' + fmt(k, row[k], row) + '</div></div>';

@@ -122,9 +122,9 @@
         '<td>' + formulaCell(r.formula) + '</td>' +
         '<td class="r" style="white-space:nowrap">' + (acts.join(' ') || muted('—')) + '</td></tr>';
     }).join('');
-    var note = d.formulaLabels === 'unavailable' ? '<p class="t-cap" style="color:var(--amber);margin:0 0 var(--s-tight)">The Vault did not answer; formula codes are hidden until it does.</p>' : '';
-    V.innerHTML = stats + '<div class="card"><div class="card-hd"><h2>Production queue</h2><span class="chip k">Formula codes only</span>' +
-      '<span class="n">ranked by ALEMBIC: priority, need-by date, arrival · refreshed ' + new Date().toLocaleTimeString() + '</span></div>' +
+    var note = d.formulaLabels === 'unavailable' ? '<p class="t-cap" style="color:var(--amber);margin:0 0 var(--s-tight)">Formula codes cannot be shown right now. The list is still correct; try again in a minute.</p>' : '';
+    V.innerHTML = stats + '<div class="card"><div class="card-hd"><h2>Orders to make</h2><span class="chip k" title="Recipes stay in the Vault; this list names formulas by code only.">Formula codes only</span>' +
+      '<span class="n">In order: priority, then need-by date, then arrival · updated ' + new Date().toLocaleTimeString() + '</span></div>' +
       '<div class="card-bd">' + note + (rows ? '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Priority</th><th>SKU</th><th>Qty</th><th>Orders</th><th>Needed by</th><th>Stage</th><th>Formula</th><th class="r">Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
         : '<div class="empty"><h3>Nothing to produce</h3><p>No open ALEMBIC requirement is waiting on the factory.</p></div>') + '</div></div>';
     [].forEach.call(V.querySelectorAll('[data-plan]'), function (b) { b.onclick = function () { planRun(b, b.getAttribute('data-plan')); }; });

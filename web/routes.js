@@ -46,7 +46,8 @@
     '/v1/material-qc-specifications': 'material-test-specs', '/v1/material-storage-rules': 'storage-rules',
     '/v1/document-registry': 'documents', '/v1/reorder-suggestions': 'reorder-plan', '/v1/stock-requirements': 'stock-planning',
     '/v1/approval-matrix': 'approval-rules', '/v1/qc-inspections': 'test-queue', '/v1/production-qc': 'production-qc',
-    '/v1/stock-adjustments': 'stock-adjustments', '/v1/stock-reservations': 'stock-reservations'
+    '/v1/stock-adjustments': 'stock-adjustments', '/v1/stock-reservations': 'stock-reservations',
+    '/v1/geo-regions': 'regions', '/v1/login-history': 'sign-in-history'
   };
 
   /** A record's own code, in this order — what a person reads on the row and on the label. */
