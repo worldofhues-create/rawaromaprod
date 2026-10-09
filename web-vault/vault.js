@@ -942,7 +942,7 @@
 
       var header = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Version ' + version.versionNumber + (parent && parent.formulaName ? ' of ' + parent.formulaName : '')]), statusChip(version.status)]),
-        h('p', { style: 'color:var(--ink-3)' }, [h('a', { href: '#/formula/' + version.formulaId }, ['Back to ' + ((parent && parent.formulaCode) || 'the formula')])]),
+        h('p', { style: 'color:var(--ink-3)' }, [h('a', { href: '#/formula/' + version.formulaId, style: 'color:var(--ink-2)' }, ['Back to ' + ((parent && parent.formulaCode) || 'the formula')])]),
         h('p', { style: 'color:var(--ink-3)' }, [(ingredients || []).length + ' sealed ingredient' + ((ingredients || []).length === 1 ? '' : 's')]),
       ]);
 
