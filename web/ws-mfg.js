@@ -61,14 +61,15 @@
   // always requires a plain-language reason, which the server audits (origin=MANUAL_CONTINUITY
   // on the row + a bridge.outbox event toward ALEMBIC — see OrdersService.confirmSalesOrder).
   function confirmSalesOrderManual(row) {
-    var reason = window.prompt('Reason for confirming ' + (row.soNumber || 'this sales order') + ' manually (required, audited):');
-    if (reason === null) return; // cancelled
-    reason = reason.trim();
-    if (!reason) { toast('A reason is required.', 'bad'); return; }
-    tunnel('/v1/sales-orders/' + row.salesOrderId + '/confirm', { method: 'POST', body: { reason: reason } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Confirm failed (' + res.status + ')'), 'bad'); return; }
-      toast('Order confirmed', 'good'); loadView();
-    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    askForm({ title: 'Confirm ' + (row.soNumber || 'this sales order') + ' by hand', submit: 'Confirm the order',
+      intro: 'Orders normally come from ALEMBIC. Confirming one here is recorded with your reason, and ALEMBIC is told.',
+      fields: [{ n: 'reason', l: 'Why are you confirming it here?', t: 'textarea', req: true }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/sales-orders/' + row.salesOrderId + '/confirm', { method: 'POST', body: { reason: v.reason } }).then(function (res) {
+          if (res.status >= 400) { fail(failText(res, 'The order was not confirmed. Try again.')); return; }
+          close(); toast('Order confirmed', 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
   }
   // Dispatch a confirmed sales order: pick an FG batch that actually has stock (FEFO, avail > 0)
   // and a real quantity. The server re-checks available (produced − reserved − already dispatched)
@@ -83,7 +84,7 @@
     // for a real error — exactly what Addendum §12D's "0 accidental placeholder pages" rules out).
     // Fixed here rather than left as visual-only: distinguishing error from empty is the same
     // state-authority the addendum requires elsewhere (§9), not new business logic.
-    if (res0.status >= 400) { toast((res0.json && res0.json.error && res0.json.error.message) || ('Could not load finished-good stock (' + res0.status + ')'), 'bad'); return; }
+    if (res0.status >= 400) { toast((res0.json && res0.json.error && res0.json.error.message) || ('Could not load finished-good stock. Try again.'), 'bad'); return; }
     var batches = (res0.json && res0.json.data) || [];
     var byId = {}; batches.forEach(function (b) { byId[b.finishedGoodBatchId] = b; });
     // Batch/lot + status always visible in the picker itself (Addendum §10), not just after pick.
@@ -111,11 +112,14 @@
       var qty = Number($('ra-dq').value);
       if (!(qty > 0)) { $('ra-derr').textContent = 'Enter a quantity.'; return; }
       if (qty > Number(b.availableQty)) { $('ra-derr').textContent = 'Only ' + b.availableQty + ' available in this batch.'; return; }
-      if (!window.confirm('Dispatch ' + qty + ' unit(s) of batch ' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + ' for ' + (row.soNumber || 'this order') + '? This commits stock and cannot be undone from here.')) return;
+      // Asked once, in the sheet itself: the first press says what will happen, the second does it.
+      var what = 'Dispatch ' + qty + ' unit(s) of batch ' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + ' for ' + (row.soNumber || 'this order') + '? This takes the stock and cannot be undone here.';
+      var sv = $('ra-dsave');
+      if (sv.getAttribute('data-armed') !== what) { sv.setAttribute('data-armed', what); $('ra-derr').textContent = what; sv.textContent = 'Yes, dispatch now'; return; }
       var body = { salesOrderId: row.salesOrderId, customerId: row.customerId, dispatchDate: $('ra-dd').value || null, vehicleNumber: $('ra-dv').value || null, items: [{ finishedGoodBatchId: b.finishedGoodBatchId, dispatchedQty: qty, uomId: b.uomId || undefined }] };
       var save = $('ra-dsave'); save.disabled = true; save.textContent = 'Dispatching…';
       tunnel('/v1/dispatches', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = (res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.'; return; }
         d.close(); toast('Dispatched', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Dispatch'; $('ra-derr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -124,7 +128,7 @@
   function markDelivered(row) {
     var id = row.dispatchId != null ? row.dispatchId : guessId(row);
     tunnel('/v1/masters/dispatches/' + id, { method: 'PATCH', body: { status: 'DELIVERED' } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.', 'bad'); return; }
       toast('Marked delivered', 'good'); loadView();
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
@@ -211,7 +215,7 @@
       if (err) { $('ra-qerr').textContent = err; return; }
       var save = $('ra-qsave'); save.disabled = true; save.textContent = 'Saving…';
       tunnel('/v1/qc-inspections/' + iid + '/results', { method: 'POST', body: { results: results } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = (res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.'; return; }
         d.close(); toast('QC results saved', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Save results'; $('ra-qerr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -254,7 +258,7 @@
       v.colourAppearanceStandard = $('ra-cstd').value.trim() || null; v.odourStandard = $('ra-ostd').value.trim() || null;
       var save = $('ra-ssave'); save.disabled = true; save.textContent = 'Saving…';
       tunnel('/v1/product-qc-specs/' + row.productId, { method: 'PUT', body: v }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save spec'; $('ra-serr').textContent = coaErr(res, 'Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save spec'; $('ra-serr').textContent = coaErr(res, 'That did not go through. Try again.'); return; }
         d.close(); toast('Spec saved', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Save spec'; $('ra-serr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -265,11 +269,11 @@
     try {
       if (row) {
         var r0 = await tunnel('/v1/batch-coas/' + row.batchCoaId);
-        if (r0.status >= 400) { toast(coaErr(r0, 'Could not load the COA (' + r0.status + ')'), 'bad'); return; }
+        if (r0.status >= 400) { toast(coaErr(r0, 'Could not load the COA. Try again.'), 'bad'); return; }
         existing = r0.json && r0.json.data;
       } else {
         var r1 = await tunnel('/v1/oil-batches?limit=100');
-        if (r1.status >= 400) { toast(coaErr(r1, 'Could not load oil batches (' + r1.status + ')'), 'bad'); return; }
+        if (r1.status >= 400) { toast(coaErr(r1, 'Could not load oil batches. Try again.'), 'bad'); return; }
         batches = ((r1.json && r1.json.data) || []).filter(function (b) { return String(b.status || '').toUpperCase() !== 'FAILED'; });
       }
     } catch (e) { toast('Can\'t connect. Try again.', 'bad'); return; }
@@ -352,7 +356,7 @@
       if (bad) { err.textContent = 'Each photo needs a document id or an https address.'; return; }
       var save = $('ra-csave'); save.disabled = true; save.textContent = 'Saving…';
       tunnel('/v1/batch-coas', { method: 'POST', body: b }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; err.textContent = coaErr(res, 'Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save results'; err.textContent = coaErr(res, 'That did not go through. Try again.'); return; }
         var out = res.json && res.json.data; d.close();
         if (out && out.coa && out.coa.overallResult === 'PASS') toast('Passed — ready to release', 'good');
         else toast('Failed: ' + ((out && out.failedTests) || []).join(', '), 'bad');
@@ -364,7 +368,7 @@
   function releaseCoa(row) {
     raConfirm('Release batch ' + (row.batchNumber || '') + '? Its certificate-of-analysis data goes to ALEMBIC and can no longer be changed.', function () {
       tunnel('/v1/batch-coas/' + row.batchCoaId + '/release', { method: 'POST', body: {} }).then(function (res) {
-        if (res.status >= 400) { toast(coaErr(res, 'Release failed (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(coaErr(res, 'Release failed. Try again.'), 'bad'); return; }
         toast('Released — COA data sent to ALEMBIC', 'good'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     }, { title: 'Release batch', confirmLabel: 'Release', tone: 'good' });

@@ -160,7 +160,7 @@
     if (window.RaRuh && RaRuh.needsConfirm(r) && !(opts && opts.ruhConfirmed)) r = await RaRuh.guard(r, opts || {}, function (o) { return tunnel(path, o); });
     if (r.status >= 400) {
       var err = (r.json && r.json.error) || {};
-      throw new VaultError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status);
+      throw new VaultError(err.code || 'UNKNOWN', err.message || (r.status === 403 ? 'Your role does not allow this. Ask the owner if you need it.' : 'That did not go through. Try again in a minute.'), r.status);
     }
     return r.json ? r.json.data : null;
   }
@@ -283,7 +283,7 @@
         ]);
         body.appendChild(actions);
         if (!ALEMBIC_CONSOLE_URL) {
-          body.appendChild(h('div', { class: 'err' }, ['Sign-in isn\'t set up for this build.']));
+          body.appendChild(h('div', { class: 'err' }, ['Sign-in is not switched on here yet. Ask your administrator.']));
         }
       });
     });
@@ -349,10 +349,10 @@
   if (window.RaDock) Object.keys(RaDock.GLYPHS).forEach(function (k) { if (!ICONS[k]) ICONS[k] = RaDock.GLYPHS[k]; });
 
   function toast(msg, bad) {
-    var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]);
+    var t = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: bad ? 'alert' : 'status', 'aria-live': bad ? 'assertive' : 'polite' }, [h('span', { class: 'd' }), msg]);
     document.body.appendChild(t);
     if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); }
-    setTimeout(function () { t.remove(); }, 3400);
+    setTimeout(function () { t.remove(); }, bad ? 6000 : 3400);
   }
 
   var dialogRoot = null;
@@ -374,6 +374,8 @@
     document.addEventListener('keydown', function onKey(e) {
       if (e.key === 'Escape') { closeDialog(); document.removeEventListener('keydown', onKey); }
     });
+    // Focus starts inside the dialog (its first field or button), for the keyboard and screen readers.
+    var first = sheet.querySelector('input,select,textarea,button:not(.xp)'); if (first) first.focus();
   }
 
   function promptReason(label) {
@@ -403,7 +405,8 @@
   // pre-existing terminal REJECTED/ARCHIVED.
   function statusChip(status) {
     var tone = { DRAFT: 'n', VERSIONED: 'n', REVIEW: 'a', APPROVED: 'g', LOCKED: 'g', SUPERSEDED: 'a', REJECTED: 'r', ARCHIVED: 'a' }[status] || 'n';
-    return h('span', { class: 'chip ' + tone }, [status || 'UNKNOWN']);
+    var word = { DRAFT: 'Draft', VERSIONED: 'Finalized', REVIEW: 'In review', APPROVED: 'Approved', LOCKED: 'Locked', SUPERSEDED: 'Replaced by newer', REJECTED: 'Rejected', ARCHIVED: 'Archived' }[status];
+    return h('span', { class: 'chip ' + tone }, [word || (status ? String(status).charAt(0) + String(status).slice(1).toLowerCase().replace(/_/g, ' ') : 'Unknown')]);
   }
   function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
 
@@ -482,7 +485,7 @@
     var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('vault') || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
-      err.textContent = 'Sign-in isn\'t set up for this build.';
+      err.textContent = 'Sign-in is not switched on here yet. Ask your administrator.';
     }
     var card = h('div', { class: 'login-card' }, [
       h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
@@ -514,8 +517,10 @@
   var formulaNeeded = { count: null };
   // Quick-access dock (dock.js): at most eight primary destinations, then All sections and Ask
   // Aria. The Vault holds seven, so the dock is its whole visible list, capped all the same.
+  // The day's work first (an approver's Approve recipes is always on the phone tab bar); audits last.
+  var DOCK_ORDER = ['formulas', 'needed', 'recipes', 'review', 'compliance', 'certificates', 'missing', 'audit-access', 'audit-mfg'];
   function dockNav() {
-    var v = visibleNav(), keys = RaDock.pick(v.map(function (n) { return n.id; }), v.map(function (n) { return n.id; }), null);
+    var v = visibleNav(), keys = RaDock.pick(v.map(function (n) { return n.id; }), DOCK_ORDER, null);
     return keys.map(function (k) { return v.filter(function (n) { return n.id === k; })[0]; });
   }
 
@@ -670,7 +675,31 @@
   // The reference Admin/Agent shell, 1:1: rail · top bar (platform brand, page title) · region ·
   // floating glass dock (brand tile, All sections, ≤8 destinations with ⌘1–8, Ask Aria). Below
   // 1024 the dock is the tab bar: the first RaDock.PHONE destinations, Ask Aria and More.
-  function renderShell(activeView, contentEl) {
+  // What each screen is for, said under its title.
+  var HELP = {
+    formulas: 'Every formula you may see. Open one to see its versions and who can read it.',
+    'audit-access': 'Every time someone revealed a formula or decided on a version: who, why and when.',
+    'audit-mfg': 'Every time production asked for a recipe as coded floor instructions.',
+    compliance: 'The safety data for each raw material (IFRA limits, allergens) that certificates are worked out from.',
+    certificates: 'IFRA and allergen certificates worked out from each approved formula.',
+    missing: 'Materials still missing safety data, so a certificate cannot be worked out yet.',
+    needed: 'Products the factory cannot make yet because no approved formula exists for them.',
+    recipes: 'Every factory product\'s formula and whether its recipe is entered. Enter one, or upload many from a spreadsheet.',
+    review: 'Recipes waiting for approval. Tick the ones that are right and approve them together.'
+  };
+  // The trail under the bar on record screens (Formulas › code › Version 2), each step a link back.
+  function setPlace(steps) {
+    var el = document.getElementById('vault-place'); if (!el) return;
+    el.innerHTML = '';
+    var ol = h('ol', { style: 'display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 var(--s-snug);padding:0;font:var(--w-med) var(--t-cap)/1.4 var(--font-ui);color:var(--ink-3)' });
+    steps.forEach(function (st, i) {
+      ol.appendChild(h('li', {}, [i ? '› ' : null, st.hash ? h('a', { href: st.hash, style: 'color:var(--ink-2)' }, [st.label]) : h('span', { 'aria-current': 'page', style: 'color:var(--ink)' }, [st.label])]));
+    });
+    el.appendChild(h('nav', { 'aria-label': 'You are here' }, [ol]));
+    var last = steps[steps.length - 1]; var t = document.getElementById('vault-title'); if (t && last) t.textContent = last.label;
+    document.title = (last ? last.label + ' · ' : '') + 'Vault · Raw Aroma Chem';
+  }
+  function renderShell(activeView, contentEl, trail) {
     root.innerHTML = '';
     var visible = visibleNav(), docked = dockNav();
     var navButtons = visible.map(function (n) {
@@ -680,7 +709,7 @@
     });
     var rail = h('nav', { class: 'rail', id: 'pv-rail', 'aria-label': 'Vault navigation' }, [
       h('button', { type: 'button', class: 'rail-min', 'aria-label': 'Minimise navigation', onclick: function () { setRail(false); } }, [raw(CI.collapse)]),
-      h('button', { type: 'button', class: 'rb', style: 'padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%', 'aria-label': 'Formulas', onclick: function () { go(visible[0].id); } }, [brandMark('Vault', true)]),
+      h('button', { type: 'button', class: 'rb', style: 'padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%', 'aria-label': 'Vault home', onclick: function () { go(visible[0].id); } }, [brandMark('Vault', true)]),
       h('div', { class: 'rail-deep' }, [h('div', {}, [h('div', { class: 'rs' }, ['FORMULAS'])].concat(navButtons))]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
@@ -694,22 +723,23 @@
     /* Focus mode switch (focus.js), between the sound switch and Sign out. A UI switch only: it
      * stores on/off, never formula or session data. */
     if (window.RaFocus && rme) RaFocus.mountToggle(rme, rme.lastChild, 'rail-min', 'position:static;margin-left:0');
-    var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
+    var label = (NAV.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
+    document.title = label + ' · Vault · Raw Aroma Chem';
     ariaCtx = 'Vault · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [
       h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),
-      h('h1', {}, [label]),
-      
+      h('h1', { id: 'vault-title' }, [label]),
       h('span', { style: 'flex:1' }),
       // Always-on Ruh: a quiet badge in the top bar (never a dock entry). In the Vault it shows
       // the Vault's own notes only — counts, never formula content.
       window.RaRuh ? RaRuh.badge('gbtn') : null,
       h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
     ]);
-    var view = h('section', { class: 'pageview' }, [contentEl]);
+    var view = h('section', { class: 'pageview' }, [h('div', { id: 'vault-place' }),
+      !trail && HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
     var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()])]), bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
-      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Formulas', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
+      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Vault home', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
        h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'All sections', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
          [raw(CI.menu), h('span', { class: 'kb' }, [h('span', { class: 'kb-d' }, ['All sections']), h('span', { class: 'kb-m' }, ['More']), h('span', { class: 'kc' }, [' · ⌘\\'])])]),
        h('span', { class: 'sep' })]
@@ -730,6 +760,7 @@
       setTimeout(function () { view.removeAttribute('data-settling'); }, 460);
     }
     prevView = activeView;
+    if (trail) setPlace(trail);
   }
 
 
@@ -740,6 +771,37 @@
     return h('div', { class: 'card notbuilt' }, [h('h2', {}, [title]), h('p', {}, [why])]);
   }
 
+  /** A table row that opens a screen: clickable, and reachable and openable from the keyboard. */
+  function rowLink(tr, hash, label) {
+    tr.setAttribute('tabindex', '0'); tr.setAttribute('role', 'link'); tr.classList.add('go');
+    if (label) tr.setAttribute('aria-label', label);
+    tr.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); location.hash = hash; } });
+    return tr;
+  }
+  /** In place of the browser's prompt()/confirm(): a sentence saying what happens, an optional
+   *  text box, one button. Resolves the text ('' when the box is optional and left empty), or null. */
+  function askText(o) {
+    return new Promise(function (resolve) {
+      var done = false;
+      openDialog(o.title, function (body, close) {
+        var err = h('div', { class: 'err', role: 'alert' });
+        var box = o.field ? h('textarea', { placeholder: o.placeholder || '', 'aria-label': o.field }) : null;
+        if (o.intro) body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [o.intro]));
+        if (box) body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, [o.field + (o.required ? ' (needed)' : ' (optional)')]), box]));
+        body.appendChild(err);
+        var submit = h('button', { class: 'btn ' + (o.tone || 'p') }, [o.submit || 'OK']);
+        submit.addEventListener('click', function () {
+          var v = box ? box.value.trim() : '';
+          if (o.required && v.length < 3) { err.textContent = 'Write a few words: ' + o.field.toLowerCase() + '.'; return; }
+          done = true; resolve(v); close();
+        });
+        body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: function () { done = true; resolve(null); close(); } }, ['Cancel'])]));
+        if (box) setTimeout(function () { box.focus(); }, 0);
+      });
+      // Closed with Escape or the ×: treated as Cancel.
+      var watch = setInterval(function () { if (!dialogRoot) { clearInterval(watch); if (!done) resolve(null); } }, 300);
+    });
+  }
   /* ── formulas list ──────────────────────────────────────────────────────────────────── */
   async function screenFormulas() {
     var content = h('div', {}, [skeletonCard()]);
@@ -748,11 +810,11 @@
       var page = await api('/v1/formulas?limit=100');
       var canCreate = hasPerm('formula:formula_master:write');
       var rows = pageItems(page).map(function (f) {
-        var tr = h('tr', { onclick: function () { location.hash = '#/formula/' + f.formulaId; } }, [
+        var tr = rowLink(h('tr', { onclick: function () { location.hash = '#/formula/' + f.formulaId; } }, [
           h('td', { class: 'mono', 'data-label': 'Code' }, [f.formulaCode]),
           h('td', { 'data-label': 'Name' }, [f.formulaName]),
           h('td', { 'data-label': 'Status' }, [statusChip(f.status)]),
-        ]);
+        ]), '#/formula/' + f.formulaId, 'Open formula ' + f.formulaCode);
         return tr;
       });
       var table = rows.length
@@ -793,9 +855,10 @@
   /* ── formula detail: meta + version history + access grants ───────────────────────────── */
   async function screenFormula(formulaId) {
     var content = h('div', {}, [skeletonCard()]);
-    renderShell('formulas', content);
+    renderShell('formulas', content, [{ label: 'Formulas', hash: '#/formulas' }, { label: 'Formula' }]);
     try {
       var formula = await api('/v1/formulas/' + encodeURIComponent(formulaId));
+      setPlace([{ label: 'Formulas', hash: '#/formulas' }, { label: formula.formulaCode || 'Formula' }]);
       var versionsPage = await api('/v1/formula-versions?limit=100'); // the route's max (listQuery)
       var versions = pageItems(versionsPage).filter(function (v) { return v.formulaId === formulaId; })
         .sort(function (a, b) { return (b.versionNumber || 0) - (a.versionNumber || 0); });
@@ -803,17 +866,17 @@
       var canDraft = hasPerm('formula:formula_version:write');
 
       var rows = versions.map(function (v) {
-        return h('tr', { onclick: function () { location.hash = '#/version/' + v.formulaVersionId; } }, [
+        return rowLink(h('tr', { onclick: function () { location.hash = '#/version/' + v.formulaVersionId; } }, [
           h('td', { class: 'mono', 'data-label': 'Version' }, ['v' + v.versionNumber]),
           h('td', { 'data-label': 'Status' }, [statusChip(v.status)]),
           h('td', { 'data-label': 'Approved' }, [fmtDt(v.approvedDt)]),
-        ]);
+        ]), '#/version/' + v.formulaVersionId, 'Open version ' + v.versionNumber);
       });
       var versionsCard = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Version history']), h('span', { class: 'spacer' }),
           canDraft ? h('button', { class: 'btn p sm', onclick: function () { createVersion(formulaId, maxVersion + 1); } }, ['New version']) : null]),
         rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Version']), h('th', {}, ['Status']), h('th', {}, ['Approved'])])]), h('tbody', {}, rows)])
-          : h('div', { class: 'empty' }, [h('h3', {}, ['No versions yet'])]),
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No versions yet']), h('p', {}, [canDraft ? 'Use New version to start the first recipe.' : 'A formulator starts the first version.'])]),
       ]);
 
       var metaCard = h('div', { class: 'card' }, [
@@ -869,15 +932,17 @@
   /* ── version detail: review / seal / approve / reject / reveal / supersede ────────────── */
   async function screenVersion(versionId) {
     var content = h('div', {}, [skeletonCard()]);
-    renderShell('formulas', content);
+    renderShell('formulas', content, [{ label: 'Formulas', hash: '#/formulas' }, { label: 'Version' }]);
     try {
       var version = await api('/v1/formula-versions/' + encodeURIComponent(versionId));
       var ingredients = await api('/v1/formula-versions/' + encodeURIComponent(versionId) + '/ingredients');
       var isAuthor = version.createdBy && session.userId && version.createdBy === session.userId;
+      var parent = null; try { parent = await api('/v1/formulas/' + encodeURIComponent(version.formulaId)); } catch (x) { parent = null; }
+      setPlace([{ label: 'Formulas', hash: '#/formulas' }, { label: (parent && parent.formulaCode) || 'Formula', hash: '#/formula/' + version.formulaId }, { label: 'Version ' + version.versionNumber }]);
 
       var header = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Version v' + version.versionNumber]), statusChip(version.status)]),
-        h('p', { class: 'mono', style: 'color:var(--ink-3)' }, [version.formulaVersionId]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Version ' + version.versionNumber + (parent && parent.formulaName ? ' of ' + parent.formulaName : '')]), statusChip(version.status)]),
+        h('p', { style: 'color:var(--ink-3)' }, [h('a', { href: '#/formula/' + version.formulaId }, ['Back to ' + ((parent && parent.formulaCode) || 'the formula')])]),
         h('p', { style: 'color:var(--ink-3)' }, [(ingredients || []).length + ' sealed ingredient' + ((ingredients || []).length === 1 ? '' : 's')]),
       ]);
 
@@ -893,13 +958,14 @@
 
       if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_version:write')) {
         if (version.status === 'DRAFT') {
-          var finalizeBtn = h('button', { class: 'btn', onclick: function () { finalize(versionId); } }, ['Finalize']);
+          var finalizeBtn = h('button', { class: 'btn', title: 'Close the draft: no more ingredients can be added. It stays editable as a new version.', onclick: function () { finalize(versionId); } }, ['Finalize']);
           if (!(ingredients || []).length) {
             finalizeBtn.disabled = true; finalizeBtn.title = 'Seal an ingredient first.';
           }
           actions.appendChild(finalizeBtn);
         }
-        actions.appendChild(h('button', { class: 'btn', onclick: function () { submitForReview(versionId); } }, ['Submit for review']));
+        actions.appendChild(h('button', { class: 'btn', title: 'Send it to an approver. Someone other than the author must approve.', onclick: function () { submitForReview(versionId); } }, ['Submit for review']));
+        reasons.push('Finalize closes the draft to new ingredients. Submit for review sends it to an approver.');
       }
 
       if (PRE_DECISION.indexOf(version.status) >= 0 && hasPerm('formula:formula_approval:write')) {
@@ -955,7 +1021,7 @@
       }
 
       async function lockVersion(id) {
-        if (!window.confirm('Lock this version? Changes after this need a new version.')) return;
+        if ((await askText({ title: 'Lock this version?', intro: 'After this, the recipe cannot change. Any change needs a new version.', submit: 'Lock', tone: 'g' })) === null) return;
         try {
           await withFreshAuth(function () {
             return api('/v1/formula-versions/' + encodeURIComponent(id) + '/lock', { method: 'POST', body: {} });
@@ -969,10 +1035,10 @@
         // Gather remarks BEFORE the fresh-auth check — withFreshAuth's callback can run
         // twice (once optimistically, once after re-auth on a race), and window.prompt()
         // must only ever ask the user once.
-        var remarks = window.prompt(kind === 'approve' ? 'Remarks (optional):' : 'Reason for rejecting (required):');
+        var remarks = await askText(kind === 'approve'
+          ? { title: 'Approve this version?', intro: 'Once approved, the factory can make products with this recipe.', field: 'Remarks', submit: 'Approve', tone: 'g' }
+          : { title: 'Reject this version?', intro: 'The author sees your reason and can start a new version.', field: 'Reason for rejecting', required: true, submit: 'Reject', tone: 'r' });
         if (remarks === null) return; // cancelled
-        remarks = remarks.trim();
-        if (kind === 'reject' && remarks.length < 3) { toast('A rejection reason is required.', true); return; }
         try {
           await withFreshAuth(function () {
             return api('/v1/formula-versions/' + encodeURIComponent(id) + '/' + kind, { method: 'POST', body: kind === 'approve' ? { remarks: remarks || undefined } : { remarks: remarks } });
@@ -1664,7 +1730,7 @@
       approveBtn.addEventListener('click', async function () {
         var ids = Object.keys(picked).filter(function (k) { return picked[k]; });
         if (!ids.length) return;
-        var remarks = window.prompt('Remarks for these ' + ids.length + ' approval(s) (optional):');
+        var remarks = await askText({ title: 'Approve ' + ids.length + ' recipe' + (ids.length === 1 ? '' : 's') + '?', intro: 'Each one is approved and recorded on its own, with the same rules as approving one at a time.', field: 'Remarks', submit: 'Approve ' + ids.length, tone: 'g' });
         if (remarks === null) return;
         approveBtn.disabled = true; out.innerHTML = '';
         try {
@@ -1746,8 +1812,10 @@
       console: 'vault',
       call: function (method, path, body) { return mainTunnel(path, body === undefined ? { method: method } : { method: method, body: body }); },
       open: function (i) {
-        var m = /^#\/([a-z-]+)/.exec(String(i.deepLink || ''));
-        if (!m || !visibleNav().some(function (n) { return n.id === m[1]; })) return false;
+        var link = String(i.deepLink || ''), m = /^#\/([a-z-]+)(?:\/([0-9a-f-]{36}))?$/.exec(link);
+        if (!m) return false;
+        if ((m[1] === 'formula' || m[1] === 'version') && m[2]) { location.hash = link; return true; }
+        if (!visibleNav().some(function (n) { return n.id === m[1]; })) return false;
         go(m[1]); return true;
       },
       canSettings: function () { return false; },
@@ -1763,6 +1831,14 @@
     }
     ruhStart();
     var r = currentRoute();
+    // A screen this role does not have says so (and who to ask), rather than a raw server refusal.
+    var gate = NAV.filter(function (n) { return n.id === r.view; })[0];
+    if (gate && gate.need && !hasPerm(gate.need)) {
+      var c = h('div', {}, [notBuilt(gate.label + ' is not part of your role', 'If you need it, ask the owner to add it to your role.')]);
+      renderShell(r.view, c); return;
+    }
+    // An address this console does not know settles on the formula list.
+    if (!gate && ['formula', 'version'].indexOf(r.view) < 0 && location.hash && location.hash !== '#/formulas') { try { history.replaceState(null, '', location.pathname + location.search + '#/formulas'); } catch (e) {} }
     if (r.view === 'formula' && r.id) return screenFormula(r.id);
     if (r.view === 'version' && r.id) return screenVersion(r.id);
     if (r.view === 'audit-access') return screenAudit('access');

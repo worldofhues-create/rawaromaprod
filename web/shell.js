@@ -350,7 +350,7 @@
   function roleView(r) { return VIEW[r] || r; }
 
   /* ---------------- state + helpers ---------------- */
-  var st = { role: null, nav: null, search: '', collapsed: false, drawer: false };
+  var st = { role: null, nav: null, ref: '', search: '', collapsed: false, drawer: false };
   var $ = function (id) { return document.getElementById(id); };
   // No-op kept so every existing call site across shell.js/ws-*.js (which call setTheme() after
   // inserting a modal into the DOM, from the old runtime skin-switching design) stays valid without
@@ -363,7 +363,8 @@
   var HIDE = { createdDt: 1, updatedDt: 1, createdBy: 1, updatedBy: 1 };
   function sensitive(k) { return /hash|secret|token|password|salt|enc_?payload|enc_?iv|enc_?tag|encpayload|enciv|enctag|encryption|vaultlocation/i.test(k); }
   function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/.test(v); }
-  function label(k) { if (k === 'ip') return 'IP'; return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
+  // A column heading a person can read (screen-guide.js COLUMN), else the field name in words.
+  function label(k) { var g = window.RaGuide && RaGuide.column(k); if (g) return g; if (k === 'ip') return 'IP'; return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
   // uomId → readable unit code (kg / L / units …), loaded once (loadView) and used to label
   // quantity cells + create-form unit pickers so every quantity reads "10 kg", not a bare "10".
   var UOM = {};
@@ -372,6 +373,7 @@
   function unitHtml(k, r) { var u = (isQtyKey(k) && r && r.uomId && UOM[r.uomId]) ? UOM[r.uomId] : ''; return u ? ' <span style="color:var(--ink-3);font-weight:var(--w-med);font-size:var(--t-cap)">' + u + '</span>' : ''; }
   // Every value is escaped before it goes into markup: rows can carry text nobody vetted (a
   // login-history row records the browser and email an unauthenticated sign-in attempt sent).
+  function statusWord(v) { return window.RaGuide ? RaGuide.statusWord(v) : String(v); }
   function escCell(v) { return String(v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   function fmt(k, v, r) {
     if (v === null || v === undefined || v === '') return '<span style="color:var(--ink-3)">—</span>';
@@ -380,7 +382,8 @@
     if (k === 'available' || k === 'availableQty') { var a = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (a <= 0 ? 'var(--red)' : 'var(--green)') + '">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r); }
     if (k === 'shortage') { var sh = Number(v); return '<span style="font-weight:var(--w-med);font-family:var(--font-mono);color:' + (sh > 0 ? 'var(--red)' : 'var(--ink-3)') + '">' + (sh > 0 ? '▲ ' : '') + escCell(v) + '</span>'; }
     if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r);
-    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus') { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(v) + '</span>'; }
+    // The chip says the status in words (screen-guide.js); the code stays in the row for search/sort.
+    if (k === 'status' || k === 'overallResult' || k === 'approvalStatus' || k === 'lifecycleStatus' || (k === 'result' && /^[A-Z_]+$/.test(String(v)))) { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(statusWord(v)) + '</span>'; }
     if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString()) + '</span>'; }
     if (k === 'result' && typeof v === 'string' && v.indexOf('Refused') === 0) return '<span style="color:var(--red)">' + escCell(v) + '</span>';
     if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + escCell(String(v).slice(0, 8).toUpperCase()) + '</span>';
@@ -500,12 +503,74 @@
     paint(); q.focus();
   }
   function closePalette() { var w = $('ra-cmdk'); if (w) w.remove(); }
-  function navTo(k) {
+  function navTo(k, ref) {
     var R = ROLES[st.role]; if (!R || !R.nav.some(function (n) { return n[0] === k; })) return;
-    if (st.nav === k) return;
-    st.nav = k; st.search = '';
+    if (st.nav === k && !st.ref && !ref) return;
+    st.nav = k; st.search = ''; st.ref = ref || '';
     if (window.innerWidth <= 1023) st.drawer = false;
+    setRoute(routeFor(k, st.ref), false);
     shell();
+  }
+
+  /* ---------------- addresses (web/routes.js) ----------------
+   * Every screen and record has an address a person can read, copy, bookmark and send:
+   * #/<workspace>/<screen>[/<record code>]. Moving between screens adds a history entry (Back and
+   * Forward work); opening or closing a record's details replaces it. Older links — Ruh notes and
+   * ALEMBIC's #/go/<section>[/<id>] — open the same screen and are rewritten to the new address. */
+  function routeFor(k, ref, role) {
+    role = role || st.role; var R = ROLES[role];
+    var n = R && R.nav.filter(function (x) { return x[0] === k; })[0];
+    return (n && window.RaRoutes) ? RaRoutes.build(role, n, ref) : '';
+  }
+  function setRoute(hash, replace) {
+    if (!hash || location.hash === hash) return;
+    var url = location.pathname + location.search + hash;
+    try { if (replace) history.replaceState(null, '', url); else history.pushState(null, '', url); } catch (e) {}
+  }
+  function heldRoles() { return (session && session.availableRoles && session.availableRoles.length) ? session.availableRoles : (st.role ? [st.role] : []); }
+  /** Open what an address names; false when no workspace this person holds has that screen. */
+  function openAddress(hash, push) {
+    if (!window.RaRoutes) return false;
+    var p = RaRoutes.parse(hash); if (p.kind !== 'route' && p.kind !== 'legacy') return false;
+    var r = RaRoutes.resolve(p, ROLES, heldRoles(), st.role); if (!r) return false;
+    var same = r.role === st.role && r.key === st.nav && !!$('ra-view');
+    st.role = r.role; st.nav = r.key; st.ref = r.ref; st.search = '';
+    setRoute(r.canonical, !push);
+    if (same) loadView(); else shell();
+    return true;
+  }
+  /** Back, Forward, a typed address or a link: show what it names. */
+  function onAddressChange() {
+    if (!session || !st.role || !window.RaRoutes) return;
+    var p = RaRoutes.parse(location.hash);
+    if (p.kind !== 'route' && p.kind !== 'legacy') return;
+    if (location.hash === routeFor(st.nav, st.ref)) return;
+    if (!openAddress(location.hash, false)) { toast('That screen is not part of your workspace.', ''); setRoute(routeFor(st.nav, st.ref), true); }
+  }
+  window.addEventListener('hashchange', onAddressChange);
+  // An address opened while signed out survives the trip to ALEMBIC and back (a new tab there).
+  var AFTER_SIGNIN = 'ra_after_signin';
+  function rememberAddress() {
+    try { var p = window.RaRoutes && RaRoutes.parse(location.hash); if (p && (p.kind === 'route' || p.kind === 'legacy')) localStorage.setItem(AFTER_SIGNIN, JSON.stringify({ h: location.hash, t: Date.now() })); } catch (e) {}
+  }
+  function takeRememberedAddress() {
+    try { var v = JSON.parse(localStorage.getItem(AFTER_SIGNIN) || 'null'); localStorage.removeItem(AFTER_SIGNIN); if (v && v.h && Date.now() - v.t < 15 * 60 * 1000) return v.h; } catch (e) {}
+    return '';
+  }
+  /** After sign-in: the address asked for (or remembered from before sign-in), else home. */
+  function landOnAddress() {
+    var asked = location.hash, p = window.RaRoutes ? RaRoutes.parse(asked) : { kind: 'none' };
+    var remembered = takeRememberedAddress();
+    if (p.kind !== 'route' && p.kind !== 'legacy' && remembered && window.RaRoutes) { asked = remembered; p = RaRoutes.parse(asked); }
+    if ((p.kind === 'route' || p.kind === 'legacy') && openAddress(asked, false)) return;
+    if (p.kind === 'route' || p.kind === 'legacy') setTimeout(function () { toast('That screen is not part of your workspace, so you are on your home screen.', ''); }, 600);
+    setRoute(routeFor(st.nav), true);
+    shell();
+  }
+  /** One plain name per screen in every workspace (screen-guide.js), applied once all screens exist. */
+  function applyGuideLabels() {
+    if (!window.RaGuide) return;
+    Object.keys(ROLES).forEach(function (role) { ROLES[role].nav.forEach(function (n) { n[1] = RaGuide.label(n[3], role, n[1]); }); });
   }
 
   /* ---------------- Ask Aria (UX-E panel, UX-H answers) ----------------
@@ -633,11 +698,22 @@
   // The rail rows: each section plus its pin (a sibling button, never nested in the nav button).
   function railNavHtml(R) {
     var dk = dockKeys(), custom = !!(dockPins() || []).length;
-    return R.nav.map(function (n) {
+    // A long list reads as named groups (Production, Quality, Buying …, screen-guide.js GROUPS) in a
+    // fixed order; a short one stays one list. Order within a group is the workspace's own.
+    var items = R.nav, heads = {};
+    if (window.RaGuide && items.length > 9) {
+      items = items.slice().sort(function (a, b) {
+        var ga = RaGuide.GROUPS.indexOf(RaGuide.group(a[3])), gb = RaGuide.GROUPS.indexOf(RaGuide.group(b[3]));
+        return ga - gb || R.nav.indexOf(a) - R.nav.indexOf(b);
+      });
+      var last = null; items.forEach(function (n, i) { var gname = RaGuide.group(n[3]); if (gname !== last && i > 0) heads[n[0]] = gname; last = gname; });
+    }
+    return items.map(function (n) {
       var on = st.nav === n[0], pinned = dk.indexOf(n[0]) >= 0;
       // data-tutorial-target="nav-<key>" (G4): the ONE dedicated attribute the tutorial runner's
       // target/action steps use to locate this real nav button (web/tutorial.js).
-      return '<div class="ri-row"><button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
+      return (heads[n[0]] ? '<div class="rs rs-group" role="presentation">' + escHtml(heads[n[0]]).toUpperCase() + '</div>' : '') +
+        '<div class="ri-row"><button data-nav="' + n[0] + '" data-tutorial-target="nav-' + n[0] + '" class="ri' + (on ? ' on' : '') + '"' + (on ? ' aria-current="page"' : '') + '>' +
         icon(n[2], 14) + '<span class="nm">' + n[1] + '</span></button>' +
         '<button type="button" class="ri-pin' + (pinned ? ' on' : '') + '" data-pin="' + n[0] + '" aria-pressed="' + pinned + '"' +
           ' aria-label="' + (pinned ? 'Unpin ' : 'Pin ') + escHtml(n[1]) + (pinned ? ' from' : ' to') + ' the dock" title="' + (pinned ? 'Unpin from dock' : 'Pin to dock') + '">' + CI.pin + '</button></div>';
@@ -680,6 +756,7 @@
   // this session's permission-driven ROLES entry contains" — the server enforces per-action
   // authorization.
   function shell() {
+    uxStyle();
     $('app').className = 'app'; // clear the login screen's override (showLogin blanks it)
     var R = ROLES[st.role]; var initials = (R.user || 'RA').slice(0, 2).toUpperCase();
     var prevIdx = R.nav.map(function (n) { return n[0]; }).indexOf(st._prevNav);
@@ -720,7 +797,7 @@
             '<div id="ra-bell-pop" class="glass glass-deep" style="display:none;position:absolute;right:0;top:40px;width:300px;padding:8px;z-index:60"><div class="loading" style="padding:var(--s-snug)">Loading…</div></div>' +
           '</div>' +
         '</div>' +
-        '<div class="content"><section class="pageview" id="ra-view"></section></div>' +
+        '<div class="content"><div class="screen-intro" id="ra-intro"></div><section class="pageview" id="ra-view"></section></div>' +
       '</div>' +
       '<button type="button" class="dock-handle" id="ra-dock-handle" aria-label="Show quick access dock"><i></i></button>' +
       '<div class="glass glass-deep qdock" id="ra-dock" role="toolbar" aria-label="Quick access">' + dockInnerHtml() + '</div>';
@@ -893,7 +970,7 @@
         '<td>' + r.target + '</td>' +
         '<td>' + fmt('status', r.status) + '</td></tr>';
     }).join('');
-    return gCard({ title: 'Master runs', meta: p.runs.length + ' runs', span: 'c8', top: true, body: '<div class="tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' });
+    return gCard({ title: 'Production orders', meta: p.runs.length + ' runs', span: 'c8', top: true, body: '<div class="tscroll"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' });
   }
   // Warehouse floor zone map — real zones + rack counts + batch occupancy.
   function warehouseMap(p) {
@@ -940,7 +1017,7 @@
     var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
     var res;
     try { res = await tunnel('/v1/dashboard'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
-    if (res.status === 403) { V.innerHTML = errBox('No dashboard for this role yet.'); return; }
+    if (res.status === 403) { V.innerHTML = errBox('This role has no dashboard. Pick a screen from the dock below.', { title: 'No dashboard for this role' }); return; }
     var p = res.json && res.json.data;
     if (!p) { V.innerHTML = errBox('The dashboard came back empty.'); return; }
     st.dash = p;
@@ -1021,7 +1098,7 @@
       { label: 'Revoke', perm: 'iam:user_role_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
         raConfirm('Revoke this role assignment? It takes effect on the user\'s next sign-in / token refresh.', function () {
           tunnel('/v1/user-roles/' + (r.userRoleMappingId != null ? r.userRoleMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
-            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.', 'bad'); return; }
             toast('Revoked', 'good'); loadView();
           }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
         }, { title: 'Revoke role assignment', confirmLabel: 'Revoke', tone: 'bad' });
@@ -1031,7 +1108,7 @@
       { label: 'Revoke', perm: 'iam:role_permission_mapping:write', tone: 'bad', when: function () { return true; }, run: function (r) {
         raConfirm('Revoke this permission from the role?', function () {
           tunnel('/v1/role-permissions/' + (r.rolePermissionMappingId != null ? r.rolePermissionMappingId : guessId(r)), { method: 'DELETE' }).then(function (res) {
-            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+            if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.', 'bad'); return; }
             toast('Revoked', 'good'); loadView();
           }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
         }, { title: 'Revoke permission', confirmLabel: 'Revoke', tone: 'bad' });
@@ -1044,7 +1121,7 @@
       { label: 'Release', perm: 'inventory:stock_reservation:write', tone: 'warn', when: function (r) { return UP(r.status) !== 'RELEASED'; }, run: function (r) {
         var id = r.stockReservationId != null ? r.stockReservationId : guessId(r);
         tunnel('/v1/masters/reservations/' + id, { method: 'PATCH', body: { status: 'RELEASED' } }).then(function (res) {
-          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+          if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.', 'bad'); return; }
           toast('Released', 'good'); loadView();
         }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
       } }
@@ -1092,10 +1169,10 @@
       // OPS-GREEN Act L: WEIGH before MIX — the server resolves the line's target from the coded
       // instruction and refuses to end a session with an unweighed line.
       { label: 'Record weighing', perm: 'production:secure_mixing_session:write', tone: 'accent', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, run: function (r) { recordWeighing(r); } },
-      { label: 'End session', perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }
+      { label: 'End session', confirm: true, perm: 'production:secure_mixing_session:write', when: function (r) { return UP(r.status).indexOf('PROGRESS') >= 0; }, path: function (r) { return '/v1/mixing-sessions/' + r.secureMixingSessionId + '/end'; }, body: {} }
     ],
     '/v1/filling-sessions': [
-      { label: 'End fill', perm: 'packaging:filling_session:write', when: function (r) { return UP(r.status) !== 'DONE'; }, path: function (r) { return '/v1/filling-sessions/' + r.fillingSessionId + '/end'; }, body: {} }
+      { label: 'End fill', confirm: true, perm: 'packaging:filling_session:write', when: function (r) { return UP(r.status) !== 'DONE'; }, path: function (r) { return '/v1/filling-sessions/' + r.fillingSessionId + '/end'; }, body: {} }
     ],
     '/v1/production-orders': [
       { label: 'Generate pick list', perm: 'production:material_pick_list:write', when: function (r) { return ['INPROGRESS', 'PLANNING'].indexOf(UP(r.status)) >= 0; }, path: function (r) { return '/v1/production-orders/' + r.productionOrderId + '/pick-list'; }, body: {} }
@@ -1299,6 +1376,35 @@
     m.sheet.querySelector('[data-confirm-no]').onclick = m.close;
     m.sheet.querySelector('[data-confirm-yes]').onclick = function () { m.close(); onYes(); };
   }
+  /** A small form sheet in place of the browser's prompt(): labelled fields, a sentence saying what
+   *  happens, one button. onSubmit(values, fail, close): fail('why') keeps it open with the reason. */
+  function askForm(o) {
+    var body = (o.intro ? '<p style="margin:0;font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-2)">' + escHtml(o.intro) + '</p>' : '') +
+      o.fields.map(function (f) {
+        return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(escHtml(f.l), f.req) +
+          (f.t === 'textarea' ? '<textarea data-ask="' + f.n + '" rows="3" class="fld" style="height:auto;padding:9px 13px;resize:vertical"></textarea>'
+            : '<input data-ask="' + f.n + '" class="fld" type="' + (f.t === 'number' ? 'number' : 'text') + '"' + (f.t === 'number' ? ' inputmode="decimal" step="any"' : '') + (f.value != null ? ' value="' + escHtml(f.value) + '"' : '') + '>') +
+          (f.help ? '<span style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">' + escHtml(f.help) + '</span>' : '') + '</label>';
+      }).join('') +
+      '<div data-ask-err role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+      '<button type="submit" class="btn ' + (o.tone === 'bad' ? 'r' : 'p') + '" data-ask-go style="width:100%;justify-content:center;height:var(--ch-touch-floor-coarse-pointer)">' + escHtml(o.submit || 'Save') + '</button>';
+    var m = openSheet({ tag: 'form', style: 'max-width:420px', title: escHtml(o.title), body: body });
+    var errEl = m.sheet.querySelector('[data-ask-err]'), go = m.sheet.querySelector('[data-ask-go]');
+    m.sheet.onsubmit = function (e) {
+      e.preventDefault(); var vals = {}, bad = '';
+      o.fields.forEach(function (f) {
+        var v = String(m.sheet.querySelector('[data-ask="' + f.n + '"]').value).trim();
+        if (f.req && !v) bad = bad || (f.l + ' is needed.');
+        if (v && f.t === 'number' && !isFinite(Number(v))) bad = bad || (f.l + ' must be a number.');
+        if (v && f.t === 'number' && f.min != null && Number(v) < f.min) bad = bad || (f.l + ' must be at least ' + f.min + '.');
+        vals[f.n] = f.t === 'number' && v ? Number(v) : v;
+      });
+      if (bad) { errEl.textContent = bad; return; }
+      go.disabled = true; errEl.textContent = '';
+      o.onSubmit(vals, function (msg) { go.disabled = false; errEl.textContent = msg || ''; }, m.close);
+    };
+    return m;
+  }
   // Shared ALEMBIC form-field label (PORTING_GUIDE.md §Form field, simplified to the `.fld` bare-
   // input grammar that same section cites for "outside a form grid"). Matches ws-supply.js's own
   // copy of this helper exactly, so every workspace's forms read identically.
@@ -1344,8 +1450,10 @@
       var owner = ownerId && document.getElementById(ownerId); if (owner) owner.setAttribute('aria-expanded', 'false');
       openRow.remove();
     }
-    if (wasOwnRow) return;
+    if (wasOwnRow) { st.ref = ''; setRoute(routeFor(st.nav), true); paintIntroNow(); return; }
     tr.setAttribute('aria-expanded', 'true');
+    // The open record gets its own address (copy it, send it, reload it); closing goes back to the list's.
+    st.ref = window.RaRoutes ? RaRoutes.refOf(row) : ''; setRoute(routeFor(st.nav, st.ref), true); paintIntroNow();
     var id = row[cfg.idKey] != null ? row[cfg.idKey] : guessId(row);
     var dtr = document.createElement('tr'); dtr.className = 'row-detail-row'; dtr.id = 'detail-for-' + tr.id; dtr.setAttribute('data-owner', tr.id);
     tr.setAttribute('aria-controls', dtr.id);
@@ -1386,7 +1494,7 @@
       var save = ov.querySelector('#ra-esave'); save.disabled = true; save.textContent = 'Saving…';
       var editUrl = cfg.editPath ? cfg.editPath(id) : ('/v1/masters/' + cfg.resource + '/' + id);
       tunnel(editUrl, { method: 'PATCH', body: body2 }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save'; ov.querySelector('#ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Save'; ov.querySelector('#ra-eerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Save failed. Try again.'); return; }
         m.close(); toast('Saved', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Save'; ov.querySelector('#ra-eerr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -1418,26 +1526,29 @@
      server composes everything else (target, floor code, label content) from its own records. */
   function postAction(path, body, okMsg) {
     tunnel(path, { method: 'POST', body: body }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'Failed', 'bad'); return; }
+      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.', 'bad'); return; }
       var d = res.json && res.json.data;
       toast(typeof okMsg === 'function' ? okMsg(d) : okMsg, d && d.status === 'OUT_OF_TOLERANCE' ? 'bad' : 'good'); loadView();
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   function recordWeighing(row) {
-    var seq = window.prompt('Instruction line number (sequence) being weighed:');
-    if (!seq) return;
-    var gross = window.prompt('Gross reading on the balance:');
-    if (gross == null || gross === '') return;
-    var tare = window.prompt('Tare (container) reading:');
-    if (tare == null || tare === '') return;
-    postAction('/v1/mixing-sessions/' + row.secureMixingSessionId + '/weighings',
-      { sequenceNo: Number(seq), grossQty: Number(gross), tareQty: Number(tare) },
-      function (d) { return d && d.status === 'OUT_OF_TOLERANCE' ? 'Out of tolerance: re-weigh this line' : 'Weighing accepted'; });
+    askForm({ title: 'Record weighing', submit: 'Save weighing',
+      intro: 'Enter the balance readings for one ingredient line. The net weight is checked against that line\'s target.',
+      fields: [{ n: 'seq', l: 'Ingredient line number', t: 'number', req: true, min: 1, help: 'The line number on the coded instruction sheet.' },
+        { n: 'gross', l: 'Gross reading', t: 'number', req: true, help: 'Container and material together.' },
+        { n: 'tare', l: 'Tare reading', t: 'number', req: true, help: 'The empty container.' }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/mixing-sessions/' + row.secureMixingSessionId + '/weighings', { method: 'POST', body: { sequenceNo: v.seq, grossQty: v.gross, tareQty: v.tare } }).then(function (res) {
+          if (res.status >= 400) { fail(failText(res, 'The weighing was not saved. Try again.')); return; }
+          var d = res.json && res.json.data, out = d && d.status === 'OUT_OF_TOLERANCE';
+          close(); toast(out ? 'Out of tolerance: weigh this line again' : 'Weighing saved', out ? 'bad' : 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
   }
   function applyFgLabels(row) {
-    var n = window.prompt('How many labels were applied to batch ' + (row.batchNumber || '') + '?');
-    if (!n) return;
-    postAction('/v1/finished-good-batches/' + row.finishedGoodBatchId + '/labels', { labelCount: Number(n) }, 'Labels recorded');
+    askForm({ title: 'Apply labels', submit: 'Record labels', intro: 'Batch ' + (row.batchNumber || '') + ': how many labels were put on?',
+      fields: [{ n: 'n', l: 'Labels applied', t: 'number', req: true, min: 1 }],
+      onSubmit: function (v, fail, close) { close(); postAction('/v1/finished-good-batches/' + row.finishedGoodBatchId + '/labels', { labelCount: v.n }, 'Labels recorded'); } });
   }
 
   function rejectDoc(resource, idKey, row) {
@@ -1511,9 +1622,10 @@
     // Disabled action: plain-language reason via `title` (desktop hover) + a visible inline hint
     // on touch, where hover tooltips don't fire (addendum §9/§10).
     if (opts.disabled) {
-      return '<button class="ra-act" disabled aria-disabled="true" title="' + escHtml(opts.reason || '') + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);background:var(--panel-2);white-space:nowrap">' + label + '<span class="act-hint">' + escHtml(opts.reason || '') + '</span></button>';
+      return '<button type="button" class="ra-act" disabled aria-disabled="true" title="' + escHtml(opts.reason || '') + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);background:var(--panel-2);white-space:nowrap">' + label + '<span class="act-hint">' + escHtml(opts.reason || '') + '</span></button>';
     }
-    return '<button class="ra-act" data-k="' + k + '" style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);cursor:pointer;color:' + (fg || '#fff') + ';background:' + bg + ';white-space:nowrap">' + label + '</button>';
+    var help = window.RaGuide && RaGuide.ACTION_HELP[String(label)];
+    return '<button type="button" class="ra-act" data-k="' + k + '"' + (help ? ' title="' + escHtml(help) + '"' : '') + ' style="margin:2px 4px 2px 0;padding:6px 12px;border:none;border-radius:var(--r-sm);font:var(--w-med) var(--t-cap)/1 var(--font-ui);cursor:pointer;color:' + (fg || '#fff') + ';background:' + bg + ';white-space:nowrap">' + label + '</button>';
   }
   function rowActionsCell(endpoint, r) {
     var out = [];
@@ -1558,24 +1670,41 @@
   // does not distinguish, so `.toast.good`/`.toast.bad` add that without a new visual grammar.
   function toast(msg, tone) {
     var t = document.createElement('div'); t.className = 'toast' + (tone === 'bad' ? ' bad' : tone === 'good' ? ' good' : '');
+    // Read out by screen readers; long enough to read (a problem stays up longer than a success).
+    t.setAttribute('role', tone === 'bad' ? 'alert' : 'status'); t.setAttribute('aria-live', tone === 'bad' ? 'assertive' : 'polite');
     t.innerHTML = '<span class="d"></span>' + escHtml(msg);
     document.body.appendChild(t);
     if (window.RaSound) { if (tone === 'bad') RaSound.play('alert'); else if (tone === 'good') RaSound.play('success'); else RaSound.cue(msg); }
-    setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, 1900);
+    setTimeout(function () { t.style.transition = 'opacity .35s'; t.style.opacity = '0'; setTimeout(function () { if (t.parentNode) t.remove(); }, 360); }, tone === 'bad' ? 6000 : 3400);
   }
+  // Accept / reject / hold / fail / release and the like change what happens to real stock or a real
+  // document: one more tap, with the consequence in words. Routine steps (submit, issue) go straight.
+  function needsConfirm(a) { return a.tone === 'bad' || a.tone === 'warn' || a.tone === 'good' || a.confirm === true; }
+  /** The server's own words when it gives them, else a plain sentence — never a bare status code. */
+  function failText(res, fallback) { var m = res && res.json && res.json.error && res.json.error.message; return m || (res && res.status === 403 ? 'Your role cannot do this. Ask your admin if you need to.' : fallback); }
   function wireActions() {
     [].forEach.call(document.querySelectorAll('.ra-act'), function (b) {
       b.onclick = async function () {
         var rec = _acts[b.getAttribute('data-k')]; if (!rec) return;
         var a = rec.a, r = rec.r, old = b.textContent;
         if (a.run) { a.run(r); return; } // custom action (opens its own modal)
-        b.disabled = true; b.style.opacity = '.6'; b.textContent = '…';
-        try {
-          var body = a.prepare ? await a.prepare(r) : (a.body || {});
-          var res = await tunnel(a.path(r), { method: 'POST', body: body });
-          if (res.status >= 400) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast((res.json && res.json.error && res.json.error.message) || ('Action failed (' + res.status + ')'), 'bad'); return; }
-          toast('Done', 'good'); loadView();
-        } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Can\'t connect. Try again.', 'bad'); }
+        // A step that changes a batch's or a document's fate is confirmed first, saying what happens.
+        if (needsConfirm(a)) {
+          var what = (window.RaGuide && RaGuide.ACTION_HELP[a.label]) || '';
+          var code = window.RaRoutes ? RaRoutes.refOf(r) : '';
+          raConfirm((code && !isUuid(code) ? code + ': ' : '') + (what || (a.label + '?')), go, { title: a.label, confirmLabel: a.label, tone: a.tone === 'good' ? 'good' : 'bad' });
+          return;
+        }
+        go();
+        async function go() {
+          b.disabled = true; b.style.opacity = '.6'; b.textContent = '…';
+          try {
+            var body = a.prepare ? await a.prepare(r) : (a.body || {});
+            var res = await tunnel(a.path(r), { method: 'POST', body: body });
+            if (res.status >= 400) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast(failText(res, a.label + ' did not go through.'), 'bad'); return; }
+            toast((window.RaGuide && RaGuide.DONE[a.label]) || (a.label + ': done'), 'good'); loadView();
+          } catch (e) { b.disabled = false; b.style.opacity = '1'; b.textContent = old; toast('Can\'t connect. Try again.', 'bad'); }
+        }
       };
     });
   }
@@ -1754,7 +1883,7 @@
       { n: 'notes', l: 'Negotiation notes', t: 'textarea' }
     ] },
     '/v1/rfqs': { title: 'New RFQ', perm: 'procurement:rfq_master:write', fields: [
-      { n: 'rfqNumber', l: 'RFQ number (auto if blank)', t: 'text' },
+      { n: 'rfqNumber', l: 'RFQ number (optional: numbered for you if left empty)', t: 'text' },
       { n: 'purchaseRequestId', l: 'From purchase request', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber', req: true },
       { n: 'rfqDate', l: 'RFQ date', t: 'date', req: true }, { n: 'submissionDeadline', l: 'Submission deadline', t: 'date' }
     ] },
@@ -1850,7 +1979,7 @@
       { n: 'qcRequired', l: 'QC required?', t: 'select', en: ['true', 'false'] }, { n: 'description', l: 'Description', t: 'textarea' }
     ] },
     '/v1/vendors': { title: 'New supplier', perm: 'procurement:vendor_details:write', fields: [
-      { n: 'vendorCode', l: 'Vendor code (auto if blank)', t: 'text', maxlen: 50 }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true, maxlen: 200 }, { n: 'paymentTerms', l: 'Payment terms', t: 'text', maxlen: 60 },
+      { n: 'vendorCode', l: 'Vendor code (optional: numbered for you if left empty)', t: 'text', maxlen: 50 }, { n: 'vendorName', l: 'Vendor name', t: 'text', req: true, maxlen: 200 }, { n: 'paymentTerms', l: 'Payment terms', t: 'text', maxlen: 60 },
       { n: 'gstin', l: 'GSTIN', t: 'text', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }, { n: 'panNumber', l: 'PAN', t: 'text', maxlen: 10, pat: '[A-Z]{5}[0-9]{4}[A-Z]', patMsg: 'PAN must be 10 characters, e.g. ABCDE1234F' },
       { n: 'bankName', l: 'Bank name', t: 'text' }, { n: 'bankAccountNumber', l: 'Bank account no.', t: 'text', maxlen: 20, pat: '[0-9]{6,20}', patMsg: 'Account number must be 6–20 digits' }, { n: 'bankIfsc', l: 'IFSC', t: 'text', maxlen: 11, pat: '[A-Z]{4}0[A-Z0-9]{6}', patMsg: 'IFSC must be 11 characters, e.g. HDFC0001234' },
       { n: 'contactEmail', l: 'Contact email', t: 'text', pat: '[^@ ]+@[^@ ]+[.][^@ ]+', patMsg: 'Enter a valid email' }, { n: 'contactPhone', l: 'Contact phone', t: 'text', pat: '[+]?[0-9][0-9 -]{6,18}', patMsg: 'Enter a valid phone number' }
@@ -1867,12 +1996,12 @@
       { n: 'requiredByDate', l: 'Required by', t: 'date', req: true }, { n: 'requirementSource', l: 'Source', t: 'text' }
     ] },
     '/v1/purchase-requests': { title: 'New purchase request', perm: 'procurement:purchase_request:write', fields: [
-      { n: 'prNumber', l: 'PR number (auto if blank)', t: 'text' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
+      { n: 'prNumber', l: 'PR number (optional: numbered for you if left empty)', t: 'text' }, { n: 'priority', l: 'Priority', t: 'select', en: ['HIGH', 'MEDIUM', 'LOW'] },
       { n: 'expectedDeliveryDate', l: 'Expected delivery', t: 'date' },
       { n: 'stockRequirementId', l: 'Stock requirement', t: 'select', fk: '/v1/stock-requirements', fv: 'stockRequirementId', fl: 'requirementSource' }
     ] },
     '/v1/gate-entries': { title: 'New gate entry', perm: 'inventory:gate_entry_master:write', fields: [
-      { n: 'gateEntryNumber', l: 'Gate entry no. (auto if blank)', t: 'text' },
+      { n: 'gateEntryNumber', l: 'Gate entry no. (optional: numbered for you if left empty)', t: 'text' },
       { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName' },
       { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' },
       { n: 'vehicleNumber', l: 'Vehicle no.', t: 'text' }, { n: 'driverName', l: 'Driver', t: 'text' },
@@ -1952,7 +2081,7 @@
       if (err) { ov.querySelector('#ra-merr').textContent = err; return; }
       var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed. Try again.'); return; }
         m.close(); st.search = ''; toast('Created', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -1961,18 +2090,18 @@
   /* ---------------- documents with line items (raise a PO / sales order from scratch) ---------------- */
   var CREATE_DOC = {
     '/v1/purchase-orders': { title: 'New purchase order', perm: 'procurement:purchase_order:write', itemMin: 1,
-      header: [ { n: 'poNumber', l: 'PO number (auto if blank)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date', req: true } ],
+      header: [ { n: 'poNumber', l: 'PO number (optional: numbered for you if left empty)', t: 'text' }, { n: 'vendorId', l: 'Supplier', t: 'select', fk: '/v1/vendors', fv: 'vendorId', fl: 'vendorName', req: true }, { n: 'purchaseRequestId', l: 'From approved PR (optional)', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber' }, { n: 'quotationId', l: 'From quotation (optional)', t: 'select', fk: '/v1/quotations', fv: 'quotationId', fl: 'quotationNumber' }, { n: 'orderDate', l: 'Order date', t: 'date', req: true } ],
       item: [ { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Unit price', t: 'number', req: true } ] },
     // G1/PB-08: sales orders should originate from the ALEMBIC bridge, not this manual form —
     // it is now a break-glass CONTINUITY path (owner/admin only: sales:manual_continuity:write
     // hides the "+ New" button for every other role via the generic `can(cfg.perm)` gate above)
     // and always requires a reason, audited server-side (origin=MANUAL_CONTINUITY + a bridge
     // event toward ALEMBIC — see OrdersService).
-    '/v1/sales-orders': { title: 'New sales order (manual continuity)', perm: 'sales:manual_continuity:write', itemMin: 1,
-      header: [ { n: 'soNumber', l: 'SO number (auto if blank)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'reason', l: 'Reason this order is created manually, outside the ALEMBIC bridge (required, audited)', t: 'text', req: true } ],
+    '/v1/sales-orders': { title: 'New sales order (entered by hand)', perm: 'sales:manual_continuity:write', itemMin: 1,
+      header: [ { n: 'soNumber', l: 'SO number (optional: numbered for you if left empty)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'reason', l: 'Why is this order entered here instead of coming from ALEMBIC? (recorded)', t: 'text', req: true } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
-      header: [ { n: 'grnNumber', l: 'GRN number (auto if blank)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
+      header: [ { n: 'grnNumber', l: 'GRN number (optional: numbered for you if left empty)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
       item: [ { n: 'purchaseOrderItemId', l: 'PO line (ordered qty)', t: 'select', fk: '/v1/purchase-order-items', fv: 'purchaseOrderItemId', fl: 'label' }, { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'damagedQty', l: 'Damaged qty', t: 'number' }, { n: 'varianceReason', l: 'Variance reason (if short/excess/damaged)', t: 'text' } ] }
   };
   async function openCreateDoc(endpoint) {
@@ -2018,7 +2147,7 @@
       body2.items = items;
       var save = ov.querySelector('#ra-msave'); save.disabled = true; save.textContent = 'Creating…';
       tunnel(endpoint, { method: 'POST', body: body2 }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Create failed. Try again.'); return; }
         m.close(); st.search = ''; toast('Created', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Create'; ov.querySelector('#ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -2068,9 +2197,60 @@
     }).catch(function () { var el = ov.querySelector('#ra-trace'); if (el) el.textContent = 'Can\'t connect. Try again.'; });
   }
 
+  /* ---------------- where am I, and what is this screen for ---------------- */
+  // A one-line trail above every screen (workspace › screen › record, each a link back) and the
+  // screen's purpose in plain words (screen-guide.js HELP), so nobody has to be told what a screen is.
+  function uxStyle() {
+    if ($('ra-ux-css')) return;
+    var c = document.createElement('style'); c.id = 'ra-ux-css';
+    c.textContent = '.screen-intro{margin:0 0 var(--s-snug);display:flex;flex-direction:column;gap:2px;min-width:0}' +
+      '.screen-intro .crumbs ol{display:flex;flex-wrap:wrap;align-items:center;gap:4px;list-style:none;margin:0;padding:0;font:var(--w-med) var(--t-cap)/1.4 var(--font-ui);color:var(--ink-3)}' +
+      '.screen-intro .crumbs li+li::before{content:"\\203A";margin-right:4px;color:var(--ink-3)}' +
+      '.screen-intro .crumbs a{color:var(--ink-2);text-decoration:none;border-radius:4px}.screen-intro .crumbs a:hover{text-decoration:underline}' +
+      '.screen-intro .crumbs a:focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px}' +
+      '.screen-intro .crumbs [aria-current]{color:var(--ink);overflow-wrap:anywhere}' +
+      '.screen-intro .screen-help{margin:0;font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch}' +
+      '.rs.rs-group{margin-top:var(--s-snug)}' +
+      '.ra-act[title]{position:relative}' +
+      '@media (max-width:420px){.screen-intro .screen-help{font-size:var(--t-cap)}}';
+    document.head.appendChild(c);
+  }
+  function paintIntroNow() { var R = ROLES[st.role]; var it = R && R.nav.filter(function (n) { return n[0] === st.nav; })[0]; if (it) paintIntro(it); }
+  function shortRef(ref) { return isUuid(ref) ? 'Record ' + String(ref).slice(0, 8).toUpperCase() : ref; }
+  function paintIntro(item) {
+    var el = $('ra-intro'); if (!el) return;
+    var R = ROLES[st.role], home = R.nav[0], atHome = item[0] === home[0] && !st.ref;
+    var help = window.RaGuide ? RaGuide.help(item[3]) : '';
+    var trail = '<li>' + (atHome ? '<span aria-current="page">' + escHtml(R.label) + '</span>' : '<a href="' + routeFor(home[0]) + '">' + escHtml(R.label) + '</a>') + '</li>' +
+      (item[0] !== home[0] ? '<li>' + (st.ref ? '<a href="' + routeFor(item[0]) + '">' + escHtml(item[1]) + '</a>' : '<span aria-current="page">' + escHtml(item[1]) + '</span>') + '</li>' : '') +
+      (st.ref ? '<li><span aria-current="page">' + escHtml(shortRef(st.ref)) + '</span></li>' : '');
+    el.innerHTML = '<nav class="crumbs" aria-label="You are here"><ol>' + trail + '</ol></nav>' + (help ? '<p class="screen-help">' + escHtml(help) + '</p>' : '');
+  }
+  /** Mark the record an address names on a list (and open its details); search the whole list when
+   *  it is not on the first page. */
+  function markRef(ref) {
+    var want = String(ref).toLowerCase();
+    var tr = [].filter.call(document.querySelectorAll('#ra-results tr[data-ref], #ra-results tr[data-rid]'), function (t) {
+      return (t.getAttribute('data-ref') || '').toLowerCase() === want || (t.getAttribute('data-rid') || '').toLowerCase() === want;
+    })[0];
+    if (!tr) return false;
+    if (tr.scrollIntoView) tr.scrollIntoView({ block: 'center' });
+    tr.classList.add('ruh-focus'); setTimeout(function () { tr.classList.remove('ruh-focus'); }, 4000);
+    if (tr.classList.contains('ra-drow') && tr.getAttribute('aria-expanded') !== 'true') tr.click();
+    return true;
+  }
+  function focusRef(ref) {
+    if (markRef(ref)) return;
+    var v = st._view; if (!v) return;
+    st.search = ref; var si = $('ra-search'); if (si) si.value = ref;
+    paintResults();
+    if (!markRef(ref)) searchServer().then(function () { if (!markRef(ref)) toast('That record is not on this screen any more.', ''); });
+  }
   async function loadView() {
     var R = ROLES[st.role]; var item = R.nav.filter(function (n) { return n[0] === st.nav; })[0] || R.nav[0]; st.nav = item[0];
     $('ra-title').textContent = item[1];
+    document.title = item[1] + ' · ' + R.label + ' · Factory';
+    paintIntro(item);
     if (item[3] === '__dash__') return loadDashboard();
     // G4: `loadTutorialView` is defined in web/tutorial.js, a classic script loaded AFTER this
     // one (index.html) — by the time this branch can actually run (a nav click, always after
@@ -2078,10 +2258,15 @@
     // reference) so a build that dropped tutorial.js degrades to an honest message instead of a
     // ReferenceError. RA_VIEWS/registerViews (this file's window.RA hook) is NOT wired into this
     // render path yet (see that var's own comment above) — this is the real dispatch.
-    if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials aren\'t available in this build.')); }
+    if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials are not available right now. Try again later.')); }
     // Lane produce: a workspace module (ws-produce.js) renders its own sentinel views
     // (__produce__, __shelftasks__, __racklayout__, __shelfdisplay__) through RA_VIEWS.
-    if (typeof item[3] === 'string' && /^__[a-z]+__$/.test(item[3]) && typeof RA_VIEWS[item[3]] === 'function') return RA_VIEWS[item[3]](item, $('ra-view'));
+    if (typeof item[3] === 'string' && /^__[a-z]+__$/.test(item[3]) && typeof RA_VIEWS[item[3]] === 'function') {
+      var shown = RA_VIEWS[item[3]](item, $('ra-view'));
+      // A record named in the address (a Ruh note, a shared link): find and mark it once drawn.
+      if (st.ref && window.RaRuh) RaRuh.focusRecord(st.ref, $('ra-view'));
+      return shown;
+    }
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
     if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
     var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
@@ -2089,11 +2274,11 @@
     var res;
     try { res = await tunnel(item[3] + '?limit=100'); }
     catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
-    if (res.status === 403) { V.innerHTML = errBox('Your role doesn\'t have access to this.'); return; }
+    if (res.status === 403) { V.innerHTML = errBox(NO_ACCESS, { title: 'Not part of your role' }); return; }
     // RP-PROC-007: a route can exist but be honestly unavailable (e.g. a feature whose backing
     // table isn't provisioned yet) — surface that message instead of silently falling through to
     // "No records yet", which would wrongly imply the table is just empty.
-    if (res.status >= 400) { V.innerHTML = errBox((res.json && res.json.error && res.json.error.message) || ('Not available right now (' + res.status + ').')); return; }
+    if (res.status >= 400) { V.innerHTML = errBox((res.json && res.json.error && res.json.error.message) || 'This screen is not available right now. Try again in a minute.'); return; }
     var rows = (res.json && res.json.data) || [];
     // Portal-audit WS1: the envelope hoists a page's nextCursor into meta.cursor — keep it so the
     // list can page past the first 100 rows via "Load more" (previously rows >100 were unreachable).
@@ -2107,27 +2292,34 @@
     // UX-C: total + up to three real status counts. The filler tiles ("Live", a count of table
     // columns as "Fields", "DB source of truth") said nothing about the records; masking is
     // already shown by the "Aliases only" chip on the table card itself.
-    var kpis = kpi(item[2], String(rows.length), 'Total') +
-      sKeys.slice(0, 3).map(function (k, i) { return kpi(['activity', 'flask', 'layers'][i], String(byStatus[k]), label(k)); }).join('');
+    var kpis = kpi(item[2], String(rows.length), rows.length === 1 ? 'Record' : 'Records') +
+      sKeys.slice(0, 3).map(function (k, i) { return kpi(['activity', 'flask', 'layers'][i], String(byStatus[k]), escHtml(statusWord(k.toUpperCase()))); }).join('');
     var kpiBand = '<div class="stats">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
     var canNew = cdef && can(cdef.perm);
     // data-tutorial-target="ra-new-record" (G4): one generic target, valid because only ONE
     // view's "+ New" button is ever on screen at a time — a tutorial action step reaches this
     // only after its own preceding target step already navigated to the right workspace/view.
-    var newBtn = canNew ? '<button id="ra-new" data-tutorial-target="ra-new-record" class="btn p">+ New</button>' : '';
+    // The one primary action on a list says what it makes ("+ New purchase order", not "+ New").
+    var newLabel = cdef ? '+ ' + String(cdef.title || 'New record').replace(/\s*\(.*\)\s*$/, '') : '';
+    var newBtn = canNew ? '<button id="ra-new" data-tutorial-target="ra-new-record" class="btn p">' + escHtml(newLabel) + '</button>' : '';
     if (!rows.length && !st.search.trim()) {
-      V.innerHTML = kpiBand + '<div class="card empty"><h3>No records yet</h3>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
+      // Empty: say so in words, then the next step — the button that adds the first one, or where
+      // these rows come from when nobody types them in here.
+      var origin = (window.RaGuide && RaGuide.comesFrom(item[3])) || '';
+      var next = newBtn ? 'Use ' + escHtml(newLabel.replace(/^\+ /, '')) + ' to add the first one.' : escHtml(origin || 'Rows appear here as soon as there is something to show.');
+      V.innerHTML = '<div class="card empty"><h3>Nothing in ' + escHtml(item[1]) + ' yet</h3><p style="margin:var(--s-tight) auto 0;max-width:46ch;color:var(--ink-2)">' + next + '</p>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
       var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
       return;
     }
     var shell = '<div class="card">' +
-      '<div class="card-hd"><h2>' + item[1] + '</h2>' + (masked ? '<span class="chip k">Aliases only</span>' : '') +
+      '<div class="card-hd"><h2>' + item[1] + '</h2>' + (masked ? '<span class="chip k" title="Real material names stay in the Vault; this list shows code names.">Code names only</span>' : '') +
       '<span class="n" id="ra-count"></span>' +
       '<input id="ra-search" class="fld" value="' + st.search.replace(/"/g, '') + '" placeholder="Search" aria-label="Search" style="max-width:220px;margin-left:auto">' + newBtn + '</div>' +
       '<div id="ra-results"></div></div>';
     V.innerHTML = kpiBand + shell;
     paintResults();
+    if (st.ref) focusRef(st.ref);
     var nb = $('ra-new'); if (nb) nb.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
     var si = $('ra-search'); if (si) {
       si.addEventListener('input', function (e) { st.search = e.target.value; paintResults(); clearTimeout(st._st); st._st = setTimeout(searchServer, 380); });
@@ -2172,7 +2364,7 @@
     // detail" — the tr itself is the trigger, kept keyboard-operable with tabindex + Enter/Space
     // since it's not a native button; aria-expanded reflects open/closed state for AT).
     var clickable = !!DETAIL[item[3]];
-    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; var rid = guessId(r); return '<tr' + (rid ? ' data-rid="' + escHtml(rid) + '"' : '') + (clickable ? ' id="' + k + '" data-k="' + k + '" class="ra-drow" style="cursor:pointer" tabindex="0" aria-expanded="false"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
+    var body = shown.map(function (r) { var k = clickable ? ('rd' + (_actSeq++)) : ''; if (clickable) _acts[k] = { detail: true, r: r }; var rid = guessId(r), rref = window.RaRoutes ? RaRoutes.refOf(r) : ''; return '<tr' + (rid ? ' data-rid="' + escHtml(rid) + '"' : '') + (rref ? ' data-ref="' + escHtml(rref) + '"' : '') + (clickable ? ' id="' + k + '" data-k="' + k + '" class="ra-drow" style="cursor:pointer" tabindex="0" aria-expanded="false"' : '') + '>' + cols.map(function (c) { return '<td>' + fmt(c, r[c], r) + '</td>'; }).join('') +
       (hasActions ? '<td class="r">' + rowActionsCell(item[3], r) + '</td>' : '') + '</tr>'; }).join('');
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
@@ -2237,7 +2429,23 @@
   }
   // NotBuilt-style: state the specific reason, per PORTING_GUIDE.md §Empty/error/loading — never a
   // generic spinner. Callers already pass a specific message (RP-PROC-007 etc.); this just frames it.
-  function errBox(m) { return '<div class="card notbuilt"><h2>Couldn\'t load</h2><p>' + m + '</p></div>'; }
+  // Never a dead end: the reason in words, then a way on (try again, or back to the home screen).
+  var NO_ACCESS = 'Your role does not include this screen. If you need it, ask your admin to add it to your role.';
+  function errBox(m, o) {
+    o = o || {};
+    return '<div class="card notbuilt"><h2>' + escHtml(o.title || 'This screen did not load') + '</h2><p>' + m + '</p>' +
+      '<div style="display:flex;gap:var(--s-tight);flex-wrap:wrap;margin-top:var(--s-snug)">' +
+        (o.title ? '' : '<button type="button" class="btn sm" data-ra-retry>Try again</button>') +
+        '<button type="button" class="btn sm" data-ra-home>Go to your home screen</button></div></div>';
+  }
+  if (!window.__raErrWired) {
+    window.__raErrWired = true;
+    document.addEventListener('click', function (e) {
+      var t = e.target && e.target.closest ? e.target.closest('[data-ra-retry],[data-ra-home]') : null;
+      if (!t || !st.role) return;
+      if (t.hasAttribute('data-ra-retry')) loadView(); else navTo(ROLES[st.role].nav[0][0]);
+    });
+  }
 
   // Module 12 dashboard alerts — fill the header bell from /v1/alerts (real, role-filtered counts).
   // Map an alert kind → the nav key of the screen that resolves it, for the CURRENT role.
@@ -2273,7 +2481,7 @@
         return '<div ' + (nk ? 'data-alert-nav="' + nk + '" ' : '') + ' style="display:flex;align-items:center;gap:var(--s-snug);padding:var(--s-tight) var(--s-snug);border-radius:var(--r-sm);' + (nk ? 'cursor:pointer' : '') + '"><span class="sw-dot" style="width:8px;height:8px;border-radius:var(--r-pill);background:' + col + ';flex:none"></span><div style="flex:1;min-width:0"><div style="font:var(--w-med) var(--t-body)/1.3 var(--font-ui)">' + a.title + (nk ? ' &rsaquo;' : '') + '</div><div style="font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui);color:var(--ink-3)">' + a.sub + '</div></div><span style="font:var(--w-med) var(--t-h3)/1 var(--font-ui);color:' + col + '">' + a.count + '</span></div>';
       }).join('')) : '<div class="loading" style="padding:var(--s-base)">No alerts</div>';
       [].forEach.call(pop.querySelectorAll('[data-alert-nav]'), function (el) {
-        el.onclick = function (e) { e.stopPropagation(); st.nav = el.getAttribute('data-alert-nav'); st.search = ''; pop.style.display = 'none'; shell(); };
+        el.onclick = function (e) { e.stopPropagation(); pop.style.display = 'none'; navTo(el.getAttribute('data-alert-nav')); };
       });
     }).catch(function () {});
   }
@@ -2281,7 +2489,8 @@
   // (addendum §5/§8). Keeps the same session/token; only st.role + the rendered rail/nav change.
   function switchRole(newRole) {
     if (!ROLES[newRole] || newRole === st.role) return;
-    st.role = newRole; st.nav = ROLES[newRole].nav[0][0]; st.search = '';
+    st.role = newRole; st.nav = ROLES[newRole].nav[0][0]; st.search = ''; st.ref = '';
+    setRoute(routeFor(st.nav), false);
     shell();
   }
   function wireNav() {
@@ -2296,7 +2505,7 @@
   }
   function wireShell() {
     wireNav();
-    $('ra-logout').onclick = function () { ariaReset(); if (window.RaRuh) RaRuh.stop(); session = null; st.role = null; st.drawer = false; document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
+    $('ra-logout').onclick = function () { ariaReset(); if (window.RaRuh) RaRuh.stop(); session = null; st.role = null; st.ref = ''; st.drawer = false; try { history.replaceState(null, '', location.pathname + location.search); } catch (e) {} document.body.classList.remove('rail-off', 'rail-open', 'dock-away'); tunnel('/auth/logout', { method: 'POST' }).catch(function () {}); showLogin(); };
     /* UX-F: the sound on/off toggle sits beside Sign out, in the reference shell's rail-min style. */
     if (window.RaSound && RaSound.mountToggle(document.querySelector('#ra-side .rme'), $('ra-logout'), 'rail-min', 'position:static;margin-left:auto')) $('ra-logout').style.marginLeft = '0';
     /* Focus mode switch (focus.js), between the sound switch and Sign out. */
@@ -2383,6 +2592,7 @@
   // UX-C: the same sign-in card as web-platform/platform.js and web-vault/vault.js (.login-wrap/
   // .login-card, web/ui-contract/shell.css) — console name, one line, one button.
   function showLogin() {
+    rememberAddress();
     $('app').className = '';
     $('app').innerHTML =
       '<div class="login-wrap"><div class="login-card">' +
@@ -2390,7 +2600,7 @@
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aroma Chem production.</p>' +
         '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
-        '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in isn\'t set up for this build.') + '</div>' +
+        '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in is not switched on here yet. Ask your administrator.') + '</div>' +
       '</div></div>';
   }
 
@@ -2411,8 +2621,8 @@
     var v = avail[0] || null;
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
-    st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = '';
-    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { shell(); ruhStart(); ruhFollowHash(); });
+    st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; st.ref = '';
+    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { landOnAddress(); ruhStart(); });
     return true;
   }
 
@@ -2430,24 +2640,13 @@
       toast: function (msg, bad) { toast(msg, bad ? 'bad' : ''); },
     });
   }
+  // A note's link (#/go/<section>[|<section>…][/<record id>], or a new-style address) opens through
+  // the same address book as everything else: the first of those screens this person has, the record
+  // found and marked on it (loadView), and the readable address left in the bar.
   function ruhOpen(link) {
-    var m = /^#\/go\/([^/]+)(?:\/(.+))?$/.exec(String(link || ''));
-    if (!m || !st.role) return false;
-    var R = ROLES[st.role]; if (!R) return false;
-    var key = m[1].split('|').filter(function (k) { return R.nav.some(function (n) { return n[0] === k; }); })[0];
-    if (!key) return false;
-    if (st.nav === key) loadView(); else navTo(key);
-    if (m[2]) RaRuh.focusRecord(decodeURIComponent(m[2]), $('ra-view'));
-    return true;
+    if (!st.role) return false;
+    return openAddress(String(link || ''), true);
   }
-  /** A link from ALEMBIC or another console (`https://rawfactory…/#/go/…`): open it once signed in. */
-  function ruhFollowHash() {
-    if (!/^#\/go\//.test(location.hash)) return;
-    var link = location.hash;
-    history.replaceState(null, '', location.pathname + location.search);
-    if (!ruhOpen(link)) toast('That screen is not part of your workspace.', '');
-  }
-  window.addEventListener('hashchange', function () { if (session && st.role) ruhFollowHash(); });
 
   // PB-04 / SB-02: a redirect back from ALEMBIC's "Open Factory" lands here with
   // `#assertion=<token>` in the URL fragment (never a query string a server would log).
@@ -2473,6 +2672,7 @@
   }
 
   function boot() {
+    applyGuideLabels();
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(function () {});
     var assertionExchange = consumeAssertionFromHash();
     if (assertionExchange) { assertionExchange.then(function () {}); return; }

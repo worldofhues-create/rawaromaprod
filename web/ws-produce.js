@@ -142,7 +142,7 @@
       tunnel('/v1/produce/requirements/' + id + '/plan', { method: 'POST', body: {} }).then(function (res) {
         if (res.status >= 400) {
           b.disabled = false; b.textContent = 'Plan run';
-          toast(err(res, 'Could not plan (' + res.status + ')'), 'bad');
+          toast(err(res, 'Could not plan. Try again.'), 'bad');
           loadView(); return;
         }
         var p = data(res) || {};
@@ -154,7 +154,7 @@
 
   function showInstruction(orderId) {
     tunnel('/v1/production-orders/' + orderId + '/manufacturing-instruction').then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'The coded instruction is not available (' + res.status + ')'), 'bad'); return; }
+      if (res.status >= 400) { toast(err(res, 'The coded instruction is not available. Try again.'), 'bad'); return; }
       var lines = data(res) || [];
       var body = lines.length
         ? '<p class="t-cap" style="margin:0">Floor codes and quantities only. The recipe never leaves the Vault.</p><div style="overflow-x:auto"><table><thead><tr><th>Step</th><th>Floor code</th><th class="r">Quantity</th></tr></thead><tbody>' +
@@ -168,7 +168,7 @@
     b.disabled = true;
     tunnel('/v1/shelf/requirements/' + reqId + '/picks', { method: 'POST', body: {} }).then(function (res) {
       b.disabled = false;
-      if (res.status >= 400) { toast(err(res, 'Could not create picks (' + res.status + ')'), 'bad'); return; }
+      if (res.status >= 400) { toast(err(res, 'Could not create picks. Try again.'), 'bad'); return; }
       var d = data(res) || {};
       toast((d.tasks || []).length + ' pick(s) created — oldest lot first' + (d.shortKg ? ' · short ' + num(d.shortKg) + ' kg' : ''), 'good');
       loadView();
@@ -251,7 +251,7 @@
         var body = { finishedGoodBatchId: $('pv-mv-batch').value, fromBinCode: $('pv-mv-from').value.trim(), toBinCode: $('pv-mv-to').value.trim(), qty: $('pv-mv-qty').value === '' ? null : Number($('pv-mv-qty').value) };
         if (!body.finishedGoodBatchId || !body.toBinCode) { toast('Scan the from-bin, pick the batch and scan the to-bin.', 'bad'); return; }
         tunnel('/v1/shelf/move', { method: 'POST', body: body }).then(function (res) {
-          if (res.status >= 400) { toast(err(res, 'Move failed (' + res.status + ')'), 'bad'); return; }
+          if (res.status >= 400) { toast(err(res, 'Move failed. Try again.'), 'bad'); return; }
           var d = data(res) || {}; toast('Moved ' + d.from + ' → ' + d.to, 'good'); loadView();
         }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
       };
@@ -278,7 +278,7 @@
   function completeTask(id, kind, binCode) {
     var path = '/v1/shelf/tasks/' + id + (kind === 'PICK' ? '/pick' : '/putaway');
     tunnel(path, { method: 'POST', body: { binCode: binCode } }).then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'Not confirmed (' + res.status + ')'), 'bad'); return; }
+      if (res.status >= 400) { toast(err(res, 'Not confirmed. Try again.'), 'bad'); return; }
       var d = data(res) || {};
       if (kind === 'PICK') toast('Picked', 'good');
       else toast('Put away on ' + (d.location || binCode) + (d.fgBatchReceived && d.fgBatchReceived.sent ? ' · ALEMBIC told' : d.fgBatchReceived ? ' · ALEMBIC NOT told: ' + (d.fgBatchReceived.problems || []).join('; ') : ''), d.fgBatchReceived && !d.fgBatchReceived.sent ? 'bad' : 'good');
@@ -310,7 +310,7 @@
     m.sheet.onsubmit = function (e) {
       e.preventDefault(); var v = $('pv-abin').value.trim(); m.close();
       tunnel('/v1/shelf/putaway', { method: 'POST', body: { finishedGoodBatchId: fgId, binCode: v || null } }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Not assigned (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Not assigned. Try again.'), 'bad'); return; }
         var t = data(res) || {}; toast(t.label ? 'Put away on ' + t.label : 'Task open — no free bin yet; add bins on Rack layout', t.label ? 'good' : 'bad'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     };
@@ -394,7 +394,7 @@
       var body = { zoneCode: $('pv-zone').value.trim(), rackCode: $('pv-rackc').value.trim(), shelves: Number($('pv-shelves').value), binsPerShelf: Number($('pv-bins').value), walkSeq: $('pv-walk').value === '' ? null : Number($('pv-walk').value) };
       if (!body.zoneCode || !body.rackCode) { toast('Zone and rack code are needed.', 'bad'); return; }
       tunnel('/v1/shelf/layout/rack', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Rack not added (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Rack not added. Try again.'), 'bad'); return; }
         var d = data(res) || {};
         PV.lastZone = body.zoneCode; PV.lastShelves = body.shelves; PV.lastBins = body.binsPerShelf; PV.nextRack = nextCode(body.rackCode);
         toast('Rack ' + d.rackCode + ' · ' + (d.binCodes || []).length + ' bins · walk #' + d.walkSeq, 'good'); loadView();
@@ -541,7 +541,7 @@
   }
   function printLabel(fgId, size) {
     tunnel('/v1/finished-good-batches/' + fgId + '/label').then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'This batch cannot be labelled (' + res.status + ')'), 'bad'); return; }
+      if (res.status >= 400) { toast(err(res, 'This batch cannot be labelled. Try again.'), 'bad'); return; }
       var c = data(res); if (!c) return;
       var s = SIZES[size] || SIZES['100x50'];
       var n = s.sheet || 1, body = '';
@@ -570,7 +570,7 @@
     m.sheet.onsubmit = function (e) {
       e.preventDefault(); var n = Number($('pv-lcount').value); if (!(n > 0)) return; m.close();
       tunnel('/v1/finished-good-batches/' + row.finishedGoodBatchId + '/labels', { method: 'POST', body: { labelCount: n } }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Labels not recorded (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Labels not recorded. Try again.'), 'bad'); return; }
         var l = data(res) || {}; var c = l.labelContent || {};
         toast('Labels recorded' + (c.rack ? ' · rack ' + c.rack : ''), 'good');
         chooseLabelSize(row.finishedGoodBatchId); loadView();
@@ -594,7 +594,7 @@
     m.sheet.onsubmit = function (e) {
       e.preventDefault(); var reason = $('pv-rj').value.trim(); if (reason.length < 3) return; m.close();
       tunnel('/v1/batch-coas/' + row.batchCoaId + '/reject', { method: 'POST', body: { reason: reason } }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Not rejected (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Not rejected. Try again.'), 'bad'); return; }
         toast('Rejected — ALEMBIC told, labelling blocked', 'bad'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     };
@@ -613,7 +613,7 @@
         e.preventDefault();
         var body = { unNumber: $('pv-un').value, dgClass: $('pv-cls').value, packingGroup: $('pv-pg').value, properShippingName: $('pv-psn').value, signalWord: $('pv-sw').value, hazardStatements: $('pv-hs').value };
         tunnel('/v1/products/' + row.productId + '/dg-info', { method: 'PUT', body: body }).then(function (r2) {
-          if (r2.status >= 400) { toast(err(r2, 'Not saved (' + r2.status + ')'), 'bad'); return; }
+          if (r2.status >= 400) { toast(err(r2, 'Not saved. Try again.'), 'bad'); return; }
           m.close(); toast('DG / hazard saved', 'good');
         });
       };

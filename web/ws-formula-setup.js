@@ -132,7 +132,7 @@
       raConfirm('Ask for Ruh (automation) to get the formulator role? A different owner or admin must approve it before Ruh can draft anything.', function () {
         req.disabled = true;
         tunnel('/v1/service-principals/ruh/formulator-request', { method: 'POST', body: {} }).then(function (res) {
-          if (res.status >= 400) { req.disabled = false; toast(err(res, 'Could not ask (' + res.status + ')'), 'bad'); return; }
+          if (res.status >= 400) { req.disabled = false; toast(err(res, 'Could not ask. Try again.'), 'bad'); return; }
           toast('Requested — now a second owner approves it here', 'good'); loadView();
         }).catch(function () { req.disabled = false; toast('Can\'t connect. Try again.', 'bad'); });
       }, { title: 'Let Ruh draft formulas', confirmLabel: 'Ask', tone: 'accent' });
@@ -142,7 +142,7 @@
       raConfirm('Approve: Ruh (automation) may draft and seal formulas in the Vault. It can never approve one.', function () {
         ap.disabled = true;
         tunnel('/v1/vault-role-grant-requests/' + ap.getAttribute('data-req') + '/approve', { method: 'POST', body: {} }).then(function (res) {
-          if (res.status >= 400) { ap.disabled = false; toast(err(res, 'Could not approve (' + res.status + ')'), 'bad'); return; }
+          if (res.status >= 400) { ap.disabled = false; toast(err(res, 'Could not approve. Try again.'), 'bad'); return; }
           toast('Approved — Ruh can draft formulas', 'good'); loadView();
         }).catch(function () { ap.disabled = false; toast('Can\'t connect. Try again.', 'bad'); });
       }, { title: 'Approve Ruh', confirmLabel: 'Approve', tone: 'good' });
@@ -174,7 +174,7 @@
       btn.disabled = true; btn.textContent = 'Drafting…';
       tunnel('/v1/formula-setup/shells', { method: 'POST', body: { products: picks } }).then(function (res) {
         btn.disabled = false; btn.textContent = 'Draft formula shells';
-        if (res.status >= 400) { toast(err(res, 'Could not draft (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Could not draft. Try again.'), 'bad'); return; }
         var out = (data(res) || {}).results || [];
         var ok = out.filter(function (r) { return r.outcome === 'created' || r.outcome === 'existing'; }).length;
         var bad = out.filter(function (r) { return r.outcome === 'error'; });
@@ -213,7 +213,7 @@
       if (why.length < 3) { $('fs-link-err').textContent = 'Say why (at least 3 characters).'; return; }
       var save = $('fs-link-save'); save.disabled = true;
       tunnel('/v1/products/' + p.productId + '/formula-link', { method: 'POST', body: { formulaId: fid, reason: why } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; $('fs-link-err').textContent = err(res, 'Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; $('fs-link-err').textContent = err(res, 'That did not go through. Try again.'); return; }
         m.close(); toast((data(res) || {}).changed ? 'Formula linked' : 'No change', 'good'); loadView();
       }).catch(function () { save.disabled = false; $('fs-link-err').textContent = 'Can\'t connect. Try again.'; });
     };

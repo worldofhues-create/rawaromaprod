@@ -99,7 +99,7 @@
   function draftQc(b) {
     b.disabled = true; b.textContent = 'Ruh is drafting…';
     tunnel('/v1/factory-setup/qc-proposals/draft', { method: 'POST', body: {} }).then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'Ruh could not draft (' + res.status + ')'), 'bad'); b.disabled = false; b.textContent = 'Ask Ruh to draft QC specs'; return; }
+      if (res.status >= 400) { toast(err(res, 'Ruh could not draft. Try again.'), 'bad'); b.disabled = false; b.textContent = 'Ask Ruh to draft QC specs'; return; }
       var d = data(res) || {};
       var not = (d.notDrafted || []).length;
       toast(d.message || ((d.drafted || 0) + ' QC specs drafted' + (not ? ' · ' + not + ' could not be drafted' : '') + ' — they wait for approval below.'), not && !d.drafted ? 'bad' : 'good');
@@ -110,7 +110,7 @@
   function draftRacks(b) {
     b.disabled = true;
     tunnel('/v1/factory-setup/rack-proposals/draft', { method: 'POST', body: {} }).then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'Ruh could not draft a layout (' + res.status + ')'), 'bad'); b.disabled = false; return; }
+      if (res.status >= 400) { toast(err(res, 'Ruh could not draft a layout. Try again.'), 'bad'); b.disabled = false; return; }
       toast('Ruh drafted a rack layout — check the counts below, then accept it.', 'good'); loadView();
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); b.disabled = false; });
   }
@@ -153,7 +153,7 @@
 
   function decideQc(ids, decision) {
     tunnel('/v1/factory-setup/qc-proposals/decide', { method: 'POST', body: { ids: ids, decision: decision } }).then(function (res) {
-      if (res.status >= 400) { toast(err(res, 'Not saved (' + res.status + ')'), 'bad'); return; }
+      if (res.status >= 400) { toast(err(res, 'Not saved. Try again.'), 'bad'); return; }
       var d = data(res) || {}, refused = d.refused || [];
       toast((decision === 'approve' ? (d.approved || 0) + ' approved' : (d.rejected || 0) + ' rejected') + (refused.length ? ' · ' + refused.length + ' not changed: ' + refused[0].reason : ''), refused.length ? 'bad' : 'good');
       loadView();
@@ -192,7 +192,7 @@
       raConfirm('Build ' + bins + ' bins on ' + (L.zones || []).reduce(function (n, z) { return n + z.racks; }, 0) + ' racks? Bins that already exist are kept as they are.', function () {
         acc.disabled = true;
         tunnel('/v1/factory-setup/rack-proposals/' + p.setupProposalId + '/decide', { method: 'POST', body: { decision: 'approve', layout: L } }).then(function (res) {
-          if (res.status >= 400) { toast(err(res, 'Not built (' + res.status + ')'), 'bad'); acc.disabled = false; return; }
+          if (res.status >= 400) { toast(err(res, 'Not built. Try again.'), 'bad'); acc.disabled = false; return; }
           var a = (data(res) || {}).applied || {};
           toast((a.created || 0) + ' bins built' + (a.existing ? ', ' + a.existing + ' were already there' : '') + '. Print their labels next.', 'good');
           SV.printOffer = true; loadView();
@@ -202,7 +202,7 @@
     var rej = $('sv-rack-reject');
     if (rej) rej.onclick = function () {
       tunnel('/v1/factory-setup/rack-proposals/' + p.setupProposalId + '/decide', { method: 'POST', body: { decision: 'reject' } }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Not saved (' + res.status + ')'), 'bad'); return; }
+        if (res.status >= 400) { toast(err(res, 'Not saved. Try again.'), 'bad'); return; }
         toast('Layout rejected. Ask Ruh again, or lay racks out by hand on Rack layout.', 'good'); loadView();
       });
     };

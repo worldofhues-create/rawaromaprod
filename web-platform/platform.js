@@ -78,14 +78,14 @@
   PlatformError.prototype = Object.create(Error.prototype);
   async function api(path, opts) {
     var r = await tunnel(path, opts);
-    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status); }
+    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || (r.status === 403 ? 'Your role does not allow this. Ask the owner if you need it.' : 'That did not go through. Try again in a minute.'), r.status); }
     return r.json ? r.json.data : null;
   }
   /* A cursor page: the envelope carries the rows as `data` and the next cursor as `meta.cursor`
    * (ResponseEnvelopeInterceptor) — `api()` above keeps only `data`, so paged screens use this. */
   async function apiPage(path) {
     var r = await tunnel(path);
-    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || ('Request failed (' + r.status + ')'), r.status); }
+    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new PlatformError(err.code || 'UNKNOWN', err.message || (r.status === 403 ? 'Your role does not allow this. Ask the owner if you need it.' : 'That did not go through. Try again in a minute.'), r.status); }
     return { items: (r.json && r.json.data) || [], cursor: (r.json && r.json.meta && r.json.meta.cursor) || null };
   }
 
@@ -178,6 +178,8 @@
     history.replaceState(null, '', location.pathname + location.search);
     try {
       await loginWithAssertion(token);
+      // Back to the screen that was asked for before sign-in (kept across the trip to ALEMBIC).
+      var back = takeRemembered(); if (back) { try { history.replaceState(null, '', location.pathname + location.search + back); } catch (x) {} }
       if (!hasPlatformAccess()) {
         toast('This account has no Platform access. Ask an admin for the platform role.', true);
         logout();
@@ -224,11 +226,15 @@
   };
   // The dock's glyph set (dock.js) gives every section its own artwork.
   if (window.RaDock) Object.keys(RaDock.GLYPHS).forEach(function (k) { if (!ICONS[k]) ICONS[k] = RaDock.GLYPHS[k]; });
-  function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : '') }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); } setTimeout(function () { t.remove(); }, 3400); }
-  var dialogRoot = null;
-  function closeDialog() { if (dialogRoot) { dialogRoot.remove(); dialogRoot = null; } }
+  function toast(msg, bad) { var t = h('div', { class: 'toast' + (bad ? ' bad' : ''), role: bad ? 'alert' : 'status', 'aria-live': bad ? 'assertive' : 'polite' }, [h('span', { class: 'd' }), msg]); document.body.appendChild(t); if (window.RaSound) { if (bad) RaSound.play('alert'); else RaSound.cue(msg); } setTimeout(function () { t.remove(); }, bad ? 6000 : 3400); }
+  var dialogRoot = null, dialogKey = null, dialogOpener = null;
+  function closeDialog() {
+    if (dialogKey) { document.removeEventListener('keydown', dialogKey); dialogKey = null; }
+    if (dialogRoot) { dialogRoot.remove(); dialogRoot = null; var o = dialogOpener; dialogOpener = null; if (o && o.focus) { try { o.focus(); } catch (e) {} } }
+  }
   function openDialog(title, bodyFn) {
     closeDialog();
+    dialogOpener = document.activeElement;
     var scrim = h('div', { class: 'xp-scrim open', onclick: closeDialog });
     var body = h('div', { class: 'xp-sheet-bd' });
     var sheet = h('div', { class: 'glass glass-deep xp-sheet open', role: 'dialog', 'aria-modal': 'true', 'aria-label': title, style: 'max-width:520px' },
@@ -237,7 +243,10 @@
     dialogRoot = h('div', {}, [scrim, sheet]);
     document.body.appendChild(dialogRoot);
     bodyFn(body, closeDialog);
-    document.addEventListener('keydown', function onKey(e) { if (e.key === 'Escape') { closeDialog(); document.removeEventListener('keydown', onKey); } });
+    dialogKey = function (e) { if (e.key === 'Escape') closeDialog(); };
+    document.addEventListener('keydown', dialogKey);
+    // Focus lands on the first field, so the keyboard and screen readers start inside the dialog.
+    var first = sheet.querySelector('input,select,textarea,button:not(.xp)'); if (first) first.focus();
   }
   function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
   function notBuilt(title, why, needs) {
@@ -246,7 +255,15 @@
   function skeletonCard() { return h('div', { class: 'card' }, [h('div', { class: 'skl' })]); }
 
   window.addEventListener('hashchange', render);
-  function currentView() { return location.hash.replace(/^#\/?/, '') || 'health'; }
+  function currentView() {
+    var word = location.hash.replace(/^#\/?/, '').split('/')[0];
+    var id = idOfRoute(word);
+    var seen = id && NAV.some(function (n) { return n.id === id; }) ? id : 'health';
+    // Unknown, older or gated addresses settle on the one this screen really has (no reload, no history entry).
+    var want = routeOf(seen);
+    if (session.token && location.hash !== want && !/assertion=/.test(location.hash)) { try { history.replaceState(null, '', location.pathname + location.search + want); } catch (e) {} }
+    return seen;
+  }
 
   var root = document.getElementById('root');
 
@@ -256,13 +273,19 @@
    * screen renders only when there is no session AND no assertion in the URL to consume. */
   // UX-C: the one sign-in card all three RawProd consoles share (web/shell.js showLogin,
   // web-vault/vault.js renderLogin) — console name, one line, one button.
+  var AFTER_SIGNIN = 'pv_after_signin';
+  function takeRemembered() {
+    try { var v = JSON.parse(localStorage.getItem(AFTER_SIGNIN) || 'null'); localStorage.removeItem(AFTER_SIGNIN); if (v && v.h && Date.now() - v.t < 15 * 60 * 1000) return v.h; } catch (e) {}
+    return '';
+  }
   function renderLogin() {
+    try { if (/^#\/[a-z-]+/.test(location.hash)) localStorage.setItem(AFTER_SIGNIN, JSON.stringify({ h: location.hash, t: Date.now() })); } catch (e) {}
     root.innerHTML = '';
     var err = h('div', { class: 'err', role: 'alert' });
     var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('platform') || '#' }, ['Sign in via ALEMBIC →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
-      err.textContent = 'Sign-in isn\'t set up for this build.';
+      err.textContent = 'Sign-in is not switched on here yet. Ask your administrator.';
     }
     var card = h('div', { class: 'login-card' }, [
       h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
@@ -275,15 +298,15 @@
 
   var NAV = [
     { id: 'health', label: 'Health', icon: 'activity' },
-    { id: 'flags', label: 'Feature flags', icon: 'toggle', need: 'platform:flag:write' },
-    { id: 'tenants', label: 'Tenants', icon: 'building' },
-    { id: 'providers', label: 'Providers', icon: 'plug' },
+    { id: 'flags', label: 'Feature switches', icon: 'toggle', need: 'platform:flag:write' },
+    { id: 'tenants', label: 'Organizations', icon: 'building', need: 'platformops:console:read' },
+    { id: 'providers', label: 'Connectors', icon: 'plug', need: 'platformops:console:read' },
     // Lane produce (owner requirement 2026-09-29): the ALEMBIC bridge's health and counters, and
     // the pick-to-light connector (device-agnostic HTTP + HMAC, or the built-in simulator).
-    { id: 'bridge', label: 'ALEMBIC bridge', icon: 'link', need: 'platformops:console:read' },
+    { id: 'bridge', label: 'ALEMBIC link', icon: 'link', need: 'platformops:console:read' },
     { id: 'picklight', label: 'Pick-to-light', icon: 'bulb', need: 'platform:flag:write' },
-    { id: 'deploy', label: 'Build', icon: 'tag' },
-    { id: 'support', label: 'Login history', icon: 'login' },
+    { id: 'deploy', label: 'Version', icon: 'tag', need: 'platformops:console:read' },
+    { id: 'support', label: 'Sign-in history', icon: 'login' },
     // G4: in-app tutorial. No `need` — screenTutorial() itself decides which lessons (if any)
     // the signed-in session may see (same fine-grained per-permission gate as web/tutorial.js);
     // an account with zero visible lessons still gets an honest empty state, same as every other
@@ -292,6 +315,26 @@
   ];
   // Quick-access dock (web/dock.js): at most eight primary destinations, then All sections and
   // Ask Aria; Tutorials stays in the sections sheet. Sections this session cannot see are skipped.
+  // Readable addresses: #/<screen> in words (#/sign-in-history), the section ids above stay internal.
+  // Older addresses (#/support, #/picklight … — Ruh notes keep these) open the same screen and are
+  // rewritten to the readable one.
+  var ROUTE = { health: 'health', flags: 'feature-switches', tenants: 'organizations', providers: 'connectors', bridge: 'alembic-bridge',
+    picklight: 'pick-to-light', deploy: 'version', support: 'sign-in-history', tutorial: 'tutorials' };
+  function routeOf(id) { return '#/' + (ROUTE[id] || id); }
+  function idOfRoute(word) { for (var k in ROUTE) { if (ROUTE[k] === word) return k; } return ROUTE[word] ? word : null; }
+  // What each screen is for, said under its title.
+  var HELP = {
+    health: 'Whether every part of the system is working right now.',
+    flags: 'Switch features on, down to a limited mode, or off, for testing or for everyone.',
+    tenants: 'The companies set up on this system.',
+    providers: 'Outside services this system is connected to, and whether each is set up.',
+    bridge: 'The link with ALEMBIC: what came in, what went out, and anything held back.',
+    picklight: 'Lights on the shelves that show staff which bin to use.',
+    deploy: 'Which version of the system is running.',
+    support: 'Every sign-in attempt, newest first, including refused ones.',
+    tutorial: 'Short guided tours of this console.'
+  };
+  var NO_ACCESS = 'Your role does not include this screen. If you need it, ask the owner to add it to your role.';
   var DOCK_DEFAULTS = ['health', 'flags', 'tenants', 'providers', 'bridge', 'picklight', 'deploy', 'support'];
   function dockNav() {
     var v = visibleNav(), keys = RaDock.pick(v.map(function (n) { return n.id; }), DOCK_DEFAULTS, null);
@@ -326,7 +369,7 @@
     if (t) { t.setAttribute('aria-pressed', String(railOpen)); t.setAttribute('aria-label', railOpen ? 'Hide sections' : 'All sections'); }
   }
   function setRail(v) { railOpen = v; applyRail(); }
-  function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === '#/' + id) { render(); return; } location.hash = '#/' + id; }
+  function go(id) { if (window.innerWidth <= 1023) railOpen = false; if (location.hash === routeOf(id)) { render(); return; } location.hash = routeOf(id); }
   function visibleNav() { return NAV.filter(function (n) { return !n.need || hasPerm(n.need); }); }
   window.addEventListener('resize', applyRail);
   /* ---- Ask Aria (UX-E panel, UX-H answers): ALEMBIC's own panel (aria-panel.js,
@@ -453,7 +496,7 @@
     });
     var rail = h('nav', { class: 'rail', id: 'pv-rail', 'aria-label': 'Platform navigation' }, [
       h('button', { type: 'button', class: 'rail-min', 'aria-label': 'Minimise navigation', onclick: function () { setRail(false); } }, [raw(CI.collapse)]),
-      h('button', { type: 'button', class: 'rb', style: 'padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [brandMark('Platform', true)]),
+      h('button', { type: 'button', class: 'rb', style: 'padding-right:44px;background:none;border:0;cursor:pointer;text-align:left;width:100%', 'aria-label': 'Platform home', onclick: function () { go(visible[0].id); } }, [brandMark('Platform', true)]),
       h('div', { class: 'rail-deep' }, [h('div', {}, [h('div', { class: 'rs' }, ['OPERATIONS'])].concat(navButtons))]),
       h('div', { class: 'rme' }, [
         h('span', { class: 'av' }, [(session.email || '?').slice(0, 2).toUpperCase()]),
@@ -466,21 +509,22 @@
     var rme = rail.querySelector('.rme'); if (window.RaSound && rme) { var so = rme.lastChild; if (RaSound.mountToggle(rme, so, 'rail-min', 'position:static;margin-left:auto')) so.style.marginLeft = '0'; }
     /* Focus mode switch (focus.js), between the sound switch and Sign out. */
     if (window.RaFocus && rme) { var fo = rme.lastChild; if (RaFocus.mountToggle(rme, fo, 'rail-min', 'position:static;margin-left:' + (fo.style.marginLeft === '0px' ? '0' : 'auto'))) fo.style.marginLeft = '0'; }
-    var label = (visible.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
+    var label = (NAV.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
+    document.title = label + ' · Platform · Raw Aroma Chem';
     ariaCtx = 'Platform · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [
       h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),
       h('h1', {}, [label]),
-      h('span', { class: 'chip n' }, ['Internal']),
+      h('span', { class: 'chip n', title: 'Only Raw Aroma Chem platform staff can open this console.' }, ['Staff only']),
       h('span', { style: 'flex:1' }),
       // Always-on Ruh: a quiet badge in the top bar (never a dock entry); the panel opens from it.
       window.RaRuh ? RaRuh.badge('gbtn') : null,
       h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
     ]);
-    var view = h('section', { class: 'pageview' }, [contentEl]);
+    var view = h('section', { class: 'pageview' }, [HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
     var main = h('div', { class: 'main' }, [ bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
-      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Health', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
+      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Platform home', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
        h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'All sections', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
          [raw(CI.menu), h('span', { class: 'kb' }, [h('span', { class: 'kb-d' }, ['All sections']), h('span', { class: 'kb-m' }, ['More']), h('span', { class: 'kc' }, [' · ⌘\\'])])]),
        h('span', { class: 'sep' })]
@@ -504,6 +548,11 @@
   }
 
 
+  // Service names as a person says them.
+  var DEP = { db: 'Database', database: 'Database', postgres: 'Database', redis: 'Cache', cache: 'Cache', vault: 'Formula vault', formulaVault: 'Formula vault',
+    formula_db: 'Formula vault', bridge: 'ALEMBIC link', email: 'Email', mail: 'Email', kms: 'Key service', storage: 'File storage' };
+  function depName(k) { if (DEP[k]) return DEP[k]; var w = String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase(); return w.charAt(0).toUpperCase() + w.slice(1); }
+  function words(code) { var w = String(code == null ? '' : code).replace(/[._-]+/g, ' ').toLowerCase().trim(); return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }
   /* ── environment & diagnostics (real: GET /health + GET /v1/platform/health) ─────────────── */
   async function screenHealth() {
     var content = h('div', {}, [skeletonCard()]);
@@ -511,31 +560,31 @@
     try {
       var r = await publicHealth();
       var tiles = Object.keys(r.deps || {}).map(function (k) {
-        return h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, [k]), h('div', { class: 'v' }, [h('span', { class: 'chip ' + (r.deps[k] === 'up' ? 'g' : 'r') }, [r.deps[k]])])]);
+        return h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, [depName(k)]), h('div', { class: 'v' }, [h('span', { class: 'chip ' + (r.deps[k] === 'up' ? 'g' : 'r') }, [r.deps[k] === 'up' ? 'Working' : 'Not responding'])])]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Services']), r.status ? h('span', { class: 'chip ' + (r.status === 'ok' ? 'g' : 'a') }, [r.status]) : null, r.at ? h('span', { class: 'n' }, ['Checked ' + fmtDt(r.at)]) : null]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Services']), r.status ? h('span', { class: 'chip ' + (r.status === 'ok' ? 'g' : 'a') }, [r.status === 'ok' ? 'All working' : 'Needs attention']) : null, r.at ? h('span', { class: 'n' }, ['Checked ' + fmtDt(r.at)]) : null]),
         h('div', { class: 'health-grid' }, tiles),
       ]);
       content.innerHTML = ''; content.appendChild(card);
       if (!hasPerm('platformops:console:read')) {
-        content.appendChild(notBuilt('Diagnostics unavailable', 'Your role doesn\'t include this.'));
+        content.appendChild(notBuilt('Diagnostics unavailable', NO_ACCESS));
         return;
       }
       try {
         var deep = await api('/v1/platform/health');
         var outboxRows = (deep.outbox || []).map(function (o) {
           return h('tr', {}, [
-            h('td', { 'data-label': 'Schema' }, [o.schema]),
-            h('td', { 'data-label': 'Backlog' }, [h('span', { class: 'chip ' + (o.backlog > 0 ? 'a' : 'g') }, [String(o.backlog)])]),
-            h('td', { 'data-label': 'Oldest unpublished' }, [o.oldestUnpublishedSeconds != null ? (Math.round(o.oldestUnpublishedSeconds) + 's') : '—']),
+            h('td', { 'data-label': 'Area' }, [words(o.schema)]),
+            h('td', { 'data-label': 'Waiting' }, [h('span', { class: 'chip ' + (o.backlog > 0 ? 'a' : 'g') }, [String(o.backlog)])]),
+            h('td', { 'data-label': 'Oldest waiting' }, [o.oldestUnpublishedSeconds != null ? (Math.round(o.oldestUnpublishedSeconds) + ' s') : '—']),
           ]);
         });
         var diagCard = h('div', { class: 'card' }, [
-          h('div', { class: 'card-hd' }, [h('h2', {}, ['Outbox'])]),
+          h('div', { class: 'card-hd' }, [h('h2', {}, ['Messages waiting to be sent']), h('span', { class: 'n' }, ['Each area queues its own messages; a growing count means they are not going out.'])]),
           outboxRows.length
-            ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Schema']), h('th', {}, ['Backlog']), h('th', {}, ['Oldest unpublished'])])]), h('tbody', {}, outboxRows)])
-            : h('div', { class: 'empty' }, [h('h3', {}, ['No outbox tables found'])]),
+            ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Area']), h('th', {}, ['Waiting']), h('th', {}, ['Oldest waiting'])])]), h('tbody', {}, outboxRows)])
+            : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing waiting'])]),
         ]);
         content.appendChild(diagCard);
       } catch (e) {
@@ -551,7 +600,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('flags', content);
     if (!hasPerm('platform:flag:write')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature switches unavailable', NO_ACCESS));
       return;
     }
     try {
@@ -559,27 +608,29 @@
       var rows = (snap.flags || []).map(function (f) {
         return h('tr', {}, [
           h('td', { class: 'mono', 'data-label': 'Key' }, [f.key]),
-          h('td', { 'data-label': 'State' }, [h('span', { class: 'chip ' + (f.state === 'on' ? 'g' : f.state === 'degraded' ? 'a' : 'r') }, [f.state])]),
-          h('td', { 'data-label': 'Action' }, [h('button', { class: 'btn sm', onclick: function () { toggleFlagDialog(f); } }, ['Change'])]),
+          h('td', { 'data-label': 'State' }, [h('span', { class: 'chip ' + (f.state === 'on' ? 'g' : f.state === 'degraded' ? 'a' : 'r') }, [FLAG_WORD[f.state] || words(f.state)])]),
+          h('td', { 'data-label': 'Action' }, [h('button', { class: 'btn sm', 'aria-label': 'Change ' + f.key, onclick: function () { toggleFlagDialog(f); } }, ['Change'])]),
         ]);
       });
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Feature flags']), h('span', { class: 'n' }, ['Version ' + snap.version])]),
-        rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Key']), h('th', {}, ['State']), h('th', {}, ['Action'])])]), h('tbody', {}, rows)]) : h('div', { class: 'empty' }, [h('h3', {}, ['No flags registered'])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Feature switches']), h('span', { class: 'n' }, ['Settings version ' + snap.version])]),
+        rows.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Switch']), h('th', {}, ['State']), h('th', {}, ['Action'])])]), h('tbody', {}, rows)]) : h('div', { class: 'empty' }, [h('h3', {}, ['No switches yet']), h('p', {}, ['Switches appear here when a feature that can be turned off ships.'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Feature flags didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Feature switches didn\'t load', e.message));
     }
   }
+  var FLAG_WORD = { on: 'On', degraded: 'Limited', off: 'Off' };
   function toggleFlagDialog(flag) {
-    openDialog('Change flag: ' + flag.key, function (body, close) {
-      var err = h('div', { class: 'err' });
-      var env = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'staging' }, ['staging']), h('option', { value: 'prod' }, ['prod'])]);
-      var state = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'on' }, ['on']), h('option', { value: 'degraded' }, ['degraded']), h('option', { value: 'off' }, ['off'])]);
+    openDialog('Change ' + flag.key, function (body, close) {
+      var err = h('div', { class: 'err', role: 'alert' });
+      var env = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'staging' }, ['Test system (staging)']), h('option', { value: 'prod' }, ['Live system (production)'])]);
+      var state = h('select', { class: 'fld', style: 'width:100%' }, [h('option', { value: 'on' }, ['On']), h('option', { value: 'degraded' }, ['Limited (reduced, safe mode)']), h('option', { value: 'off' }, ['Off'])]);
       state.value = flag.state;
       var reason = h('textarea', { placeholder: 'Why this change?' });
-      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Environment']), env]));
+      body.appendChild(h('p', { style: 'margin:0 0 10px;color:var(--ink-2)' }, ['Now: ' + (FLAG_WORD[flag.state] || words(flag.state)) + '. Pick which system to change and the new state. The reason is kept with the change.']));
+      body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['System']), env]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['New state']), state]));
       body.appendChild(h('label', { class: 'field' }, [h('span', { class: 'lbl' }, ['Reason']), reason]));
       body.appendChild(err);
@@ -588,7 +639,7 @@
         if (reason.value.trim().length < 3) { err.textContent = 'A reason is required.'; return; }
         try {
           await api('/v1/admin/flags/' + encodeURIComponent(flag.key), { method: 'PUT', body: { env: env.value, state: state.value, reason: reason.value.trim() } });
-          close(); toast('Flag updated'); location.hash = location.hash; render();
+          close(); toast(flag.key + ' is now ' + (FLAG_WORD[state.value] || state.value).toLowerCase() + ' on the ' + (env.value === 'prod' ? 'live' : 'test') + ' system'); render();
         } catch (e) { err.textContent = e.message; }
       });
       body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [submit, h('button', { class: 'btn', onclick: close }, ['Cancel'])]));
@@ -633,7 +684,7 @@
       var n = await load();
       content.innerHTML = '';
       content.appendChild(h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Login history'])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Sign-in history'])]),
         n
           ? h('div', {}, [
               h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['When']), h('th', {}, ['Who']), h('th', {}, ['How']), h('th', {}, ['Result']), h('th', {}, ['IP'])])]), tbody]),
@@ -643,7 +694,7 @@
       ]));
     } catch (e) {
       content.innerHTML = '';
-      content.appendChild(notBuilt('Login history didn\'t load', (e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.')));
+      content.appendChild(notBuilt('Sign-in history didn\'t load', (e instanceof PlatformError ? e.message : 'Can\'t connect. Try again.')));
     }
   }
 
@@ -651,7 +702,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('tenants', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Tenants unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Organizations unavailable', NO_ACCESS));
       return;
     }
     try {
@@ -660,47 +711,47 @@
         return h('tr', {}, [
           h('td', { class: 'mono', 'data-label': 'Code' }, [t.organizationCode || '—']),
           h('td', { 'data-label': 'Name' }, [t.organizationName || '—']),
-          h('td', { 'data-label': 'Status' }, [h('span', { class: 'chip ' + (t.status === 'ACTIVE' ? 'g' : 'a') }, [t.status || '—'])]),
+          h('td', { 'data-label': 'Status' }, [h('span', { class: 'chip ' + (t.status === 'ACTIVE' ? 'g' : 'a') }, [words(t.status) || '—'])]),
         ]);
       });
       var card = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Organizations'])]),
         trs.length
           ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Code']), h('th', {}, ['Name']), h('th', {}, ['Status'])])]), h('tbody', {}, trs)])
-          : h('div', { class: 'empty' }, [h('h3', {}, ['No organizations found'])]),
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No companies set up yet'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Tenants didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Organizations didn\'t load', e.message));
     }
   }
   async function screenProviders() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('providers', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Providers unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Connectors unavailable', NO_ACCESS));
       return;
     }
     try {
       var rows = await api('/v1/platform/providers');
       var trs = (rows || []).map(function (p) {
         return h('tr', {}, [
-          h('td', { class: 'mono', 'data-label': 'Connector' }, [p.id]),
-          h('td', { 'data-label': 'Enabled' }, [h('span', { class: 'chip ' + (p.enabled ? 'g' : 'r') }, [p.enabled ? 'on' : 'off'])]),
-          h('td', { 'data-label': 'Webhook set' }, [p.webhookConfigured ? 'yes' : 'no']),
-          h('td', { 'data-label': 'Secret set' }, [p.secretConfigured ? 'yes' : 'no']),
-          h('td', { 'data-label': 'Configured' }, [fmtDt(p.configuredAt) + (p.configuredBy ? (' · ' + p.configuredBy) : '')]),
+          h('td', { 'data-label': 'Connector' }, [words(p.id)]),
+          h('td', { 'data-label': 'Switched on' }, [h('span', { class: 'chip ' + (p.enabled ? 'g' : 'r') }, [p.enabled ? 'On' : 'Off'])]),
+          h('td', { 'data-label': 'Callback address' }, [p.webhookConfigured ? 'Set' : 'Not set']),
+          h('td', { 'data-label': 'Secret key' }, [p.secretConfigured ? 'Set' : 'Not set']),
+          h('td', { 'data-label': 'Last set up' }, [fmtDt(p.configuredAt) + (p.configuredBy ? (' · ' + p.configuredBy) : '')]),
         ]);
       });
       var card = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Connectors'])]),
         trs.length
-          ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Connector']), h('th', {}, ['Enabled']), h('th', {}, ['Webhook set']), h('th', {}, ['Secret set']), h('th', {}, ['Configured'])])]), h('tbody', {}, trs)])
-          : h('div', { class: 'empty' }, [h('h3', {}, ['No connectors configured'])]),
+          ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Connector']), h('th', {}, ['Switched on']), h('th', {}, ['Callback address']), h('th', {}, ['Secret key']), h('th', {}, ['Last set up'])])]), h('tbody', {}, trs)])
+          : h('div', { class: 'empty' }, [h('h3', {}, ['No connectors set up yet']), h('p', {}, ['A connector appears here once an outside service is connected.'])]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Providers didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Connectors didn\'t load', e.message));
     }
   }
   /* ── ALEMBIC bridge health (GET /v1/platform/bridge — counts and timestamps only) ─────────── */
@@ -708,7 +759,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('bridge', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Bridge unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('ALEMBIC link unavailable', NO_ACCESS));
       return;
     }
     try {
@@ -717,63 +768,65 @@
       var q = b.queue || {};
       var pl = b.pickLight;
       var grid = h('div', { class: 'health-grid' }, [
-        tile('Connector', b.connector.configured ? (b.connector.enabled ? 'on' : 'configured, off') : 'not configured', b.connector.configured && b.connector.enabled ? 'g' : 'r'),
-        tile('Inbound 24 h', b.inbound.last24h + ' (' + b.inbound.applied24h + ' applied)'),
-        tile('Inbound parked', b.inbound.parked, b.inbound.parked ? 'a' : 'g'),
+        tile('Link to ALEMBIC', b.connector.configured ? (b.connector.enabled ? 'Connected' : 'Set up, switched off') : 'Not set up', b.connector.configured && b.connector.enabled ? 'g' : 'r'),
+        tile('Received in 24 h', b.inbound.last24h + ' (' + b.inbound.applied24h + ' used)'),
+        tile('Received, held back', b.inbound.parked, b.inbound.parked ? 'a' : 'g'),
         tile('Last from ALEMBIC', fmtDt(b.inbound.lastAt)),
-        tile('Outbound waiting', b.outbound.waiting, b.outbound.waiting > 20 ? 'a' : 'g'),
-        tile('Outbound parked', b.outbound.parked, b.outbound.parked ? 'r' : 'g'),
-        tile('Delivered 24 h', b.outbound.delivered24h),
+        tile('Waiting to send', b.outbound.waiting, b.outbound.waiting > 20 ? 'a' : 'g'),
+        tile('Not sent, held back', b.outbound.parked, b.outbound.parked ? 'r' : 'g'),
+        tile('Delivered in 24 h', b.outbound.delivered24h),
         tile('Last delivered', fmtDt(b.outbound.lastDeliveredAt)),
-        tile('Open requirements', q.open != null ? q.open : '—'),
+        tile('Orders still to make', q.open != null ? q.open : '—'),
         tile('kg to produce', q.kgToProduce != null ? q.kgToProduce : '—'),
         tile('Overdue', q.overdue != null ? q.overdue : '—', q.overdue ? 'r' : 'g'),
         tile('High value', q.highValue != null ? q.highValue : '—', q.highValue ? 'a' : 'g'),
         tile('Blocked (no formula)', q.blocked != null ? q.blocked : '—', q.blocked ? 'r' : 'g'),
-        tile('Pick-to-light', pl ? pl.mode + (pl.parked ? ' · ' + pl.parked + ' parked' : '') : '—', pl && pl.mode !== 'off' ? 'g' : 'n'),
+        tile('Pick-to-light', pl ? (PL_WORD[pl.mode] || words(pl.mode)) + (pl.parked ? ' · ' + pl.parked + ' held back' : '') : '—', pl && pl.mode !== 'off' ? 'g' : 'n'),
       ]);
       var mix = (b.outbound.byType24h || []).map(function (t) {
-        return h('tr', {}, [h('td', { class: 'mono', 'data-label': 'Event' }, [t.type]), h('td', { 'data-label': 'Sent' }, [String(t.count)]), h('td', { 'data-label': 'Delivered' }, [String(t.delivered)])]);
+        return h('tr', {}, [h('td', { 'data-label': 'Message' }, [words(t.type)]), h('td', { 'data-label': 'Sent' }, [String(t.count)]), h('td', { 'data-label': 'Delivered' }, [String(t.delivered)])]);
       });
-      var reasons = (b.outbound.parkedByReason || []).concat((b.inbound.parkedByReason || []).map(function (r) { return { reason: 'inbound: ' + r.reason, count: r.count }; }));
-      var reqs = (b.requirements || []).map(function (r) { return h('span', { class: 'chip n', style: 'margin-right:6px' }, [r.status + ' ' + r.count]); });
+      var reasons = (b.outbound.parkedByReason || []).map(function (r) { return { reason: 'Not sent: ' + words(r.reason), count: r.count }; })
+        .concat((b.inbound.parkedByReason || []).map(function (r) { return { reason: 'Received, not used: ' + words(r.reason), count: r.count }; }));
+      var reqs = (b.requirements || []).map(function (r) { return h('span', { class: 'chip n', style: 'margin-right:6px' }, [words(r.status) + ': ' + r.count]); });
       content.innerHTML = '';
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC bridge']), h('span', { class: 'n' }, ['as of ' + fmtDt(b.at)])]), grid]));
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Requirements by status'])]), h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm)' }, reqs.length ? reqs : ['None yet'])]));
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['RawProd → ALEMBIC, last 24 h'])]),
-        mix.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Event']), h('th', {}, ['Sent']), h('th', {}, ['Delivered'])])]), h('tbody', {}, mix)]) : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing sent in 24 h'])])]));
-      if (reasons.length) content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Parked, by reason'])]),
-        h('table', {}, [h('tbody', {}, reasons.map(function (r) { return h('tr', {}, [h('td', { class: 'mono' }, [String(r.reason)]), h('td', {}, [String(r.count)])]); }))])]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC link']), h('span', { class: 'n' }, ['As of ' + fmtDt(b.at)])]), grid]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC orders by stage'])]), h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm)' }, reqs.length ? reqs : ['No orders from ALEMBIC yet.'])]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Sent to ALEMBIC in the last 24 hours'])]),
+        mix.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Message']), h('th', {}, ['Sent']), h('th', {}, ['Delivered'])])]), h('tbody', {}, mix)]) : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing sent in the last 24 hours'])])]));
+      if (reasons.length) content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Held back, and why'])]),
+        h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Reason']), h('th', {}, ['How many'])])]), h('tbody', {}, reasons.map(function (r) { return h('tr', {}, [h('td', { 'data-label': 'Reason' }, [String(r.reason)]), h('td', { 'data-label': 'How many' }, [String(r.count)])]); }))])]));
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Bridge health didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('ALEMBIC link didn\'t load', e.message));
     }
   }
 
+  var PL_WORD = { off: 'Off', simulator: 'On screen', http: 'Hardware controller' };
   /* ── pick-to-light connector (in-app: no .env, no redeploy) ─────────────────────────────── */
   async function screenPickLight() {
     var content = h('div', {}, [skeletonCard()]);
     renderShell('picklight', content);
     if (!hasPerm('platform:flag:write')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Pick-to-light unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Pick-to-light unavailable', NO_ACCESS));
       return;
     }
     try {
       var s = await api('/v1/shelf/pick-light');
       var mode = h('select', { class: 'fld', style: 'width:100%' }, [
-        h('option', { value: 'off' }, ['Off — record commands only']),
-        h('option', { value: 'simulator' }, ['Simulator — the Shelf display shows lit bins']),
-        h('option', { value: 'http' }, ['Controller — POST signed commands to a URL']),
+        h('option', { value: 'off' }, ['Off: no lights (tasks are still listed)']),
+        h('option', { value: 'simulator' }, ['On screen: the Shelf display shows which bin to use']),
+        h('option', { value: 'http' }, ['Hardware controller: real lights on the shelves']),
       ]);
       mode.value = s.mode;
-      var url = h('input', { class: 'fld', style: 'width:100%', placeholder: 'https://controller.example/api/light', value: s.controllerUrl || '' });
+      var url = h('input', { class: 'fld', style: 'width:100%', placeholder: 'The controller\'s web address, starting https://', value: s.controllerUrl || '' });
       var secret = h('input', { class: 'fld', style: 'width:100%', type: 'password', autocomplete: 'new-password', placeholder: s.hasSecret ? 'set — leave blank to keep' : 'at least 16 characters' });
-      var bin = h('input', { class: 'fld', style: 'width:160px', placeholder: 'bin code (optional)' });
-      var err = h('div', { class: 'err' });
+      var bin = h('input', { class: 'fld', style: 'flex:1 1 160px;min-width:0;max-width:220px', placeholder: 'Bin code (optional)', 'aria-label': 'Bin code for the test light (optional)' });
+      var err = h('div', { class: 'err', role: 'alert' });
       var save = h('button', { class: 'btn p', onclick: async function () {
         err.textContent = '';
         var body = { mode: mode.value, controllerUrl: url.value.trim() || null };
         if (secret.value) body.hmacSecret = secret.value;
-        try { await api('/v1/shelf/pick-light/config', { method: 'PUT', body: body }); toast('Saved'); screenPickLight(); }
+        try { await api('/v1/shelf/pick-light/config', { method: 'PUT', body: body }); toast('Pick-to-light saved: ' + (PL_WORD[mode.value] || mode.value)); screenPickLight(); }
         catch (e) { err.textContent = e.message; }
       } }, ['Save']);
       var test = h('button', { class: 'btn', onclick: async function () {
@@ -783,12 +836,14 @@
       var row = function (k, el) { return h('label', { style: 'display:flex;flex-direction:column;gap:5px;margin-bottom:12px' }, [h('span', { style: 'font:var(--w-med) var(--t-cap)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)' }, [k]), el]); };
       content.innerHTML = '';
       content.appendChild(h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Pick-to-light']), h('span', { class: 'n' }, [s.pending + ' waiting · ' + s.parked + ' parked · last sent ' + fmtDt(s.lastSentAt)])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Pick-to-light']), h('span', { class: 'n' }, [s.pending + ' waiting · ' + s.parked + ' held back · last sent ' + fmtDt(s.lastSentAt)])]),
         h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm);max-width:560px' }, [
-          h('p', { class: 't-cap' }, ['Every put-away and pick lights its bin (blue = put away, green = pick) and turns it off when done. Each command is POSTed as JSON {task_id, rack, shelf, bin, qty, colour} with X-PickLight-Signature: sha256=<HMAC of the raw body>. Any controller that speaks this can be used; the simulator shows the same commands on the Shelf display.']),
-          row('Mode', mode), row('Controller URL (https)', url), row('Shared secret', secret), err,
+          h('p', { class: 't-cap' }, ['Every put-away and pick lights its bin (blue = put away, green = pick) and turns it off when done. Choose On screen to try it without hardware.']),
+          h('details', { style: 'margin:0 0 12px' }, [h('summary', { style: 'cursor:pointer;color:var(--ink-2)' }, ['For the person installing a hardware controller']),
+            h('p', { class: 't-cap', style: 'margin-top:6px' }, ['Each command is sent as JSON {task_id, rack, shelf, bin, qty, colour} by HTTPS POST to the controller address, signed with the shared secret in the X-PickLight-Signature header (sha256=<HMAC of the raw body>).'])]),
+          row('Mode', mode), row('Controller address (https)', url), row('Shared secret', secret), err,
           h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, [save, bin, test]),
-          h('p', { class: 't-cap', style: 'margin-top:10px' }, ['Configured ' + fmtDt(s.configuredAt) + (s.configuredBy ? ' by ' + s.configuredBy : '') + '. The secret is sealed and never shown again.']),
+          h('p', { class: 't-cap', style: 'margin-top:10px' }, ['Last set up ' + fmtDt(s.configuredAt) + (s.configuredBy ? ' by ' + s.configuredBy : '') + '. The secret is stored locked and never shown again.']),
         ]),
       ]));
     } catch (e) {
@@ -800,22 +855,22 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('deploy', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Build unavailable', 'Your role doesn\'t include this.'));
+      content.innerHTML = ''; content.appendChild(notBuilt('Version unavailable', NO_ACCESS));
       return;
     }
     try {
       var b = await api('/v1/platform/build');
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, ['Build'])]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, ['Running version'])]),
         h('div', { class: 'health-grid' }, [
-          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Git SHA']), h('div', { class: 'v mono' }, [b.gitSha || 'not set'])]),
-          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Build time']), h('div', { class: 'v' }, [b.buildTime || 'not set'])]),
-          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Environment']), h('div', { class: 'v' }, [b.appEnv])]),
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Version code']), h('div', { class: 'v mono' }, [b.gitSha ? String(b.gitSha).slice(0, 12) : 'Not recorded'])]),
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['Built on']), h('div', { class: 'v' }, [b.buildTime ? fmtDt(b.buildTime) : 'Not recorded'])]),
+          h('div', { class: 'health-tile' }, [h('div', { class: 'k' }, ['System']), h('div', { class: 'v' }, [({ prod: 'Live (production)', staging: 'Test (staging)', dev: 'Development' })[b.appEnv] || words(b.appEnv)])]),
         ]),
       ]);
       content.innerHTML = ''; content.appendChild(card);
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Build didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Version didn\'t load', e.message));
     }
   }
 
@@ -1005,9 +1060,9 @@
       console: 'platform',
       call: function (method, path, body) { return tunnel(path, body === undefined ? { method: method } : { method: method, body: body }); },
       open: function (i) {
-        var m = /^#\/([a-z-]+)/.exec(String(i.deepLink || ''));
-        if (!m || !visibleNav().some(function (n) { return n.id === m[1]; })) return false;
-        go(m[1]); return true;
+        var m = /^#\/([a-z-]+)/.exec(String(i.deepLink || '')), id = m && idOfRoute(m[1]);
+        if (!id || !visibleNav().some(function (n) { return n.id === id; })) return false;
+        go(id); return true;
       },
       canSettings: function () { return hasPerm('platform:ruh_setting:write'); },
       toast: function (msg, bad) { toast(msg, bad); },

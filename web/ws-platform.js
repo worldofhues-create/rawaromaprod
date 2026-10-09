@@ -19,7 +19,7 @@
       e.preventDefault(); var roleId = $('ra-role').value; if (!roleId) { $('ra-merr').textContent = 'Pick a role.'; return; }
       var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
       tunnel('/v1/user-roles', { method: 'POST', body: { userId: user.userId, roleId: roleId } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.'; return; }
         m.close(); toast('Role assigned', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };
@@ -40,7 +40,7 @@
       var rid = role.roleId != null ? role.roleId : guessId(role);
       var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
       tunnel('/v1/role-permissions', { method: 'POST', body: { roleId: rid, permissionId: pid } }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = (res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.'; return; }
         m.close(); toast('Permission assigned', 'good');
       }).catch(function () { save.disabled = false; save.textContent = 'Assign'; $('ra-merr').textContent = 'Can\'t connect. Try again.'; });
     };

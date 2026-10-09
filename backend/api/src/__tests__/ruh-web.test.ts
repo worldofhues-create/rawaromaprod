@@ -41,9 +41,9 @@ test('one ruh.js in every console, loaded before the console script, cached offl
     const at = html.indexOf('<script src="/ruh.js"></script>');
     assert.ok(at > html.indexOf('<script src="/sound.js"></script>') && at < html.indexOf(`<script src="/${script}"`), `${dir}: ruh.js after sound.js, before ${script}`);
   }
-  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v97'/);
+  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v98'/);
   assert.match(read('web/sw.js'), /'\/ruh\.js'/);
-  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v15'/);
+  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v16'/);
   assert.match(read('web-platform/sw.js'), /'\/ruh\.js'/);
 });
 
@@ -100,10 +100,13 @@ test('the Vault: its own notes only, from the main box; no settings there', () =
 });
 
 test('Factory deep links open the first section the workspace has, then find the record; rows carry their ids', () => {
+  // Lane ux-audit: #/go/… links go through the one address book (web/routes.js — resolution is covered
+  // in console-routes.test.ts); the record named in the link is found once the screen is drawn.
   const shell = read('web/shell.js');
-  assert.match(shell, /var m = \/\^#\\\/go\\\/\(\[\^\/\]\+\)\(\?:\\\/\(\.\+\)\)\?\$\/\.exec/);
-  assert.match(shell, /RaRuh\.focusRecord\(decodeURIComponent\(m\[2\]\), \$\('ra-view'\)\)/);
-  assert.match(shell, /var rid = guessId\(r\); return '<tr' \+ \(rid \? ' data-rid="' \+ escHtml\(rid\) \+ '"' : ''\)/);
+  assert.match(shell, /function ruhOpen\(link\) \{\s*if \(!st\.role\) return false;\s*return openAddress\(String\(link \|\| ''\), true\);/);
+  assert.match(shell, /if \(st\.ref && window\.RaRuh\) RaRuh\.focusRecord\(st\.ref, \$\('ra-view'\)\);/);
+  assert.match(shell, /var rid = guessId\(r\), rref = window\.RaRoutes \? RaRoutes\.refOf\(r\) : ''; return '<tr' \+ \(rid \? ' data-rid="' \+ escHtml\(rid\) \+ '"' : ''\)/);
+  assert.match(read('web/routes.js'), /var go = \/\^\\\/go\\\/\(\[\^\/\?#\]\+\)\(\?:\\\/\(\.\+\)\)\?\$\/\.exec\(h\)/);
   assert.match(read('web/ws-produce.js'), /'<tr data-ruh-id="' \+ escHtml\(r\.alembicRequirementId\) \+ '">'/);
   assert.match(read('web/ws-formula-setup.js'), /'<tr data-ruh-id="' \+ escHtml\(p\.productId\) \+ '">/);
 });

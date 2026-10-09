@@ -36,46 +36,50 @@
       var body = { materialId: row.materialId, requiredQty: qty, uomId: $('ra-ru').value || undefined, priority: $('ra-rp').value, requirementSource: 'REORDER_SUGGESTION', requiredByDate: d };
       var save = $('ra-rsave'); save.disabled = true; save.textContent = 'Raising…';
       tunnel('/v1/stock-requirements', { method: 'POST', body: body }).then(function (res) {
-        if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'); return; }
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = (res.json && res.json.error && res.json.error.message) || 'That did not go through. Try again.'; return; }
         close(); toast('Requirement raised', 'good'); loadView();
       }).catch(function () { save.disabled = false; save.textContent = 'Raise requirement'; $('ra-rerr').textContent = 'Can\'t connect. Try again.'; });
     };
   }
   // FAIL-branch tail: spawn a replacement PO from a rejected GRN, linked to the original PO.
   function generateReplacementPo(row) {
-    if (!window.confirm('Generate a replacement PO for GRN ' + (row.grnNumber || '') + ', linked to the original PO?')) return;
-    tunnel('/v1/replacement-po', { method: 'POST', body: { grnId: row.grnId } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Failed (' + res.status + ')'), 'bad'); return; }
-      var d = res.json && res.json.data;
-      toast('Replacement PO ' + (d && d.poNumber ? d.poNumber : '') + ' created', 'good'); loadView();
-    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    raConfirm('Raise a new purchase order for the goods rejected on receipt ' + (row.grnNumber || '') + '? It is linked to the original order.', function () {
+      tunnel('/v1/replacement-po', { method: 'POST', body: { grnId: row.grnId } }).then(function (res) {
+        if (res.status >= 400) { toast(failText(res, 'The replacement order was not raised. Try again.'), 'bad'); return; }
+        var d = res.json && res.json.data;
+        toast('Replacement order ' + (d && d.poNumber ? d.poNumber : '') + ' raised as a draft', 'good'); loadView();
+      }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    }, { title: 'Replacement purchase order', confirmLabel: 'Raise replacement order', tone: 'accent' });
   }
   // G2/V4 §113: a PO beyond DRAFT can't have its items/fields edited directly (409 server-side)
   // — Amend raises a new DRAFT revision linked to this one via replacement_of_po_id, which then
   // needs re-approval per the existing thresholds. Carries the original's lines/fields forward
-  // unchanged (server-side default); this dialog only collects the required reason.
+  // unchanged (server-side default); this sheet only collects the required reason.
   function amendPurchaseOrder(row) {
-    var reason = window.prompt('Reason for amending ' + (row.poNumber || 'this purchase order') + ' (required):');
-    if (reason === null) return; // cancelled
-    reason = reason.trim();
-    if (!reason) { toast('A reason is required to amend a purchase order.', 'bad'); return; }
-    tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/amend', { method: 'POST', body: { reason: reason } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Amend failed (' + res.status + ')'), 'bad'); return; }
-      var d = res.json && res.json.data;
-      var poNo = d && d.purchaseOrder && d.purchaseOrder.poNumber;
-      toast('Amendment' + (poNo ? ' ' + poNo : '') + ' created as a draft', 'good'); loadView();
-    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    var po = row.poNumber || 'this purchase order';
+    askForm({ title: 'Amend ' + po, submit: 'Make the amended copy',
+      intro: 'This makes a changed copy of the order as a draft, linked to this one. The copy needs approval again.',
+      fields: [{ n: 'reason', l: 'Why are you amending it?', t: 'textarea', req: true }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/amend', { method: 'POST', body: { reason: v.reason } }).then(function (res) {
+          if (res.status >= 400) { fail(failText(res, 'The amendment was not made. Try again.')); return; }
+          var d = res.json && res.json.data;
+          var poNo = d && d.purchaseOrder && d.purchaseOrder.poNumber;
+          close(); toast('Amended copy' + (poNo ? ' ' + poNo : '') + ' made as a draft', 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
   }
   // G2/V4 §113: cancel requires a reason (audited on the row + a vendor-notification event) and
   // is refused server-side once a goods receipt already exists against the PO.
   function cancelPurchaseOrderFlow(row) {
-    var reason = window.prompt('Reason for cancelling ' + (row.poNumber || 'this purchase order') + ' (required, sent to the vendor):');
-    if (reason === null) return; // cancelled
-    reason = reason.trim();
-    if (!reason) { toast('A reason is required to cancel a purchase order.', 'bad'); return; }
-    if (!window.confirm('Cancel ' + (row.poNumber || 'this purchase order') + '? This can\'t be undone.')) return;
-    tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/cancel', { method: 'POST', body: { reason: reason } }).then(function (res) {
-      if (res.status >= 400) { toast((res.json && res.json.error && res.json.error.message) || ('Cancel failed (' + res.status + ')'), 'bad'); return; }
-      toast('Purchase order cancelled', 'good'); loadView();
-    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    var po = row.poNumber || 'this purchase order';
+    askForm({ title: 'Cancel ' + po, submit: 'Cancel the order', tone: 'bad',
+      intro: 'The supplier is told this order is cancelled, with your reason. This cannot be undone.',
+      fields: [{ n: 'reason', l: 'Why are you cancelling it?', t: 'textarea', req: true, help: 'The supplier sees this.' }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/purchase-orders/' + row.purchaseOrderId + '/cancel', { method: 'POST', body: { reason: v.reason } }).then(function (res) {
+          if (res.status >= 400) { fail(failText(res, 'The order was not cancelled. Try again.')); return; }
+          close(); toast('Purchase order cancelled', 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
   }
