@@ -50,6 +50,15 @@ export const OUTBOUND_TO_ALEMBIC = [
   // ALEMBIC allocates it to the orders waiting for it. A fact about the FG batch (aggregate
   // `fg_batch`), not a requirement step. Payload: @core/contracts bridge.FgBatchReceivedPayload.
   'fg.batch.received',
+  // ALEMBIC Books phase 2 (owner 2026-10-09): payables facts -- a purchase order issued, amended or
+  // cancelled, and a goods receipt, each carrying its vendor -- for ALEMBIC's three-way match.
+  // Emitted via backend-kernel events/payables-facts.ts; contract docs/bridge/PAYABLES_FACTS.md.
+  // `procurement.vendor.upserted` is accepted by ALEMBIC and not yet emitted here (the vendor
+  // travels inside every PO and GRN fact).
+  'procurement.po.issued',
+  'procurement.po.amended',
+  'procurement.po.cancelled',
+  'inventory.grn.created',
 ] as const;
 export type OutboundToAlembic = (typeof OUTBOUND_TO_ALEMBIC)[number];
 

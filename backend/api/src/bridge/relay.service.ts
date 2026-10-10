@@ -148,7 +148,11 @@ export class BridgeRelayService implements OnModuleDestroy {
       // is reported as the aggregate it actually names instead of a silently wrong guess.
       const complianceType = (bridgeContracts.COMPLIANCE_AGGREGATE_TYPES as Record<string, string>)[ev.type]
         ?? (ev.type === bridgeContracts.FG_BATCH_RECEIVED ? bridgeContracts.FG_BATCH_AGGREGATE_TYPE : undefined);
-      const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order' : 'production_requirement');
+      const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order'
+        // ALEMBIC Books phase 2: payables facts name their own aggregate.
+        : ev.type.startsWith('procurement.po.') ? 'purchase_order'
+        : ev.type === 'inventory.grn.created' ? 'goods_receipt'
+        : 'production_requirement');
       const orgId = req?.orgId ?? metaOrg ?? (await this.fallbackOrgId());
 
       const body = JSON.stringify({

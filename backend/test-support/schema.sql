@@ -1416,6 +1416,20 @@ create table if not exists platform.uom_master (
 );
 create unique index if not exists uom_master_code_uq on platform.uom_master (uom_code);
 
+-- Books phase 2 payables facts (backend-kernel events/payables-facts.ts) read a PO's currency
+-- code from platform.currency_master (packages/data-reference/src/schema/geo.ts). Same shape.
+create table if not exists platform.currency_master (
+  currency_id uuid primary key default gen_random_uuid(),
+  currency_code varchar(50),
+  currency_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists currency_master_code_uq on platform.currency_master (currency_code);
+
 create table if not exists automation.applied (
   rule_code varchar(64) not null,
   dedupe_key varchar(255) not null,

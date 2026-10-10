@@ -8,7 +8,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
-import { recordOutbox } from '@core/backend-kernel';
+import { recordOutbox, emitGoodsReceiptFact } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
   INVENTORY_DB,
@@ -229,6 +229,8 @@ export class GrnService {
         { grnId, purchaseOrderId: body.purchaseOrderId ?? null },
         grnId,
       );
+      /* ALEMBIC Books phase 2: what was accepted, toward ALEMBIC's three-way match. */
+      await emitGoodsReceiptFact(tx, grnId);
 
       return { grn: master, items, containers, batches, mappings };
     });

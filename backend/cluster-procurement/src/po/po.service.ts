@@ -18,7 +18,7 @@ import {
 } from '@nestjs/common';
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
-import { recordOutbox } from '@core/backend-kernel';
+import { recordOutbox, emitPurchaseOrderFact, emitPurchaseOrderCancelled } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
   PROCUREMENT_DB,
@@ -633,6 +633,8 @@ export class PoService {
         { purchaseOrderId: id, vendorId: updated.vendorId },
         id,
       );
+      /* ALEMBIC Books phase 2: the issued order, toward ALEMBIC's three-way match. */
+      await emitPurchaseOrderFact(tx, 'procurement.po.issued', id);
 
       return updated;
     });
@@ -816,6 +818,8 @@ export class PoService {
         { purchaseOrderId: newId, replacesPurchaseOrderId: id, vendorId: original.vendorId ?? null },
         newId,
       );
+      /* ALEMBIC Books phase 2: the amendment, as a later revision of the ROOT order. */
+      await emitPurchaseOrderFact(tx, 'procurement.po.amended', newId);
 
       return { purchaseOrder: newPo, items: insertedItems, amendedFrom: id, requiresReapproval: true };
     });
@@ -873,6 +877,8 @@ export class PoService {
         { purchaseOrderId: id, vendorId: po.vendorId ?? null, reason: body.reason, cancelledBy: principal.userId },
         id,
       );
+      /* ALEMBIC Books phase 2: the order withdrawn -- its bills stop matching against it. */
+      await emitPurchaseOrderCancelled(tx, id, body.reason ?? null);
 
       return updated;
     });

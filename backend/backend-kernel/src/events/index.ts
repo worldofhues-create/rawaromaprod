@@ -19,6 +19,7 @@ export {
   emitBridgeManualEvent,
   type BridgeEmitTx,
 } from './bridge-emit.js';
+export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';
 export {
   recordProduceAlert,
   type ProduceAlertInput,
