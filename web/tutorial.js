@@ -262,6 +262,37 @@
     var label = status === 'completed' ? 'Completed' : status === 'in_progress' ? 'In progress' : status === 'dismissed' ? 'Dismissed' : 'Not started';
     return '<span class="chip ' + tone + '"><i class="dot"></i>' + label + '</span>';
   }
+  /* TRAIN-VIDEO (ALEMBIC ops/training): the recorded training films for these consoles live in
+   * ALEMBIC's Tutorial → Videos (ALEMBIC packages/domain/src/training/videos.ts, ids rawprod-*),
+   * served from ALEMBIC's private bucket through 15-minute signed links. This card links to them
+   * through the same configured ALEMBIC_CONSOLE_URL the sign-in hand-off uses -- never a
+   * hardcoded address; unset, the card says the videos are in ALEMBIC and links nowhere. */
+  var TUTORIAL_FILMS = [
+    ['rawprod-catalogue-sync', 'Catalogue sync'], ['rawprod-formula', 'Formula setup and recipes'],
+    ['rawprod-approvals-qc', 'Approvals and QC specs'], ['rawprod-racks-labels', 'Racks and labels'],
+    ['rawprod-produce-pick', 'Produce queue and pick-to-light'], ['rawprod-platform-vault', 'Platform and Vault']
+  ];
+  function tutorialFilmUrl(id) {
+    if (!ALEMBIC_CONSOLE_URL) return '';
+    try {
+      var u = new URL(ALEMBIC_CONSOLE_URL, location.href);
+      u.searchParams.set('screen', 'tutorial'); u.searchParams.set('learn', id);
+      return u.toString();
+    } catch (e) { return ''; }
+  }
+  function tutorialFilmsCard() {
+    var items = TUTORIAL_FILMS.map(function (f) {
+      var url = tutorialFilmUrl(f[0]);
+      return '<li style="margin:0 0 var(--s-tight)">' + (url
+        ? '<a class="btn" href="' + escHtml(url) + '" target="_blank" rel="noopener">Watch: ' + escHtml(f[1]) + '</a>'
+        : escHtml(f[1])) + '</li>';
+    }).join('');
+    return '<div class="card" style="margin-bottom:var(--s-snug)"><div class="card-hd"><h2>Training videos</h2></div>' +
+      '<div class="card-bd"><p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-snug)">' +
+      'Short narrated videos — what each screen is for, when to use it, where it is and how to get it done. English and हिन्दी, with captions.' +
+      (ALEMBIC_CONSOLE_URL ? '' : ' They open in ALEMBIC → Tutorial → Videos.') + '</p>' +
+      '<ul style="list-style:none;margin:0;padding:0">' + items + '</ul></div></div>';
+  }
   function tutorialRenderLibrary() {
     var V = $('ra-view'); if (!V) return;
     var track = tutorialCurrentTrack();
@@ -275,7 +306,7 @@
         '<div class="card-bd"><p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-snug)">' + escHtml(l.summary) + '</p>' +
         '<button type="button" class="btn p" data-tut-start="' + escHtml(l.id) + '">' + btnLabel + '</button></div></div>';
     }).join('');
-    V.innerHTML = (lessons.length ? cards : '<div class="card empty"><h3>No tutorials yet</h3></div>') +
+    V.innerHTML = tutorialFilmsCard() + (lessons.length ? cards : '<div class="card empty"><h3>No tutorials yet</h3></div>') +
       '<div class="card" style="margin-top:var(--s-tight)"><div class="card-bd" style="padding-top:var(--pad-card-top)"><button type="button" class="btn" id="ra-tut-reset-all" style="color:var(--red)">Reset progress</button></div></div>';
     [].forEach.call(V.querySelectorAll('[data-tut-start]'), function (b) {
       b.onclick = function () {
