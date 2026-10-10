@@ -92,6 +92,18 @@ async function issuedPo(opts: { currencyId?: string } = {}) {
   return { id, vendorId, m, uomId, poNumber: created.purchaseOrder.poNumber as string };
 }
 
+/** The relay drains 50 due rows per pass, oldest first; in the shared full-run DB other files'
+ *  rows (answered 200 by the stub) may sit ahead of ours, so pass until ours has been attempted. */
+async function drainUntilAttempted(outboxId: string): Promise<void> {
+  for (let i = 0; i < 200; i++) {
+    await relay.drain();
+    const r = await testClient()`select (o.published_at is not null or d.outbox_id is not null) as done
+      from bridge.outbox o left join bridge.outbox_delivery d on d.outbox_id = o.id where o.id = ${outboxId}`;
+    if (r[0]!.done) return;
+  }
+  assert.fail('relay never reached the event');
+}
+
 async function facts(type: string, aggregateId: string) {
   return testClient()`select id, payload from bridge.outbox where type = ${type} and aggregate_id = ${aggregateId} order by seq`;
 }
@@ -192,7 +204,7 @@ test('relay: signed envelope with the contract aggregate type; event_id is the o
     if (env.event_id === outboxId) seen.push(env);
     return new Response('{"outcome":"applied"}', { status: 200 });
   };
-  await relay.drain();
+  await drainUntilAttempted(outboxId);
   assert.equal(seen.length, 1);
   assert.equal(seen[0]!.type, 'procurement.po.issued');
   assert.deepEqual(seen[0]!.aggregate, { type: 'purchase_order', id });
@@ -209,7 +221,7 @@ test('relay: ALEMBIC not yet deployed — a 404/503 backs off and the fact stays
     return env.event_id === outboxId ? new Response('not here', { status: 503 })
       : new Response('{"outcome":"applied"}', { status: 200 });
   };
-  await relay.drain();
+  await drainUntilAttempted(outboxId);
   const d = (await testClient()`select d.attempts, d.parked_at, d.next_attempt_at > now() as backed_off, o.published_at
     from bridge.outbox o join bridge.outbox_delivery d on d.outbox_id = o.id where o.id = ${outboxId}`)[0]!;
   assert.equal(d.attempts, 1);
