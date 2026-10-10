@@ -48,7 +48,7 @@ const UUID = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b';
 
 test('routes.js and screen-guide.js are cached offline with the bumped Factory shell', () => {
   const sw = read('web/sw.js');
-  assert.match(sw, /const CACHE = 'ra-shell-v98'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v99'/);
   assert.match(sw, /'\/routes\.js', '\/screen-guide\.js', '\/shell\.js'/);
 });
 
