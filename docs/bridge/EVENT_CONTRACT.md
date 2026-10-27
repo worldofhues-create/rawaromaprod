@@ -85,6 +85,58 @@ Rules (RawProd `backend/api/src/bridge/contract.ts`, `validateInboundPayload` /
   factory console (and an email to the same roles); one that passes its date later is raised once
   by the overdue sweep.
 
+### Sales requests (SALES-REQUEST-BRIDGE, 2026-10-27)
+
+An agent may record a production request for an out-of-stock SKU from an
+enquiry or a customer before any order exists (ALEMBIC `POST /api/v1/production/requests`,
+action `production.request`). On ALEMBIC it is a `bridge_production_requirement` row with
+`origin = 'sales_request'` (migration `0406_production_sales_request.sql`).
+
+It travels on the existing `ProductionRequirementCreated` / `Changed` / `Cancelled`
+(same envelope, signature and `version` sequencing; `aggregate.id` = the request row's id,
+`correlation_id` = its `correlation_id`, `version` from 1) with `origin: "sales_request"`
+and **`request_ref` in place of `order_ref` / `order_refs`**:
+
+```jsonc
+{
+  "requirement_id": "<bridge_production_requirement.id>",
+  "origin":         "sales_request",
+  "request_ref":    "<bridge_production_requirement.id>",   // no order exists
+  "enquiry_code":   "ENQ-0042",          // or null
+  "mapped_sku":     "<factory SKU from the active mapping>",
+  "sku":            "<ALEMBIC commercial SKU code>",
+  "qty":            "2500000", "uom": "mg", "qty_kg": "2.500",
+  "pack_size":      "1 kg",              // or null
+  "needed_by":      "2026-11-09T00:00:00.000Z",
+  "priority":       "normal",
+  "lot_policy":     "fifo"
+}
+```
+
+`Cancelled` is `{ requirement_id, origin, request_ref, reason }`. `customer_code` and
+`note` are not sent: who the customer is stays in ALEMBIC.
+
+Rules, both sides:
+
+- `origin` is optional; absent means an order requirement, validated exactly as before
+  (`order_ref` or `order_refs` required on `Created`). The only values are `"order"` and
+  `"sales_request"`; any other is `origin:invalid` (`BRIDGE_PERMANENT_INVALID_PAYLOAD`).
+- With `origin: "sales_request"`, `request_ref` (non-empty, at most 100 characters) is
+  required on `Created`, and an `order_ref` or `order_refs` is **refused**
+  (`order_ref:invalid` / `order_refs:invalid`) — it would tell the Factory an order exists.
+- RawProd stores `origin` and `request_ref` on `bridge.production_requirement`
+  (migration `2026-10-27-sales-request.sql`) and leaves `order_ref` empty, so
+  `productionRequirementStatus` and production blockers by order number never answer with
+  one, and its arrival alerts say "sales request", never "order".
+- RawProd answers with the existing types (`Accepted`, `RejectedMapping`, `Scheduled` ...
+  `CancelledAck`), unchanged.
+- ALEMBIC sends one only for a SKU with an active factory mapping that is not an
+  unclassified dangerous good; otherwise the request is recorded and not sent, and the
+  response says why (`sentToFactory: false`, `note`).
+
+The Factory's answer when the goods reach ALEMBIC's shelf is the fact
+`fg.batch.received` — see `FULFIL_FACTS.md` beside this file.
+
 ## Event types — RawProd → ALEMBIC
 
 | Type | Meaning |

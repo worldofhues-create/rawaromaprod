@@ -184,7 +184,11 @@ export class ImporterService {
       alembicRequirementId: env.aggregate.id,
       orgId: env.orgId,
       correlationId: env.correlationId,
-      orderRef: n.orderRef ?? '',
+      // A sales request has no order: order_ref stays EMPTY (never the request id), so every
+      // by-order-number reader passes it by; request_ref says what ALEMBIC asked for.
+      orderRef: n.origin === 'sales_request' ? '' : n.orderRef ?? '',
+      origin: n.origin ?? 'order',
+      requestRef: n.origin === 'sales_request' ? n.requestRef ?? null : null,
       mappedSku,
       qty: n.qty ?? '0',
       uom: n.uom ?? '',
@@ -217,6 +221,14 @@ export class ImporterService {
     if (exists) await this.alertOnArrival(tx, env.aggregate.id, n, neededBy);
   }
 
+  /** Who the requirement is for, in the alert's words. A sales request is never called an order
+   *  (docs/bridge/EVENT_CONTRACT.md, "Sales requests" rule 2). */
+  private static forWhom(n: NormalizedRequirementFields): string {
+    if (n.origin === 'sales_request') return `ALEMBIC sales request ${n.requestRef ?? ''}`.trimEnd();
+    const orders = (n.orderRefs ?? (n.orderRef ? [n.orderRef] : [])).join(', ');
+    return orders || 'an ALEMBIC order';
+  }
+
   /**
    * Lane produce — "alerts to PRODUCE": a requirement that lands high value (ALEMBIC's reason, or
    * an order of ₹25,000 or more) or already past its need-by date raises a live alert on every
@@ -225,14 +237,14 @@ export class ImporterService {
   private async alertOnArrival(tx: Tx, requirementId: string, n: NormalizedRequirementFields, neededBy: Date | null): Promise<void> {
     const what = `${n.mappedSku ?? ''}${n.packSize ? ` (${n.packSize})` : ''}`;
     const qty = n.qtyKg ? `${Number(n.qtyKg)} kg` : `${n.qty ?? ''} ${n.uom ?? ''}`.trim();
-    const orders = (n.orderRefs ?? (n.orderRef ? [n.orderRef] : [])).join(', ');
+    const orders = ImporterService.forWhom(n);
     const due = (neededBy ?? (n.neededBy ? new Date(n.neededBy) : null))?.toISOString().slice(0, 10) ?? 'the agreed date';
     if (bridgeContracts.isHighValue(n.priorityReason, n.orderValueInr)) {
       const value = n.orderValueInr ? ` · ₹${Number(n.orderValueInr).toLocaleString('en-IN')}` : '';
       await recordProduceAlert(tx, {
         kind: 'high_value_requirement', severity: 'high',
-        title: `High-value order to produce: ${what}`,
-        detail: `${qty} for ${orders || 'an ALEMBIC order'}${value} · needed by ${due}`,
+        title: `${n.origin === 'sales_request' ? 'High-value sales request' : 'High-value order'} to produce: ${what}`,
+        detail: `${qty} for ${orders}${value} · needed by ${due}`,
         roles: PRODUCE_ALERT_ROLES, refType: 'production_requirement', refId: requirementId,
         dedupeKey: `high_value:${requirementId}`,
       });
@@ -241,7 +253,7 @@ export class ImporterService {
       await recordProduceAlert(tx, {
         kind: 'overdue_requirement', severity: 'high',
         title: `Overdue on arrival: ${what}`,
-        detail: `${qty} for ${orders || 'an ALEMBIC order'} was needed by ${due}`,
+        detail: `${qty} for ${orders} was needed by ${due}`,
         roles: PRODUCE_ALERT_ROLES, refType: 'production_requirement', refId: requirementId,
         dedupeKey: `overdue:${requirementId}`,
       });
@@ -287,7 +299,8 @@ export class ImporterService {
       if (req && req.lifecycleStatus === 'ACCEPTED') {
         await this.alertOnArrival(tx, env.aggregate.id, {
           ...n, mappedSku: req.mappedSku, packSize: req.packSize, qty: req.qty, uom: req.uom,
-          qtyKg: req.qtyKg, orderRefs: (req.orderRefs as string[] | null) ?? [req.orderRef],
+          origin: req.origin as NormalizedRequirementFields['origin'], requestRef: req.requestRef ?? undefined,
+          qtyKg: req.qtyKg, orderRefs: req.origin === 'sales_request' ? undefined : (req.orderRefs as string[] | null) ?? [req.orderRef],
           neededBy: req.neededBy ? new Date(req.neededBy).toISOString() : undefined,
         }, null); // high value only: overdue after a change is the overdue sweep's job
       }

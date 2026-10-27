@@ -168,8 +168,23 @@ const isLegacyPriority = (v: unknown): boolean => typeof v === 'string' && (PRIO
 const isPriority = (v: unknown): boolean => isLegacyPriority(v) || isRequirementPriority(v);
 const isLotPolicy = (v: unknown): boolean => typeof v === 'string' && (LOT_POLICIES as readonly string[]).includes(v);
 
+/* ── SALES-REQUEST-BRIDGE (docs/bridge/EVENT_CONTRACT.md, "Sales requests") ──────
+ *
+ * ALEMBIC may ask for production before any order exists: an agent records a request from an
+ * enquiry or a customer. It travels on the same Created / Changed / Cancelled with
+ * `origin: "sales_request"` and `request_ref` (ALEMBIC's request id) IN PLACE OF `order_ref` /
+ * `order_refs`. An order reference on one is refused, not ignored: `order_ref` means "an ALEMBIC
+ * commercial order exists" on both sides, and this is exactly the case where none does. No
+ * `origin` is an order requirement, validated exactly as before. */
+export const REQUIREMENT_ORIGINS = ['order', 'sales_request'] as const;
+export type RequirementOrigin = (typeof REQUIREMENT_ORIGINS)[number];
+export const isSalesRequest = (p: Record<string, unknown>): boolean => p.origin === 'sales_request';
+
 /** The requirement row's fields, from either payload shape (see the block comment above). */
 export interface NormalizedRequirementFields {
+  /** Present only when the payload names it; an absent origin is an order requirement. */
+  origin?: RequirementOrigin;
+  requestRef?: string;
   orderRef?: string;
   mappedSku?: string;
   qty?: string;
@@ -190,9 +205,18 @@ export interface NormalizedRequirementFields {
 export function normalizeRequirementPayload(p: Record<string, unknown>): NormalizedRequirementFields {
   const out: NormalizedRequirementFields = {};
   const has = (k: string) => p[k] !== undefined && p[k] !== null && p[k] !== '';
-  const refs = isOrderRefs(p.order_refs) ? (p.order_refs as string[]).map((r) => r.trim()) : undefined;
+  if (has('origin') && (REQUIREMENT_ORIGINS as readonly string[]).includes(String(p.origin))) {
+    out.origin = p.origin as RequirementOrigin;
+  }
+  if (isSalesRequest(p)) {
+    // No order exists: never derive an order reference for one (validateInboundPayload refuses
+    // a sales request that carries one; this keeps the normalizer honest on its own).
+    if (has('request_ref')) out.requestRef = String(p.request_ref).trim();
+  }
+  const refs = isSalesRequest(p) ? undefined : isOrderRefs(p.order_refs) ? (p.order_refs as string[]).map((r) => r.trim()) : undefined;
   if (refs) out.orderRefs = refs;
-  if (has('order_ref')) out.orderRef = String(p.order_ref);
+  if (isSalesRequest(p)) { /* no order reference */ }
+  else if (has('order_ref')) out.orderRef = String(p.order_ref);
   else if (refs) out.orderRef = refs[0];
   if (has('mapped_sku')) out.mappedSku = String(p.mapped_sku);
   else if (has('sku')) out.mappedSku = String(p.sku);
@@ -249,9 +273,18 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
     optional('pack_size', packSize);
   };
 
+  optional('origin', (v) => typeof v === 'string' && (REQUIREMENT_ORIGINS as readonly string[]).includes(v));
+  const sales = isSalesRequest(payload);
+  if (sales) {
+    // A sales request names no order; an order reference on one would assert an order exists.
+    if (present('order_ref')) problems.push('order_ref:invalid');
+    if (present('order_refs')) problems.push('order_refs:invalid');
+  }
+
   switch (type) {
     case 'ProductionRequirementCreated':
-      needEither('order_ref', (v) => isNonEmptyString(v, 100), 'order_refs', isOrderRefs);
+      if (sales) need('request_ref', (v) => isNonEmptyString(v, 100));
+      else needEither('order_ref', (v) => isNonEmptyString(v, 100), 'order_refs', isOrderRefs);
       needEither('mapped_sku', (v) => isNonEmptyString(v), 'sku', (v) => isNonEmptyString(v));
       if (present('qty') || !present('qty_kg')) {
         need('qty', isPositiveQty);
@@ -261,6 +294,7 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       newFields();
       break;
     case 'ProductionRequirementChanged':
+      if (sales) optional('request_ref', (v) => isNonEmptyString(v, 100));
       optional('mapped_sku', (v) => isNonEmptyString(v));
       optional('qty', isPositiveQty);
       optional('uom', (v) => isNonEmptyString(v, 20));
@@ -268,6 +302,7 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       newFields();
       break;
     case 'ProductionRequirementCancelled':
+      if (sales) optional('request_ref', (v) => isNonEmptyString(v, 100));
       optional('reason', (v) => typeof v === 'string' && v.length <= 1000);
       break;
     case 'ProductionRequirementFulfilled':

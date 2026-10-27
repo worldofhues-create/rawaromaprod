@@ -158,6 +158,7 @@ export class FactsService {
              production_order_id as "productionOrderId"
         from bridge.production_requirement
        where order_ref = ${orderRef}
+         and origin <> 'sales_request'  -- never answered by order number (EVENT_CONTRACT "Sales requests")
        order by created_dt desc
        limit 1`) as Array<Record<string, unknown>>;
     if (!pr) return null;
@@ -455,6 +456,7 @@ export class FactsService {
             from bridge.production_requirement pr
             join production.production_order po on po.production_order_id = pr.production_order_id
            where pr.order_ref = ${orderRef}
+             and pr.origin <> 'sales_request'
            order by pr.created_dt desc
            limit 1`
       : await this.sql`

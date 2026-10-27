@@ -25,6 +25,12 @@ export const productionRequirement = bridge.table(
     correlationId: uuid("correlation_id").notNull(),
 
     orderRef: varchar("order_ref", { length: 100 }).notNull(),
+    // SALES-REQUEST-BRIDGE (migration 2026-10-27-sales-request.sql): 'order' for every requirement
+    // raised against an ALEMBIC commercial order (all of them until now), 'sales_request' for one an
+    // agent raised before any order exists. A sales request carries `request_ref` (ALEMBIC's request
+    // id) and an EMPTY order_ref, so nothing keyed on an order number can ever find it.
+    origin: varchar("origin", { length: 20 }).notNull().default("order"),
+    requestRef: varchar("request_ref", { length: 100 }),
     mappedSku: text("mapped_sku").notNull(),
     qty: numeric("qty").notNull(),
     uom: varchar("uom", { length: 20 }).notNull(),

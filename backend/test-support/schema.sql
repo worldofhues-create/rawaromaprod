@@ -2254,3 +2254,15 @@ create table if not exists platform.audit_events (
   prev_hash text,
   row_hash text
 );
+
+-- SALES-REQUEST-BRIDGE (2026-10-27): scripts/migrations/2026-10-27-sales-request.sql.
+alter table bridge.production_requirement add column if not exists origin varchar(20) not null default 'order';
+alter table bridge.production_requirement add column if not exists request_ref varchar(100);
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'bridge_production_requirement_origin_chk') then
+    alter table bridge.production_requirement add constraint bridge_production_requirement_origin_chk
+      check (origin in ('order', 'sales_request')
+             and (origin <> 'sales_request' or (request_ref is not null and btrim(request_ref) <> '')));
+  end if;
+end $$;
