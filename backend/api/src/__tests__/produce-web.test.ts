@@ -22,7 +22,7 @@ test('Factory: ws-produce.js loads after the other workspace modules and is cach
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-produce\.js'/);
   // v94 lane produce; v95 lanes catalogue (ws-setup.js) and vaultsetup (ws-formula-setup.js); v96 their merge; v97 lane ruh-factory (ruh.js); v98 lane ux-audit (routes.js, screen-guide.js).
-  assert.match(sw, /const CACHE = 'ra-shell-v99'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v100'/);
 });
 
 test('Factory: the shell dispatches sentinel views to RA_VIEWS, and ws-produce registers the four screens', () => {

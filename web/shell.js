@@ -1572,6 +1572,14 @@
     '/v1/package-orders': 'PACKAGING ORDER', '/v1/sales-orders': 'SALES ORDER', '/v1/document-registry': 'DOCUMENT RECORD'
   };
   function printDoc(endpoint, row) {
+    // Documents print in the house layout (web/doc-format.js). The company list may be refused for
+    // this role or empty; then the letterhead simply carries no address.
+    if (endpoint === '/v1/document-registry') {
+      var w0 = window.open('', '_blank', 'width=820,height=920'); if (!w0) { toast('Allow pop-ups to print.', 'bad'); return; }
+      var put = function (orgs) { w0.document.write(RaDocFormat.render(row, RaDocFormat.companyAddress(orgs))); w0.document.close(); };
+      tunnel('/v1/organizations?limit=100').then(function (res) { put((res.status < 400 && res.json && res.json.data) || []); }).catch(function () { put([]); });
+      return;
+    }
     var docTitle = PRINTABLE[endpoint] || 'DOCUMENT';
     function rowsHtml(obj) {
       return Object.keys(obj).filter(function (k) { return !HIDE[k] && !sensitive(k) && obj[k] != null && typeof obj[k] !== 'object' && obj[k] !== ''; }).map(function (k) {

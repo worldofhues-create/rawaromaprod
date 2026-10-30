@@ -28,5 +28,5 @@ test('Tutorials: Training videos card renders first and links via ALEMBIC_CONSOL
 });
 
 test('Tutorials: shell cache bumped — tutorial.js is stale-while-revalidate, so only a new cache name evicts the old copy', () => {
-  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v99'/);
+  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v100'/);
 });

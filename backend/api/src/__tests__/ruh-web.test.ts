@@ -41,7 +41,7 @@ test('one ruh.js in every console, loaded before the console script, cached offl
     const at = html.indexOf('<script src="/ruh.js"></script>');
     assert.ok(at > html.indexOf('<script src="/sound.js"></script>') && at < html.indexOf(`<script src="/${script}"`), `${dir}: ruh.js after sound.js, before ${script}`);
   }
-  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v99'/);
+  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v100'/);
   assert.match(read('web/sw.js'), /'\/ruh\.js'/);
   assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v16'/);
   assert.match(read('web-platform/sw.js'), /'\/ruh\.js'/);
