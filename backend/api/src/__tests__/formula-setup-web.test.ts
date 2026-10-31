@@ -22,7 +22,7 @@ test('Factory: ws-formula-setup.js loads after ws-produce.js (before tutorial.js
   assert.ok(at('ws-formula-setup.js') < at('tutorial.js'));
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-formula-setup\.js'/);
-  assert.match(sw, /const CACHE = 'ra-shell-v101'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v102'/);
 });
 
 test('Factory: the screen — two-owner Ruh card, shells, guarded link; tunnel only; no formula name or content', () => {

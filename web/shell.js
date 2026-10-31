@@ -2632,24 +2632,29 @@
       '</div></div>';
   }
 
-  /* Formulators and approvers: the staff strip only offers "Open Vault" to ALEMBIC admins, so the
-   * Factory offers it too. Goes through the same ?open=vault step-up as the Vault's own sign-in card,
-   * so it needs no Vault address here and grants nothing: ALEMBIC still decides, then the Vault does.
-   * Shown on the Vault's own test (any formula: permission, web-vault/vault.js tryConsumeAssertion). */
+  /* Open Vault goes through ALEMBIC's ?open=vault step-up, and ALEMBIC signs that only for its `admin`
+   * role (rawprod-eligibility.ts), so a link for anyone else would only lead to a refusal (owner decision
+   * 2026-10-31). Both tests must pass: ALEMBIC's, read off the assertion this tab just exchanged, and the
+   * Vault's own (any formula: permission, web-vault/vault.js tryConsumeAssertion). A display hint only:
+   * after a reload the roles are unknown and the link hides, which is the safe way round. */
+  var alembicRoles = [];
+  function assertionRoles(token) {
+    try { var r = JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).roles; return Array.isArray(r) ? r : []; } catch (e) { return []; }
+  }
   function vaultLaunchHtml() {
     var url = alembicSignInUrl('vault');
-    var can = ((session && session.perms) || []).some(function (p) { return p.indexOf('formula:') === 0; });
+    var can = alembicRoles.indexOf('admin') >= 0 && ((session && session.perms) || []).some(function (p) { return p.indexOf('formula:') === 0; });
     return url && can ? '<a class="gbtn" id="ra-open-vault" href="' + url + '" target="_blank" rel="noopener">Open Vault</a>' : '';
   }
   // A Vault-only account has no Factory workspace; say where its work is rather than a failed sign-in.
   function showVaultOnly() {
-    var url = alembicSignInUrl('vault');
+    var url = alembicRoles.indexOf('admin') >= 0 ? alembicSignInUrl('vault') : '';
     $('app').className = '';
     $('app').innerHTML =
       '<div class="login-wrap"><div class="login-card">' +
         '<h1 class="mark">Vault</h1>' +
         '<p class="sub">Your role works in the Vault, not the Factory.</p>' +
-        (url ? '<a id="lb" href="' + url + '" class="btn p">Open Vault &rarr;</a>' : '<div class="err" role="alert">Sign-in is not switched on here yet. Ask your administrator.</div>') +
+        (url ? '<a id="lb" href="' + url + '" class="btn p">Open Vault &rarr;</a>' : '<p class="sub" id="vault-grant-note">An admin must grant you access to open the Vault.</p>') +
       '</div></div>';
   }
 
@@ -2709,6 +2714,7 @@
     if (!m) return null;
     var token = decodeURIComponent(m[1]);
     history.replaceState(null, '', location.pathname + location.search);
+    alembicRoles = assertionRoles(token);
     return loginWithAssertion(token).then(function (res) {
       var d = res.json && res.json.data;
       if (res.status < 400 && d && d.accessToken && enterPortal(d)) return;

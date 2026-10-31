@@ -71,8 +71,9 @@ test('Vault: a reload still ends the session; it warns first and says so after, 
   assert.match(js, /leavingForSignIn = !!ALEMBIC_CONSOLE_URL;\s*if \(ALEMBIC_CONSOLE_URL\) location\.assign/, 'the step-up exit is not stopped by the warning');
 });
 
-test('Factory: Open Vault follows the Vault\'s own test and the signed hand-off; a Vault-only role is told where to go', () => {
+test('Factory: Open Vault only for an ALEMBIC admin the Vault accepts; anyone else is told an admin must grant access', () => {
   const js = read('web/shell.js');
-  assert.match(js, /var url = alembicSignInUrl\('vault'\);\s*var can = .*indexOf\('formula:'\) === 0/);
+  assert.match(js, /var can = alembicRoles\.indexOf\('admin'\) >= 0 && .*indexOf\('formula:'\) === 0/);
+  assert.match(js, /An admin must grant you access to open the Vault\./);
   assert.match(js, /r === 'formulator' \|\| r === 'vault_approver'.*showVaultOnly\(\)/);
 });

@@ -208,20 +208,20 @@
   }
 
   /* The reload still ends the session (§109.4); these only tell the person before and after.
-   * The marker lives in this tab's history entry, not in storage: it is one flag, no session data. */
+   * The marker lives in this tab's history entry, not in storage: it is one flag, no session data.
+   * It is stamped by render() while signed in, not on pagehide: Chromium drops a replaceState made
+   * during a reload's unload, so the message never showed (found by running it in a browser). */
   var leavingForSignIn = false, sessionEndedNote = !!(history.state && history.state.vaultEnded);
   if (sessionEndedNote) history.replaceState(null, '', location.href);
   window.addEventListener('beforeunload', function (e) {
     if (session.token && !leavingForSignIn) { e.preventDefault(); e.returnValue = ''; }
-  });
-  window.addEventListener('pagehide', function () {
-    if (session.token && !leavingForSignIn) history.replaceState({ vaultEnded: 1 }, '', location.href);
   });
 
   function logout() {
     if (window.RaRuh) RaRuh.stop();
     ruhOn = false;
     session.token = null; session.iat = 0; session.email = null; session.userId = null; session.roles = []; session.permissions = [];
+    history.replaceState(null, '', location.href);
     location.hash = '';
     render();
   }
@@ -1844,6 +1844,7 @@
       renderLogin();
       return;
     }
+    if (!(history.state && history.state.vaultEnded)) history.replaceState({ vaultEnded: 1 }, '', location.href);
     ruhStart();
     var r = currentRoute();
     // A screen this role does not have says so (and who to ask), rather than a raw server refusal.

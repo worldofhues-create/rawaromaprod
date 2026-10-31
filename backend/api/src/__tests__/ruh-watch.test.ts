@@ -77,7 +77,7 @@ test('a pass: real facts → notes (blocked with its fix, predicted late with it
   assert.ok(run.ran.includes('production') && run.ran.includes('vault'), JSON.stringify(run.failed));
   const [b] = await notes('production.blocked:QTY_NOT_IN_KG');
   assert.equal(b!.status, 'open');
-  assert.match(String(b!.body), /Fix: Ask ALEMBIC to resend the requirement in kg/);
+  assert.match(String(b!.body), /Fix: Ask the sales system to resend the requirement in kg/);
   const [l] = await notes(`production.late:${late.id}`);
   assert.equal(l!.status, 'open');
   const pred = l!.prediction as { metric: string; basis: string; confidence: number };

@@ -45,6 +45,9 @@ const child = spawn(
     // Files share ONE Postgres and some singleton rows (bridge.connector_config 'default',
     // formula_vault for rewrap): parallel files raced on them twice. Serialize.
     '--test-concurrency=1',
+    // Each file is its own process, so this also ends one that hangs on an open handle after a
+    // failed setup; without it one file stalled the whole run for over half an hour.
+    `--test-timeout=${process.env.TEST_FILE_TIMEOUT_MS ?? 300000}`,
     ...process.argv.slice(2),
     ...files,
   ],
