@@ -207,6 +207,17 @@
     session.permissions = me.permissions || [];
   }
 
+  /* The reload still ends the session (§109.4); these only tell the person before and after.
+   * The marker lives in this tab's history entry, not in storage: it is one flag, no session data. */
+  var leavingForSignIn = false, sessionEndedNote = !!(history.state && history.state.vaultEnded);
+  if (sessionEndedNote) history.replaceState(null, '', location.href);
+  window.addEventListener('beforeunload', function (e) {
+    if (session.token && !leavingForSignIn) { e.preventDefault(); e.returnValue = ''; }
+  });
+  window.addEventListener('pagehide', function () {
+    if (session.token && !leavingForSignIn) history.replaceState({ vaultEnded: 1 }, '', location.href);
+  });
+
   function logout() {
     if (window.RaRuh) RaRuh.stop();
     ruhOn = false;
@@ -271,14 +282,14 @@
     return new Promise(function (resolve) {
       openDialog('Confirm it\'s you', function (body, close) {
         body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [
-          'Confirm a new code on ALEMBIC. You\'ll come straight back here; then repeat the action.',
+          'Confirm a new code in Raw Aromachem sign-in. You\'ll come straight back here; then repeat the action.',
         ]));
         var actions = h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [
           // data-focus-skip: this click leaves for ALEMBIC, so focus.js must not go full screen on it.
           h('button', { class: 'btn p', 'data-focus-skip': '', onclick: function () {
-            close(); resolve();
+            close(); resolve(); leavingForSignIn = !!ALEMBIC_CONSOLE_URL;
             if (ALEMBIC_CONSOLE_URL) location.assign(alembicSignInUrl('vault'));
-          } }, ['Open ALEMBIC →']),
+          } }, ['Open Raw Aromachem sign-in →']),
           h('button', { class: 'btn', onclick: function () { close(); resolve(); } }, ['Cancel']),
         ]);
         body.appendChild(actions);
@@ -301,8 +312,9 @@
       }
     }
     await offerReauthViaAlembic();
+    sessionEndedNote = true;
     logout();
-    throw new VaultError('REAUTH_REQUIRED', 'Confirm a new code on ALEMBIC, then open Vault again.', 0);
+    throw new VaultError('REAUTH_REQUIRED', 'Confirm a new code in Raw Aromachem sign-in, then open Vault again.', 0);
   }
 
   /* ---------------------------------------------------------------------------------------
@@ -431,7 +443,7 @@
   function openVaultHowTo() {
     openDialog('Help', function (body) {
       body.appendChild(howToSection('Sessions', [
-        'Vault is separate from Factory. Reloading ends your session; open Vault from ALEMBIC to sign in again.',
+        'Vault is separate from Factory. Reloading ends your session; open Vault from Raw Aromachem sign-in to sign in again.',
         'You see only the formulas your role and grants allow.',
       ]));
       body.appendChild(howToSection('Versions', [
@@ -482,15 +494,18 @@
   function renderLogin() {
     root.innerHTML = '';
     var err = h('div', { class: 'err', role: 'alert' });
-    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('vault') || '#' }, ['Sign in via ALEMBIC →']);
+    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('vault') || '#' }, ['Raw Aromachem sign-in →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
       err.textContent = 'Sign-in is not switched on here yet. Ask your administrator.';
     }
+    var ended = sessionEndedNote ? h('p', { class: 'sub', role: 'status', id: 'vault-ended' }, ['Your session ended for security; sign in again.']) : null;
+    sessionEndedNote = false;
     var card = h('div', { class: 'login-card' }, [
       h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
       h('h1', { class: 'mark' }, ['Vault']),
       h('p', { class: 'sub' }, ['Raw Aroma Chem formula access.']),
+      ended,
       goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
@@ -569,7 +584,7 @@
    * bridge secret lives on the main app box, never on the Vault box.
    * When GET /v1/aria/status says the bridge is not configured or this sign-in is not linked, the
    * panel keeps its honest "Aria answers in ALEMBIC" state and invents nothing. */
-  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var ARIA_HERE = 'I answer from the sales system\'s records, and this console has no connection to them yet. Ask me in the sales admin console.';
   var ariaApi = null, ariaLoading = null, ariaCtx = 'Vault', ariaMode = null, ariaMsg = '';
   function ariaView() { var i = ariaCtx.indexOf(' · '); return i < 0 ? 'Vault' : ariaCtx.slice(i + 3); }
   function loadAria() {
@@ -607,7 +622,7 @@
     if (ariaApi) ariaApi.destroy();
     ariaMode = mode; ariaMsg = s.live ? '' : s.message;
     if (s.live) { ariaApi = AlembicAria.mount({ context: ariaCtx, parent: document.body, ask: ariaAsk }); return; }
-    var msg = ariaMsg, panel = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Aria?'], parent: document.body,
+    var msg = ariaMsg, panel = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Ruh?'], parent: document.body,
       ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: msg, cited: [] }); } });
     ariaApi = panel;
     var fix = function () { var p = panel.element.querySelector('.aria-empty > p'); if (p && p.textContent !== msg) p.textContent = msg; };
@@ -618,7 +633,7 @@
     if (ariaApi && ariaApi.isOpen()) { ariaApi.close(); return; }
     Promise.all([loadAria(), ariaStatus()]).then(function (v) {
       ariaMount(v[1]); ariaApi.setContext(ariaCtx); ariaApi.open();
-    }).catch(function () { toast('Aria didn\'t load. Try again.', true); });
+    }).catch(function () { toast('Ruh didn\'t load. Try again.', true); });
   }
   // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–8 dock destinations, ⌘/ the
   // go-to palette; Escape closes.
@@ -733,7 +748,7 @@
       // Always-on Ruh: a quiet badge in the top bar (never a dock entry). In the Vault it shows
       // the Vault's own notes only — counts, never formula content.
       window.RaRuh ? RaRuh.badge('gbtn') : null,
-      h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
+      h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Ruh', onclick: toggleAria }, [raw(CI.spark), ' Ask Ruh']),
     ]);
     var view = h('section', { class: 'pageview' }, [h('div', { id: 'vault-place' }),
       !trail && HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
@@ -748,7 +763,7 @@
         return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (i < RaDock.PHONE ? ' hot' : ''), 'data-dock': n.id, 'aria-label': n.label, 'aria-pressed': String(on), 'aria-current': on ? 'page' : null, onclick: function () { go(n.id); } },
           [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, h('span', { class: 'kc' }, [' · ⌘' + (i + 1)])])]);
       }))
-      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Aria', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
+      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Ruh', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Ruh', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
     var handle = h('button', { type: 'button', class: 'dock-handle', 'aria-label': 'Show quick access dock', onclick: function () { document.body.classList.remove('dock-away'); } }, [h('i')]);
     root.appendChild(h('div', { class: 'app' }, [rail, h('div', { class: 'rail-scrim', onclick: function () { setRail(false); } }), main, handle, dock]));
     applyRail();
@@ -1436,7 +1451,7 @@
       content.innerHTML = '';
       content.appendChild(h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Certificates']), h('span', { class: 'spacer' }), recalc]),
-        h('p', { class: 'card-note' }, ['Calculated for each formula\'s current approved version. Only the numbers leave the Vault, for ALEMBIC to issue the IFRA and allergen certificates.']),
+        h('p', { class: 'card-note' }, ['Calculated for each formula\'s current approved version. Only the numbers leave the Vault, for the sales system to issue the IFRA and allergen certificates.']),
         simpleTable(['Code', 'IFRA', 'Allergens', 'Calculated', ''], rows),
       ]));
     } catch (e) {
@@ -1776,7 +1791,7 @@
       content.innerHTML = '';
       content.appendChild(h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Formula needed']), h('span', { class: 'n' }, [rows.length + ' product(s)'])]),
-        h('p', { class: 'card-note' }, ['ALEMBIC orders for these products are waiting: the factory tried to plan a run and found no approved formula in the Vault. A formulator seals one, a vault approver approves it (two people), and the product is linked to it — then the factory plans the run with one click.']),
+        h('p', { class: 'card-note' }, ['Sales orders for these products are waiting: the factory tried to plan a run and found no approved formula in the Vault. A formulator seals one, a vault approver approves it (two people), and the product is linked to it — then the factory plans the run with one click.']),
         rows.length ? simpleTable(['Product', 'SKUs', 'Orders waiting', 'kg waiting', 'Earliest need', 'Priority'], trs)
           : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing is waiting on a formula'])]),
       ]));

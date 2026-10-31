@@ -41,9 +41,9 @@ test('one ruh.js in every console, loaded before the console script, cached offl
     const at = html.indexOf('<script src="/ruh.js"></script>');
     assert.ok(at > html.indexOf('<script src="/sound.js"></script>') && at < html.indexOf(`<script src="/${script}"`), `${dir}: ruh.js after sound.js, before ${script}`);
   }
-  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v100'/);
+  assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v101'/);
   assert.match(read('web/sw.js'), /'\/ruh\.js'/);
-  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v16'/);
+  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v17'/);
   assert.match(read('web-platform/sw.js'), /'\/ruh\.js'/);
 });
 
@@ -54,7 +54,7 @@ test('the badge is in the top bar of every console — never a dock entry', () =
   assert.ok(!/RaRuh/.test(shell.slice(shell.indexOf('function dockInnerHtml'), shell.indexOf('function togglePin'))), 'not in the Factory dock');
   for (const f of ['web-platform/platform.js', 'web-vault/vault.js']) {
     const js = read(f);
-    assert.match(js, /window\.RaRuh \? RaRuh\.badge\('gbtn'\) : null,\s*h\('button', \{ type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria'/, `${f}: the badge sits beside Ask Aria`);
+    assert.match(js, /window\.RaRuh \? RaRuh\.badge\('gbtn'\) : null,\s*h\('button', \{ type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Ruh'/, `${f}: the badge sits beside Ask Ruh`);
     const dock = js.slice(js.indexOf("var dock = h('div', { class: 'glass glass-deep qdock'"), js.indexOf("var handle = h('button'"));
     assert.ok(dock.length > 100 && !/RaRuh/.test(dock), `${f}: not in the dock`);
   }

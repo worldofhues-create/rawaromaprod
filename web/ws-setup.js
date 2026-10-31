@@ -61,11 +61,11 @@
     var canFormulas = can('packaging:product_formula_link:read') && !!ROLES[st.role] && ROLES[st.role].nav.some(function (n) { return n[0] === 'formulasetup'; });
 
     var steps = [
-      step(cat.products > 0, 'Catalogue from ALEMBIC',
+      step(cat.products > 0, 'Catalogue from the sales system',
         cat.products > 0 ? escHtml(cat.products + ' products received — ' + cat.singleChemicals + ' single chemicals, ' + cat.blends + ' blends') + (cat.lastSyncedAt ? ' · last update ' + escHtml(new Date(cat.lastSyncedAt).toLocaleString()) : '')
-          : 'Nothing received yet. In ALEMBIC Admin, open Produce &amp; dispatch → Factory setup and press “Set up factory catalogue”.'),
+          : 'Nothing received yet. In the sales admin console, open Produce &amp; dispatch → Factory setup and press “Set up factory catalogue”.'),
       step(packs.needsDensity === 0, 'Pack sizes',
-        escHtml(packs.ok + ' pack sizes have a weight') + (packs.needsDensity ? ' · ' + escHtml(packs.needsDensity + ' sold by volume need a density (' + packs.productsNeedingDensity + ' products)') + ' — Ruh drafts them and an admin approves them in ALEMBIC Admin.' : '.')),
+        escHtml(packs.ok + ' pack sizes have a weight') + (packs.needsDensity ? ' · ' + escHtml(packs.needsDensity + ' sold by volume need a density (' + packs.productsNeedingDensity + ' products)') + ' — Ruh drafts them and an admin approves them in the sales admin console.' : '.')),
       step(qc.products > 0 && qc.missing === 0 && qc.proposed === 0, 'QC specs',
         escHtml(qc.approved + ' approved · ' + qc.proposed + ' drafted, waiting for approval · ' + qc.missing + ' missing') + '. A product with no approved spec cannot get a certificate of analysis, a label or a shelf.',
         canQc && qc.missing > 0 ? btn('id="sv-draft-qc"', 'Ask Ruh to draft QC specs', 'sm p') : ''),
@@ -79,7 +79,7 @@
           (fx.approved == null ? (fx.linked ? ' · the Vault did not say how many are approved' : '') : escHtml(' · ' + fx.approved + ' approved')) +
           '. Ruh drafts one formula per product from the catalogue\'s single chemical / blend; formulas are approved in the Vault.',
         canFormulas && fx.linked < fx.products ? btn('id="sv-open-formulas"', 'Open Formula setup', 'sm') : ''),
-      step(!(bl.unknownSku || bl.noFormulaLink || bl.noApprovedFormula || bl.qtyNotInKg), 'ALEMBIC requirements blocked',
+      step(!(bl.unknownSku || bl.noFormulaLink || bl.noApprovedFormula || bl.qtyNotInKg), 'Sales requirements blocked',
         escHtml((bl.unknownSku || 0) + ' unknown product · ' + (bl.noFormulaLink || 0) + ' no formula linked · ' + (bl.noApprovedFormula || 0) + ' no approved formula · ' + (bl.qtyNotInKg || 0) + ' quantity not in kg'))
     ];
     var stats = '<div class="stats">' + kpi('pkg', String(cat.products || 0), 'Products') + kpi('award', (qc.approved || 0) + ' / ' + (qc.products || 0), 'QC specs approved') +

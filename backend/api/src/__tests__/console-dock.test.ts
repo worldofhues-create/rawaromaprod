@@ -151,7 +151,7 @@ test('Factory: the rendered dock — ≤ 8 labelled destinations, All sections, 
     assert.ok(items.filter((m) => / hot/.test(m[2] ?? '')).length <= 4, 'the phone tab bar keeps ≤ 4 destinations');
     assert.match(html, /id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="All sections"/);
     assert.match(html, /<span class="kb-d">All sections<\/span><span class="kb-m">More<\/span>/);
-    assert.match(html, /id="ra-aria-dock" aria-label="Ask Aria">[\s\S]*⌘K/);
+    assert.match(html, /id="ra-aria-dock" aria-label="Ask Ruh">[\s\S]*⌘K/);
     assert.equal((html.match(/class="qb/g) || []).length, items.length + 2, 'nothing else in the dock');
   }
   // Pin from the sections sheet: saved for this person only, capped at 8.

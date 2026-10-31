@@ -325,7 +325,7 @@ test('QC drafts: ALEMBIC unreachable or not connected drafts nothing and says wh
   await testClient()`update bridge.connector_config set webhook_url = null where id = 'default'`;
   const out = await setup.draftQc(qc, 5);
   assert.equal(out.drafted, 0);
-  assert.match(String(out.message), /not connected to ALEMBIC/);
+  assert.match(String(out.message), /not connected to the sales system/);
   await seedConnector();
 });
 

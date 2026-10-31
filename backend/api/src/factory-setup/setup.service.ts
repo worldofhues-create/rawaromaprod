@@ -161,10 +161,10 @@ export class FactorySetupService {
     const [open] = (await this.sql`select setup_proposal_id::text as id from production.setup_proposal where kind = 'rack_layout' and status = 'proposed' limit 1`) as Array<{ id: string }>;
     if (open) return { proposalId: open.id, created: false };
     const items = (await this.sql`select classification, grade, on_hand_kg::float as on_hand_kg from bridge.catalogue_item`) as unknown as Array<{ classification: 'single_chemical' | 'blend'; grade: string | null; on_hand_kg: number }>;
-    if (items.length === 0) throw new ConflictException('The catalogue has not reached the factory yet, so there is nothing to size racks from. Send the catalogue from ALEMBIC first.');
+    if (items.length === 0) throw new ConflictException('The catalogue has not reached the factory yet, so there is nothing to size racks from. Send the catalogue from the sales system first.');
     const layout = planRackLayout(items.map((i) => ({ classification: i.classification, grade: i.grade, onHandKg: i.on_hand_kg })));
     const [existing] = (await this.sql`select count(*)::int as bins from location.bin_master`) as Array<{ bins: number }>;
-    const evidence = `estimate: one bin per product plus one for every ${KG_PER_BIN} kg ALEMBIC holds (about a drum a bin), `
+    const evidence = `estimate: one bin per product plus one for every ${KG_PER_BIN} kg the sales system holds (about a drum a bin), `
       + `racks of ${DEFAULT_SHELVES} shelves × ${DEFAULT_BINS} bins, zones by product family, walked zone by zone. `
       + `${items.length} products in the catalogue; ${existing?.bins ?? 0} bins already laid out (an existing bin is kept as it is).`;
     const [row] = (await this.sql`

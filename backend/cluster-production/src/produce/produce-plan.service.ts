@@ -82,7 +82,7 @@ export class ProducePlanService {
              qty::text, uom, qty_kg::text, needed_by
         from bridge.production_requirement where alembic_requirement_id = ${alembicRequirementId}::uuid
     `)) as unknown as RequirementRow[])[0];
-    if (!req) throw new NotFoundException(`No ALEMBIC requirement ${alembicRequirementId}.`);
+    if (!req) throw new NotFoundException(`No sales requirement ${alembicRequirementId}.`);
     if (req.production_order_id) {
       throw new ConflictException(`This requirement is already planned (run ${req.production_order_id}).`);
     }

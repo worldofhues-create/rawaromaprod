@@ -290,7 +290,7 @@
     return '<div class="card" style="margin-bottom:var(--s-snug)"><div class="card-hd"><h2>Training videos</h2></div>' +
       '<div class="card-bd"><p style="font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3);margin:0 0 var(--s-snug)">' +
       'Short narrated videos — what each screen is for, when to use it, where it is and how to get it done. English and हिन्दी, with captions.' +
-      (ALEMBIC_CONSOLE_URL ? '' : ' They open in ALEMBIC → Tutorial → Videos.') + '</p>' +
+      (ALEMBIC_CONSOLE_URL ? '' : ' They open in the sales system → Tutorial → Videos.') + '</p>' +
       '<ul style="list-style:none;margin:0;padding:0">' + items + '</ul></div></div>';
   }
   function tutorialRenderLibrary() {

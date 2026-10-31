@@ -558,12 +558,12 @@ export class DashboardService {
       select count(*) filter (where kind = 'PUTAWAY')::int as putaway, count(*) filter (where kind = 'PICK')::int as pick
         from location.shelf_task where status = 'OPEN'`;
     return [
-      { kind: 'produce', severity: 'high', title: 'High-value orders to produce', count: num(open?.high_value), sub: 'ALEMBIC orders of ₹25,000+ not yet planned', for: factory },
+      { kind: 'produce', severity: 'high', title: 'High-value orders to produce', count: num(open?.high_value), sub: 'sales orders of ₹25,000+ not yet planned', for: factory },
       { kind: 'produce', severity: 'high', title: 'Overdue to produce', count: num(open?.overdue), sub: 'past their need-by date, not yet on a shelf', for: factory },
       { kind: 'formula', severity: 'high', title: 'Blocked: no approved formula', count: num(open?.blocked), sub: 'a formulator must seal and approve one', for: ['production', 'formulator', 'vault_approver'] },
       { kind: 'coa', severity: 'high', title: 'Batches failed QC', count: num(coa?.failed), sub: 'labelling is blocked until a re-test passes', for: ['qc', 'production', 'packaging'] },
       { kind: 'putaway', severity: 'med', title: 'Awaiting put-away', count: num(shelf?.putaway), sub: 'released finished goods to shelve', for: ['warehouse', 'packaging'] },
-      { kind: 'pick', severity: 'med', title: 'Awaiting pick', count: num(shelf?.pick), sub: 'picks for ALEMBIC orders at the shelves', for: ['warehouse', 'sales'] },
+      { kind: 'pick', severity: 'med', title: 'Awaiting pick', count: num(shelf?.pick), sub: 'picks for sales orders at the shelves', for: ['warehouse', 'sales'] },
     ];
   }
 

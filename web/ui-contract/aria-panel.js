@@ -46,7 +46,7 @@
 
   function failureText(reason) {
     if (reason === "http-429") return "Too many questions from here just now. Try again in a minute.";
-    if (reason === "http-401" || reason === "http-403") return "Your session has ended. Sign in again to ask Aria.";
+    if (reason === "http-401" || reason === "http-403") return "Your session has ended. Sign in again to ask Ruh.";
     return "I can't reach the service right now. Try again in a moment.";
   }
   function revealMs(text) { return Math.round(Math.min(900, 250 + String(text || "").length * 2.2)); }
@@ -122,11 +122,11 @@
 
     var sub = el("p.t-cap");
     var railBtn = el("button.xp", { type: "button", on: { click: function () { state.rail = !isRail(); frame(); } } });
-    var closeBtn = el("button.xp", { type: "button", "aria-label": "Close Aria", icon: "x",
+    var closeBtn = el("button.xp", { type: "button", "aria-label": "Close Ruh", icon: "x",
       on: { click: function () { api.close(); } } });
     var head = el("div.aria-hd", null,
       el("span.aria-orb", { "aria-hidden": "true" }),
-      el("div.aria-ttl", null, el("h3.t-h3", null, "Aria"), sub),
+      el("div.aria-ttl", null, el("h3.t-h3", null, "Ruh"), sub),
       el("div.aria-acts", null, railBtn, closeBtn));
 
     /* New chat, and History when the host gives a `threads` adapter. */
@@ -134,17 +134,17 @@
     if (opt.threads) {
       histBtn = el("button.aria-threads-btn", { type: "button", "aria-pressed": "false",
         on: { click: function () { state.drawer = !state.drawer; if (state.drawer) loadHistory(); render(); } } }, "History");
-      bar = el("div.aria-threads-bar", { role: "toolbar", "aria-label": "Aria conversations" },
+      bar = el("div.aria-threads-bar", { role: "toolbar", "aria-label": "Ruh conversations" },
         el("button.aria-threads-btn", { type: "button", "aria-label": "New chat",
           on: { click: function () { api.newChat(); } } }, "＋ New chat"),
         histBtn);
     }
-    var body = el("div.aria-bd", { role: "log", "aria-label": "Aria conversation" });
-    var input = el("input.aria-in", { placeholder: "Ask Aria…", "aria-label": "Message Aria",
+    var body = el("div.aria-bd", { role: "log", "aria-label": "Ruh conversation" });
+    var input = el("input.aria-in", { placeholder: "Ask Ruh…", "aria-label": "Message Ruh",
       on: { keydown: function (e) { if (e.key === "Enter") ask(); } } });
     var send = el("button.gbtn.acc", { type: "button", "aria-label": "Send", icon: "arrow",
       on: { click: function () { ask(); } } });
-    var dock = el("aside.glass.glass-deep.aria-dock", { "aria-label": "Aria co-pilot", "aria-hidden": "true",
+    var dock = el("aside.glass.glass-deep.aria-dock", { "aria-label": "Ruh co-pilot", "aria-hidden": "true",
       on: { keydown: function (e) { if (e.key === "Escape") { e.stopPropagation(); api.close(); } } } },
       head, bar, body, el("div.aria-ft", null, input, send));
     (opt.parent || document.body).appendChild(dock);
@@ -168,7 +168,7 @@
       sub.textContent = "Co-working on " + (state.context || "this view");
       railBtn.innerHTML = SVG[rail ? "shrink" : "expand"];
       railBtn.setAttribute("aria-pressed", String(rail));
-      railBtn.setAttribute("aria-label", rail ? "Collapse Aria" : "Expand Aria");
+      railBtn.setAttribute("aria-label", rail ? "Collapse Ruh" : "Expand Ruh");
       railBtn.title = rail ? "Collapse" : "Expand";
       send.disabled = state.busy;
       if (histBtn) {
@@ -229,7 +229,7 @@
           list.appendChild(el("button", { type: "button", on: { click: function () { ask(p); } } }, p));
         });
         body.appendChild(el("div.aria-empty", null,
-          el("p", null, "Ask about orders, stock or enquiries. Answers cite the records they use; when nothing is on file, Aria says so."),
+          el("p", null, "Ask about orders, stock or enquiries. Answers cite the records they use; when nothing is on file, Ruh says so."),
           el("span.lbl", null, "Try asking"), list));
       }
       state.suggestions.forEach(function (s) {
@@ -255,7 +255,7 @@
       });
       state.log.forEach(function (m, i) { body.appendChild(line(m, i)); });
       if (state.busy) {
-        body.appendChild(el("div.acard", { role: "status", "aria-label": "Aria is answering",
+        body.appendChild(el("div.acard", { role: "status", "aria-label": "Ruh is answering",
           style: { "align-self": "flex-start" } },
           el("span.think", { "aria-hidden": "true" }, el("i"), el("i"), el("i"))));
       }

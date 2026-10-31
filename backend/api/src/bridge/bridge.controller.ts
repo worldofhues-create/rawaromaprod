@@ -123,7 +123,7 @@ export class BridgeController {
   ) {
     const reason = typeof body?.reason === 'string' ? body.reason.trim() : '';
     if (!reason || reason.length > 500) {
-      throw new BadRequestException("'reason' is required (1-500 characters): discarding means ALEMBIC never hears of it");
+      throw new BadRequestException("'reason' is required (1-500 characters): discarding means the sales system never hears of it");
     }
     return this.outboxAdmin.discard(id, principal.userId, reason);
   }

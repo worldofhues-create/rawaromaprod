@@ -45,7 +45,7 @@ export class AlembicDraftsClient {
     let url: string | null = null;
     try { url = cfg?.webhookUrl ? `${new URL(cfg.webhookUrl).origin}${ALEMBIC_QC_DRAFTS_PATH}` : null; } catch { url = null; }
     if (!tenantId || !cfg?.enabled || !secret || !url) {
-      return { ok: false, reason: 'not_configured', message: 'This factory is not connected to ALEMBIC yet, so Ruh cannot draft. Finish the ALEMBIC bridge connection first.' };
+      return { ok: false, reason: 'not_configured', message: 'This factory is not connected to the sales system yet, so Ruh cannot draft. Finish the sales system bridge connection first.' };
     }
     const body = JSON.stringify({ tenantId, subject, skuCodes });
     let res: Response;
@@ -57,7 +57,7 @@ export class AlembicDraftsClient {
         signal: AbortSignal.timeout(TIMEOUT_MS),
       });
     } catch {
-      return { ok: false, reason: 'unreachable', message: 'ALEMBIC could not be reached, so nothing was drafted. Try again shortly.' };
+      return { ok: false, reason: 'unreachable', message: 'The sales system could not be reached, so nothing was drafted. Try again shortly.' };
     }
     const raw = (await res.json().catch(() => null)) as Record<string, unknown> | null;
     if (!res.ok || !raw || raw.ok !== true || !Array.isArray(raw.items)) {
@@ -65,8 +65,8 @@ export class AlembicDraftsClient {
       return {
         ok: false, reason: 'refused',
         message: outcome === 'unknown_subject' || outcome === 'inactive' || outcome === 'no_roles'
-          ? 'ALEMBIC does not recognise your linked account, so it would not draft. Ask an ALEMBIC administrator.'
-          : 'ALEMBIC refused the request, so nothing was drafted.',
+          ? 'The sales system does not recognise your linked account, so it would not draft. Ask a sales system administrator.'
+          : 'The sales system refused the request, so nothing was drafted.',
       };
     }
     return { ok: true, ai: typeof raw.ai === 'string' ? raw.ai : 'not_needed', items: raw.items as DraftsResult extends { items: infer I } ? I : never };

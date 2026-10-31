@@ -126,7 +126,7 @@
     V.innerHTML = stats + '<div class="card"><div class="card-hd"><h2>Orders to make</h2><span class="chip k" title="Recipes stay in the Vault; this list names formulas by code only.">Formula codes only</span>' +
       '<span class="n">In order: priority, then need-by date, then arrival · updated ' + new Date().toLocaleTimeString() + '</span></div>' +
       '<div class="card-bd">' + note + (rows ? '<div style="overflow-x:auto"><table><thead><tr><th>#</th><th>Priority</th><th>SKU</th><th>Qty</th><th>Orders</th><th>Needed by</th><th>Stage</th><th>Formula</th><th class="r">Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-        : '<div class="empty"><h3>Nothing to produce</h3><p>No open ALEMBIC requirement is waiting on the factory.</p></div>') + '</div></div>';
+        : '<div class="empty"><h3>Nothing to produce</h3><p>No open Sales requirement is waiting on the factory.</p></div>') + '</div></div>';
     [].forEach.call(V.querySelectorAll('[data-plan]'), function (b) { b.onclick = function () { planRun(b, b.getAttribute('data-plan')); }; });
     [].forEach.call(V.querySelectorAll('[data-instr]'), function (b) { b.onclick = function () { showInstruction(b.getAttribute('data-instr')); }; });
     [].forEach.call(V.querySelectorAll('[data-pick]'), function (b) { b.onclick = function () { createPicks(b, b.getAttribute('data-pick')); }; });
@@ -211,7 +211,7 @@
       }).join('') + '</tbody></table></div>' : '<div class="empty"><h3>Nothing waiting</h3><p>Every released batch is on a shelf.</p></div>') + '</div></div>';
     var putCard = '<div class="card"><div class="card-hd"><h2>Put-aways</h2><span class="n">walking order</span>' + sheetBtns('PUTAWAY') + '</div><div class="card-bd">' +
       (puts.length ? '<div style="overflow-x:auto"><table>' + head + '<tbody>' + taskRows(puts, 'PUTAWAY') + '</tbody></table></div>' : '<div class="empty"><h3>No put-aways open</h3></div>') + '</div></div>';
-    var reqCard = '<div class="card"><div class="card-hd"><h2>Orders to pick</h2><span class="n">ALEMBIC orders with stock on the shelves — oldest lot first (FIFO)</span></div><div class="card-bd">' +
+    var reqCard = '<div class="card"><div class="card-hd"><h2>Orders to pick</h2><span class="n">Sales orders with stock on the shelves — oldest lot first (FIFO)</span></div><div class="card-bd">' +
       (reqs.length ? '<div style="overflow-x:auto"><table><thead><tr><th>Orders</th><th>SKU</th><th>Needed</th><th>Picked</th><th>Needed by</th><th class="r"></th></tr></thead><tbody>' + reqs.map(function (r) {
         return '<tr><td>' + escHtml((r.orderRefs || []).join(', ')) + (r.highValue ? ' ' + chip('r', 'High value') : '') + '</td><td>' + mono(r.sku) + '</td><td>' + mono(r.qtyKg != null ? num(r.qtyKg) + ' kg' : '—') + '</td>' +
           '<td>' + mono(num(r.pickedKg) + ' kg') + (r.openPickKg ? ' ' + muted('+' + num(r.openPickKg) + ' open') : '') + '</td><td>' + escHtml(ymd(r.neededBy)) + '</td>' +
@@ -281,7 +281,7 @@
       if (res.status >= 400) { toast(err(res, 'Not confirmed. Try again.'), 'bad'); return; }
       var d = data(res) || {};
       if (kind === 'PICK') toast('Picked', 'good');
-      else toast('Put away on ' + (d.location || binCode) + (d.fgBatchReceived && d.fgBatchReceived.sent ? ' · ALEMBIC told' : d.fgBatchReceived ? ' · ALEMBIC NOT told: ' + (d.fgBatchReceived.problems || []).join('; ') : ''), d.fgBatchReceived && !d.fgBatchReceived.sent ? 'bad' : 'good');
+      else toast('Put away on ' + (d.location || binCode) + (d.fgBatchReceived && d.fgBatchReceived.sent ? ' · sales system told' : d.fgBatchReceived ? ' · sales system NOT told: ' + (d.fgBatchReceived.problems || []).join('; ') : ''), d.fgBatchReceived && !d.fgBatchReceived.sent ? 'bad' : 'good');
       loadView();
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
@@ -588,14 +588,14 @@
 
   function rejectCoa(row) {
     var m = openSheet({ tag: 'form', style: 'max-width:440px', title: 'Reject batch ' + (row.batchNumber || ''),
-      meta: 'QC\'s FAIL verdict: ALEMBIC is told the batch failed, labelling is blocked, production and packaging are alerted.',
+      meta: 'QC\'s FAIL verdict: the sales system is told the batch failed, labelling is blocked, production and packaging are alerted.',
       body: '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Reason *') + '<textarea id="pv-rj" class="fld" rows="3" required minlength="3"></textarea></label>' +
         '<button type="submit" class="btn r" style="width:100%;justify-content:center">Reject batch</button>' });
     m.sheet.onsubmit = function (e) {
       e.preventDefault(); var reason = $('pv-rj').value.trim(); if (reason.length < 3) return; m.close();
       tunnel('/v1/batch-coas/' + row.batchCoaId + '/reject', { method: 'POST', body: { reason: reason } }).then(function (res) {
         if (res.status >= 400) { toast(err(res, 'Not rejected. Try again.'), 'bad'); return; }
-        toast('Rejected — ALEMBIC told, labelling blocked', 'bad'); loadView();
+        toast('Rejected — sales system told, labelling blocked', 'bad'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     };
   }

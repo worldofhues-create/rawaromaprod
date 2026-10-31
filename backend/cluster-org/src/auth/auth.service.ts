@@ -232,7 +232,7 @@ export class AuthService {
     if (!this.passwordLoginAllowed()) {
       throw DomainError.forbidden(
         'AUTH_FORBIDDEN',
-        'Password sign-in is retired. Sign in via ALEMBIC.',
+        'Password sign-in is retired. Use Raw Aromachem sign-in.',
       );
     }
     const { userMaster } = orgSchema;
@@ -279,7 +279,7 @@ export class AuthService {
 
     // LANE D1: the showcase account never signs in with a password, in any environment.
     if (roles.includes(SHOWCASE_ROLE)) {
-      throw DomainError.forbidden("AUTH_FORBIDDEN", "The demo showcase signs in only from the ALEMBIC demo.");
+      throw DomainError.forbidden("AUTH_FORBIDDEN", "The demo showcase signs in only from the sales system demo.");
     }
 
     // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
@@ -378,7 +378,7 @@ export class AuthService {
     if (this.config.get('APP_ENV') === 'prod' &&
         (!this.config.get('RAWPROD_ASSERTION_EXPECTED_TARGETS') || !this.config.get('ALEMBIC_ASSERTION_TENANT_ID'))) {
       throw DomainError.featureDisabled(
-        'RAWPROD_ASSERTION_EXPECTED_TARGETS and ALEMBIC_ASSERTION_TENANT_ID must be set in production; sign-in via ALEMBIC is refused.',
+        'RAWPROD_ASSERTION_EXPECTED_TARGETS and ALEMBIC_ASSERTION_TENANT_ID must be set in production; sign-in via the sales system is refused.',
       );
     }
     const expectedTargetsRaw = this.config.get('RAWPROD_ASSERTION_EXPECTED_TARGETS');
@@ -454,7 +454,7 @@ export class AuthService {
         // moment its attacker tries to sign in on the identity they actually control.
         throw DomainError.forbidden(
           'AUTH_FORBIDDEN',
-          'This account is bound to a different ALEMBIC identity. Sign-in refused — contact an administrator.',
+          'This account is bound to a different sales system identity. Sign-in refused — contact an administrator.',
         );
       }
       // S4 finding N2: refuse first-bind outright for an account mid-grant for a
@@ -462,7 +462,7 @@ export class AuthService {
       if (await this.hasPendingVaultRoleGrant(byEmail.userId)) {
         throw DomainError.forbidden(
           'AUTH_FORBIDDEN',
-          'This account has a pending Vault-authority role grant request and cannot be bound to an ALEMBIC identity yet. Ask an administrator to resolve the pending request first.',
+          'This account has a pending Vault-authority role grant request and cannot be bound to a sales system identity yet. Ask an administrator to resolve the pending request first.',
         );
       }
       // First successful assertion login for this row — bind it now.
@@ -563,7 +563,7 @@ export class AuthService {
     // switching demo access off in ALEMBIC reaches a held RawProd showcase session within
     // JWT_ACCESS_TTL, deterministically, without RawProd having to ask ALEMBIC anything.
     if (roles.includes(SHOWCASE_ROLE)) {
-      throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "Demo sessions do not refresh. Re-open RawProd from the ALEMBIC demo.");
+      throw DomainError.unauthorized("AUTH_TOKEN_INVALID", "Demo sessions do not refresh. Re-open RawProd from the sales system demo.");
     }
 
     // Two-console gate: when a console is DECLARED (CONSOLE=online|factory), refuse a session whose
@@ -605,7 +605,7 @@ export class AuthService {
     if (!this.passwordLoginAllowed()) {
       throw DomainError.forbidden(
         'AUTH_FORBIDDEN',
-        'Password sign-in is retired; there is no password to set. Sign in via ALEMBIC.',
+        'Password sign-in is retired; there is no password to set. Use Raw Aromachem sign-in.',
       );
     }
     const { userMaster, userRoleMapping, roleMaster } = orgSchema;

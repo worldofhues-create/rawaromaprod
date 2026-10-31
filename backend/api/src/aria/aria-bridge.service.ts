@@ -85,14 +85,14 @@ export type AriaAskResult =
 
 const MESSAGES: Readonly<Record<AriaUnavailableReason, string>> = {
   not_configured:
-    'Aria answers from ALEMBIC\'s records, and this console is not connected to ALEMBIC yet. ' +
-    'Ask me in ALEMBIC Admin, or ask an administrator to finish the bridge connection.',
+    'Ruh answers from the sales system\'s records, and this console is not connected to the sales system yet. ' +
+    'Ask me in the sales admin console, or ask an administrator to finish the bridge connection.',
   not_linked:
-    'Aria answers as your ALEMBIC account, and this RawProd sign-in is not linked to one yet. ' +
-    'Sign in to RawProd through ALEMBIC once to link it.',
-  refused: 'ALEMBIC could not take that question.',
+    'Ruh answers as your sales system account, and this RawProd sign-in is not linked to one yet. ' +
+    'Use Raw Aromachem sign-in once to link it.',
+  refused: 'The sales system could not take that question.',
   rate_limited: 'Too many questions just now. Try again in a minute.',
-  unreachable: 'I could not reach ALEMBIC, so I have nothing to answer against. I will not guess.',
+  unreachable: 'I could not reach the sales system, so I have nothing to answer against. I will not guess.',
 };
 
 function unavailable(reason: AriaUnavailableReason, message?: string): AriaAskResult {
@@ -188,8 +188,8 @@ export class AriaBridgeService {
       if (outcome === 'unknown_subject' || outcome === 'inactive' || outcome === 'no_roles'
         || outcome === 'demo_refused') {
         return unavailable('not_linked',
-          'Your linked ALEMBIC account cannot use Aria right now (it is unknown, suspended or has no role). '
-          + 'Ask an ALEMBIC administrator.');
+          'Your linked sales system account cannot use Ruh right now (it is unknown, suspended or has no role). '
+          + 'Ask a sales system administrator.');
       }
       this.logger.warn(`aria bridge refused by ALEMBIC: 403 ${outcome}`);
       return unavailable('not_configured');

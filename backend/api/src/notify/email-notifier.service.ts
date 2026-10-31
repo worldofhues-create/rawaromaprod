@@ -38,7 +38,7 @@ const COND_TYPE = 'production.qc.recorded'; // only notify on FAIL/HOLD
  *  alert's own roles + owner; one email per alert (the alert itself is deduplicated). */
 const PRODUCE_TYPES: Record<string, { cta: string; screen: string }> = {
   'production.produce.high_value_requirement': { cta: 'Plan it first: open Produce next and create the run.', screen: 'Produce next' },
-  'production.produce.overdue_requirement': { cta: 'Expedite: plan, compound, release and shelve it, or tell ALEMBIC the new date.', screen: 'Produce next' },
+  'production.produce.overdue_requirement': { cta: 'Expedite: plan, compound, release and shelve it, or tell the sales system the new date.', screen: 'Produce next' },
   'production.produce.formula_needed': { cta: 'Seal and approve a formula for this product in the Vault (a formulator drafts, a vault approver approves).', screen: 'Vault · Formulas' },
   'production.produce.qc_failed': { cta: 'Re-test or disposition the batch; it cannot be labelled until QC releases it.', screen: 'Batch COA' },
   'production.produce.label_blocked': { cta: 'Do not label this batch: it failed QC.', screen: 'Batch COA' },

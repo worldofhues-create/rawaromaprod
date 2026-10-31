@@ -257,7 +257,7 @@ export class CoaService {
       if (String(batch.status ?? '').toUpperCase() === 'FAILED') throw new ConflictException('The oil batch is FAILED and cannot be released.');
 
       const product = await this.product(tx, coa.productId);
-      if (!product?.product_code) throw new ConflictException('The product has no product code; ALEMBIC cannot map a certificate without one.');
+      if (!product?.product_code) throw new ConflictException('The product has no product code; the sales system cannot map a certificate without one.');
       const skuCodes = ((await tx.execute(sql`
         select sku_code from packaging.product_sku where product_id = ${coa.productId} and sku_code is not null order by sku_code
       `)) as unknown as { sku_code: string }[]).map((r) => r.sku_code);
@@ -277,7 +277,7 @@ export class CoaService {
       const problems = bridgeContracts.validateQcBatchReleased(payload);
       if (problems.length > 0) throw new ConflictException(`The release could not be sent: incomplete ${problems.join(', ')}.`);
       const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes);
-      if (!factorySku) throw new ConflictException('The product has no SKU code; ALEMBIC cannot map a QC release without one.');
+      if (!factorySku) throw new ConflictException('The product has no SKU code; the sales system cannot map a QC release without one.');
       const wire = bridgeContracts.toQcBatchReleasedWire(payload, {
         status: 'passed', factorySku, qcRecordRef: coa.batchCoaId,
         colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,

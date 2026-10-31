@@ -48,7 +48,7 @@ const UUID = '0192a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b';
 
 test('routes.js and screen-guide.js are cached offline with the bumped Factory shell', () => {
   const sw = read('web/sw.js');
-  assert.match(sw, /const CACHE = 'ra-shell-v100'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v101'/);
   assert.match(sw, /'\/routes\.js', '\/screen-guide\.js', '\/shell\.js'/);
 });
 
@@ -155,7 +155,7 @@ test('one plain name per screen: no jargon labels, the same data has the same na
   const ctx = factory();
   const roles = J(run(ctx, 'ROLES'));
   const jargon = ['Master runs', 'RM aliases', 'Split containers', 'Geo levels', 'FG stock (ATP)', 'Qty verification', 'Bulk lots', 'Pack orders',
-    'Package orders', 'Write audit trail', 'ALEMBIC requirements', 'Batch COA', 'QC specs (COA)', 'Stock (FEFO)', 'RFQs', 'RM batches', 'Settlements',
+    'Package orders', 'Write audit trail', 'ALEMBIC requirements', 'Orders from ALEMBIC', 'Batch COA', 'QC specs (COA)', 'Stock (FEFO)', 'RFQs', 'RM batches', 'Settlements',
     'Rejected GRNs', 'Vendor dispatch', 'CAPA', 'Plan items', 'Pick list items', 'Product SKUs', 'Packaging BOM', 'FG labels', 'FG reservations'];
   const byEndpoint = new Map<string, Set<string>>();
   for (const [role, r] of Object.entries<any>(roles)) {

@@ -279,7 +279,7 @@ test('password login is refused in production mode, unconditionally', async () =
     () => svc.login('anybody@rawaroma.local', 'whatever-password'),
     (err: any) => {
       assert.equal(err.code, 'AUTH_FORBIDDEN');
-      assert.match(err.message, /ALEMBIC/);
+      assert.match(err.message, /Raw Aromachem sign-in/);
       return true;
     },
   );
@@ -364,7 +364,7 @@ test('VAULT-TAKEOVER GUARD — an assertion presenting the right email but a DIF
     () => svc.loginWithAssertion(signAssertion(claimsFor(email, { sub: attackerSub, jti: randomUUID() }))),
     (err: any) => {
       assert.equal(err.code, 'AUTH_FORBIDDEN');
-      assert.match(err.message, /different ALEMBIC identity/);
+      assert.match(err.message, /different sales system identity/);
       return true;
     },
   );

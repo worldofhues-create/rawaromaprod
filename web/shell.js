@@ -166,10 +166,26 @@
       ['docs', 'Documents', 'archive', '/v1/document-registry'],
       ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'history', '/v1/formula-event-hist'],
       ['wtrail', 'Write audit trail', 'edit', '/v1/audit-events'],
-      ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
+      ['bridgereq', 'Sales requirements', 'link', '/v1/bridge/requirements'],
       ['weigh', 'Weighing', 'scale', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
       ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
-      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'] ] },
+      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'],
+      // Procurement, receiving and the QC test queue: an Owner-only login had no other way to reach them.
+      // Every route's read permission is held by `owner` and `showcase`; owner-rail.test.ts checks it.
+      ['planning', 'Stock planning', 'clipList', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'refresh', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'filePlus', '/v1/purchase-requests'],
+      ['rfq', 'RFQs', 'send', '/v1/rfqs'], ['quotes', 'Quotations', 'receipt', '/v1/quotations'],
+      ['qitems', 'Quotation items', 'activity', '/v1/quotation-items'], ['negotiate', 'Negotiation', 'chat', '/v1/vendor-negotiations'],
+      ['pos', 'Purchase orders', 'clipboard', '/v1/purchase-orders'], ['advpay', 'Advance payments', 'wallet', '/v1/po-advance-payments'],
+      ['vendors', 'Suppliers', 'store', '/v1/vendors'], ['vcontacts', 'Vendor contacts', 'idcard', '/v1/vendor-contacts'],
+      ['vmap', 'Vendor materials', 'barcode', '/v1/vendor-rm-mappings'],
+      ['ratehist', 'Rate history', 'trend', '/v1/vendor-rate-history'], ['vperf', 'Vendor performance', 'chart', '/v1/vendor-performance'],
+      ['settle', 'Settlements', 'coins', '/v1/vendor-credit-notes'], ['rejgrns', 'Rejected GRNs', 'alert', '/v1/qc-rejected-grns'],
+      ['vledger', 'Vendor ledger', 'book', '/v1/vendor-ledger'],
+      ['vdispatch', 'Vendor dispatch', 'route', '/v1/vendor-dispatches'],
+      ['gate', 'Gate entries', 'door', '/v1/gate-entries'], ['grns', 'Goods receipt', 'inbox', '/v1/grns'],
+      ['grnitems', 'Qty verification', 'bin', '/v1/grn-items'],
+      ['batches', 'Batches', 'bottle', '/v1/rm-batches'], ['containers', 'Containers', 'drum', '/v1/grn-containers'],
+      ['queue', 'Test queue', 'flask', '/v1/qc-inspections'] ] },
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
@@ -201,7 +217,7 @@
       // Owner ruling 2026-09-28: COA data per finished batch (results, photos, release → ALEMBIC).
       ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'award', '/v1/batch-coas'] ] },
     production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
-      ['bridgereq', 'ALEMBIC requirements', 'link', '/v1/bridge/requirements'],
+      ['bridgereq', 'Sales requirements', 'link', '/v1/bridge/requirements'],
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'listcheck', '/v1/production-plan-items'],
       ['runs', 'Production orders', 'layers', '/v1/production-orders', true], ['orderitems', 'Order ingredients', 'list', '/v1/production-order-ingredients', true],
       ['picks', 'Pick lists', 'clipList', '/v1/material-pick-lists'], ['pickitems', 'Pick list items', 'listnum', '/v1/material-pick-list-items'],
@@ -592,7 +608,7 @@
    * configured, or this sign-in is not linked to an ALEMBIC account, the panel opens in the
    * "Aria answers in ALEMBIC" state it has always had: that one plain answer, shown as a refusal
    * (never as a fact), with nothing invented locally. */
-  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var ARIA_HERE = 'I answer from the sales system\'s records, and this console has no connection to them yet. Ask me in the sales admin console.';
   var _aria = null, _ariaMode = null, _ariaMsg = '';
   function ariaView() {
     var R = ROLES[st.role]; var it = R && R.nav.filter(function (n) { return n[0] === st.nav; })[0];
@@ -645,7 +661,7 @@
     var msg = _ariaMsg;
     _aria = AlembicAria.mount({
       context: ariaContext(),
-      prompts: ['Where can I ask Aria?'],
+      prompts: ['Where can I ask Ruh?'],
       ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: msg, cited: [] }); },
       parent: document.body,
     });
@@ -660,7 +676,7 @@
   function toggleAria() {
     if (_aria && _aria.isOpen()) { _aria.close(); return; }
     Promise.all([loadAria(), ariaStatus()]).then(function (v) { var a = ariaPanel(v[1]); a.setContext(ariaContext()); a.open(); })
-      .catch(function () { toast('Aria didn\'t load. Try again.', 'bad'); });
+      .catch(function () { toast('Ruh didn\'t load. Try again.', 'bad'); });
   }
 
   /* ---------------- render: shell + data view ---------------- */
@@ -734,7 +750,7 @@
           icon(n[2], 17) + '<span class="kb">' + n[1] + '<span class="kc"> · ⌘' + (i + 1) + '</span></span></button>';
       }).join('') +
       '<span class="sep"></span>' +
-      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Aria">' + CI.cmd + '<span class="kb">Ask Aria<span class="kc"> · ⌘K</span></span></button>';
+      '<button type="button" class="qb hot" id="ra-aria-dock" aria-label="Ask Ruh">' + CI.cmd + '<span class="kb">Ask Ruh<span class="kc"> · ⌘K</span></span></button>';
   }
   // Pin / unpin from the sections sheet: repaint the rail rows and the dock only (the page stays).
   function togglePin(k) {
@@ -791,8 +807,9 @@
           '<h1 id="ra-title">' + R.label + '</h1>' +
           '<span style="flex:1"></span>' +
           switcher +
+          vaultLaunchHtml() +
           '<span id="ra-ruh-slot"></span>' +
-          '<button type="button" class="gbtn acc" id="ra-aria" aria-label="Ask Aria">' + CI.spark + ' Ask Aria</button>' +
+          '<button type="button" class="gbtn acc" id="ra-aria" aria-label="Ask Ruh">' + CI.spark + ' Ask Ruh</button>' +
           '<div style="position:relative">' +
             '<button type="button" id="ra-bell" class="gbtn" title="Alerts" aria-label="Alerts">' + CI.bell +
               '<span id="ra-bell-badge" class="t-num" style="display:none"></span></button>' +
@@ -2109,7 +2126,7 @@
     // and always requires a reason, audited server-side (origin=MANUAL_CONTINUITY + a bridge
     // event toward ALEMBIC — see OrdersService).
     '/v1/sales-orders': { title: 'New sales order (entered by hand)', perm: 'sales:manual_continuity:write', itemMin: 1,
-      header: [ { n: 'soNumber', l: 'SO number (optional: numbered for you if left empty)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'reason', l: 'Why is this order entered here instead of coming from ALEMBIC? (recorded)', t: 'text', req: true } ],
+      header: [ { n: 'soNumber', l: 'SO number (optional: numbered for you if left empty)', t: 'text' }, { n: 'customerId', l: 'Customer', t: 'select', fk: '/v1/customers', fv: 'customerId', fl: 'customerName', req: true }, { n: 'orderDate', l: 'Order date', t: 'date' }, { n: 'reason', l: 'Why is this order entered here instead of coming from the sales system? (recorded)', t: 'text', req: true } ],
       item: [ { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true }, { n: 'orderedQty', l: 'Qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'rate', l: 'Rate', t: 'number' } ] },
     '/v1/grns': { title: 'New goods receipt (GRN)', perm: 'inventory:grn_master:write', itemMin: 1,
       header: [ { n: 'grnNumber', l: 'GRN number (optional: numbered for you if left empty)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
@@ -2610,8 +2627,29 @@
         '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aroma Chem production.</p>' +
-        '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Sign in via ALEMBIC &rarr;</a>' +
+        '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Raw Aromachem sign-in &rarr;</a>' +
         '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in is not switched on here yet. Ask your administrator.') + '</div>' +
+      '</div></div>';
+  }
+
+  /* Formulators and approvers: the staff strip only offers "Open Vault" to ALEMBIC admins, so the
+   * Factory offers it too. Goes through the same ?open=vault step-up as the Vault's own sign-in card,
+   * so it needs no Vault address here and grants nothing: ALEMBIC still decides, then the Vault does.
+   * Shown on the Vault's own test (any formula: permission, web-vault/vault.js tryConsumeAssertion). */
+  function vaultLaunchHtml() {
+    var url = alembicSignInUrl('vault');
+    var can = ((session && session.perms) || []).some(function (p) { return p.indexOf('formula:') === 0; });
+    return url && can ? '<a class="gbtn" id="ra-open-vault" href="' + url + '" target="_blank" rel="noopener">Open Vault</a>' : '';
+  }
+  // A Vault-only account has no Factory workspace; say where its work is rather than a failed sign-in.
+  function showVaultOnly() {
+    var url = alembicSignInUrl('vault');
+    $('app').className = '';
+    $('app').innerHTML =
+      '<div class="login-wrap"><div class="login-card">' +
+        '<h1 class="mark">Vault</h1>' +
+        '<p class="sub">Your role works in the Vault, not the Factory.</p>' +
+        (url ? '<a id="lb" href="' + url + '" class="btn p">Open Vault &rarr;</a>' : '<div class="err" role="alert">Sign-in is not switched on here yet. Ask your administrator.</div>') +
       '</div></div>';
   }
 
@@ -2630,6 +2668,7 @@
     var payload = {}; try { payload = JSON.parse(atob(d.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))); } catch (x) {}
     var seen = {}, avail = (payload.roles || []).map(roleView).filter(function (r) { return ROLES[r] && !seen[r] && (seen[r] = 1); });
     var v = avail[0] || null;
+    if (!ROLES[v] && (payload.roles || []).some(function (r) { return r === 'formulator' || r === 'vault_approver'; })) { showVaultOnly(); return true; }
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; st.ref = '';

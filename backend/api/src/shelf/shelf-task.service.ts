@@ -293,7 +293,7 @@ export class ShelfTaskService {
     if (!built.ok) {
       await recordProduceAlert(tx, {
         kind: 'fg_received_not_sent', severity: 'med',
-        title: `Put away, but ALEMBIC was not told: batch ${fg.batchNumber ?? fg.id}`,
+        title: `Put away, but the sales system was not told: batch ${fg.batchNumber ?? fg.id}`,
         detail: `fg.batch.received needs ${built.problems.join('; ')}.`,
         roles: ['warehouse', 'production', 'packaging'], refType: 'fg_batch', refId: fg.id,
         dedupeKey: `fg_received_not_sent:${fg.id}:${bin.binId}`,
@@ -324,7 +324,7 @@ export class ShelfTaskService {
                priority_rank, order_ref, lifecycle_status
           from bridge.production_requirement where alembic_requirement_id = ${alembicRequirementId}::uuid for update
       `)) as unknown as Array<{ id: string; mapped_sku: string; qty: number; uom: string; qty_kg: number | null; priority_rank: number | null; order_ref: string; lifecycle_status: string }>)[0];
-      if (!req) throw new NotFoundException(`No ALEMBIC requirement ${alembicRequirementId}.`);
+      if (!req) throw new NotFoundException(`No sales requirement ${alembicRequirementId}.`);
       if (req.lifecycle_status !== 'ACCEPTED') throw new ConflictException(`This requirement is ${req.lifecycle_status}; nothing to pick.`);
       const needKg = req.qty_kg ?? (bridgeContracts.kgPerUnit(req.uom) !== null ? req.qty * bridgeContracts.kgPerUnit(req.uom)! : null);
       if (needKg === null) throw new ConflictException('The requirement quantity is not in a unit of mass, so a pick cannot be sized.');

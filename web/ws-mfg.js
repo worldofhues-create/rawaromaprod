@@ -62,7 +62,7 @@
   // on the row + a bridge.outbox event toward ALEMBIC — see OrdersService.confirmSalesOrder).
   function confirmSalesOrderManual(row) {
     askForm({ title: 'Confirm ' + (row.soNumber || 'this sales order') + ' by hand', submit: 'Confirm the order',
-      intro: 'Orders normally come from ALEMBIC. Confirming one here is recorded with your reason, and ALEMBIC is told.',
+      intro: 'Orders normally come from the sales system. Confirming one here is recorded with your reason, and the sales system is told.',
       fields: [{ n: 'reason', l: 'Why are you confirming it here?', t: 'textarea', req: true }],
       onSubmit: function (v, fail, close) {
         tunnel('/v1/sales-orders/' + row.salesOrderId + '/confirm', { method: 'POST', body: { reason: v.reason } }).then(function (res) {
@@ -366,10 +366,10 @@
   }
 
   function releaseCoa(row) {
-    raConfirm('Release batch ' + (row.batchNumber || '') + '? Its certificate-of-analysis data goes to ALEMBIC and can no longer be changed.', function () {
+    raConfirm('Release batch ' + (row.batchNumber || '') + '? Its certificate-of-analysis data goes to the sales system and can no longer be changed.', function () {
       tunnel('/v1/batch-coas/' + row.batchCoaId + '/release', { method: 'POST', body: {} }).then(function (res) {
         if (res.status >= 400) { toast(coaErr(res, 'Release failed. Try again.'), 'bad'); return; }
-        toast('Released — COA data sent to ALEMBIC', 'good'); loadView();
+        toast('Released — COA data sent to the sales system', 'good'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
     }, { title: 'Release batch', confirmLabel: 'Release', tone: 'good' });
   }

@@ -282,7 +282,7 @@
     try { if (/^#\/[a-z-]+/.test(location.hash)) localStorage.setItem(AFTER_SIGNIN, JSON.stringify({ h: location.hash, t: Date.now() })); } catch (e) {}
     root.innerHTML = '';
     var err = h('div', { class: 'err', role: 'alert' });
-    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('platform') || '#' }, ['Sign in via ALEMBIC →']);
+    var goBtn = h('a', { class: 'btn p', href: alembicSignInUrl('platform') || '#' }, ['Raw Aromachem sign-in →']);
     if (!ALEMBIC_CONSOLE_URL) {
       goBtn.setAttribute('aria-disabled', 'true');
       err.textContent = 'Sign-in is not switched on here yet. Ask your administrator.';
@@ -303,7 +303,7 @@
     { id: 'providers', label: 'Connectors', icon: 'plug', need: 'platformops:console:read' },
     // Lane produce (owner requirement 2026-09-29): the ALEMBIC bridge's health and counters, and
     // the pick-to-light connector (device-agnostic HTTP + HMAC, or the built-in simulator).
-    { id: 'bridge', label: 'ALEMBIC link', icon: 'link', need: 'platformops:console:read' },
+    { id: 'bridge', label: 'Sales system link', icon: 'link', need: 'platformops:console:read' },
     { id: 'picklight', label: 'Pick-to-light', icon: 'bulb', need: 'platform:flag:write' },
     { id: 'deploy', label: 'Version', icon: 'tag', need: 'platformops:console:read' },
     { id: 'support', label: 'Sign-in history', icon: 'login' },
@@ -328,7 +328,7 @@
     flags: 'Switch features on, down to a limited mode, or off, for testing or for everyone.',
     tenants: 'The companies set up on this system.',
     providers: 'Outside services this system is connected to, and whether each is set up.',
-    bridge: 'The link with ALEMBIC: what came in, what went out, and anything held back.',
+    bridge: 'The link with the sales system: what came in, what went out, and anything held back.',
     picklight: 'Lights on the shelves that show staff which bin to use.',
     deploy: 'Which version of the system is running.',
     support: 'Every sign-in attempt, newest first, including refused ones.',
@@ -381,7 +381,7 @@
    * with that person's own permissions (same reasoning as web/shell.js's Ask Aria block).
    * When GET /v1/aria/status says the bridge is not configured or this sign-in is not linked, the
    * panel keeps its honest "Aria answers in ALEMBIC" state and invents nothing. */
-  var ARIA_HERE = 'I answer from ALEMBIC\'s records, and this console has no connection to them yet. Ask me in ALEMBIC Admin.';
+  var ARIA_HERE = 'I answer from the sales system\'s records, and this console has no connection to them yet. Ask me in the sales admin console.';
   var ariaApi = null, ariaLoading = null, ariaCtx = 'Platform', ariaMode = null, ariaMsg = '';
   function ariaView() { var i = ariaCtx.indexOf(' · '); return i < 0 ? 'Platform' : ariaCtx.slice(i + 3); }
   function loadAria() {
@@ -419,7 +419,7 @@
     if (ariaApi) ariaApi.destroy();
     ariaMode = mode; ariaMsg = s.live ? '' : s.message;
     if (s.live) { ariaApi = AlembicAria.mount({ context: ariaCtx, parent: document.body, ask: ariaAsk }); return; }
-    var msg = ariaMsg, panel = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Aria?'], parent: document.body,
+    var msg = ariaMsg, panel = AlembicAria.mount({ context: ariaCtx, prompts: ['Where can I ask Ruh?'], parent: document.body,
       ask: function () { return Promise.resolve({ ok: true, via: 'refusal', text: msg, cited: [] }); } });
     ariaApi = panel;
     var fix = function () { var p = panel.element.querySelector('.aria-empty > p'); if (p && p.textContent !== msg) p.textContent = msg; };
@@ -430,7 +430,7 @@
     if (ariaApi && ariaApi.isOpen()) { ariaApi.close(); return; }
     Promise.all([loadAria(), ariaStatus()]).then(function (v) {
       ariaMount(v[1]); ariaApi.setContext(ariaCtx); ariaApi.open();
-    }).catch(function () { toast('Aria didn\'t load. Try again.', true); });
+    }).catch(function () { toast('Ruh didn\'t load. Try again.', true); });
   }
   // QuickDock keys: ⌘K Ask Aria (as ALEMBIC Admin/Agent), ⌘\ rail, ⌘1–8 the dock's destinations,
   // ⌘/ the go-to palette; Escape closes.
@@ -519,7 +519,7 @@
       h('span', { style: 'flex:1' }),
       // Always-on Ruh: a quiet badge in the top bar (never a dock entry); the panel opens from it.
       window.RaRuh ? RaRuh.badge('gbtn') : null,
-      h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.spark), ' Ask Aria']),
+      h('button', { type: 'button', class: 'gbtn acc', 'aria-label': 'Ask Ruh', onclick: toggleAria }, [raw(CI.spark), ' Ask Ruh']),
     ]);
     var view = h('section', { class: 'pageview' }, [HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
     var main = h('div', { class: 'main' }, [ bar, h('div', { class: 'content' }, [view])]);
@@ -533,7 +533,7 @@
         return h('button', { type: 'button', class: 'qb' + (on ? ' on' : '') + (i < RaDock.PHONE ? ' hot' : ''), 'data-dock': n.id, 'aria-label': n.label, 'aria-pressed': String(on), 'aria-current': on ? 'page' : null, onclick: function () { go(n.id); } },
           [icon(ICONS[n.icon], 17), h('span', { class: 'kb' }, [n.label, h('span', { class: 'kc' }, [' · ⌘' + (i + 1)])])]);
       }))
-      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Aria', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Aria', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
+      .concat([h('span', { class: 'sep' }), h('button', { type: 'button', class: 'qb hot', 'aria-label': 'Ask Ruh', onclick: toggleAria }, [raw(CI.cmd), h('span', { class: 'kb' }, ['Ask Ruh', h('span', { class: 'kc' }, [' · ⌘K'])])])]));
     var handle = h('button', { type: 'button', class: 'dock-handle', 'aria-label': 'Show quick access dock', onclick: function () { document.body.classList.remove('dock-away'); } }, [h('i')]);
     root.appendChild(h('div', { class: 'app' }, [rail, h('div', { class: 'rail-scrim', onclick: function () { setRail(false); } }), main, handle, dock]));
     applyRail();
@@ -550,7 +550,7 @@
 
   // Service names as a person says them.
   var DEP = { db: 'Database', database: 'Database', postgres: 'Database', redis: 'Cache', cache: 'Cache', vault: 'Formula vault', formulaVault: 'Formula vault',
-    formula_db: 'Formula vault', bridge: 'ALEMBIC link', email: 'Email', mail: 'Email', kms: 'Key service', storage: 'File storage' };
+    formula_db: 'Formula vault', bridge: 'Sales system link', email: 'Email', mail: 'Email', kms: 'Key service', storage: 'File storage' };
   function depName(k) { if (DEP[k]) return DEP[k]; var w = String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase(); return w.charAt(0).toUpperCase() + w.slice(1); }
   function words(code) { var w = String(code == null ? '' : code).replace(/[._-]+/g, ' ').toLowerCase().trim(); return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }
   /* ── environment & diagnostics (real: GET /health + GET /v1/platform/health) ─────────────── */
@@ -759,7 +759,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('bridge', content);
     if (!hasPerm('platformops:console:read')) {
-      content.innerHTML = ''; content.appendChild(notBuilt('ALEMBIC link unavailable', NO_ACCESS));
+      content.innerHTML = ''; content.appendChild(notBuilt('Sales system link unavailable', NO_ACCESS));
       return;
     }
     try {
@@ -768,10 +768,10 @@
       var q = b.queue || {};
       var pl = b.pickLight;
       var grid = h('div', { class: 'health-grid' }, [
-        tile('Link to ALEMBIC', b.connector.configured ? (b.connector.enabled ? 'Connected' : 'Set up, switched off') : 'Not set up', b.connector.configured && b.connector.enabled ? 'g' : 'r'),
+        tile('Link to the sales system', b.connector.configured ? (b.connector.enabled ? 'Connected' : 'Set up, switched off') : 'Not set up', b.connector.configured && b.connector.enabled ? 'g' : 'r'),
         tile('Received in 24 h', b.inbound.last24h + ' (' + b.inbound.applied24h + ' used)'),
         tile('Received, held back', b.inbound.parked, b.inbound.parked ? 'a' : 'g'),
-        tile('Last from ALEMBIC', fmtDt(b.inbound.lastAt)),
+        tile('Last from the sales system', fmtDt(b.inbound.lastAt)),
         tile('Waiting to send', b.outbound.waiting, b.outbound.waiting > 20 ? 'a' : 'g'),
         tile('Not sent, held back', b.outbound.parked, b.outbound.parked ? 'r' : 'g'),
         tile('Delivered in 24 h', b.outbound.delivered24h),
@@ -790,15 +790,64 @@
         .concat((b.inbound.parkedByReason || []).map(function (r) { return { reason: 'Received, not used: ' + words(r.reason), count: r.count }; }));
       var reqs = (b.requirements || []).map(function (r) { return h('span', { class: 'chip n', style: 'margin-right:6px' }, [words(r.status) + ': ' + r.count]); });
       content.innerHTML = '';
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC link']), h('span', { class: 'n' }, ['As of ' + fmtDt(b.at)])]), grid]));
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['ALEMBIC orders by stage'])]), h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm)' }, reqs.length ? reqs : ['No orders from ALEMBIC yet.'])]));
-      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Sent to ALEMBIC in the last 24 hours'])]),
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Sales system link']), h('span', { class: 'n' }, ['As of ' + fmtDt(b.at)])]), grid]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Sales orders by stage'])]), h('div', { style: 'padding:0 var(--pad-card) var(--pad-card-btm)' }, reqs.length ? reqs : ['No orders from the sales system yet.'])]));
+      content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Sent to the sales system in the last 24 hours'])]),
         mix.length ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Message']), h('th', {}, ['Sent']), h('th', {}, ['Delivered'])])]), h('tbody', {}, mix)]) : h('div', { class: 'empty' }, [h('h3', {}, ['Nothing sent in the last 24 hours'])])]));
       if (reasons.length) content.appendChild(h('div', { class: 'card' }, [h('div', { class: 'card-hd' }, [h('h2', {}, ['Held back, and why'])]),
         h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['Reason']), h('th', {}, ['How many'])])]), h('tbody', {}, reasons.map(function (r) { return h('tr', {}, [h('td', { 'data-label': 'Reason' }, [String(r.reason)]), h('td', { 'data-label': 'How many' }, [String(r.count)])]); }))])]));
+      if (hasPerm('platform:flag:write')) content.appendChild(await heldBackCard());
     } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('ALEMBIC link didn\'t load', e.message));
+      content.innerHTML = ''; content.appendChild(notBuilt('Sales system link didn\'t load', e.message));
     }
+  }
+
+  /* Updates to the sales system that stopped: replay or discard, each behind a confirm. The server
+   * guards and audits both (bridge/outbox-admin.service.ts: a repeat is 409, never a second effect).
+   * Only this direction has routes: "Received, held back" stays a count, with nothing here to act on. */
+  async function heldBackCard() {
+    var r = await api('/v1/bridge/outbox/parked');
+    var items = (r && r.items) || [];
+    var head = h('div', { class: 'card-hd' }, [h('h2', {}, ['Updates not sent']), h('span', { class: 'n' }, [items.length + ' held back'])]);
+    if (!items.length) return h('div', { class: 'card' }, [head, h('div', { class: 'empty' }, [h('h3', {}, ['Nothing held back'])])]);
+    return h('div', { class: 'card' }, [head, h('table', {}, [
+      h('thead', {}, [h('tr', {}, [h('th', {}, ['Update']), h('th', {}, ['Why']), h('th', {}, ['Held since']), h('th', {}, ['Tries']), h('th', {}, [''])])]),
+      h('tbody', {}, items.map(function (it) {
+        return h('tr', {}, [
+          h('td', { 'data-label': 'Update' }, [words(it.type)]),
+          h('td', { 'data-label': 'Why' }, [words(it.parkedReason) + (it.lastHttpStatus ? ' (answer ' + it.lastHttpStatus + ')' : '')]),
+          h('td', { 'data-label': 'Held since' }, [fmtDt(it.parkedAt)]),
+          h('td', { 'data-label': 'Tries' }, [String(it.attempts)]),
+          h('td', { 'data-label': 'Action' }, [
+            h('button', { type: 'button', class: 'btn', onclick: function () { confirmHeldBack(it, 'replay'); } }, ['Replay']), ' ',
+            h('button', { type: 'button', class: 'btn', onclick: function () { confirmHeldBack(it, 'discard'); } }, ['Discard']),
+          ]),
+        ]);
+      })),
+    ])]);
+  }
+  function confirmHeldBack(it, action) {
+    var discard = action === 'discard';
+    openDialog(discard ? 'Discard this update?' : 'Replay this update?', function (body, close) {
+      body.appendChild(h('p', { style: 'margin-bottom:12px;color:var(--ink-2)' }, [words(it.type) + ': ' + (discard
+        ? 'the sales system will never hear of it. This cannot be undone.'
+        : 'it is sent again, followed by any updates held behind it. A copy that already arrived is ignored.')]));
+      var reason = discard ? h('textarea', { class: 'fld', id: 'held-reason', rows: '3', maxlength: '500', style: 'width:100%', 'aria-label': 'Reason for discarding (required)', placeholder: 'Reason (required)' }) : null;
+      if (reason) body.appendChild(reason);
+      var err = h('div', { class: 'err', role: 'alert' });
+      var go = h('button', { type: 'button', class: 'btn p', onclick: async function () {
+        var why = reason ? reason.value.trim() : '';
+        err.textContent = '';
+        if (discard && !why) { err.textContent = 'Give a reason. It is kept in the audit log.'; return; }
+        go.disabled = true;
+        try {
+          await api('/v1/bridge/outbox/' + encodeURIComponent(it.id) + '/' + action, discard ? { method: 'POST', body: { reason: why } } : { method: 'POST' });
+          close(); toast(discard ? 'Update discarded' : 'Update queued to send again'); screenBridge();
+        } catch (e) { err.textContent = e.message; go.disabled = false; }
+      } }, [discard ? 'Discard update' : 'Replay update']);
+      body.appendChild(err);
+      body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:14px' }, [go, h('button', { type: 'button', class: 'btn', onclick: close }, ['Cancel'])]));
+    });
   }
 
   var PL_WORD = { off: 'Off', simulator: 'On screen', http: 'Hardware controller' };

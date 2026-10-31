@@ -22,7 +22,7 @@ test('Factory: ws-formula-setup.js loads after ws-produce.js (before tutorial.js
   assert.ok(at('ws-formula-setup.js') < at('tutorial.js'));
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-formula-setup\.js'/);
-  assert.match(sw, /const CACHE = 'ra-shell-v100'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v101'/);
 });
 
 test('Factory: the screen — two-owner Ruh card, shells, guarded link; tunnel only; no formula name or content', () => {
@@ -45,7 +45,7 @@ test('Factory: the screen — two-owner Ruh card, shells, guarded link; tunnel o
   // explicit override (the server refuses it otherwise) and the confirmation says so.
   assert.match(js, /var kind = p\.catalogueKind \|\| 'blend';/);
   assert.match(js, /if \(body\.kind === 'single_chemical' && p\.catalogueKind === 'blend'\) body\.overrideCatalogue = true;/);
-  assert.match(js, /blends in the ALEMBIC catalogue — you are overriding it/);
+  assert.match(js, /blends in the sales catalogue — you are overriding it/);
   // Products table row action, gated by the new permission.
   assert.match(js, /ACTIONS\['\/v1\/products'\]/);
   assert.match(js, /perm: 'packaging:product_formula_link:write'/);

@@ -122,7 +122,7 @@ const PLATFORM_ROLES = ['owner', 'platform_super_admin'];
 const BLOCK_FIX: Record<string, { title: (n: number) => string; fix: string; roles: string[]; link: (id: string) => string }> = {
   UNKNOWN_SKU: {
     title: (n) => `${plural(n, 'order')} for a SKU the factory does not know`,
-    fix: 'Add the SKU on the Product SKUs screen and link it to its product; ALEMBIC\'s next update of the order is then accepted.',
+    fix: 'Add the SKU on the Product SKUs screen and link it to its product; the sales system\'s next update of the order is then accepted.',
     roles: ['production', 'packaging'], link: (id) => `#/go/skus|produce/${id}`,
   },
   NO_FORMULA_LINK: {
@@ -137,7 +137,7 @@ const BLOCK_FIX: Record<string, { title: (n: number) => string; fix: string; rol
   },
   QTY_NOT_IN_KG: {
     title: (n) => `${plural(n, 'order')} with a quantity that is not in kilograms`,
-    fix: 'Ask ALEMBIC to resend the requirement in kg (or a unit of mass), so the run size can be worked out.',
+    fix: 'Ask the sales system to resend the requirement in kg (or a unit of mass), so the run size can be worked out.',
     roles: ['production'], link: (id) => `#/go/produce/${id}`,
   },
 };
@@ -203,7 +203,7 @@ export function detectProduction(f: ProductionFacts, now: Date): InsightDraft[] 
         kind: 'production.late', severity: 'urgent', audienceRoles: OPS, console: 'factory',
         subject: { type: 'production_requirement', id: r.id, code: r.orderRef },
         title: `Overdue: ${r.orderRef} (${r.sku}) was needed by ${ymd(new Date(due))}`,
-        body: `It is ${Math.max(1, Math.round(hoursBetween(new Date(due), now) / 24))} day(s) late and ${stageWords(r.stage)}. Move it up or tell the customer's team in ALEMBIC.`,
+        body: `It is ${Math.max(1, Math.round(hoursBetween(new Date(due), now) / 24))} day(s) late and ${stageWords(r.stage)}. Move it up or tell the customer's team in the sales system.`,
         deepLink: `#/go/produce/${r.id}`, prediction: null, dedupeKey: `production.late:${r.id}`, mirror: true,
       });
       continue;
@@ -221,7 +221,7 @@ export function detectProduction(f: ProductionFacts, now: Date): InsightDraft[] 
       kind: 'production.late', severity: r.highValue ? 'urgent' : 'warn', audienceRoles: OPS, console: 'factory',
       subject: { type: 'production_requirement', id: r.id, code: r.orderRef },
       title: `${r.orderRef} (${r.sku}) is likely to be late: about ${ymd(finish)}, needed by ${ymd(new Date(due))}`,
-      body: `At the current pace it finishes about ${round1((finish.getTime() - due) / 86_400_000)} day(s) after it is needed. Plan it sooner, add a run, or agree a new date in ALEMBIC.`,
+      body: `At the current pace it finishes about ${round1((finish.getTime() - due) / 86_400_000)} day(s) after it is needed. Plan it sooner, add a run, or agree a new date in the sales system.`,
       deepLink: `#/go/produce/${r.id}`, prediction, dedupeKey: `production.late:${r.id}`, mirror: true,
     });
   }
@@ -265,7 +265,7 @@ export function detectQc(f: QcFacts, s: RuhSettings): InsightDraft[] {
       kind: 'qc.release_waiting', severity: oldest.ageHours >= relH * 3 ? 'urgent' : 'warn', audienceRoles: ['qc'], console: 'factory',
       subject: { type: 'batch_coa', id: oldest.batchCoaId, code: oldest.batchNumber },
       title: `${plural(waiting.length, 'batch', 'batches')} passed QC but ${waiting.length === 1 ? 'is' : 'are'} not released`,
-      body: `Oldest: ${oldest.batchNumber ?? 'unnumbered batch'}, passed ${Math.round(oldest.ageHours)} h ago. Release it on Batch COA so ALEMBIC hears and the warehouse can shelve it.`,
+      body: `Oldest: ${oldest.batchNumber ?? 'unnumbered batch'}, passed ${Math.round(oldest.ageHours)} h ago. Release it on Batch COA so the sales system hears and the warehouse can shelve it.`,
       deepLink: `#/go/coa/${oldest.batchCoaId}`, prediction: null, dedupeKey: 'qc.release_waiting', mirror: true,
     });
   }
@@ -304,7 +304,7 @@ export function detectQc(f: QcFacts, s: RuhSettings): InsightDraft[] {
 
 export function detectSetup(f: SetupFacts): InsightDraft[] {
   const steps: string[] = [];
-  if (f.catalogueProducts === 0) steps.push('send the catalogue from ALEMBIC');
+  if (f.catalogueProducts === 0) steps.push('send the catalogue from the sales system');
   if (f.packsNeedingDensity > 0) steps.push(`give a density for ${plural(f.packsNeedingDensity, 'product')} sold by volume`);
   if (f.qcSpecsMissing > 0) steps.push(`QC specs for ${plural(f.qcSpecsMissing, 'product')}`);
   if (f.bins === 0) steps.push(f.rackProposed ? 'approve the rack layout' : 'enter the racks');
@@ -467,8 +467,8 @@ export function detectBridge(f: BridgeFacts, s: RuhSettings, now: Date): Insight
   if (!f.connector.configured || !f.connector.enabled) {
     out.push({
       kind: 'bridge.not_connected', severity: 'warn', audienceRoles: PLATFORM_ROLES, console: 'platform', subject: { type: 'bridge' },
-      title: 'The factory is not connected to ALEMBIC',
-      body: 'Orders, QC releases and Ruh\'s notes cannot reach ALEMBIC until an administrator enters the bridge address and secret.',
+      title: 'The factory is not connected to the sales system',
+      body: 'Orders, QC releases and Ruh\'s notes cannot reach the sales system until an administrator enters the bridge address and secret.',
       deepLink: '#/bridge', prediction: null, dedupeKey: 'bridge.not_connected', mirror: false,
     });
   } else {
@@ -477,8 +477,8 @@ export function detectBridge(f: BridgeFacts, s: RuhSettings, now: Date): Insight
       out.push({
         kind: 'bridge.failing', severity: f.outbound.parked > 0 || oldestMin >= staleMin * 4 ? 'urgent' : 'warn', audienceRoles: PLATFORM_ROLES, console: 'platform',
         subject: { type: 'bridge' },
-        title: f.outbound.parked > 0 ? `${plural(f.outbound.parked, 'update')} to ALEMBIC stopped and need${f.outbound.parked === 1 ? 's' : ''} a decision` : 'Updates to ALEMBIC are not getting through',
-        body: `${plural(f.outbound.waiting, 'update')} waiting${oldestMin >= 1 ? `, the oldest for ${Math.round(oldestMin)} min` : ''}${f.outbound.parked ? `; ${f.outbound.parked} stopped` : ''}. Open ALEMBIC bridge to see why, then replay or discard.`,
+        title: f.outbound.parked > 0 ? `${plural(f.outbound.parked, 'update')} to the sales system stopped and need${f.outbound.parked === 1 ? 's' : ''} a decision` : 'Updates to the sales system are not getting through',
+        body: `${plural(f.outbound.waiting, 'update')} waiting${oldestMin >= 1 ? `, the oldest for ${Math.round(oldestMin)} min` : ''}${f.outbound.parked ? `; ${f.outbound.parked} stopped` : ''}. Open Sales system link to see why, then replay or discard.`,
         deepLink: '#/bridge', prediction: null, dedupeKey: 'bridge.failing', mirror: true,
       });
     }
@@ -488,8 +488,8 @@ export function detectBridge(f: BridgeFacts, s: RuhSettings, now: Date): Insight
     const h = hoursBetween(new Date(f.catalogue.lastSyncedAt), now);
     out.push({
       kind: 'bridge.catalogue_stale', severity: h >= staleH * 2 ? 'warn' : 'suggest', audienceRoles: PLATFORM_ROLES, console: 'platform', subject: { type: 'catalogue' },
-      title: `ALEMBIC's catalogue was last sent ${Math.round(h / 24)} day(s) ago`,
-      body: 'New products, pack sizes and stock in ALEMBIC have not reached the factory since. Send the catalogue again from ALEMBIC Admin.',
+      title: `The sales system's catalogue was last sent ${Math.round(h / 24)} day(s) ago`,
+      body: 'New products, pack sizes and stock in the sales system have not reached the factory since. Send the catalogue again from the sales admin console.',
       deepLink: '#/bridge', prediction: null, dedupeKey: 'bridge.catalogue_stale', mirror: true,
     });
   }
@@ -497,8 +497,8 @@ export function detectBridge(f: BridgeFacts, s: RuhSettings, now: Date): Insight
   if (f.ruhQueue.parked > 0 || (f.ruhQueue.waiting > 0 && ruhMin >= staleMin)) {
     out.push({
       kind: 'ruh.signals_stuck', severity: 'warn', audienceRoles: PLATFORM_ROLES, console: 'platform', subject: { type: 'bridge' },
-      title: 'Ruh\'s notes to ALEMBIC are queued',
-      body: `${plural(f.ruhQueue.waiting, 'note')} waiting${ruhMin >= 1 ? ` (oldest ${Math.round(ruhMin)} min)` : ''}${f.ruhQueue.parked ? `, ${f.ruhQueue.parked} refused by ALEMBIC` : ''}. They are kept and sent as soon as ALEMBIC answers; admins in ALEMBIC will not see them until then.`,
+      title: 'Ruh\'s notes to the sales system are queued',
+      body: `${plural(f.ruhQueue.waiting, 'note')} waiting${ruhMin >= 1 ? ` (oldest ${Math.round(ruhMin)} min)` : ''}${f.ruhQueue.parked ? `, ${f.ruhQueue.parked} refused by the sales system` : ''}. They are kept and sent as soon as the sales system answers; admins in the sales system will not see them until then.`,
       deepLink: '#/bridge', prediction: null, dedupeKey: 'ruh.signals_stuck', mirror: false,
     });
   }

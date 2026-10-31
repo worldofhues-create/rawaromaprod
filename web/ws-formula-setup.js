@@ -123,7 +123,7 @@
     return stats + '<div class="card" data-testid="formula-products"><div class="card-hd"><h2>Products and their formulas</h2><span class="chip k">Formula codes only</span>' +
       '<span class="n">' + items.length + ' product(s)</span></div><div class="card-bd">' + note + draft +
       (rows ? '<div style="overflow-x:auto"><table><thead><tr><th></th><th>Product</th><th>SKUs</th><th>State</th><th>Formula</th><th>Kind</th><th>Own material</th><th class="r">Actions</th></tr></thead><tbody>' + rows + '</tbody></table></div>'
-        : '<div class="empty"><h3>No products yet</h3><p>Products arrive from the ALEMBIC catalogue (or are created under Products).</p></div>') + '</div></div>';
+        : '<div class="empty"><h3>No products yet</h3><p>Products arrive from the sales catalogue (or are created under Products).</p></div>') + '</div></div>';
   }
 
   function wire(V) {
@@ -170,7 +170,7 @@
     var singles = picks.filter(function (p) { return p.kind === 'single_chemical'; }).length;
     var overrides = picks.filter(function (p) { return p.overrideCatalogue; }).length;
     raConfirm('Ruh drafts ' + picks.length + ' formula(s): ' + singles + ' single chemical(s) sealed at 100 % and sent for approval, ' + (picks.length - singles) + ' blend(s) waiting for a recipe in the Vault.' +
-      (overrides ? ' ' + overrides + ' of the single chemicals are blends in the ALEMBIC catalogue — you are overriding it.' : ''), function () {
+      (overrides ? ' ' + overrides + ' of the single chemicals are blends in the sales catalogue — you are overriding it.' : ''), function () {
       btn.disabled = true; btn.textContent = 'Drafting…';
       tunnel('/v1/formula-setup/shells', { method: 'POST', body: { products: picks } }).then(function (res) {
         btn.disabled = false; btn.textContent = 'Draft formula shells';
