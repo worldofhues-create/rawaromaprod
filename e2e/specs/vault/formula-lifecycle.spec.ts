@@ -20,7 +20,10 @@ test('author creates, seals and submits; the author cannot approve; the approver
   const versionId = sql(`select formula_version_id from formula.formula_version where formula_id='${formulaId}'`, 'vault');
   await page.evaluate((id) => { location.hash = `#/version/${id}`; }, versionId);
   await page.getByRole('button', { name: 'Seal ingredient', exact: true }).click();
-  await page.getByPlaceholder('Search material').fill('CH-RM-1');
+  await page.getByPlaceholder('Search materials').fill('CH-RM-1');
+  const results = page.locator('select[size="5"]');
+  await expect(results.locator('option').first()).toBeAttached({ timeout: 30_000 }); // the catalogue reaches the Vault on a timer
+  await results.selectOption({ index: 0 });
   await page.getByLabel('Percentage').fill('100');
   await page.getByRole('button', { name: 'Seal', exact: true }).click();
   await expect.poll(() => sql(`select count(*) from formula.formula_ingredients where formula_version_id='${versionId}'`, 'vault')).toBe('1');

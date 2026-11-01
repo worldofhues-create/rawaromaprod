@@ -10,5 +10,5 @@ test('an approver reads the audit trail of a real formula change; filling is ref
   await vaultGo(page, '#/audit-access', 'Access audit');
   await page.evaluate(() => { location.hash = '#/audit-mfg'; });
   await expect(page.locator('#vault-title')).toHaveText('Production audit');
-  expect((await rp('filling', 'GET', '/v1/audit-events', undefined, { vault: true })).status).toBe(403);
+  expect((await rp('filling', 'GET', '/v1/formula-access-audit', undefined, { vault: true })).status).toBe(403);
 });

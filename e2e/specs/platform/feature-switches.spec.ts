@@ -1,16 +1,12 @@
-/* Platform: feature switches. */
+/* Platform: feature switches. PARTIAL, see e2e/FINDINGS.md F7: a fresh system has no switch registered and no
+ * screen or route registers one, so there is no row to change. This proves only the empty state and the refusal. */
 import { expect, test } from '@playwright/test';
 import { rp } from '../../harness/chain';
-import { platformGo, signIn, sql } from '../../harness/walk';
+import { platformGo, signIn } from '../../harness/walk';
 
-test('a switch is changed with a reason and the state reads back; filling is refused', async ({ page }, info) => {
+test('with no switch registered the screen says so; filling is refused a change', async ({ page }) => {
   await signIn(page, 'platform', 'platform_super_admin');
   await platformGo(page, '#/feature-switches', 'Feature switches');
-  const row = page.locator('tbody tr').first();
-  await expect(row).toBeVisible();
-  await row.getByRole('button').first().click();
-  await page.getByPlaceholder('Why this change?').fill(`browser suite walk ${info.project.name}`);
-  await page.locator('[data-tutorial-target="platform-flag-save"]').click();
-  await expect.poll(() => sql('select count(*) from platform.flag_states')).not.toBe('0');
+  await expect(page.getByRole('heading', { name: 'No switches yet' })).toBeVisible();
   expect((await rp('filling', 'PUT', '/v1/admin/flags/anything', { env: 'staging', state: 'on', reason: 'nope' })).status).toBe(403);
 });

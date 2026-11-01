@@ -1,0 +1,47 @@
+# Real-stack browser walks: Factory, Vault, Platform on PostGIS, chromium-1440 and chromium-375, one worker.
+# .gitignore lists .github/workflows/ because the usual push credential lacks workflow scope; this file is force-added.
+name: browser-suite
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  walks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_only_not_a_secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      BS_PG_EXTERNAL: '1'
+      BS_PG_PORT: '5432'
+      BS_PG_USER: postgres
+      BS_PG_PASSWORD: ci_only_not_a_secret
+      PGPASSWORD: ci_only_not_a_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm exec playwright install --with-deps chromium
+      - run: pnpm e2e:up
+      - run: pnpm e2e
+      - if: always()
+        run: pnpm e2e:down
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-suite-run
+          path: |
+            e2e/.run/test-results
+            e2e/.run/*.log
