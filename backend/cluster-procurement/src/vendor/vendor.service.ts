@@ -38,7 +38,7 @@ export class VendorService {
             // Vendor code auto-generates (VEN-YYYYMM-#####) when the form leaves it blank.
             vendorCode:
               (body.vendorCode && String(body.vendorCode).trim()) ||
-              'VEN-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5),
+              'VEN-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-9),
             vendorName: body.vendorName ?? null,
             addressId: body.addressId ?? null,
             baseCurrencyId: body.baseCurrencyId ?? null,

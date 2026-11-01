@@ -23,3 +23,4 @@ owner, because each is a role grant or a product decision rather than a defect w
 | F16 | FIXED | Trace named any lot of the material, not the lot issued to the order, so a recall could follow the wrong lot and supplier. Now joins the issue. |
 | F17 | FIXED | A material issue could name a lot of another material, and the list offered every lot. The debit and recall follow that lot. Now filtered by line and refused on the server. |
 | F18 | FIXED | Trace showed one lot per material, so a material issued from two lots hid one from a recall. |
+| F19 | FIXED | Auto numbers for gate entries, GRNs, POs, PRs and vendors ended in the last 5 digits of the millisecond clock, which repeats every 100 seconds, so a month's numbers collided at random and the save answered 409. Hit by chance in a walk. Now 9 digits, repeating every 11.5 days; the unique index still refuses a clash, so this is rarer, not impossible. |

@@ -198,7 +198,7 @@ export class PoService {
             .insert(purchaseOrder)
             .values({
               purchaseOrderId: poId,
-              poNumber: (body.poNumber && String(body.poNumber).trim()) || ('PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
+              poNumber: (body.poNumber && String(body.poNumber).trim()) || ('PO-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-9)),
               vendorId: vendorId ?? null,
               quotationId: body.quotationId ?? null,
               purchaseRequestId: body.purchaseRequestId ?? null,
@@ -755,7 +755,7 @@ export class PoService {
             .insert(purchaseOrder)
             .values({
               purchaseOrderId: newId,
-              poNumber: (original.poNumber || 'PO') + '-AMD-' + String(Date.now()).slice(-5),
+              poNumber: (original.poNumber || 'PO') + '-AMD-' + String(Date.now()).slice(-9),
               vendorId: original.vendorId,
               quotationId: original.quotationId,
               purchaseRequestId: original.purchaseRequestId,

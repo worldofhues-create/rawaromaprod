@@ -57,7 +57,7 @@ export class GrnService {
             .insert(grnMaster)
             .values({
               grnId,
-              grnNumber: (body.grnNumber && String(body.grnNumber).trim()) || ('GRN-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
+              grnNumber: (body.grnNumber && String(body.grnNumber).trim()) || ('GRN-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-9)),
               gateEntryId: body.gateEntryId ?? null,
               purchaseOrderId: body.purchaseOrderId ?? null,
               vendorId: body.vendorId ?? null,

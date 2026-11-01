@@ -37,7 +37,7 @@ export class GateService {
             .insert(gateEntryMaster)
             .values({
               gateEntryId,
-              gateEntryNumber: (body.gateEntryNumber && String(body.gateEntryNumber).trim()) || ('GE-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-5)),
+              gateEntryNumber: (body.gateEntryNumber && String(body.gateEntryNumber).trim()) || ('GE-' + new Date().toISOString().slice(0, 7).replace('-', '') + '-' + String(Date.now()).slice(-9)),
               vendorId: body.vendorId ?? null,
               purchaseOrderId: body.purchaseOrderId ?? null,
               locationId: body.locationId ?? null,
