@@ -229,6 +229,7 @@ test('queue stage: where a requirement stands, from its run, QC and shelf', () =
   const run = { ...base, production_order_id: 'o', run_status: 'PLANNING' };
   assert.equal(queueStage(run), 'PLANNED');
   assert.equal(queueStage({ ...run, run_status: 'INPROGRESS' }), 'IN_PRODUCTION');
+  assert.equal(queueStage({ ...run, mixing_started: true }), 'IN_PRODUCTION');
   assert.equal(queueStage({ ...run, oil_batch_id: 'b' }), 'QC_PENDING');
   assert.equal(queueStage({ ...run, oil_batch_id: 'b', coa_status: 'TESTED', coa_result: 'FAIL' }), 'QC_FAILED');
   assert.equal(queueStage({ ...run, oil_batch_id: 'b', coa_status: 'REJECTED', coa_result: 'PASS' }), 'QC_FAILED');

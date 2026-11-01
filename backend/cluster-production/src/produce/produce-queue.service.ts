@@ -120,6 +120,7 @@ interface RawQueueRow {
   produce_block_reason: string | null;
   production_order_id: string | null;
   run_status: string | null;
+  mixing_started?: boolean | null;
   run_qty: string | null;
   formula_version_id: string | null;
   batch_no: string | null;
@@ -144,7 +145,7 @@ export function requirementKg(qtyKg: string | null, qty: string, uom: string): n
 }
 
 /** Where a requirement stands on the floor. Pure — the queue test pins it. */
-export function queueStage(r: Pick<RawQueueRow, 'lifecycle_status' | 'produce_block_reason' | 'production_order_id' | 'run_status' | 'oil_batch_id' | 'coa_status' | 'coa_result' | 'fg_batch_id' | 'rack'>): QueueStage {
+export function queueStage(r: Pick<RawQueueRow, 'lifecycle_status' | 'produce_block_reason' | 'production_order_id' | 'run_status' | 'mixing_started' | 'oil_batch_id' | 'coa_status' | 'coa_result' | 'fg_batch_id' | 'rack'>): QueueStage {
   if (r.lifecycle_status === 'REJECTED_MAPPING') return 'UNKNOWN_SKU';
   if (!r.production_order_id) return r.produce_block_reason ? 'BLOCKED' : 'TO_PLAN';
   if (r.rack) return 'ON_SHELF';
@@ -153,6 +154,9 @@ export function queueStage(r: Pick<RawQueueRow, 'lifecycle_status' | 'produce_bl
   if (r.coa_status === 'RELEASED') return 'QC_RELEASED';
   if (r.coa_status === 'TESTED') return 'QC_PASSED';
   if (r.oil_batch_id) return 'QC_PENDING';
+  // Opening a mixing session does not move the run off PLANNING, so the status alone left this
+  // queue reading PLANNED while ALEMBIC, told ProductionStarted, read IN_PRODUCTION.
+  if (r.mixing_started) return 'IN_PRODUCTION';
   return String(r.run_status ?? '').toUpperCase() === 'PLANNING' ? 'PLANNED' : 'IN_PRODUCTION';
 }
 
@@ -175,6 +179,8 @@ export class ProduceQueueService {
              r.priority_rank, r.priority_reason, r.order_value_inr::text, r.lot_policy,
              r.lifecycle_status, r.produce_block_reason,
              r.production_order_id::text, o.status as run_status, o.order_qty::text as run_qty,
+             exists (select 1 from production.secure_mixing_session m
+                      where m.production_order_id = r.production_order_id and m.status <> 'ABORTED') as mixing_started,
              o.formula_version_id::text,
              ob.batch_number as batch_no, ob.oil_batch_id::text, c.status as coa_status, c.overall_result as coa_result,
              fg.finished_good_batch_id::text as fg_batch_id, loc.rack_code, loc.shelf_code, loc.bin_code
