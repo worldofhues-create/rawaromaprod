@@ -40,6 +40,9 @@ export function mintAssertion(email: string, target: ConsoleName, over: Record<s
 export async function signIn(page: Page, consoleName: ConsoleName, role: string) {
   // The "install this app" tip covers the dock until dismissed; a person dismisses it once.
   await page.addInitScript(() => { try { localStorage.setItem('rac.console.install.dismissed.v1', String(Date.now())); } catch { /* */ } });
+  // The first-visit tour offer can appear at any moment after load; a person says not now.
+  await page.addLocatorHandler(page.getByRole('button', { name: 'Maybe later', exact: true }), async (b) => { await b.click(); }).catch(() => {});
+  await page.goto('about:blank'); // a second sign-in in one walk: a hash-only change would not load the page
   await page.goto(`${URLS[consoleName]}/#assertion=${encodeURIComponent(mintAssertion(EMAIL[role]!, consoleName))}`);
 }
 
@@ -115,3 +118,41 @@ export async function expectRowPersisted(page: Page, text: string, dbCheck: () =
 
 /** A role without the permission: no create button on the screen it can open, or the screen says so. */
 export async function expectNoNewButton(page: Page) { await expect(page.locator('#ra-new')).toHaveCount(0); }
+
+/** Press a button on the row carrying `rowText`. */
+export async function rowAction(page: Page, rowText: string, label: string) {
+  const row = page.locator('#ra-results tbody tr').filter({ hasText: rowText }).first();
+  await expect(row, `row ${rowText}`).toBeVisible();
+  await row.getByRole('button', { name: label, exact: true }).click();
+}
+/** Search the list so the row is on screen whichever page it falls on. */
+export async function searchFor(page: Page, text: string) {
+  await page.locator('#ra-search').fill(text);
+  await expect(page.locator('#ra-results')).toContainText(text);
+}
+
+/** The document form (a header plus line items: PO, GRN, sales order). */
+export async function createDoc(page: Page, header: Record<string, Field>, line: Record<string, Field>) {
+  await page.locator('#ra-new').click();
+  const fill = async (attr: string, values: Record<string, Field>) => {
+    for (const [name, v] of Object.entries(values)) {
+      const el = page.locator(`#ra-cform [data-${attr}="${name}"]`).first();
+      if ((await el.evaluate((n) => n.tagName)) !== 'SELECT') { await el.fill(String(v)); continue; }
+      if (typeof v === 'object' && 'first' in v) await el.selectOption({ index: 1 });
+      else if (typeof v === 'object') await el.selectOption({ label: v.label });
+      else await el.selectOption(String(v));
+    }
+  };
+  await fill('h', header);
+  await fill('i', line);
+  await page.locator('#ra-msave').click();
+  await expect(page.locator('#ra-msave'), 'the form closes on success; a refusal stays on it').toHaveCount(0);
+}
+
+/** raConfirm's dialog: its confirm button repeats the action's name. */
+export async function confirmDialog(page: Page, label: string) {
+  await page.getByRole('button', { name: label, exact: true }).last().click();
+}
+
+/** The row whose record id this is (data-rid), for lists that show no code of their own. */
+export function rowById(page: Page, id: string) { return page.locator(`#ra-results tr[data-rid="${id}"]`); }

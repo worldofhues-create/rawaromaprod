@@ -15,6 +15,9 @@ export const PORTS = {
   factory: n('BS_FACTORY_PORT', 3310),
   platform: n('BS_PLATFORM_PORT', 3311),
   vault: n('BS_VAULT_PORT', 3312),
+  // Nothing listens here. ALEMBIC is not in this stack, so outbound bridge events really fail and park,
+  // which is what the monitor's replay and discard exist for.
+  deadPeer: n('BS_DEAD_PEER_PORT', 4319),
 };
 export const DB_HOST = process.env.BS_PG_HOST || '127.0.0.1';
 export const DB_USER = process.env.BS_PG_USER || process.env.USER || 'postgres';

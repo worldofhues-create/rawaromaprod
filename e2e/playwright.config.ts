@@ -14,7 +14,7 @@ export default defineConfig({
   timeout: 120_000,
   expect: { timeout: 15_000 },
   reporter: [['list'], ['json', { outputFile: './.run/results.json' }]],
-  use: { trace: 'retain-on-failure', screenshot: 'only-on-failure', actionTimeout: 15_000 },
+  use: { contextOptions: { reducedMotion: 'reduce' }, trace: 'retain-on-failure', screenshot: 'only-on-failure', actionTimeout: 15_000 },
   projects: [
     { name: 'chromium-1440', use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } } },
     { name: 'chromium-375', use: { ...devices['Desktop Chrome'], viewport: { width: 375, height: 800 }, hasTouch: true } },

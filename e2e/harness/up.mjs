@@ -20,6 +20,7 @@ const external = process.env.BS_PG_EXTERNAL === '1';
 const PGBIN = process.env.BS_PG_BIN || '/opt/homebrew/opt/postgresql@17/bin';
 const pgdata = join(RUN, 'pg');
 mkdirSync(RUN, { recursive: true });
+rmSync(join(RUN, 'chain.json'), { force: true }); // what the chain built belongs to the databases dropped below
 
 async function waitFor(url, label, seconds = 120) {
   for (let i = 0; i < seconds; i++) {
@@ -71,7 +72,7 @@ execFileSync('pnpm', ['db:seed'], { ...quiet, env: seedEnv });
 const secrets = { JWT_SECRET: b64(48), FORMULA_KEK: b64(32), BRIDGE_HMAC_KEK: b64(32), INTERNAL_BRIDGE_KEY: b64(32) };
 const common = {
   ...base, ...secrets, NODE_ENV: 'development', APP_ENV: 'dev', ALEMBIC_ASSERTION_VERIFY_KEY: verifyKey,
-  OUTBOX_POLL_MS: '1000', AUTOMATION_POLL_MS: '1000', CONSUMPTION_POLL_MS: '1000', VAULT_API_INTERNAL_URL: `http://127.0.0.1:${PORTS.vaultApi}`,
+  OUTBOX_POLL_MS: '1000', BRIDGE_WEBHOOK_ALLOWED_HOSTS: `127.0.0.1:${PORTS.deadPeer}`, AUTOMATION_POLL_MS: '1000', CONSUMPTION_POLL_MS: '1000', VAULT_API_INTERNAL_URL: `http://127.0.0.1:${PORTS.vaultApi}`, VAULT_CATALOGUE_SYNC_MS: '2000', VAULT_COMPLIANCE_SYNC_MS: '2000',
 };
 const apiDir = join(ROOT, 'backend/api');
 const reg = ['--import', '@swc-node/register/esm-register'];

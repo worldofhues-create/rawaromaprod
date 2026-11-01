@@ -1490,7 +1490,7 @@
       if (f.fk) { ctrl = '<select data-name="' + f.n + '" class="fld"><option value="">— none —</option></select>'; }
       else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" class="fld">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
       else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical"></textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '" class="fld">'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + ' class="fld">'; }
       return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l) + ctrl + '</label>';
     }).join('');
     var body = rows + '<div id="ra-eerr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
@@ -2083,7 +2083,7 @@
         var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') : '');
         ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' class="fld">' + opts + '</select>';
       } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
-      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' class="fld">'; }
+      else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' class="fld">'; }
       return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl + '</label>';
     }).join('');
     var body = rows + '<div id="ra-merr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
@@ -2145,7 +2145,7 @@
     function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option>' + v + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
     // Line-item fields have no label above them (they sit in a compact row), so carry the field
     // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
-    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" class="fld">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '" placeholder="' + escHtml(f.l) + '" class="fld">'; }
+    function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" class="fld">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + ' placeholder="' + escHtml(f.l) + '" class="fld">'; }
     var headerRows = cfg.header.map(function (f) { return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l, f.req) + ctrl(f, 'h') + '</label>'; }).join('');
     var body = headerRows +
       '<div style="display:flex;align-items:center;gap:10px;margin:6px 0 0"><div class="sect" style="flex:1">Line items</div><button type="button" id="ra-addline" class="btn sm">+ Add line</button></div>' +
