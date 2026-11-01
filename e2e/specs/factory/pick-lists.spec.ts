@@ -1,7 +1,7 @@
 /* Factory: pick lists and material issue. The pick list is generated on screen. Compounding issues it on screen,
  * naming lines and a lot: it is masked and never holds a material id. */
 import { expect, test } from '@playwright/test';
-import { formula, master, must, releasedStock } from '../../harness/chain';
+import { formula, master, must, releasedStock, rp } from '../../harness/chain';
 import { expectRefused, openNav, rowById, signIn, sql } from '../../harness/walk';
 
 test('production generates the pick list on screen; the issue reads back on Material issues, code names only', async ({ page }) => {
@@ -20,6 +20,15 @@ test('production generates the pick list on screen; the issue reads back on Mate
   await openNav(page, 'Pick lists');
   await rowById(page, pl).getByRole('button', { name: 'Issue materials', exact: true }).click();
   await expect(page.locator('#ra-issue')).not.toContainText('Chain raw material');
+  // Another material's lot is on hand but not offered; the server refuses it if sent anyway.
+  const other = (await must('owner', 'POST', '/v1/materials', { materialCode: `OTHER-${invBatch.slice(0, 8)}`, materialName: 'Other material', uomId: kg })).materialId;
+  const otherLot = (await must('warehouse', 'POST', '/v1/inventory-batches', { materialId: other, quantityOnHand: 5, uomId: kg })).inventoryBatchId;
+  const wrong = await rp('compounding', 'POST', '/v1/material-issues', { productionOrderId: order, materialPickListId: pl, items: [{ materialId: mat, inventoryBatchId: otherLot }] });
+  expect(wrong.status).toBe(400);
+  await page.reload();
+  await expect(page.locator('#ra-title')).toHaveText('Pick lists');
+  await rowById(page, pl).getByRole('button', { name: 'Issue materials', exact: true }).click();
+  await expect(page.locator(`#ra-issue option[value="${otherLot}"]`)).toHaveCount(0);
   await page.locator('#ra-issue select').first().selectOption(invBatch);
   await page.locator('#ra-issue-save').click();
   await expect(page.locator('#ra-issue-save')).toHaveCount(0);

@@ -14,7 +14,7 @@
  * material/inventory/uom/order/pick-list refs are id-only soft refs (plain uuid, no FK here).
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, lt } from 'drizzle-orm';
+import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { VAULT_PORT, type CodedInstruction, type VaultPort } from '@ra/cluster-formula';
@@ -263,6 +263,19 @@ export class PickingService {
    * material's production_order_ingredients.issued_qty to true, and emits
    * production.materials.issued. All in one transaction.
    */
+  /** The lots a pick list line can be issued from: its own material's stock on hand. By line, because the
+   *  floor is masked and never holds a material id; the answer carries lot numbers only. */
+  async lotsForLine(materialPickListItemId: string): Promise<Array<{ inventoryBatchId: string; batchNumber: string | null; available: string }>> {
+    const rows = (await this.db.execute(sql`
+      select ib.inventory_batch_id::text as id, b.batch_number, ib.quantity_on_hand::text as on_hand
+        from production.material_pick_list_items l
+        join inventory.inventory_batch ib on ib.material_id = l.material_id
+        left join inventory.rm_batch_master b on b.rm_batch_id = ib.rm_batch_id
+       where l.material_pick_list_item_id = ${materialPickListItemId}::uuid and ib.quantity_on_hand > 0
+       order by b.batch_number`)) as unknown as Array<{ id: string; batch_number: string | null; on_hand: string }>;
+    return rows.map((r) => ({ inventoryBatchId: r.id, batchNumber: r.batch_number, available: r.on_hand }));
+  }
+
   async issueMaterials(body: CreateIssue, principal: AuthPrincipal) {
     // RP-PROD-004: refuse an issue with no pick list. Production cannot debit
     // inventory.inventory_batch itself (cluster boundary) — ConsumptionService (backend/api/src/
@@ -307,6 +320,14 @@ export class PickingService {
               eq(materialPickListItems.materialPickListId, body.materialPickListId))).limit(1))[0];
           if (!line?.materialId) throw new BadRequestException('That line is not on this pick list.');
           materialId = line.materialId;
+        }
+        // The debit and the recall both follow this lot, so it must be a lot of this line's material.
+        if (item.inventoryBatchId) {
+          const lot = ((await tx.execute(sql`select material_id::text as material_id from inventory.inventory_batch
+            where inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as Array<{ material_id: string | null }>)[0];
+          if (!lot || lot.material_id !== materialId) {
+            throw new BadRequestException('That lot is not a lot of this material. Choose a lot of the material on the line.');
+          }
         }
         await tx.insert(materialIssueItem).values({
           materialIssueItemId: uuidv7(),

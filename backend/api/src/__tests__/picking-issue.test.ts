@@ -47,6 +47,9 @@ async function freshOrderWithPickList() {
   await sql`insert into production.production_order (production_order_id, order_qty, status)
     values (${orderId}, 10, 'INPROGRESS')`;
 
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
+    values (${inventoryBatchId}, ${materialId}, 10, 'ACTIVE')`;
+
   const pickListId = crypto.randomUUID();
   await sql`insert into production.material_pick_list (material_pick_list_id, production_order_id, status)
     values (${pickListId}, ${orderId}, 'ACTIVE')`;
@@ -122,4 +125,29 @@ test('resolveManufacturingInstruction: a fully coded instruction is returned unc
   await testClient()`insert into production.production_order (production_order_id, formula_version_id, order_qty, status)
     values (${orderId}, ${crypto.randomUUID()}, 1, 'INPROGRESS')`;
   assert.deepEqual(await coded.resolveManufacturingInstruction(orderId, principal()), lines);
+});
+
+test('issueMaterials: refuses a lot of another material, and a lot that does not exist; nothing is recorded', async () => {
+  const { orderId, materialId, pickListId } = await freshOrderWithPickList();
+  const sql = testClient();
+  const otherLot = crypto.randomUUID();
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
+    values (${otherLot}, ${crypto.randomUUID()}, 10, 'ACTIVE')`;
+  for (const lot of [otherLot, crypto.randomUUID()]) {
+    await assert.rejects(
+      () => svc.issueMaterials({ productionOrderId: orderId, materialPickListId: pickListId, items: [{ materialId, inventoryBatchId: lot }] } as never, principal()),
+      /not a lot of this material/,
+    );
+  }
+  assert.equal((await sql`select count(*)::int as n from production.material_issue where production_order_id = ${orderId}`)[0]!.n, 0);
+});
+
+test('lotsForLine: only the line\'s own material with stock on hand', async () => {
+  const { materialId, inventoryBatchId, pickListId } = await freshOrderWithPickList();
+  const sql = testClient();
+  const line = crypto.randomUUID(), empty = crypto.randomUUID();
+  await sql`insert into production.material_pick_list_items (material_pick_list_item_id, material_pick_list_id, material_id, status) values (${line}, ${pickListId}, ${materialId}, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status) values (${empty}, ${materialId}, 0, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status) values (${crypto.randomUUID()}, ${crypto.randomUUID()}, 10, 'ACTIVE')`;
+  assert.deepEqual((await svc.lotsForLine(line)).map((l) => l.inventoryBatchId), [inventoryBatchId]);
 });

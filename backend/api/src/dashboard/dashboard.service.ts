@@ -459,7 +459,7 @@ export class DashboardService {
       : undefined;
 
     const mats = oil?.production_order_id
-      ? ((await sql`select distinct on (poi.material_id) poi.material_id, poi.required_qty,
+      ? ((await sql`select distinct on (poi.material_id, b.rm_batch_id) poi.material_id, poi.required_qty,
                            m.material_code, m.material_name, a.alias_name,
                            b.batch_number rmbatch, g.grn_number, v.vendor_name, v.vendor_code
                     from production.production_order_ingredients poi
@@ -475,7 +475,7 @@ export class DashboardService {
                     left join inventory.grn_master g on g.grn_id = gi.grn_id
                     left join procurement.vendor_details v on v.vendor_id = g.vendor_id
                     where poi.production_order_id = ${oil.production_order_id as string}
-                    order by poi.material_id, b.batch_number`) as Record<string, unknown>[])
+                    order by poi.material_id, b.rm_batch_id`) as Record<string, unknown>[])
       : [];
 
     return {
@@ -491,6 +491,7 @@ export class DashboardService {
         product: seeProduct ? String(head.product_name || formulaCode || '—') : 'Protected ◆',
       },
       oilBatch: oil ? { batch: String(oil.oilno || '—'), qty: num(oil.produced_qty) } : null,
+      // One row per lot: a material issued from two lots lists both, or a recall would miss one.
       // Security review item 3: the per-material list (vendor + rm batch + GRN, even keyed by
       // a masked alias) correlates "which supplier fed which finished good" — omitted for a
       // caller without `masterdata:material:reveal`, replaced with just a count.
@@ -502,7 +503,7 @@ export class DashboardService {
             vendor: r.vendor_name ? String(r.vendor_name) : r.vendor_code ? String(r.vendor_code) : '—',
           }))
         : [],
-      materialCount: mats.length,
+      materialCount: new Set(mats.map((r) => r.material_id)).size,
     };
   }
 

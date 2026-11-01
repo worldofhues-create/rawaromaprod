@@ -4,7 +4,7 @@
  * an order's ingredients (`/v1/production-orders/:id/pick-list`); issues are recorded against
  * the order (`/v1/material-issues`) and emit the cross-cluster signal. Per-arg ZodValidationPipe.
  */
-import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Query } from '@nestjs/common';
 import {
   CurrentUser,
   Permissions,
@@ -43,6 +43,12 @@ export class PickingController {
   @Get('v1/material-pick-list-items')
   listPickListItems(@Query(new ZodValidationPipe(listQuery)) query: ListQuery) {
     return this.picking.listPickListItems(query);
+  }
+
+  @Permissions('production:material_issue:write')
+  @Get('v1/material-pick-list-items/:id/lots')
+  lotsForLine(@Param('id', ParseUUIDPipe) id: string) {
+    return this.picking.lotsForLine(id);
   }
 
   @Permissions('production:material_pick_list_items:read')

@@ -598,15 +598,21 @@
   /* F8: material issue. Compounding is masked, so it names pick list lines rather than materials, and chooses the lot it took. */
   addAction('/v1/material-pick-lists', { label: 'Issue materials', perm: 'production:material_issue:write', tone: 'accent', when: function (r) { return UP(r.status) === 'ACTIVE'; }, run: function (r) { openIssue(r); } });
   function openIssue(row) {
-    Promise.all([tunnel('/v1/material-pick-list-items?limit=100'), tunnel('/v1/inventory-availability?limit=100')]).then(function (rs) {
-      if (rs[0].status >= 400 || rs[1].status >= 400) { toast(err(rs[0].status >= 400 ? rs[0] : rs[1], 'The pick list could not be loaded. Try again.'), 'bad'); return; }
-      var lines = (data(rs[0]) || []).filter(function (l) { return l.materialPickListId === row.materialPickListId; });
-      if (!lines.length) { toast('This pick list has no lines.', 'bad'); return; }
-      var lots = (data(rs[1]) || []).map(function (b) { return '<option value="' + escHtml(b.inventoryBatchId) + '">' + escHtml(b.batchNumber || String(b.inventoryBatchId).slice(0, 8)) + ' · ' + num(b.available) + ' available</option>'; }).join('');
+    tunnel('/v1/material-pick-list-items?limit=100').then(function (r0) {
+      if (r0.status >= 400) { toast(err(r0, 'The pick list could not be loaded. Try again.'), 'bad'); return null; }
+      var lines = (data(r0) || []).filter(function (l) { return l.materialPickListId === row.materialPickListId; });
+      if (!lines.length) { toast('This pick list has no lines.', 'bad'); return null; }
+      // Each line offers only lots of its own material; the server refuses any other.
+      return Promise.all(lines.map(function (l) { return tunnel('/v1/material-pick-list-items/' + l.materialPickListItemId + '/lots'); })).then(function (rs) { return { lines: lines, rs: rs }; });
+    }).then(function (got) {
+      if (!got) return;
+      var lines = got.lines, bad = got.rs.filter(function (r) { return r.status >= 400; })[0];
+      if (bad) { toast(err(bad, 'The lots could not be loaded. Try again.'), 'bad'); return; }
+      var lotsOf = function (i) { return (data(got.rs[i]) || []).map(function (b) { return '<option value="' + escHtml(b.inventoryBatchId) + '">' + escHtml(b.batchNumber || String(b.inventoryBatchId).slice(0, 8)) + ' · ' + num(b.available) + ' available</option>'; }).join(''); };
       var m = openSheet({ tag: 'form', id: 'ra-issue', style: 'max-width:480px', title: 'Issue materials',
-        body: lines.map(function (l) {
+        body: lines.map(function (l, i) {
           return '<label style="display:flex;flex-direction:column;gap:5px">' + lbl((l.aliasName || 'Line') + ' · ' + num(l.pickedQty)) +
-            '<select class="fld" required data-line="' + escHtml(l.materialPickListItemId) + '" data-uom="' + escHtml(l.uomId || '') + '"><option value="">Which lot was taken?</option>' + lots + '</select></label>';
+            '<select class="fld" required data-line="' + escHtml(l.materialPickListItemId) + '" data-uom="' + escHtml(l.uomId || '') + '"><option value="">Which lot was taken?</option>' + lotsOf(i) + '</select></label>';
         }).join('') + '<div id="ra-issue-err" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
           '<button type="submit" id="ra-issue-save" class="btn p" style="width:100%;justify-content:center">Issue</button>' });
       m.sheet.onsubmit = function (e) {

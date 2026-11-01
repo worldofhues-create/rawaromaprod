@@ -142,6 +142,28 @@ test('item 3: WITH masterdata:material:reveal, full material/vendor/batch detail
   assert.equal(trace.materialCount, 1);
 });
 
+test('recall: a material issued from two lots lists both lots, with one material counted; an unissued lot never appears', async () => {
+  const fgId = await seedTraceChain();
+  const sql = testClient();
+  const one = (await sql`select i.material_issue_id, i.material_id, b.grn_item_id from production.material_issue_item i
+    join inventory.inventory_batch ib on ib.inventory_batch_id = i.inventory_batch_id join inventory.rm_batch_master b on b.rm_batch_id = ib.rm_batch_id
+    join production.material_issue mi on mi.material_issue_id = i.material_issue_id
+    join production.oil_batch_master o on o.production_order_id = mi.production_order_id
+    join packaging.package_order p on p.oil_batch_id = o.oil_batch_id
+    join packaging.finished_good_batch_master f on f.package_order_id = p.package_order_id
+    where f.finished_good_batch_id = ${fgId}`)[0]!;
+  const rm2 = randomUUID(), inv2 = randomUUID(), lot2 = `RMB-SECOND-${randomUUID().slice(0, 8)}`;
+  await sql`insert into inventory.rm_batch_master (rm_batch_id, grn_item_id, material_id, batch_number, status) values (${rm2}, ${one.grn_item_id as string}, ${one.material_id as string}, ${lot2}, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, material_id, status) values (${inv2}, ${rm2}, ${one.material_id as string}, 'ACTIVE')`;
+  await sql`insert into production.material_issue_item (material_issue_item_id, material_issue_id, material_id, inventory_batch_id, status) values (${randomUUID()}, ${one.material_issue_id as string}, ${one.material_id as string}, ${inv2}, 'ACTIVE')`;
+  const trace: any = await dashboard.traceFinishedGood(fgId, principal({ roles: ['qc'], permissions: ['masterdata:material:reveal'] }));
+  const lots = trace.materials.map((m: { rmBatch: string }) => m.rmBatch);
+  assert.equal(lots.length, 2);
+  assert.ok(lots.includes(lot2));
+  assert.ok(lots.every((l: string) => !l.startsWith('AAA-NOT-ISSUED')));
+  assert.equal(trace.materialCount, 1);
+});
+
 /* ── lane fread-rp: the product label without formula.* on this box ─────────────────────────── */
 
 test('fread-rp: a formula:actual:read holder sees the product\'s own name; the Vault is not asked', async () => {

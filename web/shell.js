@@ -1595,7 +1595,7 @@
     if (endpoint === '/v1/document-registry') {
       var w0 = window.open('', '_blank', 'width=820,height=920'); if (!w0) { toast('Allow pop-ups to print.', 'bad'); return; }
       var put = function (orgs) { w0.document.write(RaDocFormat.render(row, RaDocFormat.companyAddress(orgs))); w0.document.close(); };
-      tunnel('/v1/orgs?limit=100').then(function (res) { put((res.status < 400 && res.json && res.json.data) || []); }).catch(function () { put([]); });
+      tunnel('/v1/organizations?limit=100').then(function (res) { put((res.status < 400 && res.json && res.json.data) || []); }).catch(function () { put([]); });
       return;
     }
     var docTitle = PRINTABLE[endpoint] || 'DOCUMENT';
