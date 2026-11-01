@@ -300,10 +300,18 @@ export class PickingService {
       const materialIssueId = issue.materialIssueId;
 
       for (const item of body.items) {
+        let materialId = item.materialId ?? null;
+        if (item.materialPickListItemId) {
+          const line = (await tx.select({ materialId: materialPickListItems.materialId }).from(materialPickListItems)
+            .where(and(eq(materialPickListItems.materialPickListItemId, item.materialPickListItemId),
+              eq(materialPickListItems.materialPickListId, body.materialPickListId))).limit(1))[0];
+          if (!line?.materialId) throw new BadRequestException('That line is not on this pick list.');
+          materialId = line.materialId;
+        }
         await tx.insert(materialIssueItem).values({
           materialIssueItemId: uuidv7(),
           materialIssueId,
-          materialId: item.materialId,
+          materialId: materialId!,
           inventoryBatchId: item.inventoryBatchId ?? null,
           issuedQty: true,
           uomId: item.uomId ?? null,
@@ -318,7 +326,7 @@ export class PickingService {
           .where(
             and(
               eq(productionOrderIngredients.productionOrderId, body.productionOrderId),
-              eq(productionOrderIngredients.materialId, item.materialId),
+              eq(productionOrderIngredients.materialId, materialId!),
             ),
           );
       }

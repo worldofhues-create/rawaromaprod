@@ -68,10 +68,12 @@ export type GeneratePickList = z.infer<typeof generatePickList>;
 /* ── material issue ────────────────────────────────────────────────────── */
 
 const issueItem = z.object({
-  materialId: z.string().uuid(),
+  materialId: z.string().uuid().optional(),
+  /** The floor's way to name a line: compounding is masked and never holds a material id (mask.ts). */
+  materialPickListItemId: z.string().uuid().optional(),
   inventoryBatchId: z.string().uuid().optional(),
   uomId: z.string().uuid().optional(),
-});
+}).refine((i) => !!i.materialId || !!i.materialPickListItemId, { message: 'a line needs materialId or materialPickListItemId' });
 
 /** RP-PROD-004: materialPickListId is REQUIRED, not optional. production cannot write the
  * inventory schema (cluster boundary) — the async ConsumptionService (backend/api/src/

@@ -1,8 +1,8 @@
 /* Factory: stock planning, PR, RFQ, quotation, PO. Every document raised on its own screen, with the
  * submitter/approver separation shown on the real buttons. */
 import { expect, test } from '@playwright/test';
-import { master, must } from '../../harness/chain';
-import { createDoc, createViaForm, expectRefused, openNav, rowAction, searchFor, signIn, sql, uniq } from '../../harness/walk';
+import { master } from '../../harness/chain';
+import { confirmIfAsked, createDoc, createViaForm, expectRefused, openNav, rowAction, searchFor, signIn, sql, uniq } from '../../harness/walk';
 
 test('stock requirement -> PR -> approved by another -> RFQ -> quote -> PO, each row read back', async ({ page }, info) => {
   const c = uniq('P', info);
@@ -23,11 +23,13 @@ test('stock requirement -> PR -> approved by another -> RFQ -> quote -> PO, each
   const prId = sql(`select purchase_request_id from procurement.purchase_request where pr_number='PR-${c}'`);
   await expectRefused(page, 'POST', `/v1/purchase-requests/${prId}/approve`, {});
 
-  await must('owner', 'POST', `/v1/purchase-requests/${prId}/approve`, { remarks: 'walk' });
-  await page.reload();
-  await expect(page.locator('#ra-title')).toHaveText('Purchase requests');
+  await signIn(page, 'factory', 'owner');
+  await openNav(page, 'Purchase requests');
   await searchFor(page, `PR-${c}`);
-  await expect(page.locator('#ra-results tr').filter({ hasText: `PR-${c}` })).toContainText(/approved/i);
+  await rowAction(page, `PR-${c}`, 'Approve');
+  await confirmIfAsked(page, 'Approve');
+  await expect.poll(() => sql(`select status from procurement.purchase_request where pr_number='PR-${c}'`)).toBe('APPROVED');
+  await signIn(page, 'factory', 'procurement');
 
   await openNav(page, 'Quote requests');
   await createViaForm(page, { rfqNumber: `RFQ-${c}`, purchaseRequestId: { label: `PR-${c}` }, rfqDate: '2031-05-01', submissionDeadline: '2031-05-08' });
@@ -54,6 +56,18 @@ test('stock requirement -> PR -> approved by another -> RFQ -> quote -> PO, each
   await page.reload();
   await expect(page.locator('#ra-title')).toHaveText('Purchase orders');
   await searchFor(page, `PO-${c}`);
+  await signIn(page, 'factory', 'owner');
+  await openNav(page, 'Purchase orders');
+  await searchFor(page, `PO-${c}`);
+  await rowAction(page, `PO-${c}`, 'Approve');
+  await confirmIfAsked(page, 'Approve');
+  await expect.poll(() => sql(`select status from procurement.purchase_order where po_number='PO-${c}'`)).toBe('APPROVED');
+  await signIn(page, 'factory', 'procurement');
+  await openNav(page, 'Purchase orders');
+  await searchFor(page, `PO-${c}`);
+  await rowAction(page, `PO-${c}`, 'Issue');
+  await confirmIfAsked(page, 'Issue');
+  await expect.poll(() => sql(`select status from procurement.purchase_order where po_number='PO-${c}'`)).toBe('ISSUED');
 });
 
 test('receiving is refused a purchase order and a supplier', async ({ page }) => {

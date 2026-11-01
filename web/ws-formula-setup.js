@@ -197,13 +197,13 @@
         '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Why', true) + '<input id="fs-link-why" class="fld" maxlength="500" placeholder="e.g. reformulated blend approved"></label>' +
         '<div id="fs-link-err" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
         '<button type="submit" id="fs-link-save" class="btn p" style="width:100%;justify-content:center">Save</button>' });
-    tunnel('/v1/formulas?limit=500').then(function (res) {
+    // The main box has no formula routes; this list comes through the Vault port: code and version, no recipe.
+    tunnel('/v1/products/approved-formula-versions').then(function (res) {
       var sel = $('fs-link-f'); if (!sel) return;
       if (res.status >= 400) { sel.innerHTML = '<option value="">' + escHtml(err(res, 'The formula list is not available')) + '</option>'; return; }
       var list = data(res) || [];
       sel.innerHTML = '<option value="">Select…</option>' + list.map(function (f) {
-        var tag = f.approvedVersion ? ' · approved v' + f.approvedVersion.versionNumber : (f.latestVersionStatus ? ' · v' + f.latestVersionNumber + ' ' + String(f.latestVersionStatus).toLowerCase() : '');
-        return '<option value="' + escHtml(f.formulaId) + '"' + (f.formulaId === p.formulaId ? ' selected' : '') + '>' + escHtml((f.formulaCode || f.formulaId) + tag) + '</option>';
+        return '<option value="' + escHtml(f.formulaId) + '"' + (f.formulaId === p.formulaId ? ' selected' : '') + '>' + escHtml(f.label) + '</option>';
       }).join('');
     }).catch(function () {});
     m.sheet.onsubmit = function (e) {

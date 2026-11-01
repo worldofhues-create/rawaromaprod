@@ -23,5 +23,17 @@ test('Ruh watches, its note shows in the panel, and marking it done is saved; fi
   const id = await card.getAttribute('data-ruh-insight');
   await card.getByRole('button', { name: 'Done', exact: true }).click();
   await expect.poll(() => sql(`select status from platform.ruh_insight where ruh_insight_id='${id}'`)).not.toBe('open');
+  const next = async (act: (c: import('@playwright/test').Locator) => Promise<void>, want: RegExp) => {
+    await must('platform_super_admin', 'POST', '/v1/ruh/watch/run', {});
+    await page.reload();
+    await page.locator('[data-ruh-badge]').first().click();
+    const c = page.locator('#ra-ruh-panel [data-ruh-insight]').first();
+    await expect(c).toBeVisible();
+    const cid = await c.getAttribute('data-ruh-insight');
+    await act(c);
+    await expect.poll(() => sql(`select status from platform.ruh_insight where ruh_insight_id='${cid}'`)).toMatch(want);
+  };
+  await next(async (c) => { await c.getByRole('button', { name: 'Snooze', exact: true }).click(); await c.getByRole('button', { name: '1 hour', exact: true }).click(); }, /snooz/i);
+  await next(async (c) => { await c.getByRole('button', { name: 'Dismiss', exact: true }).click(); }, /dismiss/i);
   expect((await rp('filling', 'POST', '/v1/ruh/watch/run', {})).status).toBe(403);
 });

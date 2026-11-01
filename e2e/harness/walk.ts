@@ -170,3 +170,10 @@ export async function platformGo(page: Page, hash: string, heading: string) {
   await page.evaluate((h) => { location.hash = h; }, hash);
   await expect(page.locator('h1').first()).toHaveText(heading);
 }
+
+/** Answer the action's confirmation if it asks: state-changing actions ask, some do not. */
+export async function confirmIfAsked(page: Page, label: string) {
+  const c = page.locator('#ra-confirm');
+  await c.waitFor({ state: 'visible', timeout: 1500 }).catch(() => {});
+  if (await c.isVisible()) await c.getByRole('button', { name: label, exact: true }).click();
+}

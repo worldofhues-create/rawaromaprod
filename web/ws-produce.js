@@ -584,6 +584,67 @@
   addAction('/v1/finished-good-batches', { label: 'Put away', perm: 'location:shelf_task:write', when: function () { return true; }, run: function (r) { assignRack(r.finishedGoodBatchId); } });
   addAction('/v1/fg-labels', { label: 'Print label', perm: 'packaging:finished_good_batch_master:read', when: function () { return true; }, run: function (r) { chooseLabelSize(r.finishedGoodBatchId); } });
   addAction('/v1/batch-coas', { label: 'Reject', perm: 'production:batch_coa:release', tone: 'bad', when: function (r) { return String(r.status || '').toUpperCase() === 'TESTED'; }, run: function (r) { rejectCoa(r); } });
+  /* What was filled, on the ticket: End fill alone left a finished session with no quantity on record. */
+  addAction('/v1/filling-sessions', { label: 'Record fill', perm: 'packaging:filling_session:write', tone: 'accent', when: function (r) { return UP(r.status) !== 'DONE'; }, run: function (r) {
+    askForm({ title: 'Record fill', submit: 'Save fill', fields: [{ n: 'filled', l: 'Filled quantity', t: 'number', req: true }, { n: 'rejected', l: 'Rejected quantity', t: 'number', req: true, value: 0 }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/filling-sessions/' + r.fillingSessionId + '/details', { method: 'POST', body: { filledQty: v.filled, rejectedQty: v.rejected } }).then(function (res) {
+          if (res.status >= 400) { fail(err(res, 'The fill was not saved. Try again.')); return; }
+          close(); toast('Fill saved', 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
+  } });
+
+  /* F8: material issue. Compounding is masked, so it names pick list lines rather than materials, and chooses the lot it took. */
+  addAction('/v1/material-pick-lists', { label: 'Issue materials', perm: 'production:material_issue:write', tone: 'accent', when: function (r) { return UP(r.status) === 'ACTIVE'; }, run: function (r) { openIssue(r); } });
+  function openIssue(row) {
+    Promise.all([tunnel('/v1/material-pick-list-items?limit=100'), tunnel('/v1/inventory-availability?limit=100')]).then(function (rs) {
+      if (rs[0].status >= 400 || rs[1].status >= 400) { toast(err(rs[0].status >= 400 ? rs[0] : rs[1], 'The pick list could not be loaded. Try again.'), 'bad'); return; }
+      var lines = (data(rs[0]) || []).filter(function (l) { return l.materialPickListId === row.materialPickListId; });
+      if (!lines.length) { toast('This pick list has no lines.', 'bad'); return; }
+      var lots = (data(rs[1]) || []).map(function (b) { return '<option value="' + escHtml(b.inventoryBatchId) + '">' + escHtml(b.batchNumber || String(b.inventoryBatchId).slice(0, 8)) + ' · ' + num(b.available) + ' available</option>'; }).join('');
+      var m = openSheet({ tag: 'form', id: 'ra-issue', style: 'max-width:480px', title: 'Issue materials',
+        body: lines.map(function (l) {
+          return '<label style="display:flex;flex-direction:column;gap:5px">' + lbl((l.aliasName || 'Line') + ' · ' + num(l.pickedQty)) +
+            '<select class="fld" required data-line="' + escHtml(l.materialPickListItemId) + '" data-uom="' + escHtml(l.uomId || '') + '"><option value="">Which lot was taken?</option>' + lots + '</select></label>';
+        }).join('') + '<div id="ra-issue-err" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+          '<button type="submit" id="ra-issue-save" class="btn p" style="width:100%;justify-content:center">Issue</button>' });
+      m.sheet.onsubmit = function (e) {
+        e.preventDefault();
+        var items = [].map.call(m.sheet.querySelectorAll('[data-line]'), function (s) {
+          var it = { materialPickListItemId: s.getAttribute('data-line'), inventoryBatchId: s.value };
+          if (s.getAttribute('data-uom')) it.uomId = s.getAttribute('data-uom');
+          return it;
+        });
+        var save = $('ra-issue-save'); save.disabled = true;
+        tunnel('/v1/material-issues', { method: 'POST', body: { productionOrderId: row.productionOrderId, materialPickListId: row.materialPickListId, items: items } }).then(function (res) {
+          if (res.status >= 400) { save.disabled = false; $('ra-issue-err').textContent = err(res, 'The issue was not saved. Try again.'); return; }
+          m.close(); toast('Materials issued', 'good'); loadView();
+        }).catch(function () { save.disabled = false; $('ra-issue-err').textContent = 'Can\'t connect. Try again.'; });
+      };
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+  }
+
+  /* F9: corrective actions on the existing routes. The author cannot verify their own; the server says so too. */
+  CREATE['/v1/qc-capas'] = { title: 'New corrective action', perm: 'quality:qc_capa:write', fields: [
+    { n: 'capaCode', l: 'CAPA code', t: 'text', req: true },
+    { n: 'qcInspectionId', l: 'From inspection', t: 'select', fk: '/v1/qc-inspections', fv: 'qcInspectionId', fl: 'batchNumber' },
+    { n: 'capaType', l: 'Type', t: 'select', en: ['SUPPLIER', 'PROCESS', 'EQUIPMENT', 'OTHER'] },
+    { n: 'description', l: 'What went wrong', t: 'textarea' }, { n: 'rootCause', l: 'Root cause', t: 'textarea' }, { n: 'actionPlan', l: 'Action plan', t: 'textarea' }
+  ] };
+  addAction('/v1/qc-capas', { label: 'Start', perm: 'quality:qc_capa:write', when: function (r) { return UP(r.status) === 'OPEN'; }, path: function (r) { return '/v1/qc-capas/' + r.qcCapaId + '/start'; }, body: {} });
+  addAction('/v1/qc-capas', { label: 'Close', perm: 'quality:qc_capa:write', when: function (r) { return UP(r.status) === 'IN_PROGRESS'; }, run: function (r) {
+    askForm({ title: 'Close ' + (r.capaCode || 'this action'), submit: 'Close action', intro: 'Someone other than its author then verifies it.',
+      fields: [{ n: 'evidence', l: 'What shows it is fixed?', t: 'textarea', req: true }],
+      onSubmit: function (v, fail, close) {
+        tunnel('/v1/qc-capas/' + r.qcCapaId + '/close', { method: 'POST', body: { closureEvidence: v.evidence } }).then(function (res) {
+          if (res.status >= 400) { fail(err(res, 'It was not closed. Try again.')); return; }
+          close(); toast('Closed', 'good'); loadView();
+        }).catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
+  } });
+  addAction('/v1/qc-capas', { label: 'Verify', perm: 'quality:qc_capa:write', tone: 'good', when: function (r) { return UP(r.status) === 'CLOSED' && !isCreator(r); }, path: function (r) { return '/v1/qc-capas/' + r.qcCapaId + '/verify'; }, body: {} });
+
   addAction('/v1/products', { label: 'DG / hazard', perm: 'packaging:product_master:write', when: function () { return true; }, run: function (r) { editDg(r); } });
 
   function rejectCoa(row) {

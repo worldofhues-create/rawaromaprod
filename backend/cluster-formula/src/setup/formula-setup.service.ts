@@ -207,6 +207,10 @@ export class FormulaSetupService {
       .where(sql`lower(${formulaMaster.formulaCode}) = lower(${formulaCode})`)
       .limit(1);
     if (clash[0]) {
+      // A duplicate request can commit between the first look above and this one. That is the same shell,
+      // not another formula using the code: answer with it, so a double click never reads as a failure.
+      const raced = await this.viewsFor({ productIds: [p.productId] });
+      if (raced[0]) return { ...raced[0], outcome: 'existing' };
       throw new BadRequestException(
         `Formula code ${formulaCode} is already used by another formula — link that formula to the product instead.`,
       );

@@ -145,6 +145,23 @@ test('shells: a blend is left an empty DRAFT — "recipe needed" — and appears
   assert.equal(audit[0]!.actorId, ruh.userId);
 });
 
+test('shells: a duplicate that lost the race after its first look gets the existing shell, not an error', async () => {
+  // The window the concurrent test only sometimes hits: the first look finds no shell, the other request
+  // commits, and this one then meets its own formula code. Forced here so it fails every time if it regresses.
+  const p = product('RACE', 'blend');
+  const first = (await setup.ensureShells({ products: [p] }, ruh)).results[0]!;
+  assert.equal(first.outcome, 'created');
+  const svc = setup as unknown as { viewsFor: (q: unknown) => Promise<unknown[]> };
+  const real = svc.viewsFor;
+  let looks = 0;
+  svc.viewsFor = function (this: unknown, q: unknown) { looks += 1; return looks === 1 ? Promise.resolve([]) : real.call(this, q); };
+  try {
+    const second = (await setup.ensureShells({ products: [p] }, ruh)).results[0]!;
+    assert.equal(second.outcome, 'existing', second.error);
+    assert.equal(second.formulaId, first.formulaId);
+  } finally { delete (svc as { viewsFor?: unknown }).viewsFor; }
+});
+
 test('shells: idempotent — a re-run (and a concurrent duplicate) returns the same shell, never a second formula', async () => {
   const p = product('IDEM', 'blend');
   const [a, b] = await Promise.all([setup.ensureShells({ products: [p] }, ruh), setup.ensureShells({ products: [p] }, ruh)]);

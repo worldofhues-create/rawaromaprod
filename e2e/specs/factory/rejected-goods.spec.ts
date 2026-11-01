@@ -1,13 +1,18 @@
 /* Factory: rejected goods, settlement, vendor ledger. */
 import { expect, test } from '@playwright/test';
 import { master, must, receivedLot, until } from '../../harness/chain';
-import { expectRefused, openNav, signIn, sql, createViaForm } from '../../harness/walk';
+import { confirmDialog, expectRefused, openNav, rowAction, searchFor, signIn, sql, createViaForm } from '../../harness/walk';
 
 test('a rejected lot appears for procurement with its drafted credit note, and a settlement reads back', async ({ page }, info) => {
   const { qcParam } = await master();
-  const { insp, rmBatch, grnId, grnNumber } = await receivedLot(2);
+  const lot = await receivedLot(2); const { insp, rmBatch, grnId, grnNumber } = lot;
   await must('qc', 'POST', `/v1/qc-inspections/${insp}/results`, { results: [{ qcParameterId: qcParam, observedValue: 1.52, result: 'FAIL' }] });
-  await must('qc', 'POST', `/v1/qc-inspections/${insp}/disposition`, { dispositionCode: 'REJECT', dispositionReason: 'RI 1.52 outside spec' });
+  const { batchNumber } = lot;
+  await signIn(page, 'factory', 'qc');
+  await openNav(page, 'Test queue');
+  await searchFor(page, batchNumber);
+  await rowAction(page, batchNumber, 'Reject');
+  await confirmDialog(page, 'Reject');
   await until('the credit note draft', async () => sql(`select count(*) from procurement.vendor_credit_note where grn_id='${grnId}'`) === '1');
   expect(sql(`select status from inventory.rm_batch_master where rm_batch_id='${rmBatch}'`)).toBe('REJECTED');
 

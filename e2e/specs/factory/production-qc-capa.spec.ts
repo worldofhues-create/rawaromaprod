@@ -1,7 +1,7 @@
 /* Factory: production QC and CAPA. */
 import { expect, test } from '@playwright/test';
-import { master, must, receivedLot, releasedOil } from '../../harness/chain';
-import { createViaForm, expectRefused, openNav, signIn, sql, uniq } from '../../harness/walk';
+import { master, receivedLot, releasedOil } from '../../harness/chain';
+import { confirmIfAsked, createViaForm, expectRefused, openNav, rowById, signIn, sql, uniq } from '../../harness/walk';
 
 test('QC records an in-process result on a batch; a CAPA moves to verified only by someone else', async ({ page }, info) => {
   const batch = uniq('OBQ-', info);
@@ -15,17 +15,33 @@ test('QC records an in-process result on a batch; a CAPA moves to verified only 
   await page.reload();
   await expect(page.locator('#ra-results tbody tr').first()).toBeVisible();
 
-  const { insp } = await receivedLot(1);
+  await receivedLot(1);
   const code = uniq('CAPA-', info);
-  const capa = (await must('qc', 'POST', '/v1/qc-capas', { qcInspectionId: insp, capaCode: code, capaType: 'SUPPLIER', description: 'walk', rootCause: 'walk', actionPlan: 'walk', dueDt: '2031-10-15' })).qcCapaId;
-  await must('qc', 'POST', `/v1/qc-capas/${capa}/start`, {});
-  await must('qc', 'POST', `/v1/qc-capas/${capa}/close`, { closureEvidence: 'walk evidence' });
-  await expectRefused(page, 'POST', `/v1/qc-capas/${capa}/verify`, {});
-  await must('owner', 'POST', `/v1/qc-capas/${capa}/verify`, { remarks: 'verified' });
-  expect(sql(`select status from quality.qc_capa where qc_capa_id='${capa}'`)).toBe('VERIFIED');
+  await openNav(page, 'Corrective actions');
+  await createViaForm(page, { capaCode: code, capaType: 'SUPPLIER', description: 'walk', rootCause: 'walk', actionPlan: 'walk' });
+  const id = sql(`select qc_capa_id from quality.qc_capa where capa_code='${code}'`);
+  expect(id).not.toBe('');
+  const status = () => sql(`select status from quality.qc_capa where qc_capa_id='${id}'`);
+  const press = (label: string) => rowById(page, id).getByRole('button', { name: label, exact: true }).click();
+  await press('Start');
+  await confirmIfAsked(page, 'Start');
+  await expect.poll(status).toBe('IN_PROGRESS');
+  await press('Close');
+  await page.getByLabel('What shows it is fixed?').fill('walk evidence');
+  await page.getByRole('button', { name: 'Close action', exact: true }).click();
+  await expect.poll(status).toBe('CLOSED');
+  // The author is offered no Verify, and the server agrees.
+  await expect(rowById(page, id).getByRole('button', { name: 'Verify', exact: true })).toHaveCount(0);
+  await expectRefused(page, 'POST', `/v1/qc-capas/${id}/verify`, {});
+  await signIn(page, 'factory', 'owner');
+  await openNav(page, 'Corrective actions');
+  await press('Verify');
+  await confirmIfAsked(page, 'Verify');
+  await expect.poll(status).toBe('VERIFIED');
   await signIn(page, 'factory', 'production');
   await openNav(page, 'Corrective actions');
-  await expect(page.locator('#ra-results')).toContainText(code);
+  await expect(page.locator('#ra-new')).toHaveCount(0);
+  await expect(rowById(page, id)).toBeVisible();
 });
 
 test('packaging is refused a production QC record', async ({ page }) => {

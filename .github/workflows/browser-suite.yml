@@ -31,7 +31,7 @@ jobs:
         with:
           node-version-file: .node-version
           cache: pnpm
-      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client poppler-utils
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec playwright install --with-deps chromium
       - run: pnpm e2e:up

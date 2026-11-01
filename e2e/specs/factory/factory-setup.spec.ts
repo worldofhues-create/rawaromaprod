@@ -1,6 +1,7 @@
 /* Factory: setup and master data. Physical layout entered by hand, one level at a time. */
 import { expect, test } from '@playwright/test';
-import { createViaForm, expectRefused, expectRowPersisted, openNav, signIn, sql, uniq } from '../../harness/walk';
+import { formula } from '../../harness/chain';
+import { factoryCall, createViaForm, expectRefused, expectRowPersisted, openNav, signIn, sql, uniq } from '../../harness/walk';
 
 test('warehouse builds a warehouse, floor, zone and rack; each reads back', async ({ page }, info) => {
   const c = uniq('S', info);
@@ -47,4 +48,19 @@ test('admin adds an organization and a business unit under it: one table, so the
   await openNav(page, 'Business units');
   await createViaForm(page, { businessUnitCode: `BU${c}`, businessUnitName: `Unit ${c}`, organizationId: { label: `Org ${c}` } });
   await expectRowPersisted(page, `BU${c}`, () => sql(`select count(*) from iam.business_unit_master where business_unit_code='BU${c}'`), 'Business units');
+});
+
+test('the Link formula list and the Product form offer approved formulas by code; a floor role is refused', async ({ page }) => {
+  await formula();
+  await signIn(page, 'factory', 'packaging');
+  const r = await factoryCall(page, 'GET', '/v1/products/approved-formula-versions');
+  expect(r.status).toBe(200);
+  expect(r.json.data.map((x: { label: string }) => x.label)).toContain('CH-F-1 v1');
+  expect(Object.keys(r.json.data[0]).sort()).toEqual(['formulaId', 'formulaVersionId', 'label']);
+  await openNav(page, 'Products');
+  await page.locator('#ra-new').click();
+  await expect(page.locator('[data-name="formulaId"] option', { hasText: 'CH-F-1 v1' })).toBeAttached();
+  await signIn(page, 'factory', 'sales');
+  await expect(page.locator('#ra-side .who small')).toHaveCount(1);
+  await expectRefused(page, 'GET', '/v1/products/approved-formula-versions');
 });

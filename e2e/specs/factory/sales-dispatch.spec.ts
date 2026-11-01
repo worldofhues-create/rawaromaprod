@@ -5,7 +5,7 @@ import { createDoc, createViaForm, expectRefused, openNav, signIn, sql, uniq } f
 
 test('a hand-entered sales order (with its reason), a dispatch, and a document on it all read back', async ({ page }, info) => {
   const c = uniq('SO', info);
-  const { fg, skuId } = await releasedFinishedBatch(uniq('FGS-', info), 2);
+  const { fg } = await releasedFinishedBatch(uniq('FGS-', info), 2);
   const customer = (await must('sales', 'POST', '/v1/customers', { customerCode: `C${c}`, customerName: `Customer ${c}` })).customerId;
   await signIn(page, 'factory', 'owner');
   await openNav(page, 'Sales orders');
@@ -15,17 +15,26 @@ test('a hand-entered sales order (with its reason), a dispatch, and a document o
   const so = sql(`select sales_order_id from sales.sales_order where so_number='${c}'`);
   expect(so).not.toBe('');
   expect(sql(`select origin from sales.sales_order where sales_order_id='${so}'`)).toBe('MANUAL_CONTINUITY');
-  await must('owner', 'POST', `/v1/sales-orders/${so}/confirm`, { reason: 'browser suite walk of the continuity path' });
-  const items = sql(`select sales_order_item_id from sales.sales_order_items where sales_order_id='${so}'`);
-  const d = await must('sales', 'POST', '/v1/dispatches', { salesOrderId: so, dispatchDate: '2031-05-06', items: [{ salesOrderItemId: items, finishedGoodBatchId: fg, dispatchedQty: 1 }] });
-  const number = `DC-${c}`;
+  await page.locator('#ra-results tr').filter({ hasText: c }).getByRole('button', { name: 'Confirm', exact: true }).click();
+  await page.getByLabel('Why are you confirming it here?').fill('browser suite walk of the continuity path');
+  await page.getByRole('button', { name: 'Confirm the order', exact: true }).click();
+  await expect.poll(() => sql(`select status from sales.sales_order where sales_order_id='${so}'`)).toBe('CONFIRMED');
   await signIn(page, 'factory', 'sales');
+  await openNav(page, 'Sales orders');
+  await page.locator('#ra-results tr').filter({ hasText: c }).getByRole('button', { name: 'Dispatch', exact: true }).click();
+  await page.locator('#ra-dfg').selectOption(fg);
+  await page.locator('#ra-dq').fill('1');
+  await page.locator('#ra-dv').fill('MP09AB1234');
+  await page.locator('#ra-dsave').click(); // first press states what will happen
+  await expect(page.locator('#ra-dsave')).toHaveAttribute('data-armed', /.+/);
+  await page.locator('#ra-dsave').click();
+  await expect.poll(() => sql(`select count(*) from sales.dispatch_master where sales_order_id='${so}'`), { timeout: 20_000 }).toBe('1');
+  const number = `DC-${c}`;
   await openNav(page, 'Dispatch documents');
   await createViaForm(page, { dispatchId: { first: true }, documentType: 'DELIVERY_CHALLAN', documentNumber: number, documentDate: '2031-05-06' });
   await expect(page.locator('#ra-results')).toContainText(number);
   await page.reload();
   await expect(page.locator('#ra-results')).toContainText(number);
-  expect(d).toBeTruthy(); expect(skuId).toBeTruthy();
 });
 
 test('compounding is refused a sales order and a dispatch document', async ({ page }) => {

@@ -169,7 +169,7 @@
       ['bridgereq', 'Sales requirements', 'link', '/v1/bridge/requirements'],
       ['weigh', 'Weighing', 'scale', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
       ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
-      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'],
+      ['coa', 'Batch COA', 'award', '/v1/batch-coas'], ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['capas', 'CAPA', 'wrench', '/v1/qc-capas'],
       // Procurement, receiving and the QC test queue: an Owner-only login had no other way to reach them.
       // Every route's read permission is held by `owner` and `showcase`; owner-rail.test.ts checks it.
       ['planning', 'Stock planning', 'clipList', '/v1/stock-requirements'], ['reorder', 'Reorder plan', 'refresh', '/v1/reorder-suggestions'], ['prs', 'Purchase requests', 'filePlus', '/v1/purchase-requests'],
@@ -215,7 +215,8 @@
       ['prodqc', 'Production QC', 'microscope', '/v1/production-qc'], ['samples', 'Sample retention', 'beaker', '/v1/qc-sample-retentions'],
       ['qcparams', 'QC parameters', 'filter', '/v1/qc-parameters'],
       // Owner ruling 2026-09-28: COA data per finished batch (results, photos, release → ALEMBIC).
-      ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'award', '/v1/batch-coas'] ] },
+      ['coaspec', 'QC specs (COA)', 'sliders', '/v1/product-qc-specs'], ['coa', 'Batch COA', 'award', '/v1/batch-coas'],
+      ['capas', 'CAPA', 'wrench', '/v1/qc-capas'] ] },
     production: { label: 'Production', dept: 'Manufacturing & QC oversight', user: 'Production', nav: [
       ['bridgereq', 'Sales requirements', 'link', '/v1/bridge/requirements'],
       ['plans', 'Production plans', 'calendar', '/v1/production-plans'], ['planitems', 'Plan items', 'listcheck', '/v1/production-plan-items'],
@@ -1594,7 +1595,7 @@
     if (endpoint === '/v1/document-registry') {
       var w0 = window.open('', '_blank', 'width=820,height=920'); if (!w0) { toast('Allow pop-ups to print.', 'bad'); return; }
       var put = function (orgs) { w0.document.write(RaDocFormat.render(row, RaDocFormat.companyAddress(orgs))); w0.document.close(); };
-      tunnel('/v1/organizations?limit=100').then(function (res) { put((res.status < 400 && res.json && res.json.data) || []); }).catch(function () { put([]); });
+      tunnel('/v1/orgs?limit=100').then(function (res) { put((res.status < 400 && res.json && res.json.data) || []); }).catch(function () { put([]); });
       return;
     }
     var docTitle = PRINTABLE[endpoint] || 'DOCUMENT';
@@ -1849,7 +1850,7 @@
     ] },
     '/v1/products': { title: 'New product', perm: 'packaging:product_master:write', fields: [
       { n: 'productCode', l: 'Product code', t: 'text', req: true }, { n: 'productName', l: 'Product name', t: 'text', req: true },
-      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaCode' },
+      { n: 'formulaId', l: 'Approved formula', t: 'select', fk: '/v1/products/approved-formula-versions', fv: 'formulaId', fl: 'label' },
       { n: 'brandId', l: 'Brand', t: 'select', fk: '/v1/brands', fv: 'brandId', fl: 'brandName' },
       { n: 'productCategoryId', l: 'Category', t: 'select', fk: '/v1/product-categories', fv: 'productCategoryId', fl: 'categoryName' }
     ] },

@@ -354,6 +354,7 @@ export const ROLES: RoleDef[] = [
     view: 'production',
     select: anyOf(
       oneOf(
+        'platform:uom_master:read', // units only: the Unit list on the order form was empty without it
         'production:production_plan:read',
         'production:production_plan:write',
         'production:production_plan_items:read',
