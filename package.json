@@ -24,9 +24,13 @@
     "db:provision": "node scripts/db-provision.mjs",
     "vault:rewrap": "tsx scripts/vault-rewrap.ts",
     "test": "node backend/test-support/run-tests.mjs",
-    "test:db:setup": "bash backend/test-support/setup-db.sh"
+    "test:db:setup": "bash backend/test-support/setup-db.sh",
+    "e2e:up": "node e2e/harness/up.mjs",
+    "e2e:down": "node e2e/harness/down.mjs",
+    "e2e": "playwright test -c e2e/playwright.config.ts"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@swc-node/register": "^1.11.1",
     "@swc/core": "^1.15.41",
     "argon2": "^0.41.1",

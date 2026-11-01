@@ -33,3 +33,6 @@ coverage/
 !.env.*.example
 *.pem
 *.key
+
+# Browser suite run state (per-run keys, logs, private Postgres, traces)
+e2e/.run/
