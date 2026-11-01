@@ -156,3 +156,17 @@ export async function confirmDialog(page: Page, label: string) {
 
 /** The row whose record id this is (data-rid), for lists that show no code of their own. */
 export function rowById(page: Page, id: string) { return page.locator(`#ra-results tr[data-rid="${id}"]`); }
+
+/** Vault and Platform move to their landing screen once the exchange finishes, so go only after that:
+ *  a hash set earlier is overwritten and the walk would look at the wrong screen. */
+export async function vaultGo(page: Page, hash: string, title?: string) {
+  await expect(page.locator('#vault-title')).toBeVisible();
+  await expect(page.locator('#vault-title')).toHaveText('Formulas');
+  await page.evaluate((h) => { location.hash = h; }, hash);
+  if (title) await expect(page.locator('#vault-title')).toHaveText(title);
+}
+export async function platformGo(page: Page, hash: string, heading: string) {
+  await expect(page.locator('h1').first()).toBeVisible();
+  await page.evaluate((h) => { location.hash = h; }, hash);
+  await expect(page.locator('h1').first()).toHaveText(heading);
+}

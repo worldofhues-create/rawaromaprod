@@ -17,13 +17,16 @@ test('packaging records a finished batch and labels it; packaging QC cannot pass
   await fillForm(page, { finishedGoodBatchId: { label: fg }, leakageCheck: 'PASS', labelCheck: 'PASS', cartonCheck: 'PASS' });
   await page.locator('#ra-msave').click();
   await expect(page.locator('#ra-merr'), 'the refusal reaches the screen').toContainText(/label/i);
-  await page.getByRole('button', { name: 'Close', exact: true }).last().click();
+  await page.reload();
+  await expect(page.locator('#ra-title')).toHaveText('Packaging QC');
   await releasedCoa(oil);
   await openNav(page, 'Finished batches');
   await rowAction(page, fg, 'Apply labels');
   await page.locator('#pv-lcount').fill('1');
   await page.getByRole('button', { name: 'Record and print', exact: true }).click();
   await expect(page.locator('.toast').last()).toContainText(/Labels recorded/);
+  await expect(page.getByRole('heading', { name: 'Print label' })).toBeVisible(); // offered next, on success only
+  await page.getByRole('button', { name: 'Close', exact: true }).last().click();
   await expect.poll(() => sql(`select count(*) from packaging.fg_label_record l join packaging.finished_good_batch_master b using (finished_good_batch_id) where b.batch_number='${fg}'`), { timeout: 20_000 }).not.toBe('0');
   await openNav(page, 'Product labels');
   await expect(page.locator('#ra-results tbody tr').first()).toBeVisible();
