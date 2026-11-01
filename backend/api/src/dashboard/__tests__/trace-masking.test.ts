@@ -84,6 +84,13 @@ async function seedTraceChain(product: { name: string | null; formulaId?: string
   await sql`insert into inventory.grn_items (grn_item_id, grn_id, material_id, status) values (${grnItemId}, ${grnId}, ${materialId}, 'ACTIVE')`;
   await sql`insert into inventory.rm_batch_master (rm_batch_id, grn_item_id, material_id, batch_number, status) values (${randomUUID()}, ${grnItemId}, ${materialId}, ${`RMB-${sid()}`}, 'ACTIVE')`;
   await sql`insert into production.production_order_ingredients (production_order_ingredient_id, production_order_id, material_id, required_qty, status) values (${randomUUID()}, ${prodOrderId}, ${materialId}, '5', 'ACTIVE')`;
+  // The trace names the lot ISSUED to the order, so the chain needs the issue; a lot of the same material nobody issued must not appear.
+  const issuedRm = (await sql`select rm_batch_id from inventory.rm_batch_master where grn_item_id = ${grnItemId} limit 1`)[0]!.rm_batch_id as string;
+  const invBatch = randomUUID(), issueId = randomUUID();
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, material_id, status) values (${invBatch}, ${issuedRm}, ${materialId}, 'ACTIVE')`;
+  await sql`insert into production.material_issue (material_issue_id, production_order_id, status) values (${issueId}, ${prodOrderId}, 'ACTIVE')`;
+  await sql`insert into production.material_issue_item (material_issue_item_id, material_issue_id, material_id, inventory_batch_id, status) values (${randomUUID()}, ${issueId}, ${materialId}, ${invBatch}, 'ACTIVE')`;
+  await sql`insert into inventory.rm_batch_master (rm_batch_id, grn_item_id, material_id, batch_number, status) values (${randomUUID()}, ${grnItemId}, ${materialId}, ${'AAA-NOT-ISSUED-' + sid()}, 'ACTIVE')`;
   await sql`insert into production.oil_batch_master (oil_batch_id, production_order_id, batch_number, produced_qty, status) values (${oilBatchId}, ${prodOrderId}, ${`OIL-${sid()}`}, '5', 'ACTIVE')`;
   await sql`insert into packaging.product_master (product_id, product_code, product_name, formula_id, status) values (${productId}, ${`PRD-${sid()}`}, ${product.name}, ${product.formulaId ?? null}, 'ACTIVE')`;
   await sql`insert into packaging.product_sku (product_sku_id, product_id, sku_code, status) values (${productSkuId}, ${productId}, ${`SKU-${sid()}`}, 'ACTIVE')`;

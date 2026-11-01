@@ -30,13 +30,6 @@ export class ProduceController {
     return this.plan.approvedFormulaVersions();
   }
 
-  /** The same list for whoever links a formula to a product (Product form, Link formula). */
-  @Permissions('packaging:product_formula_link:write')
-  @Get('v1/products/approved-formula-versions')
-  approvedFormulaVersionsForLinking() {
-    return this.plan.approvedFormulaVersions();
-  }
-
   @Permissions('production:production_plan_items:write', 'production:production_order:write')
   @Post('v1/produce/requirements/:id/plan')
   planRequirement(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() principal: AuthPrincipal) {

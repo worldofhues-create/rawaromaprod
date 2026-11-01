@@ -465,7 +465,12 @@ export class DashboardService {
                     from production.production_order_ingredients poi
                     left join masterdata.material m on m.material_id = poi.material_id
                     left join masterdata.rm_alias a on a.material_id = poi.material_id
-                    left join inventory.rm_batch_master b on b.material_id = poi.material_id
+                    -- The lot actually issued to THIS order, never just any lot of the material: a recall
+                    -- follows this line. Nothing issued means no lot shown, not a guess.
+                    left join production.material_issue mi on mi.production_order_id = poi.production_order_id
+                    left join production.material_issue_item mii on mii.material_issue_id = mi.material_issue_id and mii.material_id = poi.material_id
+                    left join inventory.inventory_batch ib on ib.inventory_batch_id = mii.inventory_batch_id
+                    left join inventory.rm_batch_master b on b.rm_batch_id = ib.rm_batch_id
                     left join inventory.grn_items gi on gi.grn_item_id = b.grn_item_id
                     left join inventory.grn_master g on g.grn_id = gi.grn_id
                     left join procurement.vendor_details v on v.vendor_id = g.vendor_id

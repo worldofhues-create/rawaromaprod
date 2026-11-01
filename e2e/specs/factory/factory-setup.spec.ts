@@ -50,17 +50,15 @@ test('admin adds an organization and a business unit under it: one table, so the
   await expectRowPersisted(page, `BU${c}`, () => sql(`select count(*) from iam.business_unit_master where business_unit_code='BU${c}'`), 'Business units');
 });
 
-test('the Link formula list and the Product form offer approved formulas by code; a floor role is refused', async ({ page }) => {
+test('the Product form lists formulas from the main box directory, no recipe content; a floor role is refused', async ({ page }) => {
   await formula();
   await signIn(page, 'factory', 'packaging');
-  const r = await factoryCall(page, 'GET', '/v1/products/approved-formula-versions');
-  expect(r.status).toBe(200);
-  expect(r.json.data.map((x: { label: string }) => x.label)).toContain('CH-F-1 v1');
-  expect(Object.keys(r.json.data[0]).sort()).toEqual(['formulaId', 'formulaVersionId', 'label']);
   await openNav(page, 'Products');
   await page.locator('#ra-new').click();
-  await expect(page.locator('[data-name="formulaId"] option', { hasText: 'CH-F-1 v1' })).toBeAttached();
+  await expect(page.locator('[data-name="formulaId"] option', { hasText: 'CH-F-1' })).toBeAttached();
+  const r = await factoryCall(page, 'GET', '/v1/formulas?limit=5');
+  expect(JSON.stringify(r.json.data)).not.toMatch(/percentage|Chain raw material/);
   await signIn(page, 'factory', 'sales');
   await expect(page.locator('#ra-side .who small')).toHaveCount(1);
-  await expectRefused(page, 'GET', '/v1/products/approved-formula-versions');
+  await expectRefused(page, 'GET', '/v1/formulas?limit=5');
 });

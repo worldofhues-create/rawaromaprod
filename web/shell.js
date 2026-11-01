@@ -1850,7 +1850,7 @@
     ] },
     '/v1/products': { title: 'New product', perm: 'packaging:product_master:write', fields: [
       { n: 'productCode', l: 'Product code', t: 'text', req: true }, { n: 'productName', l: 'Product name', t: 'text', req: true },
-      { n: 'formulaId', l: 'Approved formula', t: 'select', fk: '/v1/products/approved-formula-versions', fv: 'formulaId', fl: 'label' },
+      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaCode' },
       { n: 'brandId', l: 'Brand', t: 'select', fk: '/v1/brands', fv: 'brandId', fl: 'brandName' },
       { n: 'productCategoryId', l: 'Category', t: 'select', fk: '/v1/product-categories', fv: 'productCategoryId', fl: 'categoryName' }
     ] },

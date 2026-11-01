@@ -14,9 +14,10 @@ owner, because each is a role grant or a product decision rather than a defect w
 | F7 | NOT A BUG | Feature switches: a fresh system has no switch registered, and no screen registers one, so the Change flow cannot be walked. Matches production (`flag_states` 0). |
 | F8 | FIXED | No console screen posts `/v1/material-issues`; the floor can read an issue but not make one. |
 | F9 | FIXED | Corrective actions is a read-only list: raise, start, close and verify have routes but no buttons. |
-| F10 | FIXED | The Product form and Link formula still read `/v1/formulas` on the main box, the same dead route as F2. |
+| F10 | WITHDRAWN | Wrong finding. `GET /v1/formulas` exists on the main box (`formula-setup.controller.ts`), with a test pinning it, and lists draft shells on purpose. The change it prompted was reverted. |
 | F11 | FIXED | The document letterhead still reads `/v1/organizations` (left alone to keep the address fields). |
 | F12 | FIXED | Production holds no `platform:uom_master:read` either, so the Unit list on New production order is empty. Not in the decision that granted F3. |
 | F13 | FIXED | `PUT /v1/admin/flags/:key` ran its schema over the key as well as the body, so every feature switch change answered 422. Nobody had ever pressed it (production `flag_states` 0). |
 | F14 | FIXED | One full backend run failed `shells: idempotent` (a concurrent duplicate answered error, not the existing shell). It passed 3 of 3 alone. Code not touched by this lane. |
 | F15 | FIXED | No screen recorded what was filled: End fill finished a ticket with no quantity. Added Record fill on the existing details route. |
+| F16 | FIXED | Trace named any lot of the material, not the lot issued to the order, so a recall could follow the wrong lot and supplier. Now joins the issue. |
