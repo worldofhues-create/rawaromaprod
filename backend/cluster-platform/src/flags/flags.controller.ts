@@ -5,7 +5,7 @@
  * (doc 05 §0.1). The snapshot endpoint is what web bootstraps from before opening the
  * SSE stream.
  */
-import { Body, Controller, Get, Param, Put, UsePipes } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put } from '@nestjs/common';
 import {
   CurrentUser,
   Permissions,
@@ -41,10 +41,10 @@ export class FlagsController {
 
   @Permissions('platform:flag:write')
   @Put('v1/admin/flags/:key')
-  @UsePipes(new ZodValidationPipe(platform.flags.setFlagRequest))
   async setFlag(
     @Param('key') key: string,
-    @Body() body: SetFlagBody,
+    // On the body alone: @UsePipes also ran the schema over the key, so every change answered 422.
+    @Body(new ZodValidationPipe(platform.flags.setFlagRequest)) body: SetFlagBody,
     @CurrentUser() user: AuthPrincipal,
   ): Promise<FlagSnapshot> {
     const input: SetFlagInput = {

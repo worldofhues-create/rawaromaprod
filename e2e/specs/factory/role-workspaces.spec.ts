@@ -1,7 +1,7 @@
 /* Factory: eleven role workspaces and access. Every role lands in its own workspace; one writes and
  * reads back; floor roles are refused by the server, not only by a hidden button. */
 import { expect, test } from '@playwright/test';
-import { createViaForm, expectNoNewButton, expectRefused, expectRowPersisted, openNav, signIn, sql, uniq } from '../../harness/walk';
+import { createViaForm, factoryCall, expectNoNewButton, expectRefused, expectRowPersisted, openNav, signIn, sql, uniq } from '../../harness/walk';
 
 const LANDINGS: Array<[string, string]> = [
   ['owner', 'Owner'], ['admin', 'Admin'], ['procurement', 'Procurement'], ['receiving', 'Receiving'], ['qc', 'QC Laboratory'], ['production', 'Production'],
@@ -38,4 +38,18 @@ test('a floor role typing an address outside its workspace is told so', async ({
   await page.evaluate(() => { location.hash = '#/owner/users'; });
   await expect(page.getByText('That screen is not part of your workspace.')).toBeVisible();
   await expect(page.locator('#ra-title')).not.toHaveText('Users');
+});
+
+for (const role of ['receiving', 'packaging', 'compounding']) {
+  test(`${role} may read units and may not write them`, async ({ page }) => {
+    await signIn(page, 'factory', role);
+    await expect(page.locator('#ra-side .who small')).toHaveCount(1);
+    expect((await factoryCall(page, 'GET', '/v1/uoms?limit=1')).status).toBe(200);
+    await expectRefused(page, 'POST', '/v1/uoms', { uomCode: 'NOPE', uomName: 'No' });
+  });
+}
+test('filling still may not read units', async ({ page }) => {
+  await signIn(page, 'factory', 'filling');
+  await expect(page.locator('#ra-side .who small')).toHaveCount(1);
+  await expectRefused(page, 'GET', '/v1/uoms?limit=1');
 });

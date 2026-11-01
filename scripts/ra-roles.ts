@@ -227,6 +227,8 @@ export const ROLES: RoleDef[] = [
         'inventory:grn_container:write',
         'inventory:rm_batch_master:read',
         'inventory:rm_batch_master:write',
+        // Without it the Unit list on the GRN is empty and a receipt saves with no unit.
+        'platform:uom_master:read',
         REVEAL,
       ),
       (p) => p.startsWith('procurement:') && isRead(p),
@@ -294,6 +296,9 @@ export const ROLES: RoleDef[] = [
         'inventory:stock_transfer:read',
         'inventory:stock_transfer:write',
         'inventory:expiry_tracker:read',
+        // Stock counts are on this rail; without these no person could raise or read one.
+        'inventory:stock_audit:read',
+        'inventory:stock_audit:write',
         REVEAL,
       ),
       startsWith('location:'),
@@ -310,6 +315,7 @@ export const ROLES: RoleDef[] = [
     view: 'compounding',
     select: anyOf(
       oneOf(
+        'platform:uom_master:read', // units only: the Unit list on the oil batch was empty without it
         'production:production_order:read',
         'production:production_order_ingredients:read',
         'production:manufacturing_instruction:read',
@@ -418,7 +424,8 @@ export const ROLES: RoleDef[] = [
     view: 'packaging',
     select: anyOf(
       startsWith('packaging:'),
-      oneOf('production:oil_batch_master:read', 'sales:dispatch_master:read', 'sales:dispatch_items:read', REVEAL),
+      // Units: the Unit list on the package order was empty without it.
+      oneOf('production:oil_batch_master:read', 'sales:dispatch_master:read', 'sales:dispatch_items:read', 'platform:uom_master:read', REVEAL),
       (p) => p.startsWith('masterdata:') && isRead(p),
       (p) => p.startsWith('location:') && isRead(p),
     ),

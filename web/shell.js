@@ -189,7 +189,7 @@
     admin: { label: 'Admin', dept: 'Access & Governance', user: 'Admin', nav: [
       ['users', 'Users', 'users', '/v1/users'], ['roles', 'Roles', 'shield', '/v1/roles'],
       ['perms', 'Permissions', 'lock', '/v1/permissions'], ['approvals', 'Approval matrix', 'shieldCheck', '/v1/approval-matrix'],
-      ['orgs', 'Organizations', 'building', '/v1/organizations'], ['bunits', 'Business units', 'briefcase', '/v1/business-units'],
+      ['orgs', 'Organizations', 'building', '/v1/orgs'], ['bunits', 'Business units', 'briefcase', '/v1/business-units'],
       ['loctypes', 'Location types', 'signpost', '/v1/location-types'], ['locations', 'Locations', 'mappin', '/v1/locations'],
       ['materials', 'Materials', 'box', '/v1/materials'], ['units', 'Units', 'ruler', '/v1/uoms'],
       ['contacts', 'Contacts', 'idcard', '/v1/contacts'], ['countries', 'Countries', 'flag', '/v1/countries'],
@@ -293,7 +293,7 @@
     '/v1/bridge/requirements': ['orderRef', 'mappedSku', 'qty', 'uom', 'lifecycleStatus', 'neededBy'],
     '/v1/audit-events': ['occurredAt', 'actor', 'cluster', 'action', 'entityType', 'resultStatus'],
     '/v1/production-plan-items': ['plannedQty', 'status'],
-    '/v1/organizations': ['type', 'name', 'reraNo', 'gstin', 'status'],
+    '/v1/orgs': ['organizationCode', 'organizationName', 'status'],
     '/v1/locations': ['locationCode', 'locationName', 'status'],
     '/v1/location-types': ['typeCode', 'typeName', 'status'],
     '/v1/vendors': ['vendorCode', 'vendorName', 'gstin', 'paymentTerms', 'status'],
@@ -1864,16 +1864,17 @@
       { n: 'quotedQty', l: 'Quoted qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' },
       { n: 'quotedRate', l: 'Quoted rate', t: 'number' }, { n: 'currencyId', l: 'Currency', t: 'select', fk: '/v1/currencies', fv: 'currencyId', fl: 'currencyCode' }
     ] },
-    '/v1/organizations': { title: 'New organization', perm: 'iam:business_unit_master:write', fields: [
-      { n: 'type', l: 'Type', t: 'select', en: ['GROUP', 'COMPANY', 'SUBSIDIARY'] },
-      { n: 'name', l: 'Organization name', t: 'text', req: true },
-      { n: 'reraNo', l: 'Registration no.', t: 'text' }, { n: 'gstin', l: 'GSTIN (tax)', t: 'text', maxlen: 15, pat: '[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]', patMsg: 'GSTIN must be 15 characters, e.g. 29ABCDE1234F1Z5' }
+    // iam.org_master, not iam.organizations: every foreign key (business unit, user, approval rule) and the
+    // Platform list read this one. The old form wrote the other table, so a business unit under it could not save.
+    '/v1/orgs': { title: 'New organization', perm: 'iam:org_master:write', fields: [
+      { n: 'organizationCode', l: 'Organization code', t: 'text', req: true },
+      { n: 'organizationName', l: 'Organization name', t: 'text', req: true }
     ] },
     '/v1/location-types': { title: 'New location type', perm: 'location:location_type_master:write', fields: [
       { n: 'typeCode', l: 'Type code (e.g. FACTORY)', t: 'text', req: true }, { n: 'typeName', l: 'Type name', t: 'text', req: true }
     ] },
     '/v1/locations': { title: 'New location', perm: 'location:location_master:write', fields: [
-      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/organizations', fv: 'id', fl: 'name' },
+      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/orgs', fv: 'organizationId', fl: 'organizationName' },
       { n: 'businessUnitId', l: 'Business unit', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' },
       { n: 'locationTypeId', l: 'Location type', t: 'select', fk: '/v1/location-types', fv: 'locationTypeId', fl: 'typeName' },
       { n: 'parentLocationId', l: 'Parent location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' },
@@ -1932,11 +1933,11 @@
     ] },
     '/v1/production-plan-items': { title: 'New plan item', perm: 'production:production_plan:write', fields: [
       { n: 'productionPlanId', l: 'Production plan', t: 'select', fk: '/v1/production-plans', fv: 'productionPlanId', fl: 'planDate', req: true },
-      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/formulas', fv: 'formulaId', fl: 'formulaCode' },
+      { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/produce/approved-formula-versions', fv: 'formulaId', fl: 'label' },
       { n: 'plannedQty', l: 'Planned qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/production-orders': { title: 'New production order', perm: 'production:production_order:write', fields: [
-      { n: 'formulaVersionId', l: 'Formula version', t: 'select', fk: '/v1/formula-versions', fv: 'formulaVersionId', fl: 'versionNumber', req: true },
+      { n: 'formulaVersionId', l: 'Approved formula', t: 'select', fk: '/v1/produce/approved-formula-versions', fv: 'formulaVersionId', fl: 'label', req: true },
       { n: 'orderQty', l: 'Batch size / order qty', t: 'number', req: true },
       { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
@@ -2065,7 +2066,7 @@
     ] },
     '/v1/business-units': { title: 'New business unit', perm: 'iam:business_unit_master:write', fields: [
       { n: 'businessUnitCode', l: 'BU code', t: 'text', req: true }, { n: 'businessUnitName', l: 'BU name', t: 'text', req: true },
-      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/organizations', fv: 'id', fl: 'name', req: true },
+      { n: 'organizationId', l: 'Organization', t: 'select', fk: '/v1/orgs', fv: 'organizationId', fl: 'organizationName', req: true },
       { n: 'parentBusinessUnitId', l: 'Parent BU', t: 'select', fk: '/v1/business-units', fv: 'businessUnitId', fl: 'businessUnitName' }
     ] },
     '/v1/packaging-qc': { title: 'Record packaging QC', perm: 'packaging:finished_good_batch_master:write', fields: [

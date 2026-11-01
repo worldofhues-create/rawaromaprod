@@ -114,7 +114,7 @@
     '/v1/geo-region-types': 'Levels of your region tree (country, state, city …).', '/v1/geo-regions': 'Places used in addresses.',
     '/v1/users': 'Everyone who can sign in. Give each person a role.', '/v1/roles': 'Roles decide what each person can do.',
     '/v1/permissions': 'Every permission a role can hold.', '/v1/approval-matrix': 'Which documents need approval, and above what amount.',
-    '/v1/organizations': 'Your company and its group companies.', '/v1/business-units': 'Business units inside the company.',
+    '/v1/orgs': 'Your company and its group companies.', '/v1/business-units': 'Business units inside the company.',
     '/v1/location-types': 'Kinds of location (factory, office, store).', '/v1/locations': 'Your sites: factory, offices and stores.',
     '/v1/contacts': 'People you deal with, and how they like to be reached.', '/v1/countries': 'Countries, their currency and time zone.',
     '/v1/document-registry': 'Licences, certificates and other documents, with expiry dates.',
@@ -188,7 +188,7 @@
     '/v1/transporters': 6, '/v1/dispatches': 6, '/v1/dispatch-documents': 6,
     __formulasetup__: 7, '/v1/materials': 7, '/v1/uoms': 7, '/v1/material-types': 7, '/v1/material-categories': 7,
     '/v1/material-subcategories': 7, '/v1/material-groups': 7, '/v1/material-storage-rules': 7, '/v1/rm-aliases': 7,
-    '/v1/geo-region-types': 7, '/v1/geo-regions': 7, '/v1/organizations': 7, '/v1/business-units': 7, '/v1/location-types': 7,
+    '/v1/geo-region-types': 7, '/v1/geo-regions': 7, '/v1/orgs': 7, '/v1/business-units': 7, '/v1/location-types': 7,
     '/v1/locations': 7, '/v1/contacts': 7, '/v1/countries': 7, '/v1/users': 7, '/v1/roles': 7, '/v1/permissions': 7, '/v1/approval-matrix': 7,
     '/v1/notifications': 8, '/v1/document-registry': 8, '/v1/formula-event-hist': 8, '/v1/audit-events': 8, '/v1/login-history': 8,
     __tutorial__: 9

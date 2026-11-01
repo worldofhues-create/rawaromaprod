@@ -24,6 +24,12 @@ export class ProduceController {
     return this.queue.queue(limit ? Number(limit) : 200);
   }
 
+  @Permissions('production:production_order:write')
+  @Get('v1/produce/approved-formula-versions')
+  approvedFormulaVersions() {
+    return this.plan.approvedFormulaVersions();
+  }
+
   @Permissions('production:production_plan_items:write', 'production:production_order:write')
   @Post('v1/produce/requirements/:id/plan')
   planRequirement(@Param('id', new ParseUUIDPipe()) id: string, @CurrentUser() principal: AuthPrincipal) {

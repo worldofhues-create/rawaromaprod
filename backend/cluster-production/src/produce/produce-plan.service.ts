@@ -73,7 +73,7 @@ export class ProducePlanService {
   constructor(
     @Inject(PRODUCTION_DB) private readonly db: ProductionDb,
     private readonly planning: PlanningService,
-    @Optional() @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'formulaLabels'>,
+    @Optional() @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'formulaLabels' | 'formulaDirectory'>,
   ) {}
 
   async planRequirement(alembicRequirementId: string, principal: AuthPrincipal): Promise<PlanResult> {
@@ -166,6 +166,16 @@ export class ProducePlanService {
         runQtyKg: kg, addedQtyKg: kg, ingredientCount, formula,
       };
     });
+  }
+
+  /** What the New production order form may pick: each formula's approved version, by code and number.
+   *  Through the Vault port, because formula routes are not on this box. Never recipe content. */
+  async approvedFormulaVersions(): Promise<Array<{ formulaId: string; formulaVersionId: string; label: string }>> {
+    if (!this.vault) throw new ServiceUnavailableException('The Vault is not reachable from this box, so approved formulas cannot be listed.');
+    const page = await this.vault.formulaDirectory(500);
+    return page.items.flatMap((f) => (f.approvedVersion
+      ? [{ formulaId: f.formulaId, formulaVersionId: f.approvedVersion.formulaVersionId, label: `${f.formulaCode ?? f.formulaId} v${f.approvedVersion.versionNumber ?? '?'}` }]
+      : []));
   }
 
   /** The formula's current approved version (id, number, code) from the Vault, or null. */

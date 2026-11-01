@@ -37,3 +37,14 @@ test('sales is refused the physical layout and the material master', async ({ pa
   await expectRefused(page, 'POST', '/v1/warehouses', { warehouseCode: 'NO', warehouseName: 'No' });
   await expectRefused(page, 'POST', '/v1/materials', { materialCode: 'NO', materialName: 'No' });
 });
+
+test('admin adds an organization and a business unit under it: one table, so the foreign key holds', async ({ page }, info) => {
+  const c = uniq('O', info);
+  await signIn(page, 'factory', 'admin');
+  await openNav(page, 'Organizations');
+  await createViaForm(page, { organizationCode: `ORG${c}`, organizationName: `Org ${c}` });
+  await expectRowPersisted(page, `ORG${c}`, () => sql(`select count(*) from iam.org_master where organization_code='ORG${c}'`), 'Organizations');
+  await openNav(page, 'Business units');
+  await createViaForm(page, { businessUnitCode: `BU${c}`, businessUnitName: `Unit ${c}`, organizationId: { label: `Org ${c}` } });
+  await expectRowPersisted(page, `BU${c}`, () => sql(`select count(*) from iam.business_unit_master where business_unit_code='BU${c}'`), 'Business units');
+});

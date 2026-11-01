@@ -6,8 +6,6 @@ import { createDoc, createViaForm, expectRefused, expectRowPersisted, openNav, s
 test('supplier shipment, gate entry and GRN from an issued PO; the lot lands in quarantine', async ({ page }, info) => {
   const c = uniq('G', info);
   const { number } = await issuedPo(10);
-  // FINDING: Receiving holds no platform:uom_master:read, so the GRN's Unit list is empty; the walk
-  // leaves it blank as a receiver must. Reported, not widened here: an RBAC change needs the owner.
   await signIn(page, 'factory', 'receiving');
   await openNav(page, 'Supplier shipments');
   await createViaForm(page, { purchaseOrderId: { label: number }, dispatchDate: '2031-05-01', transporter: `T-${c}`, docketNumber: `DK-${c}`, vehicleNumber: 'MP09AB1234' });
@@ -19,7 +17,7 @@ test('supplier shipment, gate entry and GRN from an issued PO; the lot lands in 
 
   await openNav(page, 'Goods receipts');
   await createDoc(page, { grnNumber: `GRN-${c}`, purchaseOrderId: { label: number }, gateEntryId: { label: `GE-${c}` }, grnDate: '2031-05-02' },
-    { purchaseOrderItemId: { first: true }, materialId: { label: 'Chain raw material' }, receivedQty: 10 });
+    { purchaseOrderItemId: { first: true }, materialId: { label: 'Chain raw material' }, receivedQty: 10, uomId: { label: 'CH-KG' } });
   await searchFor(page, `GRN-${c}`);
   expect(sql(`select count(*) from inventory.grn_master where grn_number='GRN-${c}'`)).toBe('1');
   await expect.poll(() => sql(`select b.status from inventory.rm_batch_master b join inventory.grn_items i on i.grn_item_id=b.grn_item_id join inventory.grn_master g on g.grn_id=i.grn_id where g.grn_number='GRN-${c}'`)).toBe('QUARANTINE');

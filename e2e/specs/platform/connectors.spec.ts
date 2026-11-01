@@ -8,7 +8,7 @@ test('the configured bridge connector shows, its secret does not; filling is ref
   expect(sql('select count(*) from bridge.connector_config')).not.toBe('0');
   await signIn(page, 'platform', 'platform_super_admin');
   await platformGo(page, '#/connectors', 'Connectors');
-  await expect(page.locator('tbody, .card').first()).toBeVisible();
+  await expect(page.locator('tbody tr').first()).toContainText('Set');
   await expect(page.locator('body')).not.toContainText('browser-suite-bridge-secret');
   expect((await rp('filling', 'GET', '/v1/platform/providers')).status).toBe(403);
 });

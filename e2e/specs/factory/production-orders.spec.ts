@@ -1,27 +1,38 @@
-/* Factory: production orders. Walked through what the floor can actually press: Produce next -> Plan run.
- * The Production orders screen's own "+ New" form is NOT walked: see finding F2 in e2e/FINDINGS.md. */
+/* Factory: production orders, on the screen's own form. */
 import { expect, test } from '@playwright/test';
-import { formula, master, must } from '../../harness/chain';
-import { expectRefused, openNav, rowById, signIn, sql } from '../../harness/walk';
+import { formula, master, rp } from '../../harness/chain';
+import { createViaForm, expectNoNewButton, expectRefused, factoryCall, openNav, rowById, signIn, sql } from '../../harness/walk';
 
-test('an order raised from an approved formula reads back; its pick list is generated from the row', async ({ page }, info) => {
-  await formula(); const { kg } = await master(); const { fv } = await formula();
-  const qty = info.project.name.endsWith('375') ? 7 : 9;
-  const created = await must('production', 'POST', '/v1/production-orders', { formulaVersionId: fv, orderQty: qty, uomId: kg });
-  const number = created.order.productionOrderId as string;
+test('production picks an approved formula on the form; the order reads back and its pick list is generated', async ({ page }, info) => {
+  await formula(); await master();
+  const qty = info.project.name.endsWith('375') ? 7.5 : 9.5;
   await signIn(page, 'factory', 'production');
+  const list = await factoryCall(page, 'GET', '/v1/produce/approved-formula-versions');
+  expect(list.status).toBe(200);
+  // Code and version number only: the list must never carry recipe content.
+  expect(Object.keys(list.json.data[0]).sort()).toEqual(['formulaId', 'formulaVersionId', 'label']);
+  expect(JSON.stringify(list.json.data)).not.toContain('Chain raw material');
   await openNav(page, 'Production orders');
-  await rowById(page, number).getByRole('button', { name: 'Generate pick list', exact: true }).click();
-  const id = number;
-  await expect.poll(() => sql(`select count(*) from production.material_pick_list where production_order_id='${id}'`), { timeout: 20_000 }).toBe('1');
+  const q = `select production_order_id from production.production_order where order_qty=${qty} order by created_dt desc limit 1`;
+  const before = sql(q);
+  await createViaForm(page, { formulaVersionId: { label: 'CH-F-1 v1' }, orderQty: qty });
+  const id = sql(q);
+  expect(id).not.toBe(''); expect(id).not.toBe(before);
+  await expect(rowById(page, id)).toBeVisible();
   await page.reload();
   await expect(page.locator('#ra-title')).toHaveText('Production orders');
-  await expect(rowById(page, number)).toBeVisible();
+  await rowById(page, id).getByRole('button', { name: 'Generate pick list', exact: true }).click();
+  await expect.poll(() => sql(`select count(*) from production.material_pick_list where production_order_id='${id}'`), { timeout: 20_000 }).toBe('1');
 });
 
-test('sales is refused a production order', async ({ page }) => {
+test('compounding has no form, and sales is refused the order and the formula list', async ({ page }) => {
   const { fv } = await formula(); const { kg } = await master();
+  await signIn(page, 'factory', 'compounding');
+  await openNav(page, 'Production orders');
+  await expectNoNewButton(page);
   await signIn(page, 'factory', 'sales');
   await expect(page.locator('#ra-side .who small')).toHaveText('Sales & Dispatch');
   await expectRefused(page, 'POST', '/v1/production-orders', { formulaVersionId: fv, orderQty: 1, uomId: kg });
+  await expectRefused(page, 'GET', '/v1/produce/approved-formula-versions');
+  expect((await rp('filling', 'GET', '/v1/produce/approved-formula-versions')).status).toBe(403);
 });
