@@ -18,3 +18,4 @@ owner, because each is a role grant or a product decision rather than a defect w
 | F11 | OPEN | The document letterhead still reads `/v1/organizations` (left alone to keep the address fields). |
 | F12 | OPEN | Production holds no `platform:uom_master:read` either, so the Unit list on New production order is empty. Not in the decision that granted F3. |
 | F13 | FIXED | `PUT /v1/admin/flags/:key` ran its schema over the key as well as the body, so every feature switch change answered 422. Nobody had ever pressed it (production `flag_states` 0). |
+| F14 | OPEN | One full backend run failed `shells: idempotent` (a concurrent duplicate answered error, not the existing shell). It passed 3 of 3 alone. Code not touched by this lane. |
