@@ -5,7 +5,7 @@ import { expect, test } from '@playwright/test';
 import { formula, master, rp } from '../../harness/chain';
 import { vaultGo, signIn, sql } from '../../harness/walk';
 
-test('compliance data imported by CSV reads back and Recalculate writes a status; a formulator cannot write it', async ({ page }) => {
+test('compliance data imported by CSV reads back and Recalculate writes a status; filling is refused', async ({ page }) => {
   await master(); await formula();
   expect((await rp('filling', 'GET', '/v1/compliance/materials', undefined, { vault: true })).status).toBe(403);
   await signIn(page, 'vault', 'vault_approver');
@@ -21,6 +21,8 @@ test('compliance data imported by CSV reads back and Recalculate writes a status
   await card.getByRole('button', { name: 'Preview', exact: true }).click();
   await card.getByRole('button', { name: 'Import', exact: true }).click();
   await expect.poll(() => sql(`select count(*) from formula.rm_allergen_composition`, 'vault'), { timeout: 20_000 }).not.toBe('0');
+  await page.evaluate(() => { location.hash = '#/certificates'; });
+  await expect(page.locator('#vault-title')).toHaveText('Certificates');
   await page.getByRole('button', { name: 'Recalculate all', exact: true }).click();
   await expect.poll(() => sql('select count(*) from formula.compliance_calc_status', 'vault'), { timeout: 20_000 }).not.toBe('0');
 });

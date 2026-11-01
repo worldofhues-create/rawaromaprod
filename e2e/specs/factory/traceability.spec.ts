@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test';
 import { releasedFinishedBatch } from '../../harness/chain';
 import { expectRefused, openNav, rowAction, signIn, uniq } from '../../harness/walk';
 
-test('owner traces a released batch to its oil and raw material; admin sees it masked; filling is refused', async ({ page }, info) => {
+test('owner traces a released batch to its oil and raw material; filling is refused', async ({ page }, info) => {
   const fgNo = uniq('FGT-', info);
   const { fg } = await releasedFinishedBatch(fgNo, 2);
   await signIn(page, 'factory', 'owner');
