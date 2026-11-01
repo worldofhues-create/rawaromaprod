@@ -125,7 +125,11 @@ export async function releasedStock(qty: number) {
 export async function orderWithIssuedStock(qty = 5) {
   const { fv, kg, mat } = { ...(await formula()), ...(await master()) };
   const { invBatch } = await releasedStock(qty);
-  const order = (await must('production', 'POST', '/v1/production-orders', { formulaVersionId: fv, orderQty: qty, uomId: kg })).order.productionOrderId as string;
+  // Through a plan line carrying the formula: that link is how the certificate step finds the product.
+  const { formulaId } = await formula();
+  const plan = (await must('production', 'POST', '/v1/production-plans', { planDate: today() })).productionPlanId;
+  const line = (await must('production', 'POST', '/v1/production-plan-items', { productionPlanId: plan, formulaId, plannedQty: qty, uomId: kg })).productionPlanItemId;
+  const order = (await must('production', 'POST', '/v1/production-orders', { formulaVersionId: fv, productionPlanItemId: line, orderQty: qty, uomId: kg })).order.productionOrderId as string;
   await must('warehouse', 'POST', '/v1/stock-reservations', { inventoryBatchId: invBatch, reservedQty: qty, uomId: kg, reservedForDocumentId: order });
   const pl = await must('production', 'POST', `/v1/production-orders/${order}/pick-list`, { pickListDate: today() });
   await must('compounding', 'POST', '/v1/material-issues', { productionOrderId: order, materialPickListId: pl.pickList.materialPickListId,
@@ -147,6 +151,15 @@ export async function releasedOil(batchNumber: string, qty = 5) {
   await must('qc', 'POST', '/v1/production-qc', qcBody);
   await must('compounding', 'POST', `/v1/oil-batches/${oil}/transition`, { status: 'RELEASED' });
   return { oil: oil as string, order, mix };
+}
+/** QC's release of the oil batch: the gate labels now stand behind. */
+export async function releasedCoa(oil: string) {
+  const { product } = await producible().then(() => sku());
+  await must('qc', 'PUT', `/v1/product-qc-specs/${product}`, { sgMin: 0.5, sgMax: 2, flashPointMinC: 20, flashPointMaxC: 120, shelfLifeMonths: 24 });
+  const made = await must('qc', 'POST', '/v1/batch-coas', { oilBatchId: oil, productId: product, sgResult: 1, flashPointResultC: 60, colourAppearance: 'Clear', colourAppearancePass: true, odourDescription: 'Conforms', odourPass: true });
+  const coa = (made.batchCoaId ?? made.coa?.batchCoaId) as string;
+  await must('qc', 'POST', `/v1/batch-coas/${coa}/release`, {});
+  return coa;
 }
 export const sku = () => stage('sku', async () => {
   const { pcs } = await master();
@@ -171,7 +184,8 @@ export async function filledPackageOrder(oilBatchNumber: string, qty = 5) {
 /** A finished batch: labelled, packaging QC passed, released. */
 export async function releasedFinishedBatch(fgNumber: string, qty = 5) {
   const { kg } = await master();
-  const { pkg, skuId } = await filledPackageOrder(`OB-${fgNumber}`, qty);
+  const { pkg, skuId, oil } = await filledPackageOrder(`OB-${fgNumber}`, qty);
+  await releasedCoa(oil);
   const fg = (await must('packaging', 'POST', '/v1/finished-good-batches', { packageOrderId: pkg, productSkuId: skuId, batchNumber: fgNumber, producedQty: qty, uomId: kg, manufacturingDate: today(), expiryDate: plusDays(700) })).batch.finishedGoodBatchId as string;
   await must('packaging', 'POST', `/v1/finished-good-batches/${fg}/labels`, { labelCount: 1 });
   await must('packaging', 'POST', `/v1/package-orders/${pkg}/complete`, {});

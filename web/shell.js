@@ -1965,6 +1965,7 @@
       { n: 'packageOrderId', l: 'Package order', t: 'select', fk: '/v1/package-orders', fv: 'packageOrderId', fl: 'packageOrderId', req: true },
       { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
       { n: 'batchNumber', l: 'FG batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty (units)', t: 'number', req: true },
+      { n: 'manufacturingDate', l: 'Manufactured on (printed on the label)', t: 'date', req: true },
       { n: 'expiryDate', l: 'Expiry date', t: 'date' }
     ] },
     // ---- M06 stock operations (record movements / adjust / transfer / reserve / count from the UI) ----
