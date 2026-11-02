@@ -162,9 +162,11 @@
       ['geotypes', 'Geo levels', 'map', '/v1/geo-region-types'], ['georegions', 'Geo regions', 'globe', '/v1/geo-regions'],
       ['sorders', 'Sales orders', 'cart', '/v1/sales-orders'], ['dispatch', 'Dispatches', 'truck', '/v1/dispatches'], ['ddocs', 'Dispatch docs', 'fileText', '/v1/dispatch-documents'],
       ['fgstock', 'FG stock (ATP)', 'boxes', '/v1/fg-stock'],
-      ['trace', 'Traceability', 'branch', '/v1/finished-good-batches'], ['notifs', 'Notifications', 'bell', '/v1/notifications'],
+      ['trace', 'Traceability', 'branch', '/v1/finished-good-batches'],
+      // No Notifications entry: GET /v1/notifications is guarded by formula:actual:read, which the seed
+      // refuses to the Owner (§107). Formula history is not here either: that route is on the Vault API only.
       ['docs', 'Documents', 'archive', '/v1/document-registry'],
-      ['users', 'Users', 'users', '/v1/users'], ['audit', 'Audit log', 'history', '/v1/formula-event-hist'],
+      ['users', 'Users', 'users', '/v1/users'],
       ['wtrail', 'Write audit trail', 'edit', '/v1/audit-events'],
       ['bridgereq', 'Sales requirements', 'link', '/v1/bridge/requirements'],
       ['weigh', 'Weighing', 'scale', '/v1/weighing-records'], ['labels', 'FG labels', 'tag', '/v1/fg-labels'],
@@ -260,7 +262,7 @@
     '/v1/users': ['userName', 'email', 'employeeCode', 'mobileNumber', 'isActive', 'status'],
     '/v1/roles': ['roleCode', 'roleName', 'status'],
     '/v1/permissions': ['permissionCode', 'moduleName', 'permissionName', 'status'],
-    '/v1/production-orders': ['productionOrderId', 'orderQty', 'formulaVersionId', 'actualStartDt', 'status'],
+    '/v1/production-orders': ['orderNumber', 'orderQty', 'actualStartDt', 'status'],
     '/v1/production-order-ingredients': ['aliasName', 'requiredQty', 'issuedQty', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
@@ -325,7 +327,7 @@
     '/v1/finished-good-batches': ['batchNumber', 'producedQty', 'manufacturingDate', 'status'],
     '/v1/fg-stock': ['batchNumber', 'skuCode', 'producedQty', 'dispatchedQty', 'reservedQty', 'availableQty', 'expiryDate', 'daysToExpiry'],
     '/v1/fg-stock/by-sku': ['skuCode', 'productName', 'batchCount', 'producedQty', 'availableQty'],
-    '/v1/fg-reservations': ['finishedGoodBatchId', 'reservedQty', 'channel', 'reservedForDocumentId', 'reservedDt', 'status'],
+    '/v1/fg-reservations': ['batchNumber', 'reservedQty', 'channel', 'reservedDt', 'status'],
     '/v1/product-skus': ['skuCode', 'packSize', 'status'],
     '/v1/sales-orders': ['soNumber', 'totalAmount', 'orderDate', 'origin', 'status'],
     '/v1/customers': ['customerCode', 'customerName', 'status'],
@@ -333,8 +335,8 @@
     '/v1/stock-requirements': ['materialCode', 'materialName', 'requiredQty', 'requiredByDate', 'priority', 'status'],
     '/v1/rfqs': ['rfqNumber', 'prNumber', 'rfqDate', 'submissionDeadline', 'status'],
     '/v1/quotations': ['quotationNumber', 'quotationDate', 'validUntilDate', 'status'],
-    '/v1/material-pick-lists': ['pickListDate', 'productionOrderId', 'status'],
-    '/v1/material-issues': ['issuedDt', 'productionOrderId', 'status'],
+    '/v1/material-pick-lists': ['pickListDate', 'orderNumber', 'status'],
+    '/v1/material-issues': ['issuedDt', 'orderNumber', 'status'],
     '/v1/production-qc': ['result', 'observedValue', 'inspectionDt', 'status'],
     '/v1/product-qc-specs': ['productCode', 'productName', 'sgMin', 'sgMax', 'flashPointMinC', 'flashPointMaxC', 'shelfLifeMonths', 'status'],
     '/v1/batch-coas': ['batchNumber', 'productCode', 'sgResult', 'flashPointResultC', 'overallResult', 'productionDate', 'bestBefore', 'status'],
@@ -380,6 +382,15 @@
   var HIDE = { createdDt: 1, updatedDt: 1, createdBy: 1, updatedBy: 1 };
   function sensitive(k) { return /hash|secret|token|password|salt|enc_?payload|enc_?iv|enc_?tag|encpayload|enciv|enctag|encryption|vaultlocation/i.test(k); }
   function isUuid(v) { return typeof v === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-/.test(v); }
+  // A date field arrives as 2026-11-02T08:14:22.000Z or, from a raw query, 2026-11-02 08:14:22+00:
+  // both are one moment to a reader. A *Dt keeps its time of day; a *Date is a calendar day and is
+  // not moved through a timezone, which would change the day.
+  function isStamp(v) { return typeof v === 'string' && /^\d{4}-\d{2}-\d{2}[T ]/.test(v); }
+  function fmtStamp(k, v) {
+    if (!/Dt$|_dt$/.test(k)) return v.slice(0, 10);
+    var d = new Date(v.replace(' ', 'T').replace(/([+-]\d{2})$/, '$1:00'));
+    return isNaN(d) ? v : d.toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
   // A column heading a person can read (screen-guide.js COLUMN), else the field name in words.
   function label(k) { var g = window.RaGuide && RaGuide.column(k); if (g) return g; if (k === 'ip') return 'IP'; return k.replace(/([A-Z])/g, ' $1').replace(/Id\b/, '').replace(/_/g, ' ').replace(/^./, function (c) { return c.toUpperCase(); }).trim(); }
   // uomId → readable unit code (kg / L / units …), loaded once (loadView) and used to label
@@ -406,7 +417,7 @@
     if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString()) + '</span>'; }
     if (k === 'result' && typeof v === 'string' && v.indexOf('Refused') === 0) return '<span style="color:var(--red)">' + escCell(v) + '</span>';
     if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + escCell(String(v).slice(0, 8).toUpperCase()) + '</span>';
-    if (/Dt$|Date$|_dt$/.test(k) && typeof v === 'string' && v.indexOf('T') > 0) return '<span style="color:var(--ink-2)">' + escCell(v.slice(0, 10)) + '</span>';
+    if (/Dt$|Date$|_dt$/.test(k) && isStamp(v)) return '<span style="color:var(--ink-2)">' + escCell(fmtStamp(k, v)) + '</span>';
     if (/code|number|alias/i.test(k)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(v) + '</span>';
     return '<span>' + escCell(v) + '</span>';
   }
@@ -688,7 +699,7 @@
    * section stays in the sheet and the ⌘/ go-to palette. Below 1024px it is the tab bar: the first
    * RaDock.PHONE destinations, Ask Aria and More. Keys a session does not hold are skipped. */
   var DOCK_DEFAULTS = {
-    superadmin: ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders', 'notifs'],
+    superadmin: ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders', 'trace'],
     admin: ['dashboard', 'users', 'roles', 'perms', 'approvals', 'locations', 'loginhist', 'wtrail'],
     procurement: ['dashboard', 'planning', 'reorder', 'prs', 'rfq', 'pos', 'vendors', 'rejgrns'],
     receiving: ['dashboard', 'vdispatch', 'gate', 'grns', 'grnitems', 'batches', 'containers'],
@@ -877,7 +888,7 @@
   function gaugeFor(p, role) {
     if (role === 'production') return [p.planActual.pct, 'Plan attainment'];
     if (role === 'qc') return [p.counts.qcPassRate, 'Pass rate'];
-    if (role === 'warehouse') return [p.counts.zoneCapAvg, 'Capacity'];
+    if (role === 'warehouse') return [p.counts.zoneCapAvg || 0, 'Bins in use'];
     if (role === 'admin') return [p.counts.usersTotal ? Math.round(p.counts.usersActive / p.counts.usersTotal * 100) : 0, 'Active users'];
     return [p.planActual.pct, 'Plan vs actual'];
   }
@@ -996,16 +1007,16 @@
   function warehouseMap(p) {
     // U3b: zone tiles are a dynamic-length collection, so they sit in .gwrap-auto as .gcard.glass
     // surfaces rather than a fixed c-span.
+    // Only what location.zone_master holds. A used-bins figure needs bins to count; with none it says so.
     var zones = p.zones.map(function (z) {
+      var meta = z.racks + ' racks · ' + z.batches + ' batches';
+      if (z.capPct == null) return gCard({ span: 'c4', title: escCell(z.name), meta: meta, body: '<div class="kv" style="border:0;padding:0"><span class="k">Bins in use</span><span class="v">No bins set up</span></div>' });
       var capCol = z.capPct >= 85 ? 'var(--red)' : (z.capPct >= 65 ? 'var(--amber)' : 'var(--accent)');
-      var cells = ''; for (var i = 0; i < 12; i++) { var on = i < Math.round(z.capPct / 100 * 12); cells += '<i style="border-radius:var(--r-sm);height:16px;background:' + (on ? clsCol(z.cls) : 'var(--panel-3)') + '"></i>'; }
-      return gCard({ span: 'c4', title: z.name, meta: z.racks + ' racks · ' + z.batches + ' batches', body:
-        '<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:5px" aria-hidden="true">' + cells + '</div>' +
-        '<div class="kv" style="border:0;padding:0"><span class="k">Capacity used</span><span class="v" style="color:' + (capCol === 'var(--accent)' ? 'var(--ink)' : capCol) + '">' + z.capPct + '%</span></div>' +
-        '<div class="meter"><i style="width:' + z.capPct + '%;background:' + capCol + '"></i></div>' +
-        (z.code === 'Z4' ? '<span class="chip r" style="align-self:flex-start">Flammable</span>' : '')
+      return gCard({ span: 'c4', title: escCell(z.name), meta: meta, body:
+        '<div class="kv" style="border:0;padding:0"><span class="k">Bins in use</span><span class="v">' + z.binsUsed + ' of ' + z.bins + ' (' + z.capPct + '%)</span></div>' +
+        '<div class="meter"><i style="width:' + z.capPct + '%;background:' + capCol + '"></i></div>'
       });
-    }).join('');
+    }).join('') || gCard({ span: 'c12', title: 'Storage zones', body: '<div class="empty" id="ra-zones-empty"><h3>No storage zones yet</h3><p>Zones appear here once they are added under Zones.</p></div>' });
     // UX-C: the "Storage workload" bar chart beside this card was pseudo-random bars under a fixed
     // 06:00/12:00/18:00 axis — no hourly data exists behind it — so it is gone; the floor summary
     // (real counts) now spans the row.
@@ -1024,7 +1035,7 @@
       procurement: [['clipboard', c.posOpen, 'Open POs'], ['bell', c.posPending, 'Pending approvals'], ['truck', c.vendors, 'Suppliers'], ['box', c.materials, 'Materials']],
       receiving: [['truck', c.grns, 'Goods receipts'], ['layers', c.rmBatches, 'RM batches'], ['box', c.invOnHand, 'Units on hand'], ['flask', c.qcQueue, 'Awaiting QC']],
       qc: [['flask', c.qcQueue, 'In queue'], ['activity', c.qcPass, 'Passed'], ['alert', c.qcFail, 'Failed'], ['shield', c.qcPassRate + '%', 'Pass rate']],
-      warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg + '%', 'Avg capacity']],
+      warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg == null ? '—' : c.zoneCapAvg + '%', 'Bins in use']],
       production: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       compounding: [['beaker', c.mixing, 'Mixing sessions'], ['layers', c.runsActive, 'Active runs'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString(), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],
@@ -1600,8 +1611,9 @@
     }
     var docTitle = PRINTABLE[endpoint] || 'DOCUMENT';
     function rowsHtml(obj) {
-      return Object.keys(obj).filter(function (k) { return !HIDE[k] && !sensitive(k) && obj[k] != null && typeof obj[k] !== 'object' && obj[k] !== ''; }).map(function (k) {
-        var v = obj[k]; if (isUuid(v)) v = String(v).slice(0, 8).toUpperCase();
+      // A record id means nothing on paper, and the number the reader needs is its own field (poNumber…).
+      return Object.keys(obj).filter(function (k) { return !HIDE[k] && !sensitive(k) && obj[k] != null && typeof obj[k] !== 'object' && obj[k] !== '' && !isUuid(obj[k]); }).map(function (k) {
+        var v = obj[k]; if (/Dt$|Date$|_dt$/.test(k) && isStamp(v)) v = fmtStamp(k, v);
         return '<tr><td class="k">' + label(k) + '</td><td class="v">' + String(v) + '</td></tr>';
       }).join('');
     }
@@ -1615,7 +1627,7 @@
         '.sec{margin-top:20px;font-size:11px;letter-spacing:.1em;color:#66665E;font-weight:800}' +
         '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #D6D6D2;padding-top:6px;font-size:12px;color:#66665E;width:210px;text-align:center}' +
         '@media print{.noprint{display:none}}</style></head><body>' +
-        '<h1>RAW AROMA CHEM</h1><hr>' +
+        '<h1>Raw Aromachem</h1><hr>' +
         '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
         '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
         '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
@@ -1943,10 +1955,10 @@
       { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/mixing-sessions': { title: 'New mixing session', perm: 'production:secure_mixing_session:write', fields: [
-      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true }
+      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'orderNumber', req: true }
     ] },
     '/v1/oil-batches': { title: 'New oil batch', perm: 'production:oil_batch_master:write', fields: [
-      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'productionOrderId', req: true },
+      { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'orderNumber', req: true },
       { n: 'batchNumber', l: 'Oil batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty', t: 'number', req: true },
       { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
@@ -2629,7 +2641,7 @@
       '<div class="login-wrap"><div class="login-card">' +
         '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
         '<h1 class="mark">Factory</h1>' +
-        '<p class="sub">Raw Aroma Chem production.</p>' +
+        '<p class="sub">Raw Aromachem production.</p>' +
         '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Raw Aromachem sign-in &rarr;</a>' +
         '<div id="lerr" class="err" role="alert">' + (ALEMBIC_CONSOLE_URL ? '' : 'Sign-in is not switched on here yet. Ask your administrator.') + '</div>' +
       '</div></div>';

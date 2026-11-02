@@ -14,7 +14,7 @@
  * material/inventory/uom/order/pick-list refs are id-only soft refs (plain uuid, no FK here).
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, lt, sql } from 'drizzle-orm';
+import { and, desc, eq, getTableColumns, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { VAULT_PORT, type CodedInstruction, type VaultPort } from '@ra/cluster-formula';
@@ -49,10 +49,11 @@ export class PickingService {
 
   /* ── material pick list (CRUD reads) ─────────────────────────────── */
 
-  async listPickLists(query: ListQuery): Promise<Page<typeof materialPickList.$inferSelect>> {
+  async listPickLists(query: ListQuery): Promise<Page<typeof materialPickList.$inferSelect & { orderNumber: string | null }>> {
     const rows = await this.db
-      .select()
+      .select({ ...getTableColumns(materialPickList), orderNumber: productionOrder.orderNumber })
       .from(materialPickList)
+      .leftJoin(productionOrder, eq(productionOrder.productionOrderId, materialPickList.productionOrderId))
       .where(query.cursor ? lt(materialPickList.materialPickListId, query.cursor) : undefined)
       .orderBy(desc(materialPickList.materialPickListId))
       .limit(query.limit + 1);
@@ -215,10 +216,11 @@ export class PickingService {
 
   /* ── material issue (CRUD reads) ─────────────────────────────────── */
 
-  async listIssues(query: ListQuery): Promise<Page<typeof materialIssue.$inferSelect>> {
+  async listIssues(query: ListQuery): Promise<Page<typeof materialIssue.$inferSelect & { orderNumber: string | null }>> {
     const rows = await this.db
-      .select()
+      .select({ ...getTableColumns(materialIssue), orderNumber: productionOrder.orderNumber })
       .from(materialIssue)
+      .leftJoin(productionOrder, eq(productionOrder.productionOrderId, materialIssue.productionOrderId))
       .where(query.cursor ? lt(materialIssue.materialIssueId, query.cursor) : undefined)
       .orderBy(desc(materialIssue.materialIssueId))
       .limit(query.limit + 1);

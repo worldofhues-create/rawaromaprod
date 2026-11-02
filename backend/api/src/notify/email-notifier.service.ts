@@ -165,7 +165,7 @@ export class EmailNotifierService implements OnModuleInit, OnModuleDestroy {
       `\nWhat to do: ${cta}`,
       `Open the portal → ${this.portal}  (${screen})`,
       '',
-      '— RAW AROMACHEM notifications',
+      '— Raw Aromachem notifications',
     ].filter((l) => l !== null).join('\n');
   }
 

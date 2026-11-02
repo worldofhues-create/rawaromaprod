@@ -191,11 +191,14 @@ export class PlanningService {
    * "Produce next" plan creates the plan item and the run in ONE transaction with it).
    */
   async insertOrderTx(tx: Tx, body: CreateOrder, picks: PickLine[], principal: AuthPrincipal) {
+    const newOrderId = uuidv7();
     const order = (
       await tx
         .insert(productionOrder)
         .values({
-          productionOrderId: uuidv7(),
+          productionOrderId: newOrderId,
+          // The tail of the uuidv7: its head is a clock and repeats across orders minted together.
+          orderNumber: `MO-${newOrderId.replace(/-/g, '').slice(-12).toUpperCase()}`,
           productionPlanItemId: body.productionPlanItemId ?? null,
           formulaVersionId: body.formulaVersionId,
           locationId: body.locationId ?? null,

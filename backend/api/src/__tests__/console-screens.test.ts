@@ -104,7 +104,7 @@ test('toasts are announced to screen readers in all three consoles', () => {
 test('Platform and Vault: a title per screen in the tab, a help line, and plain words on the sign-in card', () => {
   for (const f of ['web-platform/platform.js', 'web-vault/vault.js']) {
     const js = read(f);
-    assert.match(js, /document\.title = label \+ ' · (Platform|Vault) · Raw Aroma Chem';/, f);
+    assert.match(js, /document\.title = label \+ ' · (Platform|Vault) · Raw Aromachem';/, f);
     assert.match(js, /var HELP = \{/, f);
     assert.match(js, /Sign-in is not switched on here yet\. Ask your administrator\./, f);
   }

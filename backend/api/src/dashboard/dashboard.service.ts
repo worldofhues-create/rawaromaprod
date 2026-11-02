@@ -33,14 +33,6 @@ function classOf(name: string): 'natural' | 'aroma' | 'base' | 'solvent' {
   if (/vetiver|cedar|patchouli|sandal|oud|rose|jasmin|absolute|\boil\b/.test(s)) return 'natural';
   return 'aroma';
 }
-/** Themed storage zone a real material belongs in (Z1 Citrus · Z2 Amber · Z3 Florals · Z4 Flammables). */
-function zoneOf(name: string): 'Z1' | 'Z2' | 'Z3' | 'Z4' {
-  const s = (name || '').toLowerCase();
-  if (/glycol|solvent|dipropylene|ethanol|alcohol|flammable|ipm/.test(s)) return 'Z4';
-  if (/bergamot|lemon|orange|citrus|lime|grapefruit|neroli/.test(s)) return 'Z1';
-  if (/ambrox|vanillin|coumarin|amber|musk|tonka|cedar|patchouli|vetiver/.test(s)) return 'Z2';
-  return 'Z3';
-}
 /** Where a run sits on the line, from its order status. */
 function stageOf(status: string): string {
   switch ((status || '').toUpperCase()) {
@@ -52,13 +44,6 @@ function stageOf(status: string): string {
   }
 }
 const num = (v: unknown): number => Number(v ?? 0) || 0;
-const ZONES = [
-  { code: 'Z1', name: 'Z1 · Citrus', cls: 'natural' },
-  { code: 'Z2', name: 'Z2 · Amber', cls: 'base' },
-  { code: 'Z3', name: 'Z3 · Florals', cls: 'aroma' },
-  { code: 'Z4', name: 'Z4 · Flammables', cls: 'solvent' },
-] as const;
-
 /** The one Vault read this service makes (VaultApiClient in production; a stub in tests). */
 export type FormulaLabelSource = Pick<VaultApiClient, 'formulaLabels'>;
 
@@ -140,10 +125,21 @@ export class DashboardService {
           order by b.batch_number`,
       sql`select count(*)::int c, coalesce(sum(quantity_on_hand::numeric),0)::float q
           from inventory.inventory_batch`,
-      sql`select z.zone_code code, count(r.rack_id)::int racks
-          from location.zone_master z
-          left join location.rack_master r on r.zone_id = z.zone_id
-          group by z.zone_id, z.zone_code`,
+      // The zones the warehouse really has, and what stands in them: finished goods by the bin they
+      // were put away in, raw stock by the storage location it was received into.
+      sql`select z.zone_code code, z.zone_name zname,
+                 (select count(*)::int from location.rack_master r where r.zone_id = z.zone_id) racks,
+                 (select count(*)::int from location.bin_master b join location.shelf_master s on s.shelf_id = b.shelf_id
+                    join location.rack_master r on r.rack_id = s.rack_id where r.zone_id = z.zone_id) bins,
+                 (select count(distinct f.bin_id)::int from location.fg_bin_stock f join location.bin_master b on b.bin_id = f.bin_id
+                    join location.shelf_master s on s.shelf_id = b.shelf_id join location.rack_master r on r.rack_id = s.rack_id
+                   where r.zone_id = z.zone_id and f.qty > 0) bins_used,
+                 (select count(distinct f.finished_good_batch_id)::int from location.fg_bin_stock f join location.bin_master b on b.bin_id = f.bin_id
+                    join location.shelf_master s on s.shelf_id = b.shelf_id join location.rack_master r on r.rack_id = s.rack_id
+                   where r.zone_id = z.zone_id and f.qty > 0)
+                 + (select count(*)::int from inventory.inventory_batch i join location.storage_location_master l on l.storage_location_id = i.storage_location_id
+                     where l.zone_id = z.zone_id) batches
+          from location.zone_master z order by z.zone_code`,
       sql`select status, count(*)::int c from production.secure_mixing_session group by status`,
       sql`select count(*)::int c, coalesce(sum(produced_qty::numeric),0)::float q
           from production.oil_batch_master`,
@@ -310,20 +306,18 @@ export class DashboardService {
         cls: (['aroma', 'base', 'natural', 'solvent'] as const)[i % 4],
       }));
 
-    // ── warehouse zones (real racks + real batch occupancy by themed zone) ──────
-    const rackByZone: Record<string, number> = {};
-    for (const z of zoneRacks) rackByZone[String(z.code)] = num(z.racks);
-    const batchByZone: Record<string, number> = { Z1: 0, Z2: 0, Z3: 0, Z4: 0 };
-    for (const b of rmBatches) { const zk = zoneOf(String(b.mname)); batchByZone[zk] = (batchByZone[zk] || 0) + 1; }
-    const maxBz = Math.max(1, ...Object.values(batchByZone));
-    const zones = ZONES.map((z) => {
-      const racks = rackByZone[z.code] || 0;
-      const batches = batchByZone[z.code] || 0;
-      // capacity = real batch load against the busiest zone, lifted onto a readable 40–96% band
-      const capPct = Math.min(96, Math.max(28, Math.round((batches / maxBz) * 70) + racks * 6));
-      return { code: z.code, name: z.name, cls: z.cls, racks, batches, capPct };
+    // ── warehouse zones: rows of location.zone_master, never a fixed list, and capacity is only ever
+    // bins in use over bins, because no table records a zone's capacity. No bins, no percentage. ──
+    const zones = zoneRacks.map((z) => {
+      const bins = num(z.bins);
+      const binsUsed = num(z.bins_used);
+      return {
+        code: String(z.code ?? ''), name: String(z.zname ?? z.code ?? ''), racks: num(z.racks), batches: num(z.batches),
+        bins, binsUsed, capPct: bins ? Math.round((binsUsed / bins) * 100) : null,
+      };
     });
-    const zoneCapAvg = Math.round(zones.reduce((a, z) => a + z.capPct, 0) / zones.length);
+    const allBins = zones.reduce((a, z) => a + z.bins, 0);
+    const zoneCapAvg = allBins ? Math.round((zones.reduce((a, z) => a + z.binsUsed, 0) / allBins) * 100) : null;
 
     // ── activity feed (real events, newest first) ──────────────────────────────
     type Feed = { text: string; dot: string; ts: string };

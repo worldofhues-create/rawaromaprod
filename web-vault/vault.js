@@ -504,7 +504,7 @@
     var card = h('div', { class: 'login-card' }, [
       h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
       h('h1', { class: 'mark' }, ['Vault']),
-      h('p', { class: 'sub' }, ['Raw Aroma Chem formula access.']),
+      h('p', { class: 'sub' }, ['Raw Aromachem formula access.']),
       ended,
       goBtn, err,
     ]);
@@ -712,7 +712,7 @@
     });
     el.appendChild(h('nav', { 'aria-label': 'You are here' }, [ol]));
     var last = steps[steps.length - 1]; var t = document.getElementById('vault-title'); if (t && last) t.textContent = last.label;
-    document.title = (last ? last.label + ' · ' : '') + 'Vault · Raw Aroma Chem';
+    document.title = (last ? last.label + ' · ' : '') + 'Vault · Raw Aromachem';
   }
   function renderShell(activeView, contentEl, trail) {
     root.innerHTML = '';
@@ -739,7 +739,7 @@
      * stores on/off, never formula or session data. */
     if (window.RaFocus && rme) RaFocus.mountToggle(rme, rme.lastChild, 'rail-min', 'position:static;margin-left:0');
     var label = (NAV.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Vault';
-    document.title = label + ' · Vault · Raw Aroma Chem';
+    document.title = label + ' · Vault · Raw Aromachem';
     ariaCtx = 'Vault · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [
       h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),

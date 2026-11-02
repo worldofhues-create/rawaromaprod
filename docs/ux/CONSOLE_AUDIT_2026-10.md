@@ -150,10 +150,8 @@ Before this lane, no Factory screen had an address. The "Older link" column is t
 | Dispatch docs → **Dispatch documents** | `#/go/ddocs` | `#/owner/dispatch-documents` | Packing and sales |
 | FG stock (ATP) → **Finished stock** | `#/go/fgstock` | `#/owner/finished-stock` | Packing and sales |
 | Traceability → **Trace a batch** | `#/go/trace` | `#/owner/finished-batches` | Packing and sales |
-| Notifications → **Notifications sent** | `#/go/notifs` | `#/owner/notifications` | Records |
 | Documents | `#/go/docs` | `#/owner/documents` | Records |
 | Users | `#/go/users` | `#/owner/users` | Setup |
-| Audit log → **Formula history** | `#/go/audit` | `#/owner/formula-history` | Records |
 | Write audit trail → **Change history** | `#/go/wtrail` | `#/owner/change-history` | Records |
 | ALEMBIC requirements → **Orders from ALEMBIC** | `#/go/bridgereq` | `#/owner/alembic-orders` | Start here |
 | Weighing | `#/go/weigh` | `#/owner/weighing` | Production |

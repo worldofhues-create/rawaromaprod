@@ -5,14 +5,7 @@
  * are id-only soft refs per the locked dictionary (no cross-schema FK). Note: IssuedQty
  * on production_order_ingredients is BOOLEAN per the locked dictionary.
  */
-import {
-  boolean,
-  date,
-  index,
-  numeric,
-  timestamp,
-  uuid,
-} from "drizzle-orm/pg-core";
+import { boolean, date, index, numeric, timestamp, uuid, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { production } from "./_schema.js";
 
@@ -54,6 +47,7 @@ export const productionOrder = production.table(
   "production_order",
   {
     productionOrderId: dictPk("production_order_id"),
+    orderNumber: varchar("order_number", { length: 40 }),
     productionPlanItemId: uuid("production_plan_item_id"), // soft ref → production_plan_items (per locked dictionary)
     formulaVersionId: uuid("formula_version_id"), // soft ref → formula.formula_version
     locationId: uuid("location_id"), // soft ref → location
@@ -64,6 +58,7 @@ export const productionOrder = production.table(
     ...metaColumns(),
   },
   (t) => [
+    uniqueIndex("production_order_order_number_uq").on(t.orderNumber),
     index("production_order_plan_item_idx").on(t.productionPlanItemId),
     index("production_order_location_idx").on(t.locationId),
   ],
