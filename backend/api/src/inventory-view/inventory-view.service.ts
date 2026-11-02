@@ -13,6 +13,8 @@ import type { Sql } from 'postgres';
 export class InventoryViewService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
 
+  /** QC-GATE: a batch reads available only on ACCEPT or PASS; missing, PENDING and anything else
+   *  read blocked. Stock with no RM batch has no inspection to read and stays as it was. */
   /** Per-batch availability + expiry, FEFO-ordered. Optional materialId filter (for pick selection). */
   async availability(opts: { limit?: number; materialId?: string }) {
     const limit = Math.min(Math.max(1, opts.limit ?? 100), 200);
@@ -27,8 +29,8 @@ export class InventoryViewService {
              coalesce(ib.quantity_on_hand, 0)::float as "onHand",
              coalesce(r.reserved, 0)::float          as "reserved",
              qc.overall_result           as "qcStatus",
-             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD','REWORK') then coalesce(ib.quantity_on_hand, 0) else 0 end)::float as "blocked",
-             (case when upper(coalesce(qc.overall_result,'')) in ('REJECT','HOLD','REWORK') then 0
+             (case when ib.rm_batch_id is not null and upper(coalesce(qc.overall_result,'')) not in ('ACCEPT','PASS') then coalesce(ib.quantity_on_hand, 0) else 0 end)::float as "blocked",
+             (case when ib.rm_batch_id is not null and upper(coalesce(qc.overall_result,'')) not in ('ACCEPT','PASS') then 0
                    else (coalesce(ib.quantity_on_hand, 0) - coalesce(r.reserved, 0)) end)::float as "available",
              rb.expiry_date              as "expiryDate",
              case when rb.expiry_date is not null then (rb.expiry_date - current_date) end as "daysToExpiry",
