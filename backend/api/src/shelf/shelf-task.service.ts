@@ -49,6 +49,7 @@ export interface FgBatchInfo {
   coaStatus: string | null;
   coaResult: string | null;
   releasedAt: string | null;
+  qcBatchNo: string | null;
   qc: FgQcState;
   stocked: number;
   status: string | null;
@@ -94,6 +95,7 @@ export function buildFgBatchReceived(input: {
   uomCode: string | null;
   rack: string | null;
   releasedAt: string | null;
+  qcBatchNo?: string | null;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   const payload: bridgeContracts.FgBatchReceivedPayload = {
@@ -103,6 +105,7 @@ export function buildFgBatchReceived(input: {
     qty_kg: qtyKg ?? 0,
     rack: input.rack ?? '',
     released_at: input.releasedAt ?? '',
+    ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   if (qtyKg === null) problems.push('qty_kg: the unit is not a mass and the pack size is not written as one (e.g. "25 kg")');
@@ -127,7 +130,7 @@ export class ShelfTaskService {
       select f.finished_good_batch_id::text as id, f.batch_number, f.produced_qty::float as qty, f.uom_id::text, u.uom_code,
              f.product_sku_id::text, s.sku_code, s.pack_size, pm.product_id::text, pm.product_code, pm.product_name,
              f.manufacturing_date, f.expiry_date, f.status,
-             po.oil_batch_id::text, ob.production_order_id::text, c.status as coa_status, c.overall_result, c.released_dt,
+             po.oil_batch_id::text, ob.batch_number as oil_batch_number, ob.production_order_id::text, c.status as coa_status, c.overall_result, c.released_dt,
              coalesce((select sum(st.qty) from location.fg_bin_stock st where st.finished_good_batch_id = f.finished_good_batch_id), 0)::float as stocked
         from packaging.finished_good_batch_master f
         left join packaging.product_sku s on s.product_sku_id = f.product_sku_id
@@ -153,6 +156,7 @@ export class ShelfTaskService {
       manufacturingDate: ymd(r.manufacturing_date), expiryDate: ymd(r.expiry_date),
       oilBatchId: (r.oil_batch_id as string | null) ?? null, productionOrderId: (r.production_order_id as string | null) ?? null,
       coaStatus, coaResult, releasedAt: r.released_dt ? new Date(r.released_dt as string).toISOString() : null,
+      qcBatchNo: (r.oil_batch_number as string | null) ?? null,
       qc, stocked: Number(r.stocked ?? 0), status: (r.status as string | null) ?? null,
     };
   }
@@ -288,7 +292,7 @@ export class ShelfTaskService {
   private async emitReceived(tx: ShelfTx, fg: FgBatchInfo, qty: number, bin: BinLocation) {
     const built = buildFgBatchReceived({
       batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
-      rack: bin.label, releasedAt: fg.releasedAt,
+      rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {

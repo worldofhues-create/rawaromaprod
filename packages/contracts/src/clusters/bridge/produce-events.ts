@@ -94,6 +94,9 @@ export interface FgBatchReceivedPayload {
   readonly rack: string;
   /** When QC released the batch (ISO 8601 UTC) — FIFO age on ALEMBIC's side. */
   readonly released_at: string;
+  /** QC-GATE: the compounded batch number `qc.batch.released` was sent under. ALEMBIC names the
+   *  lot after `batch_no` and needs this to find the release; without it the lot stays held. */
+  readonly qc_batch_no?: string;
 }
 
 const isNonEmpty = (v: unknown, max = 200) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
@@ -108,7 +111,8 @@ export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   if (typeof p.qty_kg !== "number" || !Number.isFinite(p.qty_kg) || p.qty_kg <= 0) out.push("qty_kg");
   if (!isNonEmpty(p.rack, 120)) out.push("rack");
   if (!isIsoInstant(p.released_at)) out.push("released_at");
-  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at"]);
+  if (p.qc_batch_no !== undefined && !isNonEmpty(p.qc_batch_no, 64)) out.push("qc_batch_no");
+  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }

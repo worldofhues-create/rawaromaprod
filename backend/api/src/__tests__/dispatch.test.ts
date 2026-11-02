@@ -97,6 +97,22 @@ test('dispatch: two lines against the same batch are aggregated against availabl
   );
 });
 
+// QC-GATE: the locked check is the only one the line-add route has, and it read
+// only an explicit FAIL, so a batch nobody inspected, or one on HOLD, could ship.
+test('dispatch line add: a batch with no PASSED packaging QC is refused, and the reason says so', async () => {
+  for (const qcResult of [null, 'HOLD', 'FAIL', 'pending'] as const) {
+    const batchId = await freshFgBatch(50, { qcResult });
+    await assert.rejects(
+      () => svc.createDispatchItem(
+        { dispatchId: crypto.randomUUID(), finishedGoodBatchId: batchId, dispatchedQty: 1 } as never,
+        principal(),
+      ),
+      (e: Error) => e instanceof ConflictException && /has not PASSED packaging QC/.test(e.message),
+      String(qcResult),
+    );
+  }
+});
+
 test('dispatch: a batch that FAILED packaging QC cannot be dispatched', async () => {
   const batchId = await freshFgBatch(50, { qcResult: 'FAIL' });
   await assert.rejects(

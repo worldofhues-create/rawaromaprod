@@ -88,7 +88,11 @@ export class DispatchService {
       select overall_result from packaging.packaging_qc
        where finished_good_batch_id = ${finishedGoodBatchId}
        order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
-    if (String(qc[0]?.overall_result ?? '').toUpperCase() === 'FAIL') return 0;
+    // QC-GATE: only a PASS ships. Reading only FAIL let an un-inspected or HELD batch out through
+    // the line-add route, which has no other check. Same rule as ReservationService and fg-stock.
+    if (String(qc[0]?.overall_result ?? '').toUpperCase() !== 'PASS') {
+      throw new ConflictException(`Cannot dispatch finished-good batch ${finishedGoodBatchId}: it has not PASSED packaging QC.`);
+    }
 
     const reserved = (await tx.execute(sql`
       select coalesce(sum(reserved_qty), 0)::text as total from packaging.finished_good_reservation

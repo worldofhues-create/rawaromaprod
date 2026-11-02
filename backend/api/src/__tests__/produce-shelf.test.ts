@@ -108,7 +108,7 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
   assert.equal(rows.length, 1);
   const stored = rows[0]!.payload as Record<string, unknown>;
   assert.deepEqual(stored, {
-    batch_no: fg.fgBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1],
+    batch_no: fg.fgBatchNo, qc_batch_no: fg.oilBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1],
     released_at: '2026-09-21T09:30:00.000Z', _correlation_id: req.correlationId, _org_id: req.orgId,
   });
 
@@ -130,7 +130,7 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
   assert.equal(env.correlation_id, req.correlationId);
   assert.equal(env.org_id, req.orgId);
   assert.deepEqual(env.payload, {
-    batch_no: fg.fgBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1], released_at: '2026-09-21T09:30:00.000Z',
+    batch_no: fg.fgBatchNo, qc_batch_no: fg.oilBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1], released_at: '2026-09-21T09:30:00.000Z',
   });
   assert.deepEqual(contracts.validateFgBatchReceived(env.payload), []);
 });

@@ -274,3 +274,12 @@ test('pick-light: exactly {task_id, rack, shelf, bin, qty, colour}, HMAC-signed 
   assert.equal(verifyBody(raw, SIMULATOR_KEY, sig), true);
   assert.equal(verifyBody(raw.replace('"qty":4', '"qty":5'), SIMULATOR_KEY, sig), false);
 });
+
+// QC-GATE: ALEMBIC names the lot after the finished-good batch, but QC releases the compounded
+// batch. Without the link every factory lot would wait in ALEMBIC's quarantine for ever.
+test('fg.batch.received carries the batch number QC released under', () => {
+  const input = { batchNo: 'FG-1', sku: 'S', packSize: '1 kg', qty: 1, uomCode: 'KG', rack: 'R1', releasedAt: '2026-11-02T00:00:00.000Z', qcBatchNo: 'OIL-9' };
+  const built = buildFgBatchReceived(input);
+  assert.ok(built.ok);
+  if (built.ok) assert.equal(built.payload.qc_batch_no, 'OIL-9');
+});
