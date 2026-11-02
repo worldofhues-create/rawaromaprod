@@ -2266,3 +2266,7 @@ begin
              and (origin <> 'sales_request' or (request_ref is not null and btrim(request_ref) <> '')));
   end if;
 end $$;
+
+-- FACTORY-DEFECTS: scripts/migrations/2026-11-02-production-order-number.sql, mirrored here.
+ALTER TABLE production.production_order ADD COLUMN IF NOT EXISTS order_number varchar(40);
+CREATE UNIQUE INDEX IF NOT EXISTS production_order_order_number_uq ON production.production_order (order_number);
