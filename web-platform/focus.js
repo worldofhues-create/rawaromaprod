@@ -202,6 +202,9 @@
       'padding:7px 12px;border-radius:999px;border:.5px solid rgba(255,255,255,.18);background:rgba(18,19,17,.9);color:#F2F4EA;',
       'font:500 12px/1 var(--font-ui,var(--ui,system-ui,sans-serif));cursor:pointer;transition:transform .2s ease;min-height:32px}',
       '.ra-focus-exit.show,.ra-focus-exit:focus-visible{transform:translate(-50%,0)}',
+      // On a phone the top of the screen is the sheet's title: the pill sits above the dock instead.
+      '@media (max-width:720px){.ra-focus-exit{top:auto;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translate(-50%,240px)}',
+      '.ra-focus-exit.show,.ra-focus-exit:focus-visible{transform:translate(-50%,0)}}',
       '.ra-focus-exit[hidden],.ra-focus-note[hidden]{display:none}',
       '.ra-focus-note{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:9001;max-width:min(440px,calc(100vw - 32px));',
       'padding:10px 14px;border-radius:12px;background:rgba(18,19,17,.94);color:#F2F4EA;font:400 12.5px/1.45 var(--font-ui,var(--ui,system-ui,sans-serif));',

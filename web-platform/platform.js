@@ -290,7 +290,7 @@
     var card = h('div', { class: 'login-card' }, [
       h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
       h('h1', { class: 'mark' }, ['Platform']),
-      h('p', { class: 'sub' }, ['Raw Aroma Chem platform operations.']),
+      h('p', { class: 'sub' }, ['Raw Aromachem platform operations.']),
       goBtn, err,
     ]);
     root.appendChild(h('div', { class: 'login-wrap' }, [card]));
@@ -510,12 +510,12 @@
     /* Focus mode switch (focus.js), between the sound switch and Sign out. */
     if (window.RaFocus && rme) { var fo = rme.lastChild; if (RaFocus.mountToggle(rme, fo, 'rail-min', 'position:static;margin-left:' + (fo.style.marginLeft === '0px' ? '0' : 'auto'))) fo.style.marginLeft = '0'; }
     var label = (NAV.filter(function (n) { return n.id === activeView; })[0] || {}).label || 'Platform';
-    document.title = label + ' · Platform · Raw Aroma Chem';
+    document.title = label + ' · Platform · Raw Aromachem';
     ariaCtx = 'Platform · ' + label; if (ariaApi) ariaApi.setContext(ariaCtx);
     var bar = h('div', { class: 'bar' }, [
       h('span', { class: 'bar-brand' }, ['Alembic', h('i', {}, ['·']), 'RawAromaChem']),
       h('h1', {}, [label]),
-      h('span', { class: 'chip n', title: 'Only Raw Aroma Chem platform staff can open this console.' }, ['Staff only']),
+      h('span', { class: 'chip n', title: 'Only Raw Aromachem platform staff can open this console.' }, ['Staff only']),
       h('span', { style: 'flex:1' }),
       // Always-on Ruh: a quiet badge in the top bar (never a dock entry); the panel opens from it.
       window.RaRuh ? RaRuh.badge('gbtn') : null,

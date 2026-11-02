@@ -136,7 +136,7 @@ test('Factory: every role has ≤ 8 dock defaults it actually holds, and every s
     assert.deepEqual(dupes, [], `${r}: sections sharing one glyph`);
   }
   // The owner's own view: the eight he named, in order.
-  assert.deepEqual(J(run(ctx, 'DOCK_DEFAULTS.superadmin')), ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders', 'notifs']);
+  assert.deepEqual(J(run(ctx, 'DOCK_DEFAULTS.superadmin')), ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders', 'trace']);
 });
 
 test('Factory: the rendered dock — ≤ 8 labelled destinations, All sections, Ask Aria; pins persist per person', () => {
@@ -157,17 +157,17 @@ test('Factory: the rendered dock — ≤ 8 labelled destinations, All sections, 
   // Pin from the sections sheet: saved for this person only, capped at 8.
   run(ctx, `st.role = 'superadmin'; session = { user: { id: 'u1' }, perms: [] };`);
   assert.equal(run(ctx, 'dockKeys()').length, 8);
-  run(ctx, `togglePin('notifs')`); // unpin
+  run(ctx, `togglePin('trace')`); // unpin
   assert.deepEqual(J(run(ctx, 'dockKeys()')), ['dashboard', 'plans', 'runs', 'coa', 'shelftasks', 'shelfdisplay', 'sorders']);
-  run(ctx, `togglePin('trace')`);
-  assert.equal(run(ctx, 'dockKeys()').slice(-1)[0], 'trace');
+  run(ctx, `togglePin('docs')`);
+  assert.equal(run(ctx, 'dockKeys()').slice(-1)[0], 'docs');
   run(ctx, `togglePin('users')`); // full: refused (toast only)
   assert.equal(run(ctx, 'dockKeys()').length, 8);
   assert.ok(!run(ctx, 'dockKeys()').includes('users'));
-  assert.match(run(ctx, `railNavHtml(ROLES.superadmin)`), /data-pin="trace" aria-pressed="true"/);
+  assert.match(run(ctx, `railNavHtml(ROLES.superadmin)`), /data-pin="docs" aria-pressed="true"/);
   assert.match(run(ctx, `railNavHtml(ROLES.superadmin)`), /id="ra-dock-reset"/);
   run(ctx, `session = { user: { id: 'u2' }, perms: [] };`);
-  assert.ok(!run(ctx, 'dockKeys()').includes('trace'), 'another person keeps the role defaults');
+  assert.ok(!run(ctx, 'dockKeys()').includes('docs'), 'another person keeps the role defaults');
 });
 
 // ── Platform + Vault ─────────────────────────────────────────────────────────────────────────────────────────────

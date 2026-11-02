@@ -189,6 +189,16 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       startsWith('iam:'),
       oneOf('packaging:finished_good_batch_master:read', MANUAL_CONTINUITY_PERMISSION),
+      // The Setup and Records entries on Admin's rail. Reference data: no formula and no material
+      // identity. Read only, except Documents, which Owner or Admin may change.
+      oneOf(
+        'location:location_type_master:read',
+        'location:location_master:read',
+        'platform:contact_master:read',
+        'platform:country_master:read',
+        'platform:document_master:read',
+        'platform:document_master:write',
+      ),
     ),
     sampleEmail: 'admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_ADMIN_PASSWORD',

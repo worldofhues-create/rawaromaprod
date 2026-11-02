@@ -160,7 +160,7 @@
         ? '<p class="t-cap" style="margin:0">Floor codes and quantities only. The recipe never leaves the Vault.</p><div style="overflow-x:auto"><table><thead><tr><th>Step</th><th>Floor code</th><th class="r">Quantity</th></tr></thead><tbody>' +
           lines.map(function (l) { return '<tr><td>' + escHtml(l.sequenceNo != null ? l.sequenceNo : '') + '</td><td>' + mono(l.code) + '</td><td class="r">' + mono(num(l.quantity) + ' ' + (l.uom || '')) + '</td></tr>'; }).join('') + '</tbody></table></div>'
         : '<div class="empty"><h3>No instruction yet</h3><p>The run has no approved formula version linked.</p></div>';
-      openSheet({ tag: 'div', title: 'Coded manufacturing instruction', meta: 'Run ' + String(orderId).slice(0, 8).toUpperCase(), cls: 'xp-wide', body: body });
+      openSheet({ tag: 'div', title: 'Coded manufacturing instruction', cls: 'xp-wide', body: body });
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
 
@@ -332,7 +332,7 @@
         ? '@page{size:80mm auto;margin:3mm}body{font-family:Arial,sans-serif;width:74mm;margin:0;color:#000}h1{font-size:14px;margin:0 0 4px}.t{border-bottom:1px dashed #000;padding:6px 0;font-size:12px}.loc{font:700 20px/1.1 Arial}.q{font-weight:700}svg{margin-top:4px}'
         : '@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#141413}h1{font-size:16px;letter-spacing:.12em;margin:0}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border-bottom:1px solid #ccc;padding:6px;font-size:12px;text-align:left;vertical-align:middle}.loc{font:700 16px Arial}.q{font-weight:700}.tick{width:22px;border:1px solid #000}';
       openPrint(title, '<style>' + css + '@media print{.noprint{display:none}}</style>' +
-        '<h1>RAW AROMA CHEM · ' + title + '</h1><div style="font-size:11px;color:#555">' + d.items.length + ' task(s) · rack walking order · ' + new Date().toLocaleString() + '</div>' +
+        '<h1>Raw Aromachem · ' + title + '</h1><div style="font-size:11px;color:#555">' + d.items.length + ' task(s) · rack walking order · ' + new Date().toLocaleString() + '</div>' +
         (thermal ? rows : '<table><thead><tr><th>#</th><th>Location</th><th>Task</th><th>Batch</th><th>SKU</th><th>Qty</th><th>For</th><th>QR</th><th>✓</th></tr></thead><tbody>' + rows + '</tbody></table>'));
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }

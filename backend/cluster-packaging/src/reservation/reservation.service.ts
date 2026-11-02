@@ -14,14 +14,14 @@
  * principal.userId; batch/sku/document/uom are the Data-Dictionary refs.
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt, sql } from 'drizzle-orm';
+import { desc, eq, getTableColumns, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { num, paginate, type Page } from '../_helpers.js';
 import type { CreateFinishedGoodReservation, ListQuery } from '../packaging.dtos.js';
 
-const { finishedGoodReservation } = packagingSchema;
+const { finishedGoodReservation, finishedGoodBatchMaster } = packagingSchema;
 
 @Injectable()
 export class ReservationService {
@@ -138,10 +138,11 @@ export class ReservationService {
 
   async listReservations(
     query: ListQuery,
-  ): Promise<Page<typeof finishedGoodReservation.$inferSelect>> {
+  ): Promise<Page<typeof finishedGoodReservation.$inferSelect & { batchNumber: string | null }>> {
     const rows = await this.db
-      .select()
+      .select({ ...getTableColumns(finishedGoodReservation), batchNumber: finishedGoodBatchMaster.batchNumber })
       .from(finishedGoodReservation)
+      .leftJoin(finishedGoodBatchMaster, eq(finishedGoodBatchMaster.finishedGoodBatchId, finishedGoodReservation.finishedGoodBatchId))
       .where(
         query.cursor
           ? lt(finishedGoodReservation.finishedGoodReservationId, query.cursor)

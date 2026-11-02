@@ -166,7 +166,7 @@
       '.sub{color:#66665E;font-size:13px}.brand{margin-top:18px;font-size:10px;letter-spacing:.22em;color:#66665E}' +
       '@media print{@page{margin:8mm}}</style></head><body>' +
       '<div class="qr">' + svg + '</div><div class="code">' + esc(code) + '</div><div class="sub">' + esc(sub) + '</div>' +
-      '<div class="brand">RAW AROMA CHEM</div>' +
+      '<div class="brand">Raw Aromachem</div>' +
       '<scr' + 'ipt>window.onload=function(){setTimeout(function(){window.print();},180);};</scr' + 'ipt>' +
       '</body></html>');
     w.document.close();
