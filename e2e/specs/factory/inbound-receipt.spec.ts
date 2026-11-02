@@ -20,6 +20,8 @@ test('supplier shipment, gate entry and GRN from an issued PO; the lot lands in 
     { purchaseOrderItemId: { first: true }, materialId: { label: 'Chain raw material' }, receivedQty: 10, uomId: { label: 'CH-KG' } });
   await searchFor(page, `GRN-${c}`);
   expect(sql(`select count(*) from inventory.grn_master where grn_number='GRN-${c}'`)).toBe('1');
+  // A receipt made on this screen must reach Books: the fact is written for it, naming the order's vendor.
+  await expect.poll(() => sql(`select count(*) from bridge.outbox where type='inventory.grn.created' and payload->>'grn_number'='GRN-${c}' and payload->'vendor'->>'vendor_code' is not null`)).toBe('1');
   await expect.poll(() => sql(`select b.status from inventory.rm_batch_master b join inventory.grn_items i on i.grn_item_id=b.grn_item_id join inventory.grn_master g on g.grn_id=i.grn_id where g.grn_number='GRN-${c}'`)).toBe('QUARANTINE');
 });
 

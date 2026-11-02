@@ -123,7 +123,11 @@ export async function emitPurchaseOrderCancelled(tx: BridgeEmitTx, poId: string,
 /** Emits inventory.grn.created for `grnId`, its order named by the ROOT po id. */
 export async function emitGoodsReceiptFact(tx: BridgeEmitTx, grnId: string): Promise<void> {
   const head = ((await tx.execute(sql`
-    select grn_id, grn_number, purchase_order_id, vendor_id, coalesce(grn_date, created_dt::date)::text as grn_date from inventory.grn_master where grn_id = ${grnId}
+    select g.grn_id, g.grn_number, g.purchase_order_id,
+      -- The receipt form takes no vendor; it is the order's. Reading only the receipt's own column dropped
+      -- every on-screen GRN here without a word, so Books never saw goods the factory had received.
+      coalesce(g.vendor_id, (select p.vendor_id from procurement.purchase_order p where p.purchase_order_id = g.purchase_order_id)) as vendor_id,
+      coalesce(g.grn_date, g.created_dt::date)::text as grn_date from inventory.grn_master g where grn_id = ${grnId}
   `)) as unknown as { grn_id: string; grn_number: string | null; purchase_order_id: string | null; vendor_id: string | null;
     grn_date: string | null }[])[0];
   if (!head || !head.vendor_id || !head.grn_number || !head.grn_date) return;
