@@ -35,6 +35,11 @@ after(async () => {
 });
 
 async function freshBatch(onHand: number, opts: { qcResult?: string } = {}) {
+  return rawBatch(onHand, opts);
+}
+/** QC-GATE: the ordinary fixture is a cleared batch; `qcResult: undefined` is passed explicitly for none. */
+async function clearedBatch(onHand: number) { return rawBatch(onHand, { qcResult: 'ACCEPT' }); }
+async function rawBatch(onHand: number, opts: { qcResult?: string } = {}) {
   const sql = testClient();
   const id = crypto.randomUUID();
   const rmBatchId = crypto.randomUUID();
@@ -50,7 +55,7 @@ async function freshBatch(onHand: number, opts: { qcResult?: string } = {}) {
 }
 
 test('stock reservation: happy path reserves within available stock', async () => {
-  const batchId = await freshBatch(100);
+  const batchId = await clearedBatch(100);
   const row = await svc.createStockReservation(
     { inventoryBatchId: batchId, reservedQty: 40 },
     principal(),
@@ -60,7 +65,7 @@ test('stock reservation: happy path reserves within available stock', async () =
 });
 
 test('stock reservation: negative-stock attempt (over-reservation) is rejected', async () => {
-  const batchId = await freshBatch(50);
+  const batchId = await clearedBatch(50);
   await svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 30 }, principal());
   await assert.rejects(
     () => svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 21 }, principal()),
@@ -74,6 +79,30 @@ test('stock reservation: unknown batch 404s', async () => {
     () => svc.createStockReservation({ inventoryBatchId: crypto.randomUUID(), reservedQty: 1 }, principal()),
     NotFoundException,
   );
+});
+
+// QC-GATE: same allow-list as the inventory view. A batch nobody inspected, or one still PENDING,
+// could be reserved here even though the view reads it blocked.
+test('stock reservation: only ACCEPT or PASS is eligible; missing, PENDING and an unknown result are refused', async () => {
+  for (const qcResult of [undefined, 'PENDING', 'SOMETHING'] as const) {
+    const batchId = await freshBatch(100, qcResult ? { qcResult } : {});
+    await assert.rejects(
+      () => svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 1 } as never, principal()),
+      (e: Error) => e instanceof ConflictException && /has not PASSED QC/.test(e.message),
+      String(qcResult),
+    );
+  }
+  for (const qcResult of ['ACCEPT', 'PASS'] as const) {
+    const batchId = await freshBatch(100, { qcResult });
+    await svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 1 } as never, principal());
+  }
+});
+
+test('stock reservation: stock with no RM batch has no inspection to read and stays reservable', async () => {
+  const id = crypto.randomUUID();
+  await testClient()`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, material_id, quantity_on_hand, status)
+    values (${id}, null, ${crypto.randomUUID()}, 10, 'ACTIVE')`;
+  await svc.createStockReservation({ inventoryBatchId: id, reservedQty: 1 } as never, principal());
 });
 
 test('stock reservation: a batch QC dispositioned REJECT has zero eligible stock', async () => {
@@ -93,7 +122,7 @@ test('stock reservation: a batch QC dispositioned REWORK has zero eligible stock
 });
 
 test('stock reservation: release frees the hold so it can be re-reserved', async () => {
-  const batchId = await freshBatch(20);
+  const batchId = await clearedBatch(20);
   const held = await svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 20 }, principal());
   await assert.rejects(
     () => svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 1 }, principal()),
@@ -105,7 +134,7 @@ test('stock reservation: release frees the hold so it can be re-reserved', async
 });
 
 test('stock reservation: releasing an already-released reservation is rejected (no double-release)', async () => {
-  const batchId = await freshBatch(10);
+  const batchId = await clearedBatch(10);
   const held = await svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 10 }, principal());
   await svc.releaseStockReservation(held.stockReservationId, principal());
   await assert.rejects(
@@ -118,7 +147,7 @@ test('stock reservation: concurrent over-reservation attempts never exceed on-ha
   // 5 concurrent requests for 30 units each against a 100-unit batch: naive unguarded code lets
   // all 5 through (150 > 100). The transactional, row-locked guard must let through at most 3
   // (90) and reject the rest.
-  const batchId = await freshBatch(100);
+  const batchId = await clearedBatch(100);
   const results = await Promise.allSettled(
     Array.from({ length: 5 }, () =>
       svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 30 }, principal()),
@@ -140,7 +169,7 @@ test('stock reservation: concurrent over-reservation attempts never exceed on-ha
 });
 
 test('stock reservation: the generic EditService editor can no longer PATCH status/reservedQty directly (bypass closed)', async () => {
-  const batchId = await freshBatch(50);
+  const batchId = await clearedBatch(50);
   const held = await svc.createStockReservation({ inventoryBatchId: batchId, reservedQty: 10 }, principal());
   const p = principal({ permissions: ['inventory:stock_reservation:write'] });
   await assert.rejects(

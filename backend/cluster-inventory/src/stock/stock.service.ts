@@ -264,16 +264,20 @@ export class StockService {
         const batch = locked[0];
         if (!batch) throw new NotFoundException(`inventory_batch not found: ${inventoryBatchId}`);
 
-        // RP-FAC2 (RP-QC-002 follow-up): a batch QC dispositioned REJECT/HOLD/REWORK has zero
-        // eligible stock — the disposition drives reservation eligibility automatically, matching
-        // the same block the inventory-availability read-model already applies.
-        let qcBlocked = false;
+        // QC-GATE: the same allow-list as the inventory view. Only ACCEPT or PASS is eligible, so a
+        // batch nobody inspected or one still PENDING is refused, with the reason. Stock with no RM
+        // batch has no inspection to read and is unchanged.
         if (batch.rm_batch_id) {
           const qc = (await tx.execute(sql`
             select overall_result from quality.qc_inspections
              where rm_batch_id = ${batch.rm_batch_id}
              order by created_dt desc limit 1`)) as unknown as Array<{ overall_result: string | null }>;
-          qcBlocked = ['REJECT', 'HOLD', 'REWORK'].includes(String(qc[0]?.overall_result ?? '').toUpperCase());
+          const result = String(qc[0]?.overall_result ?? '').toUpperCase();
+          if (result !== 'ACCEPT' && result !== 'PASS') {
+            throw new ConflictException(
+              `Cannot reserve from batch ${inventoryBatchId}: it has not PASSED QC (${result || 'no inspection on record'}).`,
+            );
+          }
         }
 
         const reserved = (
@@ -282,9 +286,9 @@ export class StockService {
             .from(stockReservation)
             .where(and(eq(stockReservation.inventoryBatchId, inventoryBatchId), isNull(stockReservation.releasedDt)))
         )[0];
-        const available = qcBlocked ? 0 : Number(batch.quantity_on_hand ?? 0) - Number(reserved?.total ?? 0);
+        const available = Number(batch.quantity_on_hand ?? 0) - Number(reserved?.total ?? 0);
         if (Number(body.reservedQty) > available) {
-          throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations${qcBlocked ? '; batch is QC REJECT/HOLD/REWORK' : ''}).`);
+          throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations).`);
         }
 
         return ensure(
