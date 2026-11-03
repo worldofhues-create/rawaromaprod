@@ -808,7 +808,7 @@
   async function heldBackCard() {
     var r = await api('/v1/bridge/outbox/parked');
     var items = (r && r.items) || [];
-    var head = h('div', { class: 'card-hd' }, [h('h2', {}, ['Updates not sent']), h('span', { class: 'n' }, [items.length + ' held back'])]);
+    var head = h('div', { class: 'card-hd' }, [h('h2', {}, ['Updates not sent']), h('span', { class: 'n' }, [heldBackCount(items.length)])]);
     if (!items.length) return h('div', { class: 'card' }, [head, h('div', { class: 'empty' }, [h('h3', {}, ['Nothing held back'])])]);
     return h('div', { class: 'card' }, [head, h('table', {}, [
       h('thead', {}, [h('tr', {}, [h('th', {}, ['Update']), h('th', {}, ['Why']), h('th', {}, ['Held since']), h('th', {}, ['Tries']), h('th', {}, [''])])]),
@@ -825,6 +825,11 @@
         ]);
       })),
     ])]);
+  }
+  // The route answers at most 200, oldest first (outbox-admin.service.ts listParked): a full page is
+  // not the whole backlog, so it never headlines as the total.
+  function heldBackCount(n) {
+    return n >= 200 ? 'oldest ' + n + ' shown, more held back' : n + ' held back';
   }
   function confirmHeldBack(it, action) {
     var discard = action === 'discard';
