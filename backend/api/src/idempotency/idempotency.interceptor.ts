@@ -64,7 +64,7 @@ export class IdempotencyStore {
   async complete(userId: string, key: string, response: unknown): Promise<void> {
     await this.sql`
       update ${this.t}
-         set state = 'completed', response = ${this.sql.json((response ?? null) as never)}, completed_dt = now()
+         set state = 'completed', response = ${JSON.stringify(response ?? null)}::text::jsonb /* as write-audit does: sql.json here threw ERR_INVALID_ARG_TYPE and every keyed POST answered 500 */, completed_dt = now()
        where user_id = ${userId} and idempotency_key = ${key}`;
   }
 
