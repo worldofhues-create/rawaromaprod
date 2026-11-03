@@ -1514,8 +1514,8 @@
     // FK dropdowns: fetch options, then re-select the current value.
     cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
       var sel = ov.querySelector('[data-name="' + f.n + '"]'); if (!sel) return;
-      tunnel(f.fk + '?limit=100').then(function (res) {
-        ((res.json && res.json.data) || []).forEach(function (r) { var val = r[f.fv] != null ? r[f.fv] : guessId(r); var lab = r[f.fl] != null ? r[f.fl] : (val ? String(val).slice(0, 8) : ''); if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); } });
+      fkRows(f.fk).then(function (fr) {
+        fkFail(sel, fr.error); fr.rows.forEach(function (r) { var val = r[f.fv] != null ? r[f.fv] : guessId(r); var lab = r[f.fl] != null ? r[f.fl] : (val ? String(val).slice(0, 8) : ''); if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); } });
         if (row[f.n] != null) sel.value = String(row[f.n]);
       }).catch(function () {});
     });
@@ -2107,8 +2107,8 @@
     var ov = m.sheet;
     cfg.fields.filter(function (f) { return f.fk; }).forEach(function (f) {
       var sel = ov.querySelector('[data-name="' + f.n + '"][data-fk]'); if (!sel) return;
-      tunnel(f.fk + '?limit=100').then(function (res) {
-        ((res.json && res.json.data) || []).forEach(function (row) {
+      fkRows(f.fk).then(function (fr) {
+        fkFail(sel, fr.error); fr.rows.forEach(function (row) {
           var val = row[f.fv] != null ? row[f.fv] : guessId(row); var lab = row[f.fl] != null ? row[f.fl] : (val ? String(val).slice(0, 8) : '');
           if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); }
         });
@@ -2147,6 +2147,26 @@
       header: [ { n: 'grnNumber', l: 'GRN number (optional: numbered for you if left empty)', t: 'text' }, { n: 'purchaseOrderId', l: 'Against PO', t: 'select', fk: '/v1/purchase-orders', fv: 'purchaseOrderId', fl: 'poNumber' }, { n: 'gateEntryId', l: 'Gate entry', t: 'select', fk: '/v1/gate-entries', fv: 'gateEntryId', fl: 'gateEntryNumber' }, { n: 'grnDate', l: 'GRN date', t: 'date', req: true } ],
       item: [ { n: 'purchaseOrderItemId', l: 'PO line (ordered qty)', t: 'select', fk: '/v1/purchase-order-items', fv: 'purchaseOrderItemId', fl: 'label' }, { n: 'materialId', l: 'Material', t: 'select', fk: '/v1/materials', fv: 'materialId', fl: 'materialName', req: true }, { n: 'receivedQty', l: 'Received qty', t: 'number', req: true }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }, { n: 'damagedQty', l: 'Damaged qty', t: 'number' }, { n: 'varianceReason', l: 'Variance reason (if short/excess/damaged)', t: 'text' } ] }
   };
+  // Form pickers: every row of the referenced list, page by page (list routes stop at 100), so an
+  // older material or vendor can always be chosen. A refused or unreachable list comes back as an
+  // error the picker shows, never an empty dropdown that reads as "there are none".
+  async function fkRows(path) {
+    var rows = [], cursor = null, n = 0;
+    try {
+      do {
+        var res = await tunnel(path + '?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+        if (!res || res.status >= 400) return { rows: rows, error: (res && res.json && res.json.error && res.json.error.message) || 'This list did not load. Close and try again.' };
+        rows = rows.concat((res.json && res.json.data) || []);
+        cursor = (res.json && res.json.meta && res.json.meta.cursor) || null;
+      } while (cursor && ++n < 100);
+    } catch (e) { return { rows: rows, error: 'This list did not load. Check the connection, then close and try again.' }; }
+    return { rows: rows, error: null };
+  }
+  function fkFail(sel, error) {
+    if (!error) return;
+    var o = document.createElement('option'); o.value = ''; o.disabled = true; o.textContent = error; sel.appendChild(o);
+    var eb = sel.closest && sel.closest('form'); eb = eb && eb.querySelector('[role="alert"]'); if (eb) eb.textContent = error;
+  }
   async function openCreateDoc(endpoint) {
     var cfg = CREATE_DOC[endpoint]; if (!cfg) return;
     var fkEps = {}; cfg.header.concat(cfg.item).forEach(function (f) { if (f.fk) fkEps[f.fk] = f; });
