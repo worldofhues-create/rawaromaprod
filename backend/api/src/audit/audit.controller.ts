@@ -5,6 +5,7 @@
 import { Controller, Get, Query } from '@nestjs/common';
 import { Permissions } from '@core/backend-kernel';
 import { AuditService } from './audit.service.js';
+import { auditKind } from '@ra/cluster-formula';
 
 @Controller()
 export class AuditController {
@@ -12,8 +13,9 @@ export class AuditController {
 
   @Permissions('formula:actual:read')
   @Get('v1/formula-access-audit')
-  formulaAccess(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
-    return this.svc.formulaAccessAudit(limit ? Number(limit) : 100, cursor);
+  formulaAccess(@Query('limit') limit?: string, @Query('cursor') cursor?: string, @Query('kind') kind?: string) {
+    // auditKind throws before the Vault is asked, so an unknown kind is a 400, not a whole log.
+    return this.svc.formulaAccessAudit(limit ? Number(limit) : 100, cursor, auditKind(kind));
   }
 
   @Permissions('iam:audit_events:read')

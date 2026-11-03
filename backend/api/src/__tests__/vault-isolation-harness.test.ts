@@ -494,6 +494,21 @@ test('the Vault console\'s access-audit screen: GET /v1/formula-access-audit on 
   assert.equal((await vaultConsole('/v1/formula-access-audit', token)).status, 403);
 });
 
+test('SWEEP-VAULT-3: each audit screen is its own kind on the VAULT box, filtered and counted there', async () => {
+  const mfg = await vaultConsole('/v1/formula-access-audit?limit=1&kind=production');
+  assert.equal(mfg.status, 200, JSON.stringify(mfg.json));
+  const [n] = await vaultSql<{ n: number }[]>`select count(*)::int as n from formula.audit_events
+    where starts_with(action, 'formula.floor.read') or starts_with(action, 'formula.picklist.read') or starts_with(action, 'formula.manufacturing_instruction.resolve')`;
+  assert.equal(mfg.json.meta.total, n!.n, 'the true total of production reads');
+  assert.ok(n!.n >= 1);
+  assert.ok((mfg.json.data as Array<{ action: string }>).every((r) => /^formula\.(floor|picklist|manufacturing_instruction)/.test(r.action)));
+  const access = await vaultConsole('/v1/formula-access-audit?limit=500&kind=access');
+  assert.equal(access.status, 200);
+  assert.ok(!(access.json.data as Array<{ action: string }>).some((r) => r.action === 'formula.picklist.read' || r.action.startsWith('security.')));
+  assert.equal(access.json.meta.total, access.json.data.length);
+  assert.equal((await vaultConsole('/v1/formula-access-audit?kind=everything')).status, 400);
+});
+
 test('GET /v1/formula-access-audit on the MAIN box: the Vault\'s page over the signed channel, emails from this box', async () => {
   const res = await api('GET', '/v1/formula-access-audit?limit=200', undefined, { bearer: vaultToken });
   assert.equal(res.status, 200, JSON.stringify(res.json));
@@ -504,6 +519,12 @@ test('GET /v1/formula-access-audit on the MAIN box: the Vault\'s page over the s
   const firstPage = await api('GET', '/v1/formula-access-audit?limit=1', undefined, { bearer: vaultToken });
   assert.equal(firstPage.json.data.length, 1);
   assert.equal(firstPage.json.meta.cursor, '1');
+  // SWEEP-VAULT-3: the kind crosses the signed channel and the Vault's total comes back.
+  const kinded = await api('GET', '/v1/formula-access-audit?limit=1&kind=production', undefined, { bearer: vaultToken });
+  assert.equal(kinded.status, 200, JSON.stringify(kinded.json));
+  assert.equal(kinded.json.data[0].action.startsWith('formula.'), true);
+  assert.ok(kinded.json.meta.total >= 1);
+  assert.equal((await api('GET', '/v1/formula-access-audit?kind=x', undefined, { bearer: vaultToken })).status, 400);
 });
 
 test('the Vault console\'s material picker: GET /v1/vault/materials on the VAULT box, from the catalogue the main box pushes', async () => {

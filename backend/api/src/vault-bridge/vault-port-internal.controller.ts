@@ -53,6 +53,7 @@ import {
   type SecurityAuditSink,
 } from '@core/backend-kernel';
 import {
+  AUDIT_KINDS,
   ComplianceService,
   FORMULA_LOOKUP,
   FormulaDirectoryService,
@@ -60,6 +61,7 @@ import {
   MaterialCatalogue,
   RuhVaultService,
   type AccessAuditPage,
+  type AuditKind,
   type CodedInstruction,
   type CodedMaterialLine,
   type CodedPickLine,
@@ -115,9 +117,10 @@ const formulaLabelsBody = z.object({
   recent: z.boolean().optional(),
 });
 
-const accessAuditBody = z.object({
+export const accessAuditBody = z.object({
   limit: z.number().int().min(1).max(500),
   cursor: z.string().regex(/^\d{1,9}$/).nullable().optional(),
+  kind: z.enum(AUDIT_KINDS as [AuditKind, ...AuditKind[]]).nullable().optional(),
 });
 
 const formulaDirectoryBody = z
@@ -244,7 +247,7 @@ export class VaultPortInternalController {
   async accessAudit(
     @Body(new ZodValidationPipe(accessAuditBody)) body: z.infer<typeof accessAuditBody>,
   ): Promise<{ result: AccessAuditPage }> {
-    return { result: await this.directory.accessAudit(body.limit, body.cursor) };
+    return { result: await this.directory.accessAudit(body.limit, body.cursor, body.kind ?? null) };
   }
 
   @Post('material-catalogue')

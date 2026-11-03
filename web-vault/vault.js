@@ -1176,13 +1176,13 @@
 
   /* ── access audit / manufacturing-resolution audit ─────────────────────────────────────
    * Both screens read the SAME GET /v1/formula-access-audit (the one existing route over
-   * formula.audit_events) and split client-side by action prefix: `formula.actual.read` /
+   * formula.audit_events), each with its ?kind=, and the server splits by action prefix: `formula.actual.read` /
    * `formula.version.approve*` / `formula.version.reject*` / `formula.copy.*` are HUMAN
    * access decisions; `formula.floor.read` / `formula.picklist.read` are the server-resolved
    * manufacturing reads (FormulaLookupService, §109.7) that never leave the backend as
    * plaintext but ARE audited the same way. */
-  var HUMAN_PREFIXES = ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.version.finalized', 'formula.version.submitted_for_review', 'formula.version.locked', 'formula.version.superseded', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage', 'formula.compliance.'];
-  var MFG_PREFIXES = ['formula.floor.read', 'formula.picklist.read', 'formula.manufacturing_instruction.resolve'];
+  // The split itself lives on the server (formula-directory.service.ts AUDIT_KIND_PREFIXES), which
+  // filters and counts it: ?kind=access | production.
 
   function auditTable(rows) {
     if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['Nothing recorded yet'])]);
@@ -1204,24 +1204,18 @@
     ]);
   }
 
-  /** One kind of audit event, newest first. The route returns every kind mixed (offset cursor,
-   * up to 500 a page), so a page is filtered here and reading continues until a screenful of this
-   * kind is found or the log ends: a busy floor's picklist reads must not push every human read
-   * off the Access audit. A refused page throws, never a short list. */
-  async function auditCollect(prefixes, cursor) {
-    var out = [], pages = 0;
-    do {
-      var r = await vaultTunnel('/v1/formula-access-audit?limit=500' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
-      if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new VaultError(err.code || 'UNKNOWN', err.message || 'That did not go through. Try again in a minute.', r.status); }
-      var d = r.json && r.json.data; var items = Array.isArray(d) ? d : ((d && d.items) || []);
-      out = out.concat(items.filter(function (e) { return prefixes.some(function (p) { return e.action && e.action.indexOf(p) === 0; }); }));
-      cursor = (r.json && r.json.meta && r.json.meta.cursor) || (d && d.nextCursor) || null;
-    } while (cursor && out.length < 100 && ++pages < 20);
-    return { rows: out, cursor: cursor };
+  /** One page of one kind of audit event, newest first. The server filters by kind and counts it
+   * (SWEEP-VAULT-3), so a busy floor's picklist reads cannot push the human reads off a page and
+   * the headline is the log's true total. A refused page throws, never a short list. */
+  async function auditPage(kind, cursor) {
+    var r = await vaultTunnel('/v1/formula-access-audit?limit=100&kind=' + kind + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+    if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new VaultError(err.code || 'UNKNOWN', err.message || 'That did not go through. Try again in a minute.', r.status); }
+    var meta = (r.json && r.json.meta) || {};
+    return { rows: pageItems(r.json && r.json.data), cursor: meta.cursor || null, total: typeof meta.total === 'number' ? meta.total : null };
   }
-  /** A total only when the log was read to its end; otherwise what is shown, and that more exist. */
-  function auditCountText(n, cursor) {
-    return cursor ? n + ' shown, older events not read yet' : n + ' events';
+  /** The server's total, and how many are on screen when that is fewer. */
+  function auditCountText(total, shown) {
+    return shown < total ? total + ' events · ' + shown + ' shown' : total + ' events';
   }
   async function screenAudit(kind) {
     var content = h('div', {}, [skeletonCard()]);
@@ -1231,10 +1225,10 @@
       content.appendChild(notBuilt('Audit unavailable', 'Your role doesn\'t include this.'));
       return;
     }
-    var prefixes = kind === 'mfg' ? MFG_PREFIXES : HUMAN_PREFIXES;
-    var rows = [], cursor = null;
+    var serverKind = kind === 'mfg' ? 'production' : 'access';
+    var rows = [], cursor = null, total = 0;
     try {
-      var first = await auditCollect(prefixes, null); rows = first.rows; cursor = first.cursor;
+      var first = await auditPage(serverKind, null); rows = first.rows; cursor = first.cursor; total = first.total == null ? rows.length : first.total;
     } catch (e) {
       content.innerHTML = ''; content.appendChild(notBuilt('Audit didn\'t load', e.message)); return;
     }
@@ -1245,11 +1239,11 @@
     function paint() {
       var more = cursor ? h('button', { class: 'btn sm', onclick: async function (ev) {
         var b = ev.currentTarget; b.disabled = true; b.textContent = 'Loading…';
-        try { var nx = await auditCollect(prefixes, cursor); rows = rows.concat(nx.rows); cursor = nx.cursor; paint(); }
+        try { var nx = await auditPage(serverKind, cursor); rows = rows.concat(nx.rows); cursor = nx.cursor; if (nx.total != null) total = nx.total; paint(); }
         catch (e) { b.disabled = false; b.textContent = 'Load older'; toast(e.message, true); }
       } }, ['Load older']) : null;
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [auditCountText(rows.length, cursor)]), h('span', { class: 'spacer' }), verify]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [auditCountText(total, rows.length)]), h('span', { class: 'spacer' }), verify]),
         kind === 'mfg' ? h('p', { class: 'card-note' }, ['Coded instructions resolved for production. No formula left the server.']) : null,
         auditTable(rows),
         more ? h('div', { style: 'display:flex;justify-content:center;margin-top:12px' }, [more]) : null,

@@ -25,6 +25,10 @@ export { materialRef, materialRefKey } from './material-ref.js';
 export {
   FormulaDirectoryService,
   accessAuditBounds,
+  AUDIT_KIND_PREFIXES,
+  AUDIT_KINDS,
+  auditKind,
+  type AuditKind,
   type AccessAuditPage,
   type AccessAuditRow,
   type FormulaDirectoryEntry,

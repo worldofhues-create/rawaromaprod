@@ -45,7 +45,7 @@ import {
   type SecurityAuditSink,
 } from '@core/backend-kernel';
 import type { CodedInstruction, CodedMaterialLine, CodedPickLine, ReadContext } from './public-api.js';
-import type { AccessAuditPage, FormulaDirectoryPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
+import type { AccessAuditPage, AuditKind, FormulaDirectoryPage, FormulaLabels, FormulaLabelsQuery } from './formula-directory.service.js';
 import type { FormulaShellsBody } from './formula.dtos.js';
 import type { ShellResult } from './setup/formula-setup.service.js';
 import type { CatalogueUpdate } from './facts-bridge/material-catalogue.js';
@@ -159,10 +159,11 @@ export class VaultApiClient {
   }
 
   /** One page of the Vault's access audit (the caller's permission is checked on this box). */
-  async accessAudit(limit: number, cursor?: string | null): Promise<AccessAuditPage> {
+  async accessAudit(limit: number, cursor?: string | null, kind?: AuditKind | null): Promise<AccessAuditPage> {
     const data = await this.post<{ result: AccessAuditPage }>(VAULT_INTERNAL_PATHS.accessAudit, {
       limit,
       cursor: cursor ?? null,
+      ...(kind ? { kind } : {}),
     });
     return data.result;
   }

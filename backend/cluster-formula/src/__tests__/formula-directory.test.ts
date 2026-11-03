@@ -12,12 +12,13 @@
 import { test, before, after as afterAll } from 'node:test';
 import assert from 'node:assert/strict';
 import { uuidv7 } from '@core/data-kernel';
+import { sql } from 'drizzle-orm';
 import { ConfigService } from '../../../backend-kernel/src/config/config.service.js';
 import { EnvKmsAdapter } from '../crypto/env-kms.adapter.js';
 import { VaultService } from '../vault.service.js';
 import { FormulasService } from '../formulas/formulas.service.js';
 import { ApprovalsService } from '../approvals/approvals.service.js';
-import { FormulaDirectoryService, accessAuditBounds } from '../formula-directory.service.js';
+import { FormulaDirectoryService, accessAuditBounds, AUDIT_KIND_PREFIXES } from '../formula-directory.service.js';
 import { principal } from '../../../test-support/db.js';
 import { ensureSchema, formulaDb, closeTestClient } from './db.js';
 
@@ -39,6 +40,7 @@ const author = principal({ userId: uuidv7() });
 const approver = principal({ userId: uuidv7() });
 
 let directory: FormulaDirectoryService;
+let vaultSvc: VaultService;
 let formulaId = '';
 let formulaCode = '';
 let versionId = '';
@@ -48,6 +50,7 @@ before(async () => {
   const db = formulaDb();
   const kms = new EnvKmsAdapter(config);
   const vault = new VaultService(db as any, kms);
+  vaultSvc = vault;
   const formulas = new FormulasService(db as any, kms, vault, noMasterdata as any);
   const approvals = new ApprovalsService(db as any, vault);
   directory = new FormulaDirectoryService(db as any);
@@ -116,4 +119,32 @@ test('accessAudit: offset paging and the main box\'s old bounds (limit 1..500, a
   assert.deepEqual(accessAuditBounds(9999, '-5'), { limit: 500, offset: 0 });
   assert.deepEqual(accessAuditBounds(200, '400'), { limit: 200, offset: 400 });
   assert.deepEqual(accessAuditBounds(10, '99999999999'), { limit: 10, offset: 999_999_999 }, 'fits the channel\'s 9 digits');
+});
+
+// SWEEP-VAULT-3: the Access and Production audits are one kind of event each, filtered and counted
+// HERE, so a busy floor's picklist reads cannot push the human reads off a page, and the screen's
+// headline is the true total rather than what one browser page happened to hold.
+test('accessAudit (kind): filtered on the server, paged within the kind, with the true total', async () => {
+  const entityId = uuidv7();
+  for (let i = 0; i < 4; i++) await vaultSvc.writeStandaloneAudit({ actorId: author.userId, action: 'formula.picklist.read', entityType: 'formula_version', entityId });
+  await vaultSvc.writeStandaloneAudit({ actorId: author.userId, action: 'formula.actual.read', entityType: 'formula_version', entityId, reason: 'review' });
+  const { formulaDb: db } = await import('./db.js');
+  const count = async (prefixes: readonly string[]) => Number(((await (db() as any).execute(
+    sql`select count(*)::int as n from formula.audit_events where exists (select 1 from unnest(${`{${prefixes.join(',')}}`}::text[]) p where starts_with(action, p))`)) as Array<{ n: number }>)[0]!.n);
+
+  const access = await directory.accessAudit(1, null, 'access');
+  assert.equal(access.items.length, 1);
+  assert.ok(access.items.every((r) => AUDIT_KIND_PREFIXES.access.some((p) => r.action.startsWith(p))));
+  assert.equal(access.items[0]!.action, 'formula.actual.read', 'the newest human read, not the four picklist reads after it');
+  assert.equal(access.total, await count(AUDIT_KIND_PREFIXES.access));
+  assert.equal(access.nextCursor, access.total > 1 ? '1' : null);
+
+  const mfg = await directory.accessAudit(500, null, 'production');
+  assert.ok(mfg.items.every((r) => AUDIT_KIND_PREFIXES.production.some((p) => r.action.startsWith(p))));
+  assert.ok(mfg.items.filter((r) => r.entityId === entityId).length === 4);
+  assert.equal(mfg.total, await count(AUDIT_KIND_PREFIXES.production));
+  assert.equal(mfg.nextCursor, null, 'the last page of the kind has no cursor');
+
+  const all = await directory.accessAudit(1);
+  assert.equal(all.total, undefined, 'an unfiltered page is unchanged: no count is run');
 });

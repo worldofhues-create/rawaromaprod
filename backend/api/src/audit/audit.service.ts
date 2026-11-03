@@ -16,7 +16,7 @@
  */
 import { Inject, Injectable, ServiceUnavailableException } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
-import { VaultApiClient, accessAuditBounds, type AccessAuditPage } from '@ra/cluster-formula';
+import { VaultApiClient, accessAuditBounds, type AccessAuditPage, type AuditKind } from '@ra/cluster-formula';
 import type { Sql } from 'postgres';
 import { AUDITED_SCHEMAS } from './write-audit.interceptor.js';
 
@@ -29,7 +29,7 @@ export class AuditService {
     @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'accessAudit'>,
   ) {}
 
-  async formulaAccessAudit(limit = 100, cursor?: string): Promise<AccessAuditPage> {
+  async formulaAccessAudit(limit = 100, cursor?: string, kind?: AuditKind | null): Promise<AccessAuditPage> {
     // Portal-audit WS1: offset-cursor paging so a growing audit trail is fully reachable (was
     // capped at the newest 100 with nextCursor:null). Offset is opaque to the client (meta.cursor);
     // acceptable for a time-desc governance browse where exact-consistency under concurrent writes
@@ -38,7 +38,7 @@ export class AuditService {
     if (!this.vault) throw new ServiceUnavailableException('The Formula Vault client is not configured on this box.');
     // section 109.6/109.8: each row carries the caller's decrypt reason + allow/refuse result
     // (VaultService.writeAudit's `after` snapshot, not part of the hash chain).
-    const page = await this.vault.accessAudit(lim, String(offset));
+    const page = await this.vault.accessAudit(lim, String(offset), kind ?? null);
     const actorIds = [...new Set(page.items.map((r) => r.actorId).filter((a): a is string => !!a))];
     const emails = new Map<string, string>();
     if (actorIds.length) {
@@ -49,6 +49,7 @@ export class AuditService {
     return {
       items: page.items.map((r) => ({ ...r, actor: (r.actorId && emails.get(r.actorId)) || null })),
       nextCursor: page.nextCursor,
+      ...(page.total === undefined ? {} : { total: page.total }),
     };
   }
 

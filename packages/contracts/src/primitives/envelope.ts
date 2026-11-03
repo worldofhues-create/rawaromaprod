@@ -16,6 +16,8 @@ export type ApiError = z.infer<typeof apiError>;
 export const apiMeta = z
   .object({
     cursor: z.string().nullable().optional(),
+    /** How many rows match in all, for a page whose route counts them (SWEEP-VAULT-3). */
+    total: z.number().int().nonnegative().optional(),
     requestId: z.string().optional(),
   })
   .partial();

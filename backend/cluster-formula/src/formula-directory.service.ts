@@ -24,7 +24,7 @@
  *     email is not known here (it lives in the main database's `iam.user_master`); the main box
  *     adds it, the Vault console shows the actor id.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { FORMULA_DB, formulaSchema, type FormulaDb } from './formula.tokens.js';
 
@@ -90,6 +90,27 @@ export interface AccessAuditRow {
 export interface AccessAuditPage {
   items: AccessAuditRow[];
   nextCursor: string | null;
+  /** How many events of the asked kind the log holds; present only when a kind was asked. */
+  total?: number;
+}
+
+/** The Vault console's two audit screens, by action prefix (SWEEP-VAULT-3). They were filtered in
+ *  the browser over one mixed page, so a busy floor's picklist reads pushed every human read off
+ *  the Access audit and the headline was what one page happened to hold; the server owns the
+ *  split now, and counts it. */
+export const AUDIT_KIND_PREFIXES = {
+  access: ['formula.actual.read', 'formula.version.approve', 'formula.version.reject', 'formula.version.finalized', 'formula.version.submitted_for_review', 'formula.version.locked', 'formula.version.superseded', 'formula.copy.', 'formula.created', 'formula.version.created', 'formula.ingredients.sealed', 'formula.stage', 'formula.compliance.'],
+  production: ['formula.floor.read', 'formula.picklist.read', 'formula.manufacturing_instruction.resolve'],
+} as const;
+export type AuditKind = keyof typeof AUDIT_KIND_PREFIXES;
+export const AUDIT_KINDS = Object.keys(AUDIT_KIND_PREFIXES) as AuditKind[];
+
+/** `?kind=` of both boxes' access-audit routes: absent is every event, as before; anything unknown
+ *  is a 400, never a silent "every event" a screen would headline as its own kind. */
+export function auditKind(kind?: string): AuditKind | null {
+  if (kind === undefined || kind === '') return null;
+  if ((AUDIT_KINDS as string[]).includes(kind)) return kind as AuditKind;
+  throw new BadRequestException(`kind must be one of ${AUDIT_KINDS.join(', ')}`);
 }
 
 /** One formula as the main box's formula list shows it (lane vaultsetup: the Factory's
@@ -243,8 +264,13 @@ export class FormulaDirectoryService {
    * caller's reason and allow/refuse result come from the row's `after` snapshot
    * (VaultService.writeAudit; not part of the hash chain).
    */
-  async accessAudit(limit?: number, cursor?: string | null): Promise<AccessAuditPage> {
+  async accessAudit(limit?: number, cursor?: string | null, kind?: AuditKind | null): Promise<AccessAuditPage> {
     const { limit: lim, offset } = accessAuditBounds(limit, cursor);
+    // starts_with, not LIKE: '_' in 'manufacturing_instruction' is a LIKE wildcard.
+    const prefixes = kind ? AUDIT_KIND_PREFIXES[kind] : null;
+    const ofKind = prefixes
+      ? sql`exists (select 1 from unnest(${`{${prefixes.join(',')}}`}::text[]) p where starts_with(${auditEvents.action}, p))`
+      : undefined;
     const rows = await this.db
       .select({
         id: auditEvents.id,
@@ -259,7 +285,8 @@ export class FormulaDirectoryService {
         result: sql<string>`coalesce(${auditEvents.after} ->> 'result', 'allow')`,
       })
       .from(auditEvents)
-      .orderBy(desc(auditEvents.occurredAt))
+      .where(ofKind)
+      .orderBy(desc(auditEvents.occurredAt), desc(auditEvents.chainSeq))
       .limit(lim)
       .offset(offset);
     const items: AccessAuditRow[] = rows.map((r) => ({
@@ -275,6 +302,9 @@ export class FormulaDirectoryService {
       reason: r.reason ?? null,
       result: r.result ?? 'allow',
     }));
-    return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
+    if (!ofKind) return { items, nextCursor: items.length === lim ? String(offset + lim) : null };
+    const [c] = (await this.db.select({ n: sql<number>`count(*)::int` }).from(auditEvents).where(ofKind));
+    const total = Number(c?.n ?? 0);
+    return { items, nextCursor: offset + items.length < total ? String(offset + lim) : null, total };
   }
 }

@@ -14,7 +14,7 @@ import {
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { FormulasService } from './formulas.service.js';
-import { FormulaDirectoryService } from '../formula-directory.service.js';
+import { FormulaDirectoryService, auditKind } from '../formula-directory.service.js';
 import {
   actualReadBody,
   addIngredients,
@@ -77,8 +77,9 @@ export class FormulasController {
   // database. Same permission and paging the main box's route has always had.
   @Permissions('formula:actual:read')
   @Get('v1/formula-access-audit')
-  accessAudit(@Query('limit') limit?: string, @Query('cursor') cursor?: string) {
-    return this.directory.accessAudit(limit ? Number(limit) : 100, cursor);
+  accessAudit(@Query('limit') limit?: string, @Query('cursor') cursor?: string, @Query('kind') kind?: string) {
+    // ?kind=access|production: one screen's events, filtered and counted here (SWEEP-VAULT-3).
+    return this.directory.accessAudit(limit ? Number(limit) : 100, cursor, auditKind(kind));
   }
 
   // The Vault draft editor's material picker — `vault.*` permission (not the ordinary

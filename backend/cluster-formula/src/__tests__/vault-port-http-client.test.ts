@@ -190,6 +190,13 @@ test('accessAudit: a signed POST of limit + cursor to /internal/vault/access-aud
   assert.deepEqual(JSON.parse(lastRequest!.rawBody), { limit: 200, cursor: '400' });
 });
 
+test('accessAudit (kind): the kind crosses the channel and the total comes back (SWEEP-VAULT-3)', async () => {
+  const page = { items: [], nextCursor: null, total: 7 };
+  nextResponse = { status: 201, body: { result: page } };
+  assert.deepEqual(await client().accessAudit(100, null, 'access'), page);
+  assert.deepEqual(JSON.parse(lastRequest!.rawBody), { limit: 100, cursor: null, kind: 'access' });
+});
+
 test('materialCatalogue: a signed POST of the probe / part to /internal/vault/material-catalogue', async () => {
   nextResponse = { status: 201, body: { result: { current: false } } };
   const digest = 'a'.repeat(64);

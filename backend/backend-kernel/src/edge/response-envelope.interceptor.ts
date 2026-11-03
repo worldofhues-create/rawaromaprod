@@ -32,6 +32,10 @@ export class ResponseEnvelopeInterceptor implements NestInterceptor {
         // hoist the cursor into meta and return the items as data.
         if (isCursorPage(payload)) {
           meta.cursor = payload.nextCursor;
+          // A page that counted its matches says so beside the cursor (SWEEP-VAULT-3), so a
+          // screen can headline the true total instead of what one page happened to hold.
+          const total = (payload as { total?: unknown }).total;
+          if (typeof total === 'number') meta.total = total;
           data = payload.items;
         }
 
