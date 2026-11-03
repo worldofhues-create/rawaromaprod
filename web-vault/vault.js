@@ -1204,6 +1204,25 @@
     ]);
   }
 
+  /** One kind of audit event, newest first. The route returns every kind mixed (offset cursor,
+   * up to 500 a page), so a page is filtered here and reading continues until a screenful of this
+   * kind is found or the log ends: a busy floor's picklist reads must not push every human read
+   * off the Access audit. A refused page throws, never a short list. */
+  async function auditCollect(prefixes, cursor) {
+    var out = [], pages = 0;
+    do {
+      var r = await vaultTunnel('/v1/formula-access-audit?limit=500' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+      if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new VaultError(err.code || 'UNKNOWN', err.message || 'That did not go through. Try again in a minute.', r.status); }
+      var d = r.json && r.json.data; var items = Array.isArray(d) ? d : ((d && d.items) || []);
+      out = out.concat(items.filter(function (e) { return prefixes.some(function (p) { return e.action && e.action.indexOf(p) === 0; }); }));
+      cursor = (r.json && r.json.meta && r.json.meta.cursor) || (d && d.nextCursor) || null;
+    } while (cursor && out.length < 100 && ++pages < 20);
+    return { rows: out, cursor: cursor };
+  }
+  /** A total only when the log was read to its end; otherwise what is shown, and that more exist. */
+  function auditCountText(n, cursor) {
+    return cursor ? n + ' shown, older events not read yet' : n + ' events';
+  }
   async function screenAudit(kind) {
     var content = h('div', {}, [skeletonCard()]);
     renderShell(kind === 'mfg' ? 'audit-mfg' : 'audit-access', content);
@@ -1212,23 +1231,32 @@
       content.appendChild(notBuilt('Audit unavailable', 'Your role doesn\'t include this.'));
       return;
     }
+    var prefixes = kind === 'mfg' ? MFG_PREFIXES : HUMAN_PREFIXES;
+    var rows = [], cursor = null;
     try {
-      var page = await api('/v1/formula-access-audit?limit=200');
-      var prefixes = kind === 'mfg' ? MFG_PREFIXES : HUMAN_PREFIXES;
-      var rows = pageItems(page).filter(function (r) { return prefixes.some(function (p) { return r.action && r.action.indexOf(p) === 0; }); });
-      var verify = h('button', { class: 'btn sm', onclick: async function () {
-        try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Verified · ' + v.rows + ' rows intact') : ('Broken at row ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
-        catch (e) { toast(e.message, true); }
-      } }, ['Verify']);
+      var first = await auditCollect(prefixes, null); rows = first.rows; cursor = first.cursor;
+    } catch (e) {
+      content.innerHTML = ''; content.appendChild(notBuilt('Audit didn\'t load', e.message)); return;
+    }
+    var verify = h('button', { class: 'btn sm', onclick: async function () {
+      try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Verified · ' + v.rows + ' rows intact') : ('Broken at row ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
+      catch (e) { toast(e.message, true); }
+    } }, ['Verify']);
+    function paint() {
+      var more = cursor ? h('button', { class: 'btn sm', onclick: async function (ev) {
+        var b = ev.currentTarget; b.disabled = true; b.textContent = 'Loading…';
+        try { var nx = await auditCollect(prefixes, cursor); rows = rows.concat(nx.rows); cursor = nx.cursor; paint(); }
+        catch (e) { b.disabled = false; b.textContent = 'Load older'; toast(e.message, true); }
+      } }, ['Load older']) : null;
       var card = h('div', { class: 'card' }, [
-        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [rows.length + ' rows']), h('span', { class: 'spacer' }), verify]),
+        h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [auditCountText(rows.length, cursor)]), h('span', { class: 'spacer' }), verify]),
         kind === 'mfg' ? h('p', { class: 'card-note' }, ['Coded instructions resolved for production. No formula left the server.']) : null,
         auditTable(rows),
+        more ? h('div', { style: 'display:flex;justify-content:center;margin-top:12px' }, [more]) : null,
       ]);
       content.innerHTML = ''; content.appendChild(card);
-    } catch (e) {
-      content.innerHTML = ''; content.appendChild(notBuilt('Audit didn\'t load', e.message));
     }
+    paint();
   }
 
   /* ---------------------------------------------------------------------------------------
