@@ -618,6 +618,27 @@ export class SecurityService {
   }
 
   /**
+   * SWEEP2-O4: the Vault's Access grants card named grantees by raw user and role UUIDs and asked a
+   * vault_approver (who may not read user_master) to paste a "User UUID". This is the narrow
+   * directory that card needs: active HUMAN users by name and every role by name, nothing else --
+   * no mobile, no employee code, no hash. Read-only; who may receive a grant is still decided by
+   * createAccessPolicy (never yourself) on the Vault.
+   */
+  async formulaGrantees(): Promise<{ users: Array<{ userId: string; userName: string | null; email: string | null }>; roles: Array<{ roleId: string; roleCode: string | null; roleName: string | null }> }> {
+    const users = await this.db
+      .select({ userId: userMaster.userId, userName: userMaster.userName, email: userMaster.email, isActive: userMaster.isActive, status: userMaster.status, accountKind: userMaster.accountKind })
+      .from(userMaster);
+    const roles = await this.db.select({ roleId: roleMaster.roleId, roleCode: roleMaster.roleCode, roleName: roleMaster.roleName }).from(roleMaster);
+    return {
+      users: users
+        .filter((u) => u.accountKind === 'HUMAN' && u.isActive !== false && (!u.status || u.status.toUpperCase() === 'ACTIVE'))
+        .map((u) => ({ userId: u.userId, userName: u.userName, email: u.email }))
+        .sort((a, b) => String(a.userName ?? a.email).localeCompare(String(b.userName ?? b.email))),
+      roles: roles.map((r) => ({ roleId: r.roleId, roleCode: r.roleCode, roleName: r.roleName })),
+    };
+  }
+
+  /**
    * Who may approve a PENDING Vault-role grant request (lane vaultsetup's "Let Ruh draft
    * formulas" card shows the names): every active HUMAN owner/admin who is not the requester, not
    * the target, and not in the requester's account-creation chain — exactly the people

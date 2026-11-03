@@ -956,17 +956,29 @@
     try {
       var page = await apiAll('/v1/formula-access-policies?limit=100');
       var grants = pageItems(page).filter(function (g) { return g.formulaId === formulaId; });
+      // SWEEP2-O4: people and roles by name, from the main box's narrow directory; an id is shown
+      // only when the directory cannot say (unreachable, or a user since removed), and says so.
+      var dir = { users: [], roles: [] };
+      try { var dr = await mainApi('/v1/formula-grantees'); if (dr && dr.users) dir = dr; } catch (x) { dir = null; }
+      var userName = {}, roleName = {};
+      (dir ? dir.users : []).forEach(function (u) { userName[u.userId] = u.userName || u.email || 'Unnamed user'; });
+      (dir ? dir.roles : []).forEach(function (r) { roleName[r.roleId] = r.roleName || r.roleCode || 'Unnamed role'; });
+      var who = function (map, id) { return !id ? '—' : map[id] || (dir ? 'Unknown (' + String(id).slice(0, 8) + ')' : 'Names unavailable'); };
       var rows = grants.map(function (g) {
-        return h('tr', {}, [h('td', { class: 'mono', 'data-label': 'User' }, [g.userId || '—']), h('td', { 'data-label': 'Role' }, [g.roleId || '—']), h('td', { 'data-label': 'Level' }, [String(g.accessLevel != null ? g.accessLevel : '—')])]);
+        return h('tr', {}, [h('td', { 'data-label': 'User' }, [who(userName, g.userId)]), h('td', { 'data-label': 'Role' }, [who(roleName, g.roleId)]), h('td', { 'data-label': 'Level' }, [String(g.accessLevel != null ? g.accessLevel : '—')])]);
       });
       body.appendChild(rows.length
         ? h('table', {}, [h('thead', {}, [h('tr', {}, [h('th', {}, ['User']), h('th', {}, ['Role']), h('th', {}, ['Level'])])]), h('tbody', {}, rows)])
         : h('div', { class: 'empty' }, [h('h3', {}, ['No grants']), h('p', {}, ['Only the owner can read this formula.'])]));
       if (hasPerm('formula:formula_access_policy:write')) {
-        var uid = h('input', { class: 'fld', placeholder: 'User UUID', style: 'flex:1' });
+        var me = session && session.userId; // never yourself: createAccessPolicy refuses a self-grant
+        var choices = (dir ? dir.users : []).filter(function (u) { return u.userId !== me && !grants.some(function (g) { return g.userId === u.userId; }); });
+        var uid = h('select', { class: 'fld', 'aria-label': 'Person to grant access', style: 'flex:1' },
+          [h('option', { value: '' }, [dir ? (choices.length ? 'Choose a person…' : 'Everyone already has access') : 'Names unavailable — try again'])].concat(
+            choices.map(function (u) { return h('option', { value: u.userId }, [u.userName ? u.userName + (u.email ? ' · ' + u.email : '') : (u.email || 'Unnamed user')]); })));
         var add = h('button', { class: 'btn sm', onclick: async function () {
-          if (!uid.value.trim()) return;
-          try { await api('/v1/formula-access-policies', { method: 'POST', body: { formulaId: formulaId, userId: uid.value.trim() } }); toast('Access granted'); location.hash = location.hash; render(); }
+          if (!uid.value) return;
+          try { await api('/v1/formula-access-policies', { method: 'POST', body: { formulaId: formulaId, userId: uid.value } }); toast('Access granted'); location.hash = location.hash; render(); }
           catch (e) { toast(e.message, true); }
         } }, ['Grant']);
         body.appendChild(h('div', { style: 'display:flex;gap:8px;margin-top:10px' }, [uid, add]));

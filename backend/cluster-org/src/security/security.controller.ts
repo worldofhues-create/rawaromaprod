@@ -40,6 +40,13 @@ export class SecurityController {
     return this.security.listUsers(query);
   }
 
+  // SWEEP2-O4: names for the Vault's Access grants card -- see SecurityService.formulaGrantees.
+  @Permissions('formula:formula_access_policy:read')
+  @Get('v1/formula-grantees')
+  formulaGrantees() {
+    return this.security.formulaGrantees();
+  }
+
   @Permissions('iam:user_master:read')
   @Get('v1/users/:id')
   getUser(@Param('id') id: string) {
