@@ -1517,7 +1517,7 @@
       fkRows(f.fk).then(function (fr) {
         fkFail(sel, fr.error); fr.rows.forEach(function (r) { var val = r[f.fv] != null ? r[f.fv] : guessId(r); var lab = r[f.fl] != null ? r[f.fl] : (val ? String(val).slice(0, 8) : ''); if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); } });
         if (row[f.n] != null) sel.value = String(row[f.n]);
-      }).catch(function () {});
+      }).catch(function () { fkFail(sel, 'This list did not load. Close and try again.'); });
     });
     ov.onsubmit = function (e) {
       e.preventDefault(); var body2 = {}, verr = '';
@@ -2112,7 +2112,7 @@
           var val = row[f.fv] != null ? row[f.fv] : guessId(row); var lab = row[f.fl] != null ? row[f.fl] : (val ? String(val).slice(0, 8) : '');
           if (val) { var o = document.createElement('option'); o.value = val; o.textContent = lab; sel.appendChild(o); }
         });
-      }).catch(function () {});
+      }).catch(function () { fkFail(sel, 'This list did not load. Close and try again.'); });
     });
     ov.onsubmit = function (e) {
       e.preventDefault(); var body2 = {}, err = '';
@@ -2545,7 +2545,9 @@
   }
   function loadAlerts() {
     tunnel('/v1/alerts').then(function (res) {
-      var d = res.json && res.json.data; if (!d) return;
+      var d = res && res.status < 400 && res.json && res.json.data;
+      if (!d) { alertsFailed((res && res.json && res.json.error && res.json.error.message) || 'The alert feed did not answer.'); return; }
+      loadAlerts.failed = false; var bb = $('ra-bell-badge'); if (bb) bb.title = '';
       // A count that went UP since the last look is news; the first load is not.
       if (window.RaSound && loadAlerts.seen != null && d.total > loadAlerts.seen) {
         RaSound.play((d.alerts || []).some(function (a) { return a.severity === 'high'; }) ? 'alert' : 'notify');
@@ -2561,7 +2563,14 @@
       [].forEach.call(pop.querySelectorAll('[data-alert-nav]'), function (el) {
         el.onclick = function (e) { e.stopPropagation(); pop.style.display = 'none'; navTo(el.getAttribute('data-alert-nav')); };
       });
-    }).catch(function () {});
+    }).catch(function () { alertsFailed('Can\'t reach the alert feed.'); });
+  }
+  // A down alert feed must not read as "no alerts": mark the bell, say so in its panel, and tell the
+  // user once per outage (the bell polls every 30 s).
+  function alertsFailed(msg) {
+    var badge = $('ra-bell-badge'); if (badge) { badge.textContent = '!'; badge.title = 'Alerts did not load'; badge.style.display = 'inline'; }
+    var pop = $('ra-bell-pop'); if (pop) pop.innerHTML = '<div class="loading" style="padding:var(--s-base)">Alerts did not load: ' + escHtml(msg) + ' Trying again shortly.</div>';
+    if (!loadAlerts.failed) { loadAlerts.failed = true; toast('Alerts did not load. ' + msg, 'bad'); }
   }
   // Switch to another workspace the signed-in session already holds a role for — no second login
   // (addendum §5/§8). Keeps the same session/token; only st.role + the rendered rail/nav change.
