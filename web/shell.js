@@ -2154,7 +2154,7 @@
     var rows = [], cursor = null, n = 0;
     try {
       do {
-        var res = await tunnel(path + '?limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+        var res = await tunnel(path + (path.indexOf('?') >= 0 ? '&' : '?') + 'limit=100' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
         if (!res || res.status >= 400) return { rows: rows, error: (res && res.json && res.json.error && res.json.error.message) || 'This list did not load. Close and try again.' };
         rows = rows.concat((res.json && res.json.data) || []);
         cursor = (res.json && res.json.meta && res.json.meta.cursor) || null;
@@ -2331,7 +2331,7 @@
       return shown;
     }
     // Load the unit dictionary once (uomId → code) so quantity cells + create pickers read units.
-    if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await tunnel('/v1/uoms?limit=100'); ((ur.json && ur.json.data) || []).forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); } catch (e) { st._uomsLoaded = false; } }
+    if (!st._uomsLoaded) { st._uomsLoaded = true; try { var ur = await fkRows('/v1/uoms'); ur.rows.forEach(function (u) { UOM[u.uomId] = u.uomCode || u.uomName; }); if (ur.error) st._uomsLoaded = false; } catch (e) { st._uomsLoaded = false; } }
     var V = $('ra-view'); V.innerHTML = '<div class="loading">Loading…</div>';
     var masked = item[4] === true;
     var res;

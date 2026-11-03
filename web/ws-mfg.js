@@ -76,7 +76,7 @@
   // and rejects over-dispatch (409). One line per dispatch here; add more via the Dispatches list.
   async function openDispatch(row) {
     var res0;
-    try { res0 = await tunnel('/v1/fg-stock?onlyAvailable=1&limit=100'); }
+    try { res0 = await tunnel('/v1/fg-stock?onlyAvailable=1&limit=200'); }
     catch (e) { toast('Can\'t connect. Try again.', 'bad'); return; }
     // A server error is not "no stock" — the original code let `(res0.json && res0.json.data) ||
     // []` fold a failed fetch's `data: null` into the same empty array as a genuine zero-stock
@@ -101,6 +101,8 @@
           '<button type="submit" id="ra-dsave" data-tutorial-target="dispatch-submit" class="btn p" style="width:100%;justify-content:center">Dispatch</button>' +
           // Irreversible-action language up front (Addendum §10) — no separate hidden reason.
           '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);text-align:center">Dispatch can\'t be undone.</div>'
+          // /v1/fg-stock has no cursor and stops at 200 (earliest expiry first): a full list says so.
+        + (batches.length >= 200 ? '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--amber)">Showing the 200 earliest-expiring batches with stock; later ones are not listed here.</div>' : '')
         : '<div class="empty"><h3>Nothing to dispatch</h3><p>No finished-good stock is available.</p></div>');
     var d = openMfgSheet('Dispatch order', '<form id="ra-dform" style="display:flex;flex-direction:column;gap:12px">' + body + '</form>');
     if (!batches.length) return;
@@ -194,7 +196,7 @@
         '<button type="button" class="ra-qrm xp" aria-label="Remove parameter" style="flex:none">&times;</button>';
       linesEl.appendChild(row); row.querySelector('.ra-qrm').onclick = function () { row.remove(); };
     }
-    tunnel('/v1/qc-parameters?limit=100').then(function (res) { params = (res.json && res.json.data) || []; [].forEach.call(linesEl.querySelectorAll('[data-param]'), function (s) { s.innerHTML = paramOptions(); }); });
+    fkRows('/v1/qc-parameters').then(function (fr) { if (fr.error) toast('QC parameters did not load: ' + fr.error, 'bad'); params = fr.rows; [].forEach.call(linesEl.querySelectorAll('[data-param]'), function (s) { s.innerHTML = paramOptions(); }); });
     addLine();
     $('ra-qadd').onclick = addLine;
     $('ra-qform').onsubmit = function (e) {
@@ -272,9 +274,9 @@
         if (r0.status >= 400) { toast(coaErr(r0, 'Could not load the COA. Try again.'), 'bad'); return; }
         existing = r0.json && r0.json.data;
       } else {
-        var r1 = await tunnel('/v1/oil-batches?limit=100');
-        if (r1.status >= 400) { toast(coaErr(r1, 'Could not load oil batches. Try again.'), 'bad'); return; }
-        batches = ((r1.json && r1.json.data) || []).filter(function (b) { return String(b.status || '').toUpperCase() !== 'FAILED'; });
+        var r1 = await fkRows('/v1/oil-batches');
+        if (r1.error) { toast(r1.error, 'bad'); return; }
+        batches = r1.rows.filter(function (b) { return String(b.status || '').toUpperCase() !== 'FAILED'; });
       }
     } catch (e) { toast('Can\'t connect. Try again.', 'bad'); return; }
     var batchInput = existing

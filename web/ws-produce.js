@@ -91,7 +91,7 @@
   async function viewProduce(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
     var res;
-    try { res = await tunnel('/v1/produce/queue?limit=300'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
+    try { res = await tunnel('/v1/produce/queue?limit=500'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
     if (stale('produce')) return;
     if (res.status === 403) { V.innerHTML = errBox('Your role doesn\'t see the production queue.'); return; }
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The production queue is not available (' + res.status + ').')); return; }
@@ -99,7 +99,10 @@
     var canPlan = can('production:production_plan_items:write') && can('production:production_order:write');
     var canInstr = can('production:manufacturing_instruction:read');
     var canPick = can('location:shelf_task:write');
-    var stats = '<div class="stats">' + kpi('activity', String(c.open || 0), 'Open') + kpi('droplet', num(c.kgToProduce || 0) + ' kg', 'To produce') +
+    // The route stops at 500 rows and its counters cover only those (countersOf(items)): a full
+    // queue says so instead of reading as the whole backlog.
+    var full = (d.items || []).length >= 500;
+    var stats = (full ? '<div class="card" role="status" style="color:var(--amber)">Showing the first 500 queue rows; counts below cover these only.</div>' : '') + '<div class="stats">' + kpi('activity', String(c.open || 0) + (full ? '+' : ''), 'Open') + kpi('droplet', num(c.kgToProduce || 0) + ' kg', 'To produce') +
       kpi('alert', String(c.overdue || 0), 'Overdue') + kpi('tag', String(c.highValue || 0), 'High value') + kpi('lock', String(c.blocked || 0), 'Blocked') + '</div>';
     var open = (d.items || []).filter(function (r) { return r.lifecycleStatus !== 'CANCELLED'; });
     PV.queue = {}; open.forEach(function (r) { PV.queue[r.alembicRequirementId] = r; });
@@ -696,7 +699,7 @@
     var host = document.createElement('div'); host.className = 'gwrap strip'; host.style.marginBottom = 'var(--gr-gap)';
     V.insertBefore(host, V.firstChild);
     var parts = [];
-    var p1 = hasProduce ? tunnel('/v1/produce/queue?limit=300').then(function (res) {
+    var p1 = hasProduce ? tunnel('/v1/produce/queue?limit=500').then(function (res) {
       var c = (data(res) || {}).counters; if (!c) return;
       parts.push('<button type="button" class="work-tile" data-pnav="produce" style="flex:2;min-width:260px;text-align:left;border-radius:var(--r-md);padding:var(--s-snug)"><div class="t-cap" style="text-transform:uppercase;letter-spacing:.06em">Produce next</div>' +
         '<div style="display:flex;gap:18px;margin-top:6px;flex-wrap:wrap">' + [[c.open, 'open'], [num(c.kgToProduce) + ' kg', 'to produce'], [c.overdue, 'overdue', 'var(--red)'], [c.highValue, 'high value', 'var(--red)'], [c.blocked, 'blocked', 'var(--amber)']].map(function (x) {
