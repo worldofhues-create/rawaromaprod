@@ -22,7 +22,7 @@ test('Factory: ws-produce.js loads after the other workspace modules and is cach
   const sw = read('web/sw.js');
   assert.match(sw, /'\/ws-produce\.js'/);
   // v94 lane produce; v95 lanes catalogue (ws-setup.js) and vaultsetup (ws-formula-setup.js); v96 their merge; v97 lane ruh-factory (ruh.js); v98 lane ux-audit (routes.js, screen-guide.js).
-  assert.match(sw, /const CACHE = 'ra-shell-v103'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v104'/);
 });
 
 test('Factory: the shell dispatches sentinel views to RA_VIEWS, and ws-produce registers the four screens', () => {
@@ -39,7 +39,7 @@ test('Platform: the ALEMBIC bridge and pick-to-light screens, gated, and a cache
   const js = read('web-platform/platform.js');
   assert.match(js, /\{ id: 'bridge', label: 'Sales system link', icon: 'link', need: 'platformops:console:read' \}/);
   assert.match(js, /\{ id: 'picklight', label: 'Pick-to-light', icon: 'bulb', need: 'platform:flag:write' \}/);
-  assert.match(read('web-platform/sw.js'), /platform-shell-v17/);
+  assert.match(read('web-platform/sw.js'), /platform-shell-v18/);
 });
 
 test('Vault: the formula-needed list comes from the main box, never the Vault box', () => {
