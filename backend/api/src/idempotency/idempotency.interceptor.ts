@@ -40,17 +40,19 @@ export function requestHash(method: string, url: string, body: unknown): string 
 
 /** The store, on its own so it can be tested against a real database without Nest. */
 export class IdempotencyStore {
-  constructor(private readonly sql: Sql) {}
+  /** `table` is fixed by the two interceptors below, never caller input. */
+  constructor(private readonly sql: Sql, private readonly table = 'platform.idempotency_key') {}
+  private get t() { return this.sql(this.table); } // postgres.js quotes a dotted name as schema.table
 
   async claim(userId: string, key: string, hash: string): Promise<Claim> {
     const inserted = await this.sql`
-      insert into platform.idempotency_key (user_id, idempotency_key, request_hash)
+      insert into ${this.t} (user_id, idempotency_key, request_hash)
       values (${userId}, ${key}, ${hash})
       on conflict (user_id, idempotency_key) do nothing
       returning idempotency_key`;
     if (inserted.length) return { kind: 'run' };
     const rows = await this.sql<{ request_hash: string; state: string; response: unknown }[]>`
-      select request_hash, state, response from platform.idempotency_key
+      select request_hash, state, response from ${this.t}
        where user_id = ${userId} and idempotency_key = ${key}`;
     const row = rows[0];
     if (!row) return this.claim(userId, key, hash); // released between the two statements
@@ -61,21 +63,19 @@ export class IdempotencyStore {
 
   async complete(userId: string, key: string, response: unknown): Promise<void> {
     await this.sql`
-      update platform.idempotency_key
+      update ${this.t}
          set state = 'completed', response = ${this.sql.json((response ?? null) as never)}, completed_dt = now()
        where user_id = ${userId} and idempotency_key = ${key}`;
   }
 
   async release(userId: string, key: string): Promise<void> {
-    await this.sql`delete from platform.idempotency_key
+    await this.sql`delete from ${this.t}
                     where user_id = ${userId} and idempotency_key = ${key} and state = 'in_progress'`;
   }
 }
 
-@Injectable()
-export class IdempotencyInterceptor implements NestInterceptor {
-  private readonly store: IdempotencyStore;
-  constructor(@Inject(PG_CLIENT) sql: Sql) { this.store = new IdempotencyStore(sql); }
+export class IdempotencyInterceptorBase implements NestInterceptor {
+  constructor(private readonly store: IdempotencyStore) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
     if (context.getType() !== 'http') return next.handle();
@@ -103,3 +103,10 @@ export class IdempotencyInterceptor implements NestInterceptor {
     );
   }
 }
+
+/** The main API: platform.idempotency_key on DATABASE_URL. */
+@Injectable()
+export class IdempotencyInterceptor extends IdempotencyInterceptorBase {
+  constructor(@Inject(PG_CLIENT) sql: Sql) { super(new IdempotencyStore(sql, 'platform.idempotency_key')); }
+}
+

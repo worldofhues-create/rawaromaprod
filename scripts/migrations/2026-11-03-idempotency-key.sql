@@ -20,3 +20,20 @@ create table if not exists platform.idempotency_key (
   primary key (user_id, idempotency_key)
 );
 create index if not exists idempotency_key_created_dt_idx on platform.idempotency_key (created_dt);
+
+-- The application role (DB_APP_ROLE, passed as rawprod.app_role) reads, claims, completes and
+-- releases its rows; the same grant pattern as 2026-09-28-login-history.
+do $$
+declare
+  app text := nullif(current_setting('rawprod.app_role', true), '');
+begin
+  if app is null then
+    raise notice 'idempotency_key grants: DB_APP_ROLE is not set, so no application role was granted';
+    return;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = app) then
+    raise exception 'idempotency_key grants: DB_APP_ROLE "%" is not a role in this cluster', app;
+  end if;
+  execute format('grant usage on schema platform to %I', app);
+  execute format('grant select, insert, update, delete on platform.idempotency_key to %I', app);
+end $$;

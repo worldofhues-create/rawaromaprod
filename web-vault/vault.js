@@ -127,7 +127,7 @@
       await handshake();
       var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
       if (opts.body !== undefined) payload.body = opts.body;
-      if (opts.idemKey) payload.idempotencyKey = opts.idemKey; // SWEEP2-R1: forwarded on the Vault box only if it honours it
+      if (opts.idemKey) payload.idempotencyKey = opts.idemKey; // SWEEP2-R1: the Vault API honours it (formula.idempotency_key)
       if (session.token) payload.token = session.token;
       var res = await fetch(base + '/rpc', {
         method: 'POST',

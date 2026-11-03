@@ -74,6 +74,7 @@ import {
 } from '@core/backend-kernel';
 import { FormulaModule } from '@ra/cluster-formula';
 import { CryptoModule } from './crypto/crypto.module.js';
+import { VaultIdempotencyInterceptor } from './idempotency/vault-idempotency.interceptor.js';
 import { VaultPortInternalModule } from './vault-bridge/vault-port-internal.module.js';
 import { VaultHealthModule } from './vault-bridge/vault-health.module.js';
 
@@ -96,6 +97,8 @@ import { VaultHealthModule } from './vault-bridge/vault-health.module.js';
     { provide: APP_GUARD, useClass: PermissionsGuard },
     { provide: APP_GUARD, useClass: FreshAuthGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
+    // SWEEP2-R1: as on the main API, just inside the envelope -- a re-sent formula write lands once.
+    { provide: APP_INTERCEPTOR, useClass: VaultIdempotencyInterceptor },
     { provide: APP_FILTER, useClass: AllExceptionsFilter },
   ],
 })
