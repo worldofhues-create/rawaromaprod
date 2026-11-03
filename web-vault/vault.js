@@ -170,6 +170,20 @@
    * (the rows array) + `meta.cursor`, so `api()` already returns the array — reading `.items` off it
    * was always undefined and every list/audit screen rendered empty. */
   function pageItems(page) { return Array.isArray(page) ? page : ((page && page.items) || []); }
+  /** Every row of a list route, following `meta.cursor` page by page. `api()` returns only `data`
+   * and drops the cursor, so a screen reading one page stopped at 100 rows with nothing saying so —
+   * the formula screen filtered the newest 100 versions of ALL formulas down to one, showed an older
+   * formula as "No versions yet" and offered v1 again. A failed page throws (never a short list). */
+  async function apiAll(path) {
+    var out = [], cursor = null, guard = 0;
+    do {
+      var r = await vaultTunnel(path + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+      if (r.status >= 400) { var err = (r.json && r.json.error) || {}; throw new VaultError(err.code || 'UNKNOWN', err.message || 'That did not go through. Try again in a minute.', r.status); }
+      var d = r.json && r.json.data; out = out.concat(Array.isArray(d) ? d : ((d && d.items) || []));
+      cursor = (r.json && r.json.meta && r.json.meta.cursor) || (d && d.nextCursor) || null;
+    } while (cursor && ++guard < 200);
+    return out;
+  }
   /** The main app box (`MAIN_API`): `/auth/alembic-assertion` and `/me` (it holds
    * `iam.user_master`), and — lane produce, 2026-09-29 — `GET /v1/produce/formula-needs`, the
    * factory's list of products blocked for want of an approved formula (product code, SKU, how
@@ -822,7 +836,7 @@
     var content = h('div', {}, [skeletonCard()]);
     renderShell('formulas', content);
     try {
-      var page = await api('/v1/formulas?limit=100');
+      var page = await apiAll('/v1/formulas?limit=100');
       var canCreate = hasPerm('formula:formula_master:write');
       var rows = pageItems(page).map(function (f) {
         var tr = rowLink(h('tr', { onclick: function () { location.hash = '#/formula/' + f.formulaId; } }, [
@@ -874,7 +888,7 @@
     try {
       var formula = await api('/v1/formulas/' + encodeURIComponent(formulaId));
       setPlace([{ label: 'Formulas', hash: '#/formulas' }, { label: formula.formulaCode || 'Formula' }]);
-      var versionsPage = await api('/v1/formula-versions?limit=100'); // the route's max (listQuery)
+      var versionsPage = await apiAll('/v1/formula-versions?limit=100'); // the route's max (listQuery), every page
       var versions = pageItems(versionsPage).filter(function (v) { return v.formulaId === formulaId; })
         .sort(function (a, b) { return (b.versionNumber || 0) - (a.versionNumber || 0); });
       var maxVersion = versions.reduce(function (m, v) { return Math.max(m, v.versionNumber || 0); }, 0);
@@ -921,7 +935,7 @@
     if (!hasPerm('formula:formula_access_policy:read')) return h('div', {});
     var body = h('div', {});
     try {
-      var page = await api('/v1/formula-access-policies?limit=100');
+      var page = await apiAll('/v1/formula-access-policies?limit=100');
       var grants = pageItems(page).filter(function (g) { return g.formulaId === formulaId; });
       var rows = grants.map(function (g) {
         return h('tr', {}, [h('td', { class: 'mono', 'data-label': 'User' }, [g.userId || '—']), h('td', { 'data-label': 'Role' }, [g.roleId || '—']), h('td', { 'data-label': 'Level' }, [String(g.accessLevel != null ? g.accessLevel : '—')])]);
@@ -1433,7 +1447,7 @@
     renderShell('certificates', content);
     try {
       var statuses = await api('/v1/compliance/status');
-      var formulas = pageItems(await api('/v1/formulas?limit=100'));
+      var formulas = pageItems(await apiAll('/v1/formulas?limit=100'));
       var byFormula = {};
       statuses.forEach(function (s) { (byFormula[s.formulaId] = byFormula[s.formulaId] || {})[s.kind] = s; });
       var canCalc = hasPerm('vault:compliance_calc:read');
