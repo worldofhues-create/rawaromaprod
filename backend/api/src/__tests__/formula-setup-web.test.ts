@@ -34,7 +34,7 @@ test('Factory: the screen — two-owner Ruh card, shells, guarded link; tunnel o
     "'/v1/vault-role-grant-requests/'",
     "'/v1/formula-setup/products'",
     "'/v1/formula-setup/shells'",
-    "'/v1/formulas?limit=500'",
+    "'/v1/formulas'", // every page, via fkRows (SWEEP)
     "'/formula-link'",
   ]) assert.ok(js.includes(route), route);
   assert.ok(!/\bfetch\(/.test(js), 'every call goes through tunnel()');

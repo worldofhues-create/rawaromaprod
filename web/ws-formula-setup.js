@@ -197,15 +197,17 @@
         '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Why', true) + '<input id="fs-link-why" class="fld" maxlength="500" placeholder="e.g. reformulated blend approved"></label>' +
         '<div id="fs-link-err" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
         '<button type="submit" id="fs-link-save" class="btn p" style="width:100%;justify-content:center">Save</button>' });
-    tunnel('/v1/formulas?limit=500').then(function (res) {
+    // Every page (fkRows in shell.js follows the cursor), and a failure is said in the dropdown and
+    // the error line, never left as "Loading…" with Save answering "Pick a formula.".
+    fkRows('/v1/formulas').then(function (fr) {
       var sel = $('fs-link-f'); if (!sel) return;
-      if (res.status >= 400) { sel.innerHTML = '<option value="">' + escHtml(err(res, 'The formula list is not available')) + '</option>'; return; }
-      var list = data(res) || [];
+      if (fr.error) { sel.innerHTML = '<option value="">' + escHtml(fr.error) + '</option>'; var eb = $('fs-link-err'); if (eb) $('fs-link-err').textContent = fr.error; return; }
+      var list = fr.rows;
       sel.innerHTML = '<option value="">Select…</option>' + list.map(function (f) {
         var tag = f.approvedVersion ? ' · approved v' + f.approvedVersion.versionNumber : (f.latestVersionStatus ? ' · v' + f.latestVersionNumber + ' ' + String(f.latestVersionStatus).toLowerCase() : '');
         return '<option value="' + escHtml(f.formulaId) + '"' + (f.formulaId === p.formulaId ? ' selected' : '') + '>' + escHtml((f.formulaCode || f.formulaId) + tag) + '</option>';
       }).join('');
-    }).catch(function () {});
+    });
     m.sheet.onsubmit = function (e) {
       e.preventDefault();
       var fid = $('fs-link-f').value, why = $('fs-link-why').value.trim();
