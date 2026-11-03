@@ -33,9 +33,9 @@ function run(res: unknown) {
 for (const [name, res] of [['refused', { status: 500, json: { error: { message: 'down' } } }], ['unreachable', new Error('channel')]] as const) {
   test(`a ${name} alert feed is shown on the bell, not left as the last count`, async () => {
     const r = run(res); await r.go();
-    assert.equal(r.els['ra-bell-badge'].textContent, '!');
-    assert.equal(r.els['ra-bell-badge'].style.display, 'inline');
-    assert.match(r.els['ra-bell-pop'].innerHTML, /did not load/);
+    assert.equal(r.els['ra-bell-badge']!.textContent, '!');
+    assert.equal(r.els['ra-bell-badge']!.style.display, 'inline');
+    assert.match(r.els['ra-bell-pop']!.innerHTML, /did not load/);
     assert.equal(r.toasts.length, 1);
   });
 }

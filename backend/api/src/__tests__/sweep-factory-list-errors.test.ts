@@ -38,7 +38,7 @@ test('an unreachable next page tells the user', async () => {
 
 test('a failed whole-table search tells the user only the loaded rows were searched', async () => {
   const r = run('searchServer', { status: 500, json: null }, 'abc'); await r.go();
-  assert.equal(r.toasts.length, 1); assert.match(r.toasts[0], /loaded/);
+  assert.equal(r.toasts.length, 1); assert.match(r.toasts[0]!, /loaded/);
   const r2 = run('searchServer', new Error('channel'), 'abc'); await r2.go(); assert.equal(r2.toasts.length, 1);
 });
 
