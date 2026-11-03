@@ -1952,7 +1952,7 @@
       { n: 'planDate', l: 'Plan date', t: 'date', req: true },
       { n: 'locationId', l: 'Location', t: 'select', fk: '/v1/locations', fv: 'locationId', fl: 'locationName' }
     ] },
-    '/v1/production-plan-items': { title: 'New plan item', perm: 'production:production_plan:write', fields: [
+    '/v1/production-plan-items': { title: 'New plan item', perm: 'production:production_plan_items:write', fields: [
       { n: 'productionPlanId', l: 'Production plan', t: 'select', fk: '/v1/production-plans', fv: 'productionPlanId', fl: 'planDate', req: true },
       { n: 'formulaId', l: 'Formula', t: 'select', fk: '/v1/produce/approved-formula-versions', fv: 'formulaId', fl: 'label' },
       { n: 'plannedQty', l: 'Planned qty', t: 'number' }, { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
