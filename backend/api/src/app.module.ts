@@ -11,6 +11,7 @@
  */
 import { type MiddlewareConsumer, Module, type NestModule } from '@nestjs/common';
 import { APP_FILTER, APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
+import { IdempotencyInterceptor } from './idempotency/idempotency.interceptor.js';
 import {
   AllExceptionsFilter,
   BackendKernelModule,
@@ -118,6 +119,9 @@ import { RuhModule } from './ruh/ruh.module.js';
     { provide: APP_GUARD, useClass: FreshAuthGuard },
     { provide: APP_GUARD, useClass: FlagGuard },
     { provide: APP_INTERCEPTOR, useClass: ResponseEnvelopeInterceptor },
+    // SWEEP2-R1: right inside the envelope, so a replayed write returns its stored raw result
+    // (enveloped again on the way out) without running masking, Ruh's guard, the audit or the handler.
+    { provide: APP_INTERCEPTOR, useClass: IdempotencyInterceptor },
     // Registered AFTER the envelope → on the response path it runs FIRST, masking material_id
     // on the raw handler output before the envelope wraps it. Floor sees aliases, never real ids.
     { provide: APP_INTERCEPTOR, useClass: MaterialMaskingInterceptor },

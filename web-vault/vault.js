@@ -127,6 +127,7 @@
       await handshake();
       var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
       if (opts.body !== undefined) payload.body = opts.body;
+      if (opts.idemKey) payload.idempotencyKey = opts.idemKey; // SWEEP2-R1: forwarded on the Vault box only if it honours it
       if (session.token) payload.token = session.token;
       var res = await fetch(base + '/rpc', {
         method: 'POST',
@@ -156,7 +157,8 @@
    * answered by that request instead of a second one, and the button just pressed is held until it
    * answers. Only a top-level call is merged: the channel's own retries, the refresh and Ruh's
    * confirmed resend pass through, so none of them waits on itself. */
-  var RA_INFLIGHT = {}; var raPress = null;
+  var RA_INFLIGHT = {}; var RA_KEYS = {}; var raPress = null;
+  function raKey() { return (crypto.randomUUID ? crypto.randomUUID() : 'k-' + Date.now() + '-' + Math.random().toString(36).slice(2)); }
   document.addEventListener('click', function (e) { var b = e.target && e.target.closest ? e.target.closest('button,[role=button],input[type=submit]') : null; raPress = b ? { el: b, at: Date.now() } : null; }, true);
   function raOnce(path, opts, run) {
     var m = String((opts && opts.method) || 'GET').toUpperCase(); if (m === 'GET' || m === 'HEAD') return null;
@@ -165,13 +167,18 @@
     if (RA_INFLIGHT[sig]) return RA_INFLIGHT[sig];
     var el = raPress && Date.now() - raPress.at < 1000 ? raPress.el : null, was = el ? !!el.disabled : false;
     if (el) { el.disabled = true; el.setAttribute('aria-busy', 'true'); }
-    var p = Promise.resolve().then(run);
+    // SWEEP2-R1: one Idempotency-Key per intent. The channel's own re-sends carry the same opts, so
+    // the same key; a press again after the channel failed (no answer) reuses it for a minute, so the
+    // server can answer it from the first attempt's stored result. An answer ends the intent.
+    var prior = RA_KEYS[sig], key = prior && Date.now() - prior.at < 60000 ? prior.key : raKey();
+    RA_KEYS[sig] = { key: key, at: Date.now() };
+    var p = Promise.resolve().then(function () { return run(key); });
     RA_INFLIGHT[sig] = p;
-    p.catch(function () {}).then(function () { delete RA_INFLIGHT[sig]; if (el) { el.disabled = was; el.removeAttribute('aria-busy'); } });
+    p.then(function () { delete RA_KEYS[sig]; }, function () {}).then(function () { delete RA_INFLIGHT[sig]; if (el) { el.disabled = was; el.removeAttribute('aria-busy'); } });
     return p;
   }
   async function callTunnel(tunnel, path, opts) {
-    if (!(opts && (opts.ruhConfirmed || opts.raOnced))) { var once = raOnce(path, opts, function () { return callTunnel(tunnel, path, Object.assign({}, opts, { raOnced: true })); }); if (once) return once; }
+    if (!(opts && (opts.ruhConfirmed || opts.raOnced))) { var once = raOnce(path, opts, function (key) { return callTunnel(tunnel, path, Object.assign({}, opts, { raOnced: true, idemKey: key })); }); if (once) return once; }
     var r = await tunnel(path, opts);
     // Always-on Ruh (owner rulings 2026-10-06): a guarded action answered RUH_CONFIRM_REQUIRED —
     // RuhConfirm (ruh.js) shows the risks, and with a typed reason the same call goes again on the

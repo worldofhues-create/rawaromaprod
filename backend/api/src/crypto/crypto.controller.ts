@@ -33,6 +33,9 @@ interface TunnelRequest {
   /** The console wants its session kept across reloads in the HttpOnly cookie (Factory,
    *  Platform). Absent = the old behaviour exactly: nothing set or read, body untouched. */
   persist?: boolean;
+  /** SWEEP2-R1: one key per intent from the console, forwarded as `idempotency-key` so a write the
+   *  channel re-sends after a lost reply is answered from the stored result, not run twice. */
+  idempotencyKey?: string;
 }
 
 @Controller()
@@ -113,6 +116,7 @@ export class CryptoController {
         'content-type': 'application/json',
         ...(ua ? { 'user-agent': ua } : {}),
         ...(req.token ? { authorization: 'Bearer ' + req.token } : {}),
+        ...(typeof req.idempotencyKey === 'string' && req.idempotencyKey ? { 'idempotency-key': req.idempotencyKey } : {}),
       },
     });
 

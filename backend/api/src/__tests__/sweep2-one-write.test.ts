@@ -19,7 +19,7 @@ function load(file: string) {
   const s = js.indexOf('  /* SWEEP2-O6: one press');
   const e = js.indexOf('\n  }\n', js.indexOf('function raOnce(', s)) + 4;
   let onClick: ((e: unknown) => void) | null = null;
-  const ctx: Record<string, unknown> = { document: { addEventListener: (_t: string, f: (e: unknown) => void) => { onClick = f; } }, Date, Promise, JSON, String };
+  const ctx: Record<string, unknown> = { crypto: { randomUUID: () => 'k-' + Math.random() }, document: { addEventListener: (_t: string, f: (e: unknown) => void) => { onClick = f; } }, Date, Promise, JSON, String };
   vm.runInNewContext(js.slice(s, e) + '\nthis.raOnce = raOnce;', ctx);
   return { raOnce: ctx.raOnce as (p: string, o: unknown, r: () => Promise<unknown>) => Promise<unknown> | null, press: (el: unknown) => onClick!({ target: { closest: () => el } }) };
 }
@@ -47,9 +47,22 @@ for (const file of FILES) {
 
 test('only a top-level call is merged; retries and the confirmed resend pass through', () => {
   const shell = readFileSync(join(root, 'web/shell.js'), 'utf8');
-  assert.match(shell, /if \(_retried === undefined && !_ch && !\(opts && opts\.ruhConfirmed\)\) \{ var once = raOnce\(path, opts, function \(\) \{ return tunnel\(path, opts, false\); \}\)/);
+  assert.match(shell, /if \(_retried === undefined && !_ch && !\(opts && opts\.ruhConfirmed\)\) \{ var once = raOnce\(path, opts, function \(key\) \{ return tunnel\(path, Object\.assign\(\{\}, opts, \{ idemKey: key \}\), false\); \}\)/);
   const plat = readFileSync(join(root, 'web-platform/platform.js'), 'utf8');
   assert.match(plat, /if \(_retried === undefined && !\(opts && opts\.ruhConfirmed\)\) \{ var once = raOnce/);
   const vault = readFileSync(join(root, 'web-vault/vault.js'), 'utf8');
-  assert.match(vault, /opts\.raOnced\)\)\) \{ var once = raOnce\(path, opts, function \(\) \{ return callTunnel\(tunnel, path, Object\.assign\(\{\}, opts, \{ raOnced: true \}\)\); \}\)/);
+  assert.match(vault, /opts\.raOnced\)\)\) \{ var once = raOnce\(path, opts, function \(key\) \{ return callTunnel\(tunnel, path, Object\.assign\(\{\}, opts, \{ raOnced: true, idemKey: key \}\)\); \}\)/);
+});
+
+test('a press again after no answer reuses the intent key; after an answer the key is new', async () => {
+  const { raOnce } = load('web/shell.js');
+  const keys: string[] = [];
+  const fail = (k: string) => { keys.push(k); return Promise.reject(new Error('channel')); };
+  const ok = (k: string) => { keys.push(k); return Promise.resolve({ status: 200 }); };
+  const o = { method: 'POST', body: { qty: 1 } };
+  await (raOnce('/v1/x', o, fail as never) as Promise<unknown>).catch(() => {});
+  await raOnce('/v1/x', o, ok as never);
+  await raOnce('/v1/x', o, ok as never);
+  assert.equal(keys[1], keys[0], 'the retry carries the same key');
+  assert.notEqual(keys[2], keys[1], 'a new press after an answer is a new intent');
 });
