@@ -2455,7 +2455,10 @@
     var v = st._view; if (!v || !v.cursor) return;
     var btn = $('ra-more'); if (btn) { btn.textContent = 'Loading…'; btn.disabled = true; }
     var res; try { res = await tunnel(v.item[3] + '?limit=100&cursor=' + encodeURIComponent(v.cursor)); }
-    catch (e) { if (btn) { btn.textContent = 'Load more'; btn.disabled = false; } return; }
+    catch (e) { if (btn) { btn.textContent = 'Load more'; btn.disabled = false; } toast('The next rows did not load. Try Load more again.', 'bad'); return; }
+    // A refused page is not the last page: keep the cursor (and the button) so the list never
+    // looks complete when it is not.
+    if (!res || res.status >= 400) { if (btn) { btn.textContent = 'Load more'; btn.disabled = false; } toast((res && res.json && res.json.error && res.json.error.message) || 'The next rows did not load. Try Load more again.', 'bad'); return; }
     var more = (res.json && res.json.data) || [];
     v.rows = v.rows.concat(more);
     v.cursor = (res.json && res.json.meta && res.json.meta.cursor) || null;
@@ -2464,7 +2467,11 @@
   // Whole-table search (beyond the loaded page) — updates the cache then repaints; input untouched.
   async function searchServer() {
     var v = st._view; if (!v) return; var q = st.search.trim(); if (!q) return;
-    var res; try { res = await tunnel('/v1/search?resource=' + encodeURIComponent(v.item[3]) + '&q=' + encodeURIComponent(q) + '&limit=200'); } catch (e) { return; }
+    // A failed search leaves only the loaded rows filtered; when rows remain unloaded (a cursor),
+    // say so rather than imply the table was searched. With no cursor the loaded rows ARE the table.
+    function failed() { if (v.cursor) toast('Searched only the loaded rows: the full search did not answer. Load more, or try again in a minute.', 'bad'); }
+    var res; try { res = await tunnel('/v1/search?resource=' + encodeURIComponent(v.item[3]) + '&q=' + encodeURIComponent(q) + '&limit=200'); } catch (e) { failed(); return; }
+    if (!res || res.status >= 400) { failed(); return; }
     if (res && res.status < 400 && res.json && res.json.data && st.search.trim() === q) { v.serverQ = q; v.serverRows = res.json.data; paintResults(); }
   }
   function escHtml(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return c === '&' ? '&amp;' : c === '<' ? '&lt;' : c === '>' ? '&gt;' : '&quot;'; }); }
