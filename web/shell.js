@@ -366,6 +366,14 @@
   Object.keys(ROLES).forEach(function (k) { ROLES[k].nav.push(['tutorial', 'Tutorials', 'bookOpen', '__tutorial__']); });
   // LANE D1: the demo showcase opens the owner's screens; the server keeps it read-only and masked (no writes, no formula access).
   var VIEW = { owner: 'superadmin', showcase: 'superadmin' };
+  // SWEEP2-FACTORY-1: a rail item whose list the signed-in role may not read is dropped once /me has
+  // said what the session holds, instead of a live link to a 403. Keyed by endpoint, valued by that
+  // route's own @Permissions; sweep2-factory-rail.test.ts fails if a rail item is refused and not here.
+  var NAV_READ = { '/v1/users': 'iam:user_master:read', '/v1/audit-events': 'iam:audit_events:read', '/v1/approval-matrix': 'iam:role_master:read', '/v1/materials': 'masterdata:material:read', '/v1/uoms': 'platform:uom_master:read' };
+  function pruneNav() {
+    Object.keys(ROLES).forEach(function (k) { ROLES[k].nav = ROLES[k].nav.filter(function (n) { return !NAV_READ[n[3]] || can(NAV_READ[n[3]]); }); });
+    var R = ROLES[st.role]; if (R && R.nav.length && !R.nav.some(function (n) { return n[0] === st.nav; })) st.nav = R.nav[0][0];
+  }
   function roleView(r) { return VIEW[r] || r; }
 
   /* ---------------- state + helpers ---------------- */
@@ -2736,7 +2744,7 @@
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; st.ref = '';
-    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { landOnAddress(); ruhStart(); });
+    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { pruneNav(); landOnAddress(); ruhStart(); });
     return true;
   }
 
