@@ -1527,7 +1527,7 @@
     var rows = cfg.fields.map(function (f) {
       var ctrl;
       if (f.fk) { ctrl = '<select data-name="' + f.n + '" class="fld"><option value="">— none —</option></select>'; }
-      else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" class="fld">' + f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') + '</select>'; }
+      else if (f.t === 'select') { ctrl = '<select data-name="' + f.n + '" class="fld">' + f.en.map(function (v) { return '<option value="' + escHtml(v) + '">' + escHtml(statusWord(v)) + '</option>'; }).join('') + '</select>'; }
       else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical"></textarea>'; }
       else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + ' class="fld">'; }
       return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(f.l) + ctrl + '</label>';
@@ -2122,7 +2122,7 @@
     var rows = cfg.fields.map(function (f) {
       var ctrl;
       if (f.t === 'select') {
-        var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + v + '">' + v + '</option>'; }).join('') : '');
+        var opts = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>' + (f.en ? f.en.map(function (v) { return '<option value="' + escHtml(v) + '">' + escHtml(statusWord(v)) + '</option>'; }).join('') : '');
         ctrl = '<select data-name="' + f.n + '"' + (f.fk ? ' data-fk="' + f.fk + '" data-fv="' + f.fv + '" data-fl="' + f.fl + '"' : '') + ' class="fld">' + opts + '</select>';
       } else if (f.t === 'textarea') { ctrl = '<textarea data-name="' + f.n + '" rows="2" class="fld" style="height:auto;padding:9px 13px;resize:vertical">' + (f.def != null ? escHtml(f.def) : '') + '</textarea>'; }
       else { ctrl = '<input data-name="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + (f.def != null ? ' value="' + escHtml(f.def) + '"' : '') + (f.maxlen ? ' maxlength="' + f.maxlen + '"' : '') + (f.ph ? ' placeholder="' + escHtml(f.ph) + '"' : '') + ' class="fld">'; }
@@ -2204,7 +2204,7 @@
         fkCache[ep] = ((res.json && res.json.data) || []).map(function (row) { var v = row[f.fv] != null ? row[f.fv] : guessId(row); return { v: v, l: row[f.fl] != null ? row[f.fl] : (v ? String(v).slice(0, 8) : '') }; }).filter(function (o) { return o.v; });
       }).catch(function () { fkCache[ep] = []; });
     }));
-    function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option>' + v + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
+    function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option value="' + escHtml(v) + '">' + escHtml(statusWord(v)) + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
     // Line-item fields have no label above them (they sit in a compact row), so carry the field
     // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
     function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" class="fld">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + ' placeholder="' + escHtml(f.l) + '" class="fld">'; }
