@@ -39,7 +39,7 @@ test('Platform: the ALEMBIC bridge and pick-to-light screens, gated, and a cache
   const js = read('web-platform/platform.js');
   assert.match(js, /\{ id: 'bridge', label: 'Sales system link', icon: 'link', need: 'platformops:console:read' \}/);
   assert.match(js, /\{ id: 'picklight', label: 'Pick-to-light', icon: 'bulb', need: 'platform:flag:write' \}/);
-  assert.match(read('web-platform/sw.js'), /platform-shell-v18/);
+  assert.match(read('web-platform/sw.js'), /platform-shell-v19/);
 });
 
 test('Vault: the formula-needed list comes from the main box, never the Vault box', () => {

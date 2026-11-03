@@ -43,7 +43,7 @@ test('one ruh.js in every console, loaded before the console script, cached offl
   }
   assert.match(read('web/sw.js'), /const CACHE = 'ra-shell-v105'/);
   assert.match(read('web/sw.js'), /'\/ruh\.js'/);
-  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v18'/);
+  assert.match(read('web-platform/sw.js'), /const CACHE = 'platform-shell-v19'/);
   assert.match(read('web-platform/sw.js'), /'\/ruh\.js'/);
 });
 

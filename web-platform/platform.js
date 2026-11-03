@@ -47,7 +47,26 @@
   }
   async function seal(pt) { var iv = crypto.getRandomValues(new Uint8Array(12)); var ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, aesKey, te(pt))); var out = new Uint8Array(12 + ct.length); out.set(iv, 0); out.set(ct, 12); return b64(out); }
   async function open(blob) { var raw = ub64(blob); var pt = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, aesKey, raw.slice(12)); return new TextDecoder().decode(pt); }
+  /* SWEEP2-O6: one press, one write. An identical write (method + path + body) already in flight is
+   * answered by that request instead of a second one, and the button just pressed is held until it
+   * answers. Only a top-level call is merged: the channel's own retries, the refresh and Ruh's
+   * confirmed resend pass through, so none of them waits on itself. */
+  var RA_INFLIGHT = {}; var raPress = null;
+  document.addEventListener('click', function (e) { var b = e.target && e.target.closest ? e.target.closest('button,[role=button],input[type=submit]') : null; raPress = b ? { el: b, at: Date.now() } : null; }, true);
+  function raOnce(path, opts, run) {
+    var m = String((opts && opts.method) || 'GET').toUpperCase(); if (m === 'GET' || m === 'HEAD') return null;
+    var body = opts && opts.body !== undefined ? opts.body : null; var sig;
+    try { sig = m + ' ' + path + ' ' + (typeof body === 'string' ? body : JSON.stringify(body)); } catch (x) { return null; }
+    if (RA_INFLIGHT[sig]) return RA_INFLIGHT[sig];
+    var el = raPress && Date.now() - raPress.at < 1000 ? raPress.el : null, was = el ? !!el.disabled : false;
+    if (el) { el.disabled = true; el.setAttribute('aria-busy', 'true'); }
+    var p = Promise.resolve().then(run);
+    RA_INFLIGHT[sig] = p;
+    p.catch(function () {}).then(function () { delete RA_INFLIGHT[sig]; if (el) { el.disabled = was; el.removeAttribute('aria-busy'); } });
+    return p;
+  }
   async function tunnel(path, opts, _retried) {
+    if (_retried === undefined && !(opts && opts.ruhConfirmed)) { var once = raOnce(path, opts, function () { return tunnel(path, opts, false); }); if (once) return once; }
     opts = opts || {};
     await handshake();
     var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };

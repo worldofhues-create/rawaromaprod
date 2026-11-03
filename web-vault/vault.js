@@ -152,7 +152,26 @@
    * (AUTH_STEP_UP_REQUIRED, AUTH_FORBIDDEN, VALIDATION_FAILED, …) so callers can react —
    * e.g. the fresh-auth prompt fires specifically on AUTH_STEP_UP_REQUIRED, never on a
    * generic catch-all. */
+  /* SWEEP2-O6: one press, one write. An identical write (method + path + body) already in flight is
+   * answered by that request instead of a second one, and the button just pressed is held until it
+   * answers. Only a top-level call is merged: the channel's own retries, the refresh and Ruh's
+   * confirmed resend pass through, so none of them waits on itself. */
+  var RA_INFLIGHT = {}; var raPress = null;
+  document.addEventListener('click', function (e) { var b = e.target && e.target.closest ? e.target.closest('button,[role=button],input[type=submit]') : null; raPress = b ? { el: b, at: Date.now() } : null; }, true);
+  function raOnce(path, opts, run) {
+    var m = String((opts && opts.method) || 'GET').toUpperCase(); if (m === 'GET' || m === 'HEAD') return null;
+    var body = opts && opts.body !== undefined ? opts.body : null; var sig;
+    try { sig = m + ' ' + path + ' ' + (typeof body === 'string' ? body : JSON.stringify(body)); } catch (x) { return null; }
+    if (RA_INFLIGHT[sig]) return RA_INFLIGHT[sig];
+    var el = raPress && Date.now() - raPress.at < 1000 ? raPress.el : null, was = el ? !!el.disabled : false;
+    if (el) { el.disabled = true; el.setAttribute('aria-busy', 'true'); }
+    var p = Promise.resolve().then(run);
+    RA_INFLIGHT[sig] = p;
+    p.catch(function () {}).then(function () { delete RA_INFLIGHT[sig]; if (el) { el.disabled = was; el.removeAttribute('aria-busy'); } });
+    return p;
+  }
   async function callTunnel(tunnel, path, opts) {
+    if (!(opts && (opts.ruhConfirmed || opts.raOnced))) { var once = raOnce(path, opts, function () { return callTunnel(tunnel, path, Object.assign({}, opts, { raOnced: true })); }); if (once) return once; }
     var r = await tunnel(path, opts);
     // Always-on Ruh (owner rulings 2026-10-06): a guarded action answered RUH_CONFIRM_REQUIRED —
     // RuhConfirm (ruh.js) shows the risks, and with a typed reason the same call goes again on the
