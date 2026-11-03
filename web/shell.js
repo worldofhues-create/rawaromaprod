@@ -2335,7 +2335,8 @@
     // UX-C: total + up to three real status counts. The filler tiles ("Live", a count of table
     // columns as "Fields", "DB source of truth") said nothing about the records; masking is
     // already shown by the "Aliases only" chip on the table card itself.
-    var kpis = kpi(item[2], String(rows.length), rows.length === 1 ? 'Record' : 'Records') +
+    // "100+" while more pages exist: the loaded page is not the table's total.
+    var kpis = kpi(item[2], String(rows.length) + (cursor ? '+' : ''), rows.length === 1 ? 'Record' : 'Records') +
       sKeys.slice(0, 3).map(function (k, i) { return kpi(['activity', 'flask', 'layers'][i], String(byStatus[k]), escHtml(statusWord(k.toUpperCase()))); }).join('');
     var kpiBand = '<div class="stats">' + kpis + '</div>';
     var cdef = CREATE[item[3]] || CREATE_DOC[item[3]];
@@ -2391,7 +2392,7 @@
     var cols = columns(v.rows, item[3]);
     _acts = {}; _actSeq = 0;
     var hasActions = !!ACTIONS[item[3]] || !!EDIT[item[3]] || !!PRINTABLE[item[3]] || !!DETAIL[item[3]];
-    var cnt = $('ra-count'); if (cnt) cnt.textContent = shown.length + ' of ' + v.rows.length;
+    var cnt = $('ra-count'); if (cnt) cnt.textContent = listCountText(shown.length, v, base === v.serverRows);
     var el = $('ra-results'); if (!el) return;
     if (!shown.length) {
       el.innerHTML = '<div class="empty"><h3>No results for "' + escHtml(st.search.trim()) + '"</h3><button id="ra-clear" class="btn" style="margin:var(--s-snug) auto 0">Clear search</button></div>';
@@ -2429,6 +2430,13 @@
         paintResults();
       };
     });
+  }
+  // The count line. Server-search rows are whole-table matches (up to the 200 searchServer asks for), so they are
+  // never divided by the loaded page ("180 of 100"); a search that hit the cap says so, and a page
+  // with more behind it says that too, so a short list is never read as the whole table.
+  function listCountText(shownLen, v, fromServer) {
+    if (fromServer) return (v.serverRows.length >= 200 ? 'first 200 matches, narrow the search to see the rest' : shownLen + ' matches');
+    return shownLen + ' of ' + v.rows.length + (v.cursor ? ' loaded, more to load' : '');
   }
   // WS3: type-aware comparator — numbers numerically, dates chronologically, else natural-order
   // string compare; blanks/nulls always sort last regardless of direction sign at the call site.
