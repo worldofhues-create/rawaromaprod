@@ -55,3 +55,14 @@ test('the Vault API registers it inside the envelope, its store is formula.*, an
   assert.match(readFileSync(join(root, 'scripts/migrations/rollback/2026-11-03-vault-idempotency-key.down.sql'), 'utf8'), /drop table if exists formula\.idempotency_key/);
   assert.match(readFileSync(join(root, 'web-vault/vault.js'), 'utf8'), /payload\.idempotencyKey = opts\.idemKey/);
 });
+
+test('the migration grants the Vault app role explicitly, as the main one does', { skip }, async () => {
+  await sql`do $$ begin if not exists (select 1 from pg_roles where rolname = 'sweep2_vault_app') then create role sweep2_vault_app; end if; end $$`;
+  const mig = readFileSync(join(root, 'scripts/migrations/2026-11-03-vault-idempotency-key.sql'), 'utf8');
+  const body = mig.slice(mig.indexOf('-- @target: formula') + '-- @target: formula'.length);
+  for (let n = 0; n < 2; n++) { // idempotent: a second run changes nothing and does not fail
+    await sql.begin(async (tx) => { await tx`select set_config('rawprod.app_role', 'sweep2_vault_app', true)`; await tx.unsafe(body); });
+  }
+  const [g] = await sql`select has_table_privilege('sweep2_vault_app', 'formula.idempotency_key', 'select, insert, update, delete') as ok`;
+  assert.equal(g!.ok, true);
+});

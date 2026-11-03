@@ -18,3 +18,22 @@ create table if not exists formula.idempotency_key (
   primary key (user_id, idempotency_key)
 );
 create index if not exists idempotency_key_created_dt_idx on formula.idempotency_key (created_dt);
+
+-- The Vault's application role (DB_APP_ROLE on the Vault's migrate run, ra_vault in
+-- provision-vault-isolation.sql) claims, completes and releases its rows. Granted explicitly rather
+-- than left to that script's default privileges, which only cover tables made by the role that set
+-- them. Same pattern as the main migration.
+do $$
+declare
+  app text := nullif(current_setting('rawprod.app_role', true), '');
+begin
+  if app is null then
+    raise notice 'vault idempotency_key grants: DB_APP_ROLE is not set, so no application role was granted';
+    return;
+  end if;
+  if not exists (select 1 from pg_roles where rolname = app) then
+    raise exception 'vault idempotency_key grants: DB_APP_ROLE "%" is not a role in this cluster', app;
+  end if;
+  execute format('grant usage on schema formula to %I', app);
+  execute format('grant select, insert, update, delete on formula.idempotency_key to %I', app);
+end $$;
