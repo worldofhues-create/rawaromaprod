@@ -99,10 +99,10 @@
     var canPlan = can('production:production_plan_items:write') && can('production:production_order:write');
     var canInstr = can('production:manufacturing_instruction:read');
     var canPick = can('location:shelf_task:write');
-    // The route stops at 500 rows and its counters cover only those (countersOf(items)): a full
-    // queue says so instead of reading as the whole backlog.
-    var full = (d.items || []).length >= 500;
-    var stats = (full ? '<div class="card" role="status" style="color:var(--amber)">Showing the first 500 queue rows; counts below cover these only.</div>' : '') + '<div class="stats">' + kpi('activity', String(c.open || 0) + (full ? '+' : ''), 'Open') + kpi('droplet', num(c.kgToProduce || 0) + ' kg', 'To produce') +
+    // The route shows up to 500 rows; its counters and total cover the whole queue on the server
+    // (produce-queue.service.ts), so the tiles are true and a longer queue only says what is shown.
+    var more = d.total > (d.items || []).length;
+    var stats = (more ? '<div class="card" role="status" style="color:var(--amber)">Showing the first ' + (d.items || []).length + ' of ' + d.total + ' queue rows; the counts below cover all of them.</div>' : '') + '<div class="stats">' + kpi('activity', String(c.open || 0), 'Open') + kpi('droplet', num(c.kgToProduce || 0) + ' kg', 'To produce') +
       kpi('alert', String(c.overdue || 0), 'Overdue') + kpi('tag', String(c.highValue || 0), 'High value') + kpi('lock', String(c.blocked || 0), 'Blocked') + '</div>';
     var open = (d.items || []).filter(function (r) { return r.lifecycleStatus !== 'CANCELLED'; });
     PV.queue = {}; open.forEach(function (r) { PV.queue[r.alembicRequirementId] = r; });

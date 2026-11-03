@@ -3,10 +3,10 @@
  * web/ws-produce.js, web/shell.js; no browser).
  *  - Unit dictionary (100), QC parameters (100), oil batches for a COA (100): now every page via
  *    fkRows, which also accepts a path that already carries a query string.
- *  - Dispatch batch picker: /v1/fg-stock has no cursor and caps at 200 (fg-stock.service.ts); it now
- *    asks for 200 and says when the list may be longer.
- *  - Produce queue: the route caps at 500 and its counters cover only the rows returned
- *    (produce-queue.service.ts countersOf(items)); it now asks for 500 and says when it is full.
+ *  - Dispatch batch picker: /v1/fg-stock pages now (fg-stock.service.ts), and the picker reads
+ *    every page through fkRows.
+ *  - Produce queue: the route shows up to 500 rows; its counters and `total` cover the whole queue
+ *    (produce-queue.service.ts), and the screen says when more rows exist than are shown.
  *  - QC parameters: a failed list is said, not an empty picker.
  */
 import { test } from 'node:test';
@@ -35,8 +35,12 @@ test('unit dictionary, QC parameters and oil batches read every page', () => {
   assert.match(mfg, /fkRows\('\/v1\/oil-batches'\)/); assert.doesNotMatch(mfg, /oil-batches\?limit=100/);
 });
 
-test('capped lists without a cursor say when they are full', () => {
-  assert.match(mfg, /fg-stock\?onlyAvailable=1&limit=200/); assert.match(mfg, /batches\.length >= 200/);
+// SWEEP-FACTORY-8: /v1/fg-stock now pages and the produce queue's counters and total cover the
+// whole queue on the server, so the picker reads every page and the tiles need no '+' or caveat.
+test('the dispatch picker reads every page of stock; the queue says its server total', () => {
+  assert.match(mfg, /fkRows\('\/v1\/fg-stock\?onlyAvailable=1'\)/); assert.doesNotMatch(mfg, /fg-stock\?onlyAvailable=1&limit=/);
+  assert.doesNotMatch(mfg, /batches\.length >= 200/);
   assert.equal((produce.match(/produce\/queue\?limit=500/g) || []).length, 2);
-  assert.match(produce, /items \|\| \[\]\)\.length >= 500/);
+  assert.match(produce, /d\.total > \(d\.items \|\| \[\]\)\.length/);
+  assert.doesNotMatch(produce, /counts below cover these only/);
 });

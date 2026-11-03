@@ -18,9 +18,13 @@ import type { Sql } from 'postgres';
 export class FgStockService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
 
-  /** Per-FG-batch ATP, FEFO-ordered. Optional productSkuId filter (for a dispatch/reservation picker). */
-  async availability(opts: { limit?: number; productSkuId?: string; onlyAvailable?: boolean }) {
+  /** Per-FG-batch ATP, FEFO-ordered. Optional productSkuId filter (for a dispatch/reservation picker).
+   *  Offset-paged (SWEEP-FACTORY-8): it used to stop at 200 with nextCursor null, so a dispatch
+   *  picker could never reach a batch past the 200 earliest-expiring. The batch id breaks ties so
+   *  a page boundary never repeats or skips a batch. */
+  async availability(opts: { limit?: number; productSkuId?: string; onlyAvailable?: boolean; cursor?: string | null }) {
     const limit = Math.min(Math.max(1, opts.limit ?? 100), 200);
+    const offset = Math.min(Math.max(0, parseInt(opts.cursor || '0', 10) || 0), 999_999_999);
     const skuWhere = opts.productSkuId ? this.sql`fg.product_sku_id = ${opts.productSkuId}` : this.sql`true`;
     const availWhere = opts.onlyAvailable
       ? this.sql`and case when upper(coalesce(qc.overall_result,'')) <> 'PASS' then 0 else greatest(0, coalesce(fg.produced_qty,0) - coalesce(d.dispatched,0) - coalesce(c.consumed,0) - coalesce(r.reserved,0)) end > 0`
@@ -70,9 +74,9 @@ export class FgStockService {
         order by finished_good_batch_id, created_dt desc
       ) qc on qc.finished_good_batch_id = fg.finished_good_batch_id
       where ${skuWhere} ${availWhere}
-      order by fg.expiry_date asc nulls last, fg.batch_number asc nulls last
-      limit ${limit}`;
-    return { items: rows, nextCursor: null };
+      order by fg.expiry_date asc nulls last, fg.batch_number asc nulls last, fg.finished_good_batch_id asc
+      limit ${limit} offset ${offset}`;
+    return { items: rows, nextCursor: rows.length === limit ? String(offset + limit) : null };
   }
 
   /** Per-SKU ATP roll-up (sellable stock per SKU across all its batches) — the by-SKU grant view. */

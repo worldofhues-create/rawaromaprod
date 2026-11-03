@@ -169,9 +169,21 @@ export class ProduceQueueService {
     @Optional() @Inject(VaultApiClient) private readonly vault?: Pick<VaultApiClient, 'formulaLabels'>,
   ) {}
 
-  /** The ranked queue of OPEN requirements (up to `limit`, default 200). */
-  async queue(limit = 200): Promise<{ items: QueueRow[]; counters: QueueCounters; formulaLabels: 'ok' | 'unavailable' | 'none' }> {
+  /** The ranked queue of OPEN requirements (up to `limit`, default 200). `counters` and `total`
+   *  cover the WHOLE queue: when the page is full the queue is read again without the limit for
+   *  them, so a queue longer than the page never under-counts open work (SWEEP-FACTORY-8). */
+  async queue(limit = 200): Promise<{ items: QueueRow[]; counters: QueueCounters; total: number; formulaLabels: 'ok' | 'unavailable' | 'none' }> {
     const lim = Math.min(Math.max(Math.trunc(limit) || 200, 1), 500);
+    const raw = await this.rawQueue(lim);
+    const labels = await this.formulaLabels(raw);
+    const items = this.toRows(raw, labels);
+    if (raw.length < lim) return { items, counters: countersOf(items), total: items.length, formulaLabels: labels.state };
+    // Formula labels do not enter the counters, so the whole-queue pass does not ask the Vault.
+    const whole = this.toRows(await this.rawQueue(null), { versions: new Map(), approved: new Map() });
+    return { items, counters: countersOf(whole), total: whole.length, formulaLabels: labels.state };
+  }
+
+  private async rawQueue(lim: number | null): Promise<RawQueueRow[]> {
     const raw = (await this.db.execute(sql`
       select r.alembic_requirement_id::text, r.order_ref, r.order_refs, r.mapped_sku, r.pack_size,
              pm.product_code, pm.formula_id::text,
@@ -211,13 +223,15 @@ export class ProduceQueueService {
         ) loc on true
        where r.lifecycle_status in ('ACCEPTED', 'REJECTED_MAPPING', 'CREATED')
        order by r.priority_rank asc nulls last, r.needed_by asc, r.created_dt asc, r.alembic_requirement_id asc
-       limit ${lim}
+       ${lim === null ? sql`` : sql`limit ${lim}`}
     `)) as unknown as RawQueueRow[];
-
     for (const r of raw) r.rack = bridgeContracts.locationLabel(r.rack_code, r.shelf_code, r.bin_code);
-    const labels = await this.formulaLabels(raw);
+    return raw;
+  }
+
+  private toRows(raw: RawQueueRow[], labels: Pick<Awaited<ReturnType<ProduceQueueService['formulaLabels']>>, 'versions' | 'approved'>): QueueRow[] {
     const now = Date.now();
-    const items: QueueRow[] = raw.map((r, i) => {
+    return raw.map((r, i): QueueRow => {
       const stage = queueStage(r);
       const kg = requirementKg(r.qty_kg, r.qty, r.uom);
       const onShelf = stage === 'ON_SHELF';
@@ -259,7 +273,6 @@ export class ProduceQueueService {
         rack: r.rack ?? null,
       };
     });
-    return { items, counters: countersOf(items), formulaLabels: labels.state };
   }
 
   /** Code + version for every run's version, and the approved version of every unplanned product's formula. */

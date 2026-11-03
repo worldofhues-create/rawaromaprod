@@ -16,9 +16,11 @@ export class FgStockController {
     @Query('limit') limit?: string,
     @Query('productSkuId') productSkuId?: string,
     @Query('onlyAvailable') onlyAvailable?: string,
+    @Query('cursor') cursor?: string,
   ) {
     return this.svc.availability({
       limit: limit ? Number(limit) : 100,
+      cursor,
       productSkuId,
       onlyAvailable: onlyAvailable === '1' || onlyAvailable === 'true',
     });

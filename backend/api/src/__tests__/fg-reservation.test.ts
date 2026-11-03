@@ -128,3 +128,23 @@ test('fg reservation: a batch with NO packaging QC yet is not reservable and sho
     .find((r) => r.finishedGoodBatchId === batchId);
   assert.equal(row?.availableQty, 0);
 });
+
+/* SWEEP-FACTORY-8: /v1/fg-stock stopped at 200 with nextCursor:null, so the dispatch picker could
+ * never reach a batch past the 200 earliest-expiring. It now pages (offset cursor) like the other
+ * lists, so the picker reads every page. */
+test('fg stock pages past the first page and every available batch is reachable', async () => {
+  const ids = [await freshFgBatch(5), await freshFgBatch(5), await freshFgBatch(5)];
+  const { FgStockService } = await import('../fg-stock/fg-stock.service.js');
+  const fg = new FgStockService(testClient());
+  const seen: string[] = [];
+  let cursor: string | null = null;
+  let pages = 0;
+  do {
+    const page: { items: unknown[]; nextCursor: string | null } = await fg.availability({ limit: 1, onlyAvailable: true, cursor });
+    assert.ok(page.items.length <= 1);
+    for (const r of page.items as Array<{ finishedGoodBatchId: string }>) seen.push(r.finishedGoodBatchId);
+    cursor = page.nextCursor;
+  } while (cursor && ++pages < 10_000);
+  for (const id of ids) assert.ok(seen.includes(id), 'every batch is on some page');
+  assert.equal(new Set(seen).size, seen.length, 'no batch on two pages');
+});

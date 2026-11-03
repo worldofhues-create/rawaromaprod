@@ -178,3 +178,17 @@ test('counters and the formula-needed list', async () => {
   assert.deepEqual(mine.skuCodes, [p.skuCode]);
   assert.equal(mine.requirementCount, 1);
 });
+
+// SWEEP-FACTORY-8: the counters were countersOf(items), the rows returned, so a queue longer than
+// the page under-counted open work, kg and overdue. They now come from the whole open queue, and
+// `total` says how many rows the queue holds beyond the page.
+test('counters and total cover the whole queue, not just the rows returned', async () => {
+  const p = await productWithSku();
+  for (let i = 0; i < 3; i++) await send(created(p.skuCode, { priority: { rank: 9, reason: 'fifo', order_value_inr: 1 }, needed_by: '2000-01-01', order_refs: [`SO-CNT-${i}`], qty_kg: 7 }).env);
+  const all = await queue.queue(500);
+  const one = await queue.queue(1);
+  assert.equal(one.items.length, 1);
+  assert.deepEqual(one.counters, all.counters, 'counters do not depend on the page size');
+  assert.equal(one.total, all.items.length);
+  assert.ok(one.total >= 3);
+});
