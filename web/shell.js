@@ -2783,7 +2783,8 @@
     if (!ROLES[v]) return false;
     session = { token: d.accessToken, user: d.user, roles: payload.roles || [], perms: [], availableRoles: avail };
     st.role = v; st.nav = ROLES[v].nav[0][0]; st.search = ''; st.ref = '';
-    tunnel('/me').then(function (m) { var me = m.json && m.json.data; if (me && me.permissions) session.perms = me.permissions; }).catch(function () {}).then(function () { pruneNav(); landOnAddress(); ruhStart(); });
+    // A failed /me keeps the rail (the server still checks every call) and says why buttons are missing.
+    tunnel('/me').then(function (m) { var me = m && m.status < 400 && m.json && m.json.data; if (me && me.permissions) { session.perms = me.permissions; return true; } return false; }, function () { return false; }).then(function (ok) { if (ok) pruneNav(); else toast('Your permissions did not load, so some buttons are hidden. Reload to try again.', 'bad'); landOnAddress(); ruhStart(); });
     return true;
   }
 
