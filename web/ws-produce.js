@@ -601,9 +601,10 @@
   /* F8: material issue. Compounding is masked, so it names pick list lines rather than materials, and chooses the lot it took. */
   addAction('/v1/material-pick-lists', { label: 'Issue materials', perm: 'production:material_issue:write', tone: 'accent', when: function (r) { return UP(r.status) === 'ACTIVE'; }, run: function (r) { openIssue(r); } });
   function openIssue(row) {
-    tunnel('/v1/material-pick-list-items?limit=100').then(function (r0) {
-      if (r0.status >= 400) { toast(err(r0, 'The pick list could not be loaded. Try again.'), 'bad'); return null; }
-      var lines = (data(r0) || []).filter(function (l) { return l.materialPickListId === row.materialPickListId; });
+    // Every page, then this pick list's lines: the newest 100 of the whole table left an older list empty.
+    fkRows('/v1/material-pick-list-items').then(function (fr) {
+      if (fr.error) { toast('The pick list could not be loaded: ' + fr.error, 'bad'); return null; }
+      var lines = fr.rows.filter(function (l) { return l.materialPickListId === row.materialPickListId; });
       if (!lines.length) { toast('This pick list has no lines.', 'bad'); return null; }
       // Each line offers only lots of its own material; the server refuses any other.
       return Promise.all(lines.map(function (l) { return tunnel('/v1/material-pick-list-items/' + l.materialPickListItemId + '/lots'); })).then(function (rs) { return { lines: lines, rs: rs }; });
