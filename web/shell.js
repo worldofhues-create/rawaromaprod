@@ -1675,11 +1675,15 @@
     }
     // CoA: enrich with the inspection's test-result rows.
     if (endpoint === '/v1/qc-inspections') {
-      tunnel('/v1/qc-result-details?limit=100').then(function (res) {
-        var mine = ((res.json && res.json.data) || []).filter(function (x) { return x.qcInspectionId === row.qcInspectionId; });
+      // Every page: the newest 100 of the whole table dropped an older lot's readings. A failed read
+      // prints a warning, never a certificate that looks complete without its results.
+      var noResults = '<div class="sec">TEST RESULTS</div><p style="color:#9A3A2A;font-weight:700">Test results could not be loaded. Do not issue this certificate; print it again.</p>';
+      fkRows('/v1/qc-result-details').then(function (fr) {
+        if (fr.error) { open(noResults); return; }
+        var mine = fr.rows.filter(function (x) { return x.qcInspectionId === row.qcInspectionId; });
         var extra = mine.length ? ('<div class="sec">TEST RESULTS</div><table>' + mine.map(function (m) { return '<tr><td class="k">' + (m.parameterName || m.parameter || m.testName || 'Result') + '</td><td class="v">' + (m.observedValue != null ? m.observedValue : '') + ' ' + (m.result || '') + '</td></tr>'; }).join('') + '</table>') : '';
         open(extra);
-      }).catch(function () { open(''); });
+      }).catch(function () { open(noResults); });
     } else open('');
   }
 
