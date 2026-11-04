@@ -310,16 +310,19 @@
       if (!pid) return;
       tunnel('/v1/product-qc-specs/' + pid).then(function (res) {
         if (res.status === 404) { $('ra-cspec').textContent = 'No QC spec for this product yet — set it on the QC specs screen first.'; return; }
-        var s = res.json && res.json.data; if (!s) return;
+        var s = res.status < 400 && res.json && res.json.data;
+        if (!s) { $('ra-cspec').textContent = 'The QC spec for this product did not load' + (res.json && res.json.error && res.json.error.message ? ': ' + res.json.error.message : '') + '. Check the limits on the QC specs screen.'; return; }
         $('ra-cspec').textContent = 'Spec: SG ' + s.sgMin + '–' + s.sgMax + ' · flash point ' + s.flashPointMinC + '–' + s.flashPointMaxC + ' °C · shelf life ' + s.shelfLifeMonths + ' months';
-      }).catch(function () {});
+      }).catch(function () { $('ra-cspec').textContent = 'The QC spec for this product did not load. Check the connection, then pick the product again.'; });
     }
     function loadProducts(batchId, selected) {
       var sel = $('ra-cp'); sel.innerHTML = '<option value="">—</option>';
       if (!batchId) return;
-      Promise.all([tunnel('/v1/oil-batches/' + batchId + '/coa-products'), tunnel('/v1/product-qc-specs')]).then(function (rs) {
+      // Every spec page, and a refused read is said: an empty list read as "no product has a spec".
+      Promise.all([tunnel('/v1/oil-batches/' + batchId + '/coa-products'), fkRows('/v1/product-qc-specs')]).then(function (rs) {
+        if (rs[0].status >= 400 || rs[1].error) { $('ra-cerr').textContent = 'Could not load products: ' + ((rs[0].status >= 400 && rs[0].json && rs[0].json.error && rs[0].json.error.message) || rs[1].error || 'try again') + '.'; return; }
         var mapped = (rs[0].json && rs[0].json.data) || [];
-        var all = ((rs[1].json && rs[1].json.data) || []).map(function (p) { return { product_id: p.productId, product_code: p.productCode, product_name: p.productName }; });
+        var all = rs[1].rows.map(function (p) { return { product_id: p.productId, product_code: p.productCode, product_name: p.productName }; });
         var list = mapped.length ? mapped : all; // no formula link on the order → any product
         sel.innerHTML = '<option value="">Pick the product…</option>' + list.map(function (p) { return '<option value="' + p.product_id + '">' + escHtml((p.product_code || '') + (p.product_name ? ' · ' + p.product_name : '')) + '</option>'; }).join('');
         var pick = selected || (mapped.length === 1 ? mapped[0].product_id : '');
