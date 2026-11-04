@@ -59,6 +59,7 @@ export interface PickLightStatus {
   hasSecret: boolean;
   configuredAt: string | null;
   configuredBy: string | null;
+  configuredByName: string | null;
   pending: number;
   parked: number;
   lastSentAt: string | null;
@@ -98,6 +99,8 @@ export class PickLightService implements OnModuleDestroy {
       hasSecret: !!cfg?.hmac_secret_sealed,
       configuredAt: cfg?.configured_at ? new Date(cfg.configured_at).toISOString() : null,
       configuredBy: cfg?.configured_by ?? null,
+      // WALK-RP-9: who, as a person reads it; the id alone named nobody.
+      configuredByName: cfg?.configured_by_name ?? null,
       pending: Number(counts?.pending ?? 0),
       parked: Number(counts?.parked ?? 0),
       lastSentAt: counts?.last_sent ? new Date(counts.last_sent).toISOString() : null,
@@ -260,8 +263,10 @@ export class PickLightService implements OnModuleDestroy {
 
   private async config() {
     return ((await this.db.execute(sql`
-      select mode, controller_url, hmac_secret_sealed, configured_at, configured_by from location.pick_light_config where id = 'default'
-    `)) as unknown as Array<{ mode: string; controller_url: string | null; hmac_secret_sealed: string | null; configured_at: Date | null; configured_by: string | null }>)[0];
+      select c.mode, c.controller_url, c.hmac_secret_sealed, c.configured_at, c.configured_by,
+             (select coalesce(nullif(u.email, ''), u.user_name) from iam.user_master u where u.user_id::text = c.configured_by) as configured_by_name
+        from location.pick_light_config c where c.id = 'default'
+    `)) as unknown as Array<{ mode: string; controller_url: string | null; hmac_secret_sealed: string | null; configured_at: Date | null; configured_by: string | null; configured_by_name: string | null }>)[0];
   }
 }
 

@@ -766,7 +766,7 @@
           h('td', { 'data-label': 'Switched on' }, [h('span', { class: 'chip ' + (p.enabled ? 'g' : 'r') }, [p.enabled ? 'On' : 'Off'])]),
           h('td', { 'data-label': 'Callback address' }, [p.webhookConfigured ? 'Set' : 'Not set']),
           h('td', { 'data-label': 'Secret key' }, [p.secretConfigured ? 'Set' : 'Not set']),
-          h('td', { 'data-label': 'Last set up' }, [fmtDt(p.configuredAt) + (p.configuredBy ? (' · ' + p.configuredBy) : '')]),
+          h('td', { 'data-label': 'Last set up' }, [fmtDt(p.configuredAt) + (p.configuredBy ? (' · ' + (p.configuredByName || 'a user no longer on file')) : '')]),
         ]);
       });
       var card = h('div', { class: 'card' }, [
@@ -923,7 +923,7 @@
             h('p', { class: 't-cap', style: 'margin-top:6px' }, ['Each command is sent as JSON {task_id, rack, shelf, bin, qty, colour} by HTTPS POST to the controller address, signed with the shared secret in the X-PickLight-Signature header (sha256=<HMAC of the raw body>).'])]),
           row('Mode', mode), row('Controller address (https)', url), row('Shared secret', secret), err,
           h('div', { style: 'display:flex;gap:8px;align-items:center;flex-wrap:wrap' }, [save, bin, test]),
-          h('p', { class: 't-cap', style: 'margin-top:10px' }, ['Last set up ' + fmtDt(s.configuredAt) + (s.configuredBy ? ' by ' + s.configuredBy : '') + '. The secret is stored locked and never shown again.']),
+          h('p', { class: 't-cap', style: 'margin-top:10px' }, ['Last set up ' + fmtDt(s.configuredAt) + (s.configuredBy ? ' by ' + (s.configuredByName || 'a user no longer on file') : '') + '. The secret is stored locked and never shown again.']),
         ]),
       ]));
     } catch (e) {

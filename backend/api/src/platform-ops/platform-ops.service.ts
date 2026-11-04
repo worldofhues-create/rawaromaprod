@@ -67,6 +67,7 @@ export interface ProviderHealth {
   secretConfigured: boolean;
   configuredAt: string | null;
   configuredBy: string | null;
+  configuredByName: string | null;
 }
 
 export interface BuildIdentity {
@@ -139,6 +140,15 @@ export class PlatformOpsService {
   /** bridge.connector_config — status only, never the sealed HMAC secret. */
   async providers(): Promise<ProviderHealth[]> {
     const rows = await this.bridgeDb.select().from(connectorConfig);
+    // WALK-RP-9: name who set each one up; the id alone named nobody.
+    const ids = [...new Set(rows.map((r) => r.configuredBy).filter((x): x is string => !!x))];
+    const names = new Map<string, string>();
+    if (ids.length) {
+      for (const u of await this.sql<Array<{ user_id: string; name: string | null }>>`
+        select user_id::text as user_id, coalesce(nullif(email, ''), user_name) as name from iam.user_master where user_id::text = any(${ids})`) {
+        if (u.name) names.set(u.user_id, u.name);
+      }
+    }
     return rows.map((r) => ({
       id: r.id,
       enabled: !!r.enabled,
@@ -146,6 +156,7 @@ export class PlatformOpsService {
       secretConfigured: !!r.hmacSecretSealed,
       configuredAt: r.configuredAt ? r.configuredAt.toISOString() : null,
       configuredBy: r.configuredBy ?? null,
+      configuredByName: (r.configuredBy && names.get(r.configuredBy)) || null,
     }));
   }
 
