@@ -578,7 +578,7 @@
   var DEP = { db: 'Database', database: 'Database', postgres: 'Database', redis: 'Cache', cache: 'Cache', vault: 'Formula vault', formulaVault: 'Formula vault',
     formula_db: 'Formula vault', bridge: 'Sales system link', email: 'Email', mail: 'Email', kms: 'Key service', storage: 'File storage' };
   function depName(k) { if (DEP[k]) return DEP[k]; var w = String(k).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_-]+/g, ' ').toLowerCase(); return w.charAt(0).toUpperCase() + w.slice(1); }
-  function words(code) { var w = String(code == null ? '' : code).replace(/[._-]+/g, ' ').toLowerCase().trim(); return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }
+  function words(code) { var w = String(code == null ? '' : code).replace(/([a-z0-9])([A-Z])/g, '$1 $2').replace(/[._-]+/g, ' ').toLowerCase().trim(); return w ? w.charAt(0).toUpperCase() + w.slice(1) : ''; }
   /* ── environment & diagnostics (real: GET /health + GET /v1/platform/health) ─────────────── */
   async function screenHealth() {
     var content = h('div', {}, [skeletonCard()]);
