@@ -2206,14 +2206,16 @@
   async function openCreateDoc(endpoint) {
     var cfg = CREATE_DOC[endpoint]; if (!cfg) return;
     var fkEps = {}; cfg.header.concat(cfg.item).forEach(function (f) { if (f.fk) fkEps[f.fk] = f; });
-    var fkCache = {};
+    var fkCache = {}, fkErr = null;
+    // Every page, as the single-record forms read them; a refused list is said on the form.
     await Promise.all(Object.keys(fkEps).map(function (ep) {
       var f = fkEps[ep];
-      return tunnel(ep + '?limit=100').then(function (res) {
-        fkCache[ep] = ((res.json && res.json.data) || []).map(function (row) { var v = row[f.fv] != null ? row[f.fv] : guessId(row); return { v: v, l: row[f.fl] != null ? row[f.fl] : (v ? String(v).slice(0, 8) : '') }; }).filter(function (o) { return o.v; });
-      }).catch(function () { fkCache[ep] = []; });
+      return fkRows(ep).then(function (fr) {
+        if (fr.error) fkErr = fkErr || fr.error;
+        fkCache[ep] = fr.rows.map(function (row) { var v = row[f.fv] != null ? row[f.fv] : guessId(row); return { v: v, l: row[f.fl] != null ? row[f.fl] : (v ? String(v).slice(0, 8) : '') }; }).filter(function (o) { return o.v; });
+      });
     }));
-    function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option value="' + escHtml(v) + '">' + escHtml(statusWord(v)) + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + x.v + '">' + x.l + '</option>'; }).join(''); return o; }
+    function opts(f) { var o = '<option value="">' + (f.req ? 'Select…' : '— none —') + '</option>'; if (f.en) o += f.en.map(function (v) { return '<option value="' + escHtml(v) + '">' + escHtml(statusWord(v)) + '</option>'; }).join(''); if (f.fk && fkCache[f.fk]) o += fkCache[f.fk].map(function (x) { return '<option value="' + escHtml(x.v) + '">' + escHtml(x.l) + '</option>'; }).join(''); return o; }
     // Line-item fields have no label above them (they sit in a compact row), so carry the field
     // name as a placeholder (PROC-20 — PO qty/rate + GRN qty boxes were unlabeled).
     function ctrl(f, scope) { return f.t === 'select' ? '<select data-' + scope + '="' + f.n + '" class="fld">' + opts(f) + '</select>' : '<input data-' + scope + '="' + f.n + '" type="' + (f.t === 'number' ? 'number' : f.t === 'date' ? 'date' : 'text') + '"' + (f.t === 'number' ? ' step="any"' : '') + ' placeholder="' + escHtml(f.l) + '" class="fld">'; }
@@ -2225,6 +2227,7 @@
     var m = openSheet({ id: 'ra-cform', tag: 'form', style: 'max-width:560px', title: cfg.title, body: body });
     var ov = m.sheet;
     var linesEl = ov.querySelector('#ra-lines');
+    if (fkErr) ov.querySelector('#ra-merr').textContent = 'A list on this form did not load: ' + fkErr;
     function addLine() {
       var row = document.createElement('div'); row.className = 'ra-line'; row.style.cssText = 'display:flex;gap:7px;align-items:center;margin-bottom:8px';
       row.innerHTML = cfg.item.map(function (f) { return '<div style="flex:' + (f.t === 'select' ? '2' : '1') + '">' + ctrl(f, 'i') + '</div>'; }).join('') + '<button type="button" class="ra-rmline xp" aria-label="Remove line" style="flex:none">&times;</button>';
