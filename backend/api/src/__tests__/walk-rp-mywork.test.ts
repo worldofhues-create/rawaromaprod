@@ -40,3 +40,10 @@ test('the dashboard no longer swallows the alert read', () => {
   const dash = js.slice(js.indexOf("tunnel('/v1/alerts'); ad ="), js.indexOf('var html = myWorkPanel(ad)'));
   assert.doesNotMatch(dash, /catch \(e\) \{\s*\}/);
 });
+
+test('WALK-RP-3: one queue reads "1 queue needs action", not "1 queues need action"', () => {
+  const one = panel()({ alerts: [{ kind: 'qc', title: 'QC', sub: 's', count: 2, severity: 'high' }] });
+  assert.match(one, />1 queue needs action\|/);
+  const two = panel()({ alerts: [{ kind: 'qc', title: 'a', sub: 's', count: 1 }, { kind: 'x', title: 'b', sub: 's', count: 1 }] });
+  assert.match(two, />2 queues need action\|/);
+});

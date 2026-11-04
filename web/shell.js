@@ -1129,7 +1129,7 @@
     // U3b: real .card/.card-hd/.card-bd grammar for the outer panel; the hover feedback on a
     // clickable tile moves from inline onmouseover/onmouseout box-shadow swaps (the legacy
     // --ins-sm/--rai-sm shim) to a plain CSS rule on [data-work-nav] (shell.css "U3b" block).
-    return '<div class="gwrap strip" style="margin-bottom:var(--gr-gap)">' + gCard({ title: 'My work', meta: alerts.length ? alerts.length + ' queues need action' : '', span: 'c12', expand: false, body: inner }) + '</div>';
+    return '<div class="gwrap strip" style="margin-bottom:var(--gr-gap)">' + gCard({ title: 'My work', meta: alerts.length ? alerts.length + (alerts.length === 1 ? ' queue needs action' : ' queues need action') : '', span: 'c12', expand: false, body: inner }) + '</div>';
   }
   /* ---------------- flow actions: existing POST routes wired to per-row buttons ---------------- */
   // The role must hold the permission (owner/super_admin hold all) AND the row must be in the
