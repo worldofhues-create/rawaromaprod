@@ -12,9 +12,10 @@
       '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel('Role', true) + '<select id="ra-role" class="fld"><option value="">Select…</option></select></label>' +
       '<div id="ra-merr" role="alert" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
       '<button type="submit" id="ra-msave" class="btn p" style="width:100%;justify-content:center;height:var(--ch-touch-floor-coarse-pointer)">Assign</button>' });
-    tunnel('/v1/roles?limit=100').then(function (res) {
-      ((res.json && res.json.data) || []).forEach(function (role) { var v = role.roleId != null ? role.roleId : guessId(role); var l = role.roleName || role.roleCode || (v ? String(v).slice(0, 8) : ''); if (v) { var o = document.createElement('option'); o.value = v; o.textContent = l; $('ra-role').appendChild(o); } });
-    }).catch(function () {});
+    fkRows('/v1/roles').then(function (fr) {
+      fkFail($('ra-role'), fr.error);
+      fr.rows.forEach(function (role) { var v = role.roleId != null ? role.roleId : guessId(role); var l = role.roleName || role.roleCode || (v ? String(v).slice(0, 8) : ''); if (v) { var o = document.createElement('option'); o.value = v; o.textContent = l; $('ra-role').appendChild(o); } });
+    }).catch(function () { fkFail($('ra-role'), 'This list did not load. Close and try again.'); });
     m.sheet.onsubmit = function (e) {
       e.preventDefault(); var roleId = $('ra-role').value; if (!roleId) { $('ra-merr').textContent = 'Pick a role.'; return; }
       var save = $('ra-msave'); save.disabled = true; save.textContent = 'Assigning…';
