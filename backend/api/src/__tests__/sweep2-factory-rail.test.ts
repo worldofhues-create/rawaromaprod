@@ -56,6 +56,7 @@ test('every rail item is readable by its role, or dropped for it by NAV_READ', (
 });
 
 test('the rail is pruned once the permissions arrive, before the address is opened', () => {
-  assert.match(shell, /session\.perms = me\.permissions; \}\)\.catch\(function \(\) \{\}\)\.then\(function \(\) \{ pruneNav\(\); landOnAddress\(\);/);
+  // WALK-RP-17: pruned only when /me answered; a failed /me keeps the rail and says so.
+  assert.match(shell, /session\.perms = me\.permissions; return true; \} return false; \}, function \(\) \{ return false; \}\)\.then\(function \(ok\) \{ if \(ok\) pruneNav\(\); else toast\([^;]+\); landOnAddress\(\);/);
   assert.match(shell, /function pruneNav\(\)/);
 });
