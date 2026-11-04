@@ -2313,6 +2313,8 @@
       '.screen-intro .crumbs [aria-current]{color:var(--ink);overflow-wrap:anywhere}' +
       '.screen-intro .screen-help{margin:0;font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch}' +
       '.rs.rs-group{margin-top:var(--s-snug)}' +
+      // WALK-RP-5: a table that scrolls sideways never needs to break a code mid-word.
+      '.tscroll td,.tscroll th,[style*="overflow-x:auto"] td,[style*="overflow-x:auto"] th{overflow-wrap:normal}' +
       '.ra-act[title]{position:relative}' +
       '@media (max-width:420px){.screen-intro .screen-help{font-size:var(--t-cap)}}';
     document.head.appendChild(c);
