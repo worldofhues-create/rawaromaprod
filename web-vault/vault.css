@@ -57,6 +57,11 @@ label.field textarea{min-height:64px;padding:var(--s-tight) 10px;border-radius:6
 /* ── toast tones on the reference's dark pill ─────────────────────────────────────────────── */
 .toast.bad .d{background:#9A6A5C}
 
+/* ── table words (WALK-RP-6): the vendored .card{overflow-wrap:anywhere} shrank columns and stacked
+   values to a few letters and broke words mid-word; a cell wraps at spaces, and breaks a word only
+   when it cannot fit a line on its own. */
+.card td,.card th{overflow-wrap:break-word}
+
 /* ── phone tables: rows become label/value stacks ─────────────────────────────────────────── */
 @media (max-width:767px){
   .card table,.card thead,.card tbody,.card tr{display:block;width:100%}
@@ -64,7 +69,7 @@ label.field textarea{min-height:64px;padding:var(--s-tight) 10px;border-radius:6
   .card thead{display:none}
   .card tbody tr{border-bottom:1px solid var(--line);padding:var(--s-tight) var(--pad-card)}
   .card tbody td{display:flex;justify-content:space-between;gap:var(--s-tight);border-bottom:none;padding:2px 0}
-  .card tbody td::before{content:attr(data-label);font-weight:var(--w-med);color:var(--ink-3)}
+  .card tbody td::before{content:attr(data-label);font-weight:var(--w-med);color:var(--ink-3);flex:none}
 }
 
 /* ── sign-in (UX-C): the one sign-in card of all three RawProd consoles ──────────────────── */
