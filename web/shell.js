@@ -991,11 +991,11 @@
       return '<div style="display:flex;flex-direction:column;padding:3px 0"><span style="font:var(--w-med) var(--t-cap)/1.3 var(--font-mono);color:' + (masked ? 'var(--ink-2)' : 'var(--accent-ink)') + '">' + c.code + '</span><span style="font:var(--w-reg) var(--t-micro)/1.3 var(--font-ui);color:var(--ink-3)">' + c.sub + '</span></div>';
     }).join('') || '<div style="font:var(--w-reg) var(--t-cap)/1 var(--font-ui);color:var(--ink-3);padding:3px 0">—</div>';
     return '<div style="flex:1;min-width:152px;background:var(--panel);border:1px solid var(--line);border-radius:var(--r-md);padding:var(--s-snug)">' +
-      '<div style="display:flex;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-tight)">' +
+      '<div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-tight);margin-bottom:var(--s-tight)">' +
       '<span style="width:22px;height:22px;border-radius:var(--r-sm);background:var(--accent-soft);color:var(--accent-ink);display:grid;place-items:center;font:var(--w-med) var(--t-micro)/1 var(--font-ui);flex:none">' + num + '</span>' +
       '<span style="display:grid;place-items:center;color:var(--ink-2);flex:none">' + icon(ic, 14) + '</span>' +
-      '<span style="font:var(--w-med) var(--t-cap)/1.15 var(--font-ui);flex:1">' + name + '</span>' +
-      '<span style="font:var(--w-reg) var(--t-micro)/1 var(--font-mono);color:var(--ink-3);flex:none">' + stage.count + '</span></div>' + codes + '</div>';
+      '<span style="font:var(--w-med) var(--t-cap)/1.15 var(--font-ui);flex:1 1 auto;min-width:min-content;overflow-wrap:normal">' + name + '</span>' +
+      '<span style="font:var(--w-reg) var(--t-micro)/1 var(--font-mono);color:var(--ink-3);flex:none;margin-left:auto">' + stage.count + '</span></div>' + codes + '</div>';
   }
   function flowRow(metas, p, start, masked) {
     var parts = [];
