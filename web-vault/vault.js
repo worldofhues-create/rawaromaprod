@@ -260,7 +260,7 @@
   function logout() {
     if (window.RaRuh) RaRuh.stop();
     ruhOn = false;
-    session.token = null; session.iat = 0; session.email = null; session.userId = null; session.roles = []; session.permissions = [];
+    session.token = null; session.iat = 0; session.email = null; session.userId = null; session.roles = []; session.permissions = []; peopleDir = null;
     history.replaceState(null, '', location.href);
     location.hash = '';
     render();
@@ -1222,13 +1222,32 @@
   // The split itself lives on the server (formula-directory.service.ts AUDIT_KIND_PREFIXES), which
   // filters and counts it: ?kind=access | production.
 
-  function auditTable(rows) {
+  /** People by name, from the main box's narrow directory (the one Access grants reads, SWEEP2-O4),
+   * under the caller's own formula:formula_access_policy:read. Without it, or when the main box does
+   * not answer, ids stay unnamed, and say they are a user rather than standing bare. */
+  var peopleDir = null;
+  async function peopleNames() {
+    if (peopleDir) return peopleDir;
+    if (!hasPerm('formula:formula_access_policy:read')) return {};
+    try {
+      var dr = await mainApi('/v1/formula-grantees'); var m = {};
+      ((dr && dr.users) || []).forEach(function (u) { m[u.userId] = u.userName || u.email || 'Unnamed user'; });
+      peopleDir = m; return m;
+    } catch (e) { return {}; }
+  }
+  function personName(names, id) {
+    if (!id) return 'system';
+    if (id === session.userId) return 'You';
+    return (names && names[id]) || ('User ' + String(id).slice(0, 8));
+  }
+
+  function auditTable(rows, names) {
     if (!rows.length) return h('div', { class: 'empty' }, [h('h3', {}, ['Nothing recorded yet'])]);
     var trs = rows.map(function (r) {
       var resultChip = h('span', { class: 'chip ' + (r.result === 'refuse' ? 'r' : 'g') }, [r.result || 'allow']);
       return h('tr', {}, [
         h('td', { 'data-label': 'When' }, [fmtDt(r.occurredAt)]),
-        h('td', { 'data-label': 'Actor' }, [r.actor || r.actorId || 'system']),
+        h('td', { 'data-label': 'Actor' }, [r.actor || personName(names, r.actorId)]),
         h('td', { class: 'mono', 'data-label': 'Action' }, [r.action]),
         h('td', { class: 'mono', 'data-label': 'Entity' }, [(r.entityId || '').slice(0, 8) + '…']),
         h('td', { 'data-label': 'Reason' }, [r.reason || '—']),
@@ -1270,6 +1289,7 @@
     } catch (e) {
       content.innerHTML = ''; content.appendChild(notBuilt('Audit didn\'t load', e.message)); return;
     }
+    var names = await peopleNames();
     var verify = h('button', { class: 'btn sm', onclick: async function () {
       try { var v = await api('/v1/formula-audit-verify'); toast(v.ok ? ('Verified · ' + v.rows + ' rows intact') : ('Broken at row ' + v.firstBadSeq + ': ' + v.reason), !v.ok); }
       catch (e) { toast(e.message, true); }
@@ -1283,7 +1303,7 @@
       var card = h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, [kind === 'mfg' ? 'Production audit' : 'Access audit']), h('span', { class: 'n' }, [auditCountText(total, rows.length)]), h('span', { class: 'spacer' }), verify]),
         kind === 'mfg' ? h('p', { class: 'card-note' }, ['Coded instructions resolved for production. No formula left the server.']) : null,
-        auditTable(rows),
+        auditTable(rows, names),
         more ? h('div', { style: 'display:flex;justify-content:center;margin-top:12px' }, [more]) : null,
       ]);
       content.innerHTML = ''; content.appendChild(card);
@@ -1787,6 +1807,7 @@
     renderShell('review', content);
     try {
       var items = await api('/v1/formula-review-queue');
+      var names = await peopleNames();
       var picked = {};
       var countEl = h('span', { style: 'white-space:nowrap' });
       var approveBtn = h('button', { class: 'btn g', id: 'review-approve', style: 'white-space:nowrap' }, ['Approve selected']);
@@ -1802,7 +1823,7 @@
         var box = h('input', { type: 'checkbox', 'aria-label': 'Approve ' + (x.productCode || x.formulaCode) });
         if (x.blockedReason) { box.disabled = true; box.title = x.blockedReason; }
         else { boxes.push({ id: x.formulaVersionId, box: box }); box.addEventListener('change', function () { picked[x.formulaVersionId] = box.checked; refreshCount(); }); }
-        var by = function (id) { return id === session.userId ? 'You' : (id ? String(id).slice(0, 8) : '—'); };
+        var by = function (id) { return id ? personName(names, id) : '—'; };
         return h('tr', { 'data-version': x.formulaVersionId }, [
           td('', box),
           td('Product', x.productCode || '—', 'mono'),
