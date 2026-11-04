@@ -22,3 +22,10 @@ test('the phone stack keeps its label whole', () => {
   const phone = css.slice(css.indexOf('@media (max-width:767px){\n  .card table'));
   assert.match(phone, /\.card tbody td::before\s*\{[^}]*flex:\s*none/);
 });
+
+// WALK-RP-8: a mono cell (Product, Formula, Action, Entity) set its phone-stack label in the code font,
+// so "Product" and "Formula" read as codes beside "Kind" and "Status" in the same card.
+test('the phone-stack label is always in the UI font', () => {
+  const phone = css.slice(css.indexOf('@media (max-width:767px){\n  .card table'));
+  assert.match(phone, /\.card tbody td::before\s*\{[^}]*font-family:\s*var\(--ui\)/);
+});
