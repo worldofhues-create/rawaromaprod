@@ -1788,8 +1788,8 @@
     try {
       var items = await api('/v1/formula-review-queue');
       var picked = {};
-      var countEl = h('span', {});
-      var approveBtn = h('button', { class: 'btn g', id: 'review-approve' }, ['Approve selected']);
+      var countEl = h('span', { style: 'white-space:nowrap' });
+      var approveBtn = h('button', { class: 'btn g', id: 'review-approve', style: 'white-space:nowrap' }, ['Approve selected']);
       function refreshCount() {
         var n = Object.keys(picked).filter(function (k) { return picked[k]; }).length;
         countEl.textContent = n + ' selected'; approveBtn.disabled = n === 0;
@@ -1840,7 +1840,7 @@
       content.appendChild(h('div', { class: 'card' }, [
         h('div', { class: 'card-hd' }, [h('h2', {}, ['Approve recipes']), h('span', { class: 'n' }, [items.length + ' waiting · ' + eligible.length + ' you may approve'])]),
         h('p', { class: 'card-note' }, ['Recipes sent for approval. You cannot approve one you drafted or sealed. Approving asks for a fresh sign-in once; every approval is recorded under your name.']),
-        h('div', { style: 'display:flex;gap:10px;align-items:center;margin-bottom:10px' }, [h('label', { style: 'display:flex;gap:6px;align-items:center' }, [all, 'Select all']), countEl, approveBtn]),
+        h('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;align-items:center;margin-bottom:10px' }, [h('label', { style: 'display:flex;gap:6px;align-items:center;white-space:nowrap' }, [all, 'Select all']), countEl, approveBtn]),
         simpleTable(['', 'Product', 'Formula', 'Kind', 'Recipe', 'Drafted by', 'Sealed by', 'Status', ''], rows),
         out,
       ]));
