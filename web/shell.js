@@ -1496,9 +1496,11 @@
     return '<div class="fgrid">' + cells + '</div>' + (cfg.items ? '<div class="sect" style="margin:16px 0 6px">Line items</div><div class="ra-ditems">Loading…</div>' : '');
   }
   function loadRowDetailItems(cfg, id, box) {
-    tunnel(cfg.items.ep + '?limit=100').then(function (res) {
-      var mine = ((res.json && res.json.data) || []).filter(function (x) { return x[cfg.items.fk] === id; });
+    // Every page, then this record's lines: the newest 100 of the whole table left an older PO empty.
+    fkRows(cfg.items.ep).then(function (fr) {
       if (!box.parentNode) return;
+      if (fr.error) { box.textContent = 'Line items did not load: ' + fr.error; return; }
+      var mine = fr.rows.filter(function (x) { return x[cfg.items.fk] === id; });
       if (!mine.length) { box.textContent = 'No line items recorded.'; return; }
       var cols = cfg.items.cols;
       box.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' +
