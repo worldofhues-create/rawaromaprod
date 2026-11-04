@@ -1089,7 +1089,8 @@
     var role = st.role, kset = kpiSet(p, role);
     var kpis = '<div class="stats">' + kset.map(function (k) { return kpiRich(k[0], k[1], k[2], k[3], k[4]); }).join('') + '</div>';
     // "My work" — the role's actionable queue at the top of the home (tap a tile to jump to the screen that resolves it)
-    var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.json && ar.json.data; } catch (e) {}
+    // A feed that did not answer is said on the strip, never drawn as "Nothing needs action."
+    var ad = null; try { var ar = await tunnel('/v1/alerts'); ad = ar && ar.status < 400 && ar.json && ar.json.data; if (!ad) ad = { failed: (ar && ar.json && ar.json.error && ar.json.error.message) || 'The alert feed did not answer.' }; } catch (e) { ad = { failed: 'Can\'t reach the alert feed.' }; }
     var html = myWorkPanel(ad) + kpis;
     if (role === 'warehouse') {
       html += warehouseMap(p);
@@ -1113,7 +1114,8 @@
   function myWorkPanel(ad) {
     var alerts = (ad && ad.alerts) || [];
     var inner;
-    if (!alerts.length) inner = '<p style="margin:0;font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3)">Nothing needs action.</p>';
+    if (ad && ad.failed) inner = '<p role="alert" style="margin:0;font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--red)">Your queues did not load: ' + escHtml(ad.failed) + ' Reload to try again.</p>';
+    else if (!alerts.length) inner = '<p style="margin:0;font:var(--w-reg) var(--t-body)/var(--lh-body) var(--font-ui);color:var(--ink-3)">Nothing needs action.</p>';
     else inner = '<div style="display:flex;gap:var(--s-snug);flex-wrap:wrap">' + alerts.map(function (a) {
       // Low severity used to print in --accent (#E9F260) on a near-white tile — ~1.2:1. Its ink
       // counterpart keeps the same hue family at a readable contrast.
