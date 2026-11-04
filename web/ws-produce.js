@@ -41,7 +41,8 @@
   function qrSvg(text, cell) {
     try { var q = qrcode(0, 'M'); q.addData(String(text)); q.make(); return q.createSvgTag(cell || 3, 0); } catch (e) { return ''; }
   }
-  function btn(id, label, cls, attrs) { return '<button type="button" ' + (id ? 'id="' + id + '" ' : '') + 'class="btn ' + (cls || 'sm') + '"' + (attrs || '') + '>' + label + '</button>'; }
+  // A caller's own type (type="submit") must replace the default: a browser keeps the first of two.
+  function btn(id, label, cls, attrs) { return '<button ' + (/\btype=/.test(attrs || '') ? '' : 'type="button" ') + (id ? 'id="' + id + '" ' : '') + 'class="btn ' + (cls || 'sm') + '"' + (attrs || '') + '>' + label + '</button>'; }
   function stale(nav) { return st.nav !== nav; }
 
   /* ── navigation: add the four screens to the roles that do this work ────────────────── */
@@ -263,7 +264,7 @@
 
   // Scan flow: a task code opens the task; the next scan (a bin) confirms it.
   function onScan(code) {
-    if (!code) return;
+    if (!code) { toast(PV.scanTask ? 'Scan the bin, or type its code, then press Go.' : 'Scan a task QR, or type its number (PA-12, PK-7), then press Go.', 'bad'); return; }
     var state = $('pv-scan-state');
     if (PV.scanTask) { var t = PV.scanTask; PV.scanTask = null; completeTask(t.shelfTaskId, t.kind, code); return; }
     tunnel('/v1/shelf/tasks/scan?code=' + encodeURIComponent(code)).then(function (res) {
