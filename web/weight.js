@@ -76,7 +76,10 @@
 
   function formatTolerance(targetMg, tolMg, uom, resMg) {
     var u = lineUnit(targetMg, uom);
-    return 'target ' + formatIn(targetMg, u, resMg, true) + ' ± ' + formatIn(tolMg, u, resMg, true);
+    // The window is rounded DOWN to the display step, so it never reads wider than the check the
+    // server makes (1255 mg on 125.5 g shows ± 1.25 g, not ± 1.26 g).
+    var step = stepFor(u, resMg), t = Math.max(0, Math.floor(Math.round(Number(tolMg) || 0) / step) * step);
+    return 'target ' + formatIn(targetMg, u, resMg, true) + ' ± ' + formatIn(t, u, resMg, true);
   }
 
   function parseToMg(text, unit) {

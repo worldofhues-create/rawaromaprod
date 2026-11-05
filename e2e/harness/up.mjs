@@ -58,7 +58,9 @@ psql('postgres', `CREATE DATABASE ${VAULT_DB}`);
 const { publicKey, privateKey } = generateKeyPairSync('ed25519');
 const signingKey = privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64');
 const verifyKey = publicKey.export({ type: 'spki', format: 'der' }).toString('base64');
-const ROLE_ENVS = ['OWNER', 'ADMIN', 'PROCUREMENT', 'RECEIVING', 'QC', 'WAREHOUSE', 'COMPOUNDING', 'PRODUCTION', 'FILLING', 'PACKAGING', 'SALES', 'FORMULATOR', 'VAULT_APPROVER', 'PLATFORM_ADMIN'];
+const ROLE_ENVS = ['OWNER', 'ADMIN', 'PROCUREMENT', 'RECEIVING', 'QC', 'WAREHOUSE', 'COMPOUNDING', 'PRODUCTION', 'FILLING', 'PACKAGING', 'SALES', 'FORMULATOR', 'VAULT_APPROVER', 'PLATFORM_ADMIN',
+  // PROD-A floor roles
+  'PICKER', 'VERIFIER', 'MIXER', 'PACKING', 'LOGISTICS', 'FINANCE'];
 
 const base = { ...process.env };
 for (const k of ['DATABASE_URL', 'DATABASE_URL_APP', 'FORMULA_DATABASE_URL', 'NODE_OPTIONS']) delete base[k];

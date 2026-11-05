@@ -203,6 +203,11 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
   // 283: + the 14 PROD-A floor/rules permissions (lane pf-a, 2026-11-05).
   assert.equal(ownerGrant.length, 283);
+  // Named, so a different 14 cannot stand in for these: each must be the owner's.
+  for (const p of ['platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_code:read',
+    'masterdata:floor_code:write', 'masterdata:floor_family:write', 'inventory:lot_barcode:resolve', 'inventory:lot_barcode:write',
+    'production:floor_queue:read', 'production:floor_job:write', 'production:floor_pick:write', 'production:floor_verify:write',
+    'production:floor_mix:write', 'production:floor_label:write']) assert.ok(ownerGrant.includes(p), `owner holds ${p}`);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

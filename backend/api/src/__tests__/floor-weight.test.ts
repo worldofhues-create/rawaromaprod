@@ -44,6 +44,8 @@ test('explicit units, and one unit per line chosen from the target', () => {
   // the actual is shown in the target's unit even though it alone would be grams
   assert.equal(W.formatIn(999000, u), '1 kg');
   assert.equal(W.formatTolerance(125000000 / 1000, 1250, 'g'), 'target 125.00 g ± 1.25 g');
+  // the window rounds down: never shown wider than the server's check
+  assert.equal(W.formatTolerance(125500, 1255, 'g'), 'target 125.50 g ± 1.25 g');
 });
 
 test('typed weights become exact integer mg, and finer-than-mg input is refused', () => {
