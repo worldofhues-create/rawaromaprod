@@ -14,11 +14,13 @@ import { ScaleService } from './scale.service.js';
 import { MacerationController } from './maceration.controller.js';
 import { MacerationService } from './maceration.service.js';
 import { FloorSweepService } from './floor-sweep.service.js';
+import { PackingController } from './packing.controller.js';
+import { PackingService } from './packing.service.js';
 
-const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService];
+const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService];
 
 @Module({
-  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })
