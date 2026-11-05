@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Pair this device · RAW Factory</title>
+  <link rel="icon" href="/favicon.ico">
+  <link rel="stylesheet" href="/ui-contract/fonts/outfit.css">
+  <link rel="stylesheet" href="/ui-contract/fonts/jetbrains-mono.css">
+  <!-- Lane pf-c (plan section 2): pair a TV or a kiosk tablet with the 6-digit code from Admin ->
+       Devices (or the QR, which opens this page with #code=). The device gets a station-scoped
+       token: a TV then shows the floor board read-only; a kiosk is locked to its station's screen
+       in the console, where a person still signs in to act. Printers pair through the print agent,
+       scales through whatever reads them. Talks to /v1/device-agent/* only. -->
+  <style>
+    :root { --bg: #EDEDEB; --ink: #151515; --ink-3: #6b6b6b; --panel: #fff; --panel-2: #f4f4f2; --accent: #c4561b; --bad: #b3261e; --ok: #1e7b45; }
+    @media (prefers-color-scheme: dark) { :root { --bg: #111; --ink: #f2f2f2; --ink-3: #a0a0a0; --panel: #1b1b1b; --panel-2: #242424; } }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.4 Outfit, system-ui, sans-serif; }
+    main { max-width: 520px; margin: 0 auto; padding: 32px 16px; }
+    h1 { font: 600 28px/1.2 Outfit, system-ui, sans-serif; margin: 0 0 6px; }
+    .t-cap { color: var(--ink-3); font-size: 14px; }
+    .panel { background: var(--panel); border-radius: 14px; padding: 20px; margin-top: 18px; }
+    input { width: 100%; font: 600 40px/1.2 'JetBrains Mono', monospace; letter-spacing: .3em; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid #ccc; background: var(--panel-2); color: var(--ink); }
+    button { width: 100%; margin-top: 14px; min-height: 56px; font: 600 18px Outfit, system-ui, sans-serif; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+    button.ghost { background: var(--panel-2); color: var(--ink); }
+    .msg { margin-top: 12px; min-height: 1.4em; }
+    .bad { color: var(--bad); } .ok { color: var(--ok); }
+    #board { display: none; padding: 20px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
+    .row { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 22px; margin-top: 6px; }
+    .mono { font-family: 'JetBrains Mono', monospace; }
+    h2 { font: 600 26px/1.2 Outfit, system-ui, sans-serif; margin: 0 0 8px; }
+    #net { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px; text-align: center; background: var(--bad); color: #fff; display: none; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <main id="pair">
+    <h1>Pair this device</h1>
+    <div class="t-cap">Enter the 6-digit code shown in Admin → Devices, or scan its QR. A code lasts 10 minutes and works once.</div>
+    <div class="panel" id="form-panel">
+      <form id="f"><input id="code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="\d{6}" aria-label="Pairing code" required><button type="submit">Pair</button></form>
+      <div class="msg" id="msg" role="status"></div>
+    </div>
+    <div class="panel" id="paired" style="display:none"></div>
+  </main>
+  <div id="board"></div>
+  <div id="net">No network. The board will update when it is back.</div>
+  <script src="/pair.js"></script>
+</body>
+</html>
