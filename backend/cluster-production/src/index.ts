@@ -9,6 +9,10 @@
  * PRODUCTION_LOOKUP port.
  */
 export { ProductionModule } from './production.module.js';
+// PROD-A: the floor stations call the existing flow through these.
+export { PickingService } from './picking/picking.service.js';
+export { MixingService } from './mixing/mixing.service.js';
+export { BatchService } from './batch/batch.service.js';
 export { PRODUCTION_DB, type ProductionDb } from './production.tokens.js';
 export { productionEvents } from './production.events.js';
 export {

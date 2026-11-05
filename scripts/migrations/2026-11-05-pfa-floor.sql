@@ -135,6 +135,8 @@ create table if not exists production.floor_job (
   mixed_by              varchar(255),
   mixed_dt              timestamptz,
   batch_no              varchar(40),
+  mixing_session_id     uuid,
+  oil_batch_id          uuid,
   created_by            varchar(255),
   created_dt            timestamptz not null default now()
 );
