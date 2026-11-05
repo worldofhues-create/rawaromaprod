@@ -147,9 +147,9 @@
         var r = data(res);
         toast('Audit saved · GRN ' + (r.grnNumber || ''), 'good');
         host.innerHTML = card('Delivery ' + r.deliveryNo + ' · GRN ' + esc(r.grnNumber || ''),
-          '<table class="tbl"><thead><tr><th>Line</th><th>Decision</th><th>Accepted</th><th>Rejected</th><th>Held</th><th>Short</th><th>Why</th></tr></thead><tbody>' +
+          '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Line</th><th>Decision</th><th>Accepted</th><th>Rejected</th><th>Held</th><th>Short</th><th>Why</th></tr></thead><tbody>' +
           r.lines.map(function (l, i) { var dd = DEC[l.decision] || ['n', l.decision]; return '<tr><td>' + (i + 1) + '</td><td>' + chip(dd[0], (l.overridden ? 'OVERRIDDEN · ' : '') + dd[1]) + '</td><td>' + mg(l.acceptedBase, l.unit) + '</td><td>' + mg(l.rejectedBase, l.unit) + '</td><td>' + mg(l.excessHeldBase, l.unit) + '</td><td>' + mg(l.shortBase, l.unit) + '</td><td>' + esc(l.explain) + '</td></tr>'; }).join('') +
-          '</tbody></table>' + (r.debitNote ? '<p style="margin-top:8px">Debit note ' + esc(r.debitNote.debitNoteNumber) + ' raised for ' + inr(r.debitNote.amountPaise) + '.</p>' : '') +
+          '</tbody></table></div>' + (r.debitNote ? '<p style="margin-top:8px">Debit note ' + esc(r.debitNote.debitNoteNumber) + ' raised for ' + inr(r.debitNote.amountPaise) + '.</p>' : '') +
           '<p class="t-cap">Raw lots go to quarantine for incoming QC; print each lot\'s label at putaway (Lot hold & recall).</p>' +
           '<p>' + r.rmBatches.map(function (x) { return '<span style="font-family:var(--font-mono)">' + esc(x.batchNumber) + '</span>'; }).join(' · ') + '</p>');
       }).catch(function () { b.disabled = false; b.textContent = 'Submit audit'; errEl.textContent = 'Can\'t connect. Try again.'; });
@@ -179,14 +179,14 @@
       (canWrite && t ? card('Request a payment', '<form id="fb-preq">' + row(field('Kind', '<select id="fb-pkind" class="fld"><option value="BALANCE">Balance (against GRN)</option><option value="ADVANCE">Advance</option></select>') +
         field('Amount (₹)', '<input id="fb-pamt" class="fld" inputmode="decimal" style="width:140px">') + field('Note', '<input id="fb-pnote" class="fld">') +
         '<button type="submit" class="btn p">Request</button>') + '<div id="fb-perr" role="alert" style="color:var(--red);min-height:16px"></div></form>') : '') +
-      card('Payments', d.releases.length ? '<table class="tbl"><thead><tr><th>Kind</th><th>Amount</th><th>Status</th><th>UTR</th><th></th></tr></thead><tbody>' +
+      card('Payments', d.releases.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Kind</th><th>Amount</th><th>Status</th><th>UTR</th><th></th></tr></thead><tbody>' +
         d.releases.map(function (r) {
           var s = PST[r.status] || ['n', r.status], acts = '';
           if (canWrite && r.status === 'REQUESTED') acts = '<button type="button" class="btn sm" data-pa="approve" data-id="' + r.releaseId + '">Approve</button> ';
           if (canWrite && r.status === 'APPROVED') acts = '<input class="fld" data-utr="' + r.releaseId + '" placeholder="UTR / bank ref" style="width:140px"> <button type="button" class="btn sm p" data-pa="release" data-id="' + r.releaseId + '">Release</button> ';
           if (canWrite && (r.status === 'REQUESTED' || r.status === 'APPROVED')) acts += '<button type="button" class="btn sm" data-pa="refuse" data-id="' + r.releaseId + '">Refuse</button>';
           return '<tr><td>' + esc(r.kind) + '</td><td>' + inr(r.amountPaise) + '</td><td>' + chip(s[0], s[1]) + '</td><td style="font-family:var(--font-mono)">' + esc(r.utr || '') + '</td><td>' + acts + '</td></tr>';
-        }).join('') + '</tbody></table>' : '<p>No payments yet.</p>', 'The person who raised the PO cannot approve or release; the requester cannot approve.');
+        }).join('') + '</tbody></table></div>' : '<p>No payments yet.</p>', 'The person who raised the PO cannot approve or release; the requester cannot approve.');
     var f = $('fb-preq');
     if (f) f.onsubmit = function (e) {
       e.preventDefault(); var amt = Math.round(Number($('fb-pamt').value) * 100);
@@ -213,7 +213,7 @@
   /* ── QC checkpoints ─────────────────────────────────────────────────────────────────── */
   async function viewCheckpoints(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
-    var prods = await getRows('/v1/products?limit=100');
+    var prods = await getRows('/v1/product-qc-specs?limit=200');
     if (stale('qccheckpoints')) return;
     V.innerHTML = '<div class="grid">' + card('Product', row(field('Product', pick('fb-cprod', prods, 'productId', function (p) { return (p.productCode || '') + ' ' + (p.productName || ''); }, 'Choose a product…')))) + '<div id="fb-cp" class="c12"></div></div>';
     $('fb-cprod').onchange = function () { if (this.value) loadCp(this.value); };
@@ -239,10 +239,10 @@
       (canWrite ? '<div style="display:flex;gap:var(--s-snug);flex-wrap:wrap;margin-top:8px"><button type="button" class="btn sm" id="fb-cpadd">Add checkpoint</button>' +
         field('Why it changes', '<input class="fld" id="fb-cpwhy" style="min-width:240px">') + '<button type="button" class="btn p" id="fb-cpsave">Publish new version</button></div><div id="fb-cperr" role="alert" style="color:var(--red);min-height:16px"></div>' : ''),
       'Saving publishes a new version. A batch keeps the version it was first tested on.') +
-      card('Versions', d.versions.length ? '<table class="tbl"><thead><tr><th>Version</th><th>Why</th><th>When</th><th>Batches tested</th></tr></thead><tbody>' + d.versions.map(function (v) {
+      card('Versions', d.versions.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Version</th><th>Why</th><th>When</th><th>Batches tested</th></tr></thead><tbody>' + d.versions.map(function (v) {
         var b = d.batchesPerVersion.filter(function (x) { return x.version === v.version; })[0];
         return '<tr><td>v' + v.version + '</td><td>' + esc(v.reason) + '</td><td>' + esc(String(v.publishedDt).slice(0, 10)) + '</td><td>' + (b ? b.batches : 0) + '</td></tr>';
-      }).join('') + '</tbody></table>' : '<p>None.</p>');
+      }).join('') + '</tbody></table></div>' : '<p>None.</p>');
     function wireDel() { [].forEach.call(host.querySelectorAll('[data-cpdel]'), function (b) { b.onclick = function () { b.parentNode.remove(); }; }); }
     wireDel();
     if (!canWrite) return;
@@ -274,12 +274,12 @@
     var res; try { res = await tunnel('/v1/prodfloor/qc/batches/' + id); } catch (e) { host.innerHTML = errBox('Can\'t connect. Try again.'); return; }
     if (res.status >= 400) { host.innerHTML = errBox(err(res, 'This batch is not available.')); return; }
     var d = data(res), last = d.rounds[d.rounds.length - 1], cps = d.checkpoints;
-    var prods = cps ? [] : await getRows('/v1/products?limit=100');
+    var prods = cps ? [] : await getRows('/v1/product-qc-specs?limit=200');
     var needRework = last && last.decision === 'REWORK' && d.reworks.length < Number(last.reworkNo) + 1;
     var closed = last && /APPROVE|REJECT|REVIEW|HOLD_CAPA/.test(last.decision);
-    var hist = d.rounds.length ? '<table class="tbl"><thead><tr><th>Round</th><th>Spec</th><th>Decision</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
+    var hist = d.rounds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Round</th><th>Spec</th><th>Decision</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
       var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>v' + r.specVersion + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType || '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
-    }).join('') + '</tbody></table>' : '<p>No QC round yet.</p>';
+    }).join('') + '</tbody></table></div>' : '<p>No QC round yet.</p>';
     var form = '';
     if (closed) form = '<p>' + chip('n', 'Last decision ' + last.decision) + ' No further round is taken here.</p>';
     else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" class="fld" placeholder="RM batch id">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
@@ -333,12 +333,12 @@
     var res; try { res = await tunnel('/v1/prodfloor/holds'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
     if (stale('lotrecall')) return;
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'Holds are not available.')); return; }
-    var holds = (data(res) && data(res).items) || [], canWrite = can('inventory:rm_batch_master:write');
+    var hd = data(res), holds = Array.isArray(hd) ? hd : ((hd && hd.items) || []), canWrite = can('inventory:rm_batch_master:write');
     V.innerHTML = '<div class="grid">' +
-      card('On hold now', holds.length ? '<table class="tbl"><thead><tr><th>What</th><th>Number</th><th>Why</th><th>Since</th><th></th></tr></thead><tbody>' + holds.map(function (h) {
+      card('On hold now', holds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>What</th><th>Number</th><th>Why</th><th>Since</th><th></th></tr></thead><tbody>' + holds.map(function (h) {
         return '<tr><td>' + (h.subjectType === 'RM_LOT' ? 'Raw lot' : 'Batch') + '</td><td style="font-family:var(--font-mono)">' + esc(h.number || h.subjectId) + '</td><td>' + esc(h.reason) + '</td><td>' + esc(String(h.heldDt).slice(0, 10)) + '</td><td>' +
           (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + h.subjectId + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') + '</td></tr>';
-      }).join('') + '</tbody></table>' : '<p>Nothing is on hold.</p>') +
+      }).join('') + '</tbody></table></div>' : '<p>Nothing is on hold.</p>') +
       card('A raw lot', row(field('RM batch id', '<input id="fb-lot" class="fld" style="min-width:280px">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
         (canWrite ? '<button type="button" class="btn" id="fb-hold">Hold this lot</button>' : '') +
         field('Bin (for the label)', '<input id="fb-bin" class="fld" placeholder="Bin id">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
@@ -369,7 +369,7 @@
       var r = await tunnel('/v1/prodfloor/recall/rm-lot/' + lot);
       if (r.status >= 400) { host.innerHTML = errBox(err(r, 'That lot was not found.')); return; }
       var d = data(r);
-      function tbl(rows, cols) { return rows.length ? '<table class="tbl"><thead><tr>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (x) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(x[c[1]]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table>' : '<p>None.</p>'; }
+      function tbl(rows, cols) { return rows.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (x) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(x[c[1]]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' : '<p>None.</p>'; }
       host.innerHTML = card('Lot ' + esc(d.lot.lotNumber) + (d.hold ? ' · ON HOLD' : ''), '<p>' + (d.hold ? esc(d.hold.reason) : 'Not on hold.') + '</p>') +
         card('Batches that used it (' + d.batches.length + ')', tbl(d.batches, [['Batch', 'batchNumber'], ['Status', 'status'], ['How', 'via']])) +
         card('Finished goods (' + d.finishedGoods.length + ')', tbl(d.finishedGoods, [['FG batch', 'batchNumber'], ['Status', 'status']])) +
