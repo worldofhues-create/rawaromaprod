@@ -40,6 +40,14 @@
     if (window.RaWeight && RaWeight.parseToMg) { try { var r = RaWeight.parseToMg(s, 'g'); if (r != null && typeof r === 'object' && 'mg' in r) return r.mg; if (typeof r === 'number') return r; } catch (e) { return null; } }
     var n = Number(s); return isFinite(n) && n >= 0 ? Math.round(n * 1000) : null;
   }
+  /** One reason, asked in the console's own sheet (never the browser's prompt). */
+  function askReason(title, label, submit, send) {
+    askForm({ title: title, submit: submit, fields: [{ n: 'reason', l: label, t: 'textarea', req: true }],
+      onSubmit: function (v, fail, close) {
+        send(String(v.reason || '').trim()).then(function (r) { if (r.status >= 400) { fail(err(r, 'That did not go through. Try again.')); return; } close(); })
+          .catch(function () { fail('Can\'t connect. Try again.'); });
+      } });
+  }
   async function getRows(path) {
     try { var r = await tunnel(path); return r.status < 400 ? ((data(r) && (data(r).items || data(r))) || []) : []; } catch (e) { return []; }
   }
@@ -200,11 +208,16 @@
       b.onclick = function () {
         var id = b.getAttribute('data-id'), a = b.getAttribute('data-pa'), body = {};
         if (a === 'release') { body.utr = (host.querySelector('[data-utr="' + id + '"]').value || '').trim(); if (!body.utr) { toast('Enter the UTR first.', 'bad'); return; } }
-        if (a === 'refuse') { body.reason = window.prompt('Why is this payment refused?') || ''; if (!body.reason.trim()) return; }
+        if (a === 'refuse') {
+          askReason('Refuse this payment', 'Why is it refused?', 'Refuse payment', function (why) {
+            return tunnel('/v1/prodfloor/payments/' + id + '/refuse', { method: 'POST', body: { reason: why } }).then(function (r) { if (r.status < 400) { toast('Payment refused', 'good'); loadPay(poId); } return r; });
+          });
+          return;
+        }
         b.disabled = true;
         tunnel('/v1/prodfloor/payments/' + id + '/' + a, { method: 'POST', body: body }).then(function (r) {
           b.disabled = false; if (r.status >= 400) { toast(err(r, 'That did not go through.'), 'bad'); return; }
-          toast('Done', 'good'); loadPay(poId);
+          toast(a === 'approve' ? 'Payment approved' : 'Payment released', 'good'); loadPay(poId);
         }).catch(function () { b.disabled = false; toast('Can\'t connect. Try again.', 'bad'); });
       };
     });
@@ -346,15 +359,17 @@
     [].forEach.call(V.querySelectorAll('[data-trace]'), function (b) { b.onclick = function () { $('fb-lot').value = b.getAttribute('data-trace'); trace(); }; });
     [].forEach.call(V.querySelectorAll('[data-rel]'), function (b) {
       b.onclick = function () {
-        var why = window.prompt('Why is the hold lifted? Name the evidence (retest, COA).') || ''; if (!why.trim()) return;
-        tunnel('/v1/prodfloor/holds/' + b.getAttribute('data-rel') + '/release', { method: 'POST', body: { reason: why } }).then(function (r) { if (r.status >= 400) toast(err(r, 'Not released.'), 'bad'); else { toast('Hold released', 'good'); viewRecall(item, V); } });
+        askReason('Release the hold', 'Why is the hold lifted? Name the evidence (retest, COA).', 'Release hold', function (why) {
+          return tunnel('/v1/prodfloor/holds/' + b.getAttribute('data-rel') + '/release', { method: 'POST', body: { reason: why } }).then(function (r) { if (r.status < 400) { toast('Hold released', 'good'); viewRecall(item, V); } return r; });
+        });
       };
     });
     $('fb-trace').onclick = trace;
     var hb = $('fb-hold'); if (hb) hb.onclick = function () {
       var lot = $('fb-lot').value.trim(); if (!lot) { toast('Enter the lot.', 'bad'); return; }
-      var why = window.prompt('Why is this lot held?') || ''; if (!why.trim()) return;
-      tunnel('/v1/prodfloor/holds', { method: 'POST', body: { subjectType: 'RM_LOT', subjectId: lot, reason: why } }).then(function (r) { if (r.status >= 400) toast(err(r, 'Not held.'), 'bad'); else { toast('Lot held', 'good'); viewRecall(item, V); } });
+      askReason('Hold this lot', 'Why is this lot held?', 'Hold lot', function (why) {
+        return tunnel('/v1/prodfloor/holds', { method: 'POST', body: { subjectType: 'RM_LOT', subjectId: lot, reason: why } }).then(function (r) { if (r.status < 400) { toast('Lot held', 'good'); viewRecall(item, V); } return r; });
+      });
     };
     $('fb-label').onclick = function () {
       var lot = $('fb-lot').value.trim(); if (!lot) { toast('Enter the lot.', 'bad'); return; }

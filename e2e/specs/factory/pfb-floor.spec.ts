@@ -85,8 +85,9 @@ test('lot hold & recall: a released lot traces, then is held and listed', async 
   await page.locator('#fb-trace').click();
   await expect(page.getByText('Lot ' + lot.batchNumber)).toBeVisible();
   await expect(page.getByText(/Shipped orders \(0\)/)).toBeVisible();
-  page.once('dialog', (d) => d.accept('Walk: suspect lot'));
   await page.locator('#fb-hold').click();
+  await page.locator('[data-ask="reason"]').fill('Walk: suspect lot');
+  await page.getByRole('button', { name: 'Hold lot', exact: true }).click();
   await expect(page.getByText('Walk: suspect lot').first()).toBeVisible();
   expect(sql(`select count(*) from inventory.lot_hold where subject_id = '${lot.rmBatch}' and released_dt is null`)).toBe('1');
   await noSideScroll(page);
