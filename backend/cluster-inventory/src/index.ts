@@ -12,3 +12,6 @@ export {
   type InventoryBatchRef,
   INVENTORY_LOOKUP,
 } from './public-api.js';
+/* PROD-B: the receiving audit (api/src/prodfloor) writes its GRN through the same service, inside
+ * its own transaction, so the checklist, the decision and the GRN land together or not at all. */
+export { GrnService } from './grn/grn.service.js';

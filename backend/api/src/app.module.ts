@@ -65,6 +65,7 @@ import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 import { RuhModule } from './ruh/ruh.module.js';
 import { PolicyModule } from './policy/policy.module.js';
 import { FloorModule } from './floor/floor.module.js';
+import { ProdfloorModule } from './prodfloor/prodfloor.module.js';
 
 @Module({
   imports: [
@@ -113,6 +114,7 @@ import { FloorModule } from './floor/floor.module.js';
     // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
     PolicyModule,
     FloorModule,
+    ProdfloorModule,
     RuhModule,
   ],
   providers: [

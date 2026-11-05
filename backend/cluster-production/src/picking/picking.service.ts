@@ -330,6 +330,11 @@ export class PickingService {
           if (!lot || lot.material_id !== materialId) {
             throw new BadRequestException('That lot is not a lot of this material. Choose a lot of the material on the line.');
           }
+          // PROD-B-7: a frozen raw lot (inventory.lot_hold) was still issuable, so a recall hold stopped nothing.
+          const held = (await tx.execute(sql`select 1 from inventory.inventory_batch ib join inventory.lot_hold h
+            on h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null
+            where ib.inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as unknown[];
+          if (held.length) throw new ConflictException('That lot is on hold and cannot be issued. Choose another lot.');
         }
         await tx.insert(materialIssueItem).values({
           materialIssueItemId: uuidv7(),

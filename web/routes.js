@@ -28,6 +28,7 @@
   var SLUG = {
     __dash__: 'home', __tutorial__: 'tutorials', __produce__: 'produce-next', __shelftasks__: 'put-away-and-pick',
     __racklayout__: 'rack-layout', __shelfdisplay__: 'shelf-display', __factorysetup__: 'factory-setup', __formulasetup__: 'formula-setup',
+    __recvaudit__: 'receiving-audit', __payrelease__: 'supplier-payments', __qccheckpoints__: 'qc-checkpoints', __qcgate__: 'batch-qc', __lotrecall__: 'lot-hold-and-recall',
     '/v1/bridge/requirements': 'alembic-orders', '/v1/formula-event-hist': 'formula-history', '/v1/audit-events': 'change-history',
     '/v1/uoms': 'units', '/v1/rm-aliases': 'material-code-names', '/v1/batch-container-mappings': 'batch-containers',
     '/v1/geo-region-types': 'region-levels', '/v1/fg-stock': 'finished-stock', '/v1/fg-reservations': 'reserved-finished-stock',

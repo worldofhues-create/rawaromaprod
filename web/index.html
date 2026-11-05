@@ -65,6 +65,9 @@
        colours. weight.js is the one weight formatter (integer mg in, display text out). -->
   <script src="/weight.js"></script>
   <script src="/ws-floor.js"></script>
+  <!-- PROD-B: production floor P2 (receiving audit, supplier payments, QC checkpoints, batch QC, lot hold
+       and recall, raw-lot label). After ws-produce.js: it adds to ROLES like the other ws-*.js. -->
+  <script src="/ws-floorb.js"></script>
   <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
        raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
        ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->
