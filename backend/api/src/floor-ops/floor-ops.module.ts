@@ -9,11 +9,13 @@ import { DeviceAgentController, DevicesController } from './devices.controller.j
 import { DevicesService } from './devices.service.js';
 import { PrintAgentController, PrintController } from './print.controller.js';
 import { PrintService } from './print.service.js';
+import { ScaleController } from './scale.controller.js';
+import { ScaleService } from './scale.service.js';
 
-const SERVICES = [DevicesService, PrintService];
+const SERVICES = [DevicesService, PrintService, ScaleService];
 
 @Module({
-  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })
