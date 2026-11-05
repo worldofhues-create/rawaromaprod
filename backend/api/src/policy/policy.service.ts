@@ -61,7 +61,7 @@ export class PolicyService {
     const rows = await this.sql<VersionRow[]>`
       select policy_key, version, body, reason, created_by, created_dt::text as created_dt
         from platform.policy_version
-       where policy_key = ${key} and created_dt <= ${at ?? new Date()}
+       where policy_key = ${key} and created_dt <= coalesce(${at ? at.toISOString() : null}::timestamptz, now())
        order by version desc limit 1`;
     if (!rows[0]) throw new PolicyUnresolved(key, 0, 'No version of this policy was in force at that time');
     return { ...rows[0], body: parseBody(rows[0].body) };
@@ -72,15 +72,20 @@ export class PolicyService {
     const recordType = ctx.record_type == null ? null : String(ctx.record_type);
     const recordId = ctx.record_id == null ? null : String(ctx.record_id);
     if (recordType && recordId) {
-      const when = at ?? new Date();
+      // PROD-B-8: an ISO string, not a Date: once any cluster wraps PG_CLIENT in Drizzle its Date serializer is
+      // replaced and a Date parameter throws (TypeError: "string" argument ... Received an instance of Date).
+      // No `at` means the database's own now(): a JS clock read is millisecond-truncated and can sit
+      // just before a row written in the same millisecond.
+      const when = at ? at.toISOString() : null;
       const [o] = await this.sql<{ override_id: string; value: unknown; reason: string; created_by: string }[]>`
-        select override_id, value, reason, created_by from platform.policy_override
+        select override_id, value::text as value, reason, created_by from platform.policy_override
          where policy_key = ${key} and record_type = ${recordType} and record_id = ${recordId}
-           and created_dt <= ${when} and (revoked_dt is null or revoked_dt > ${when})
+           and created_dt <= coalesce(${when}::timestamptz, now()) and (revoked_dt is null or revoked_dt > coalesce(${when}::timestamptz, now()))
          order by created_dt desc limit 1`;
       if (o) {
-        // jsonb arrives parsed (the Drizzle wrapper only passes dates through as text).
-        const value = o.value;
+        // Read as text and parsed here: the bare client parses jsonb, the Drizzle-wrapped one (the app's)
+        // hands it back as text, so neither shape may be assumed.
+        const value = JSON.parse(String(o.value));
         return {
           value, ruleId: `override:${o.override_id}`, version: v.version,
           explain: `OVERRIDDEN on ${recordType} ${recordId}: ${o.reason}`,
@@ -100,24 +105,25 @@ export class PolicyService {
     try {
       const r = await this.evaluate(key, ctx, at);
       await this.sql`insert into platform.policy_decision (policy_key, version, rule_id, record_type, record_id, ctx, value, explain, decided_by)
-        values (${key}, ${r.version}, ${r.ruleId}, ${recordType}, ${recordId}, ${this.sql.json(ctx as never)}, ${this.sql.json((r.value ?? null) as never)}, ${r.explain}, ${principal?.userId ?? 'system'})`;
+        values (${key}, ${r.version}, ${r.ruleId}, ${recordType}, ${recordId}, ${JSON.stringify(ctx)}::text::jsonb, ${JSON.stringify(r.value ?? null)}::text::jsonb, ${r.explain}, ${principal?.userId ?? 'system'})`;
       return r;
     } catch (e) {
       if (e instanceof PolicyUnresolved) {
         await this.sql`insert into platform.policy_decision (policy_key, version, rule_id, record_type, record_id, ctx, value, explain, decided_by)
-          values (${key}, ${e.version}, ${null}, ${recordType}, ${recordId}, ${this.sql.json(ctx as never)}, ${null}, ${'HOLD: ' + e.explain}, ${principal?.userId ?? 'system'})`;
+          values (${key}, ${e.version}, ${null}, ${recordType}, ${recordId}, ${JSON.stringify(ctx)}::text::jsonb, ${null}, ${'HOLD: ' + e.explain}, ${principal?.userId ?? 'system'})`;
       }
       throw e;
     }
   }
 
   async list() {
-    return this.sql`
+    const rows = await this.sql`
       select p.policy_key as "key", p.title, p.description, v.version, v.body, v.reason, v.created_by as "createdBy", v.created_dt::text as "createdDt",
              (select count(*)::int from platform.policy_override o where o.policy_key = p.policy_key and o.revoked_dt is null) as "activeOverrides"
         from platform.policy p
         join lateral (select * from platform.policy_version pv where pv.policy_key = p.policy_key order by version desc limit 1) v on true
        order by p.policy_key`;
+    return rows.map((r) => ({ ...r, body: parseBody(r.body) }) as Record<string, unknown>);
   }
 
   async history(key: string) {
@@ -126,14 +132,15 @@ export class PolicyService {
       select version, body, reason, created_by as "createdBy", created_dt::text as "createdDt"
         from platform.policy_version where policy_key = ${key} order by version desc`;
     const overrides = await this.sql`
-      select override_id as "overrideId", record_type as "recordType", record_id as "recordId", value, reason,
+      select override_id as "overrideId", record_type as "recordType", record_id as "recordId", value::text as value, reason,
              created_by as "createdBy", created_dt::text as "createdDt", revoked_by as "revokedBy", revoked_dt::text as "revokedDt", revoke_reason as "revokeReason"
         from platform.policy_override where policy_key = ${key} order by created_dt desc limit 200`;
     const decisions = await this.sql`
       select decision_id as "decisionId", version, rule_id as "ruleId", record_type as "recordType", record_id as "recordId", explain,
              decided_by as "decidedBy", decided_dt::text as "decidedDt"
         from platform.policy_decision where policy_key = ${key} order by decided_dt desc limit 50`;
-    return { key, versions, overrides, decisions };
+    const j = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v);
+    return { key, versions: versions.map((v) => ({ ...v, body: j(v.body) }) as Record<string, unknown>), overrides: overrides.map((o) => ({ ...o, value: JSON.parse(String(o.value)) }) as Record<string, unknown>), decisions };
   }
 
   /** Try a case against a draft body (nothing saved), or against the version in force. */
@@ -162,7 +169,7 @@ export class PolicyService {
         select coalesce(max(version), 0) + 1 as next from platform.policy_version where policy_key = ${key}`;
       const next = row!.next;
       await tx`insert into platform.policy_version (policy_key, version, body, reason, created_by)
-        values (${key}, ${next}, ${tx.json(body as never)}, ${why}, ${principal.userId})`;
+        values (${key}, ${next}, ${JSON.stringify(body)}::text::jsonb, ${why}, ${principal.userId})`;
       return { key, version: next };
     });
   }
@@ -184,7 +191,7 @@ export class PolicyService {
     try {
       const [row] = await this.sql<{ override_id: string }[]>`
         insert into platform.policy_override (policy_key, record_type, record_id, value, reason, created_by)
-        values (${key}, ${recordType}, ${recordId}, ${this.sql.json(value as never)}, ${why}, ${principal.userId})
+        values (${key}, ${recordType}, ${recordId}, ${JSON.stringify(value)}::text::jsonb, ${why}, ${principal.userId})
         returning override_id`;
       return { overrideId: row!.override_id, status: 'OVERRIDDEN' };
     } catch (e) {

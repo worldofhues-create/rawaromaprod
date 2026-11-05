@@ -24,7 +24,7 @@ async function freshPolicy(body: unknown = { rules: [], hasDefault: false }): Pr
   const key = `test.${crypto.randomUUID().slice(0, 8)}`;
   await sql`insert into platform.policy (policy_key, title) values (${key}, 'test')`;
   await sql`insert into platform.policy_version (policy_key, version, body, reason, created_by, created_dt)
-    values (${key}, 1, ${sql.json(body as never)}, 'seed', 'system', now() - interval '1 day')`;
+    values (${key}, 1, ${JSON.stringify(body)}::text::jsonb, 'seed', 'system', now() - interval '1 day')`;
   return key;
 }
 
@@ -111,4 +111,14 @@ test('version rows are append-only: two concurrent publishes get distinct versio
   const b = { rules: [], hasDefault: true, defaultValue: 1 };
   const [a, c] = await Promise.all([svc.publish(key, b, 'a', admin), svc.publish(key, b, 'c', admin)]);
   assert.notEqual(a.version, c.version);
+});
+
+test('through the Drizzle-wrapped PG_CLIENT (as in the app): evaluate with a time and an override does not throw', async () => {
+  const { drizzle } = await import('drizzle-orm/postgres-js');
+  drizzle(testClient()); // wrapping replaces the client's Date serializer, exactly as the app's modules do
+  const key = await freshPolicy({ rules: [], hasDefault: true, defaultValue: 'x' });
+  await svc.override(key, 'po', 'PO-W', 'y', 'wrapped', admin);
+  assert.equal((await svc.evaluate(key, { record_type: 'po', record_id: 'PO-W' })).value, 'y');
+  assert.equal((await svc.evaluate(key, { record_type: 'po', record_id: 'PO-W' }, new Date(Date.now() + 1000))).value, 'y');
+  assert.equal((await svc.evaluate(key, {}, new Date(Date.now() - 60_000))).value, 'x');
 });
