@@ -11,18 +11,23 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { PORTS, RUN } from './config.mjs';
 import { EMAIL, mintAssertion, type ConsoleName } from './walk';
 
-const tokens = new Map<string, string>();
+// A token is reused for 4 minutes, then signed in again. Step-up actions (a vault approval) need a session
+// issued within the last 300s, and a whole run is far longer than that, so a token kept for the run was
+// refused (AUTH_STEP_UP_REQUIRED) the moment the suite grew past five minutes before the vault specs.
+const TOKEN_REUSE_MS = 240_000;
+const tokens = new Map<string, { token: string; at: number }>();
 const API = `http://127.0.0.1:${PORTS.api}`;
 const VAULT = `http://127.0.0.1:${PORTS.vaultApi}`;
 
 async function tokenFor(role: string, target: ConsoleName) {
   const k = `${role}|${target}`;
-  if (tokens.has(k)) return tokens.get(k)!;
+  const hit = tokens.get(k);
+  if (hit && Date.now() - hit.at < TOKEN_REUSE_MS) return hit.token;
   const res = await fetch(`${API}/auth/alembic-assertion`, { method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ assertion: mintAssertion(EMAIL[role]!, target) }) });
   const j: any = await res.json();
   if (!j?.data?.accessToken) throw new Error(`sign-in for ${role} failed: ${res.status} ${JSON.stringify(j?.error)}`);
-  tokens.set(k, j.data.accessToken);
+  tokens.set(k, { token: j.data.accessToken, at: Date.now() });
   return j.data.accessToken as string;
 }
 

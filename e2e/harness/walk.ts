@@ -46,7 +46,12 @@ export async function signIn(page: Page, consoleName: ConsoleName, role: string)
   // The first-visit tour offer can appear at any moment after load; a person says not now.
   await page.addLocatorHandler(page.getByRole('button', { name: 'Maybe later', exact: true }), async (b) => { await b.click(); }).catch(() => {});
   await page.goto('about:blank'); // a second sign-in in one walk: a hash-only change would not load the page
+  // Returns once the console's assertion exchange has answered, not when the page has loaded: the shell
+  // scrubs the hash and exchanges asynchronously, so a walk's first call could go out before the session
+  // existed and read 401 (production-orders at 375, PF-REL2 run 3).
+  const exchanged = page.waitForResponse((r) => r.url().includes('/auth/alembic-assertion'), { timeout: 30_000 });
   await page.goto(`${URLS[consoleName]}/#assertion=${encodeURIComponent(mintAssertion(EMAIL[role]!, consoleName))}`);
+  await exchanged;
 }
 
 /** Read the real database. Assert on this as well as the screen, so a stale page cannot pass. */
