@@ -141,6 +141,36 @@ export const SHOWCASE_ROLE = 'showcase';
 export const MANUAL_CONTINUITY_PERMISSION = 'sales:manual_continuity:write';
 export const MANUAL_CONTINUITY_ROLES = ['owner', 'admin'];
 
+/** PROD-A (production-floor plan §10): the six floor roles. Each sees coded material only (floor
+ * code + colour, never a name, CAS or percentage) and none can give a role. */
+export const FLOOR_ROLES = ['picker', 'verifier', 'mixer', 'packing', 'logistics', 'finance'];
+
+/** Grant-refusal for the floor roles, asserted by scripts/db-seed.ts at seed time and refused at
+ * runtime by SecurityService.createRolePermission: no material identity (reveal), no role
+ * granting (iam:*), nothing from the Vault (formula:*, vault:*), no Platform Ops, not the §109.7
+ * instruction read, and none of the rules engine's admin writes. A floor role that could change
+ * the rule it is judged by, or read the recipe it is weighing, is not a floor role. */
+export function floorForbidden(p: string): boolean {
+  return (
+    p === REVEAL ||
+    p.startsWith('iam:') ||
+    p.startsWith('formula:') ||
+    p.startsWith('vault:') ||
+    p.startsWith('platformops:') ||
+    p === MANUFACTURING_INSTRUCTION_PERMISSION ||
+    p === MANUAL_CONTINUITY_PERMISSION ||
+    p === 'platform:policy:write' ||
+    p === 'platform:policy_override:write' ||
+    p === 'masterdata:floor_family:write' ||
+    p === 'masterdata:floor_code:write' ||
+    // Finance releases payments against POs; it never raises or edits one, so the maker of a PO and
+    // the releaser of its payment can never be the same role (plan §10; per payment, lane B's
+    // release service also refuses the person who raised the PO).
+    p === 'procurement:purchase_order:write' ||
+    p === 'procurement:purchase_order_items:write'
+  );
+}
+
 export const ROLES: RoleDef[] = [
   {
     // Super Admin — full access EXCEPT the decrypted recipe (§107: no implicit vault
@@ -199,6 +229,9 @@ export const ROLES: RoleDef[] = [
         'platform:document_master:read',
         'platform:document_master:write',
       ),
+      // PROD-A (plan §10, §12.0, §12.2): the admin runs the Rules screen (publish, override one
+      // record) and the ingredient family -> colour table. Floor codes are read coded, never named.
+      oneOf('platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_family:write', 'masterdata:floor_code:read'),
     ),
     sampleEmail: 'admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_ADMIN_PASSWORD',
@@ -214,6 +247,9 @@ export const ROLES: RoleDef[] = [
       (p) => p.startsWith('platform:') && isRead(p),
       (p) => p.startsWith('location:') && isRead(p),
       oneOf('inventory:gate_entry_master:read', 'inventory:grn_master:read', REVEAL),
+      // PROD-A (plan §12.2): procurement knows the real material, so it files it under a family and
+      // the code is drawn (masterdata:floor_code:write). It never sets the family colours.
+      oneOf('masterdata:floor_code:write'),
     ),
     sampleEmail: 'procurement@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PROCUREMENT_PASSWORD',
@@ -310,6 +346,9 @@ export const ROLES: RoleDef[] = [
         'inventory:stock_audit:read',
         'inventory:stock_audit:write',
         REVEAL,
+        // PROD-A: warehouse mints the opaque lot barcode at put-away and scans lots like the floor.
+        'inventory:lot_barcode:write',
+        'inventory:lot_barcode:resolve',
       ),
       startsWith('location:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -399,6 +438,8 @@ export const ROLES: RoleDef[] = [
         'quality:qc_disposition:read',
       ),
       oneOf('masterdata:rm_alias:read', 'inventory:inventory_batch:read'),
+      // PROD-A: production opens floor jobs from its runs and watches the floor queue.
+      oneOf('production:floor_queue:read', 'production:floor_job:write', 'inventory:lot_barcode:resolve', 'masterdata:floor_code:read', 'platform:policy:read'),
       (p) => p.startsWith('location:') && isRead(p),
     ),
     sampleEmail: 'production@rawaroma.local',
@@ -542,6 +583,94 @@ export const ROLES: RoleDef[] = [
     ),
     sampleEmail: 'vault.approver@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_VAULT_APPROVER_PASSWORD',
+  },
+  // ── PROD-A: the floor roles (production-floor plan §10). Coded material only, no grants. ──
+  {
+    // Picker — sees the queue, scans the rack and the lot, takes the lot it is told (FEFO), prints
+    // PICKED. Never the grams per formula and never a real ingredient name.
+    code: 'picker',
+    name: 'Picker',
+    view: 'picker',
+    select: anyOf(
+      oneOf('production:floor_queue:read', 'production:floor_pick:write', 'production:floor_label:write',
+        'inventory:lot_barcode:resolve', 'masterdata:floor_code:read'),
+      (p) => p.startsWith('location:') && isRead(p),
+    ),
+    sampleEmail: 'picker@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_PICKER_PASSWORD',
+  },
+  {
+    // Verifier (perfumer) — weighs each coded line against its target grams, prints VERIFIED. The
+    // station API gives it the grams for its own line; it never sees a percentage or a name, and it
+    // cannot verify a pick it made (the station refuses the same person).
+    code: 'verifier',
+    name: 'Verifier',
+    view: 'verifier',
+    select: anyOf(
+      oneOf('production:floor_queue:read', 'production:floor_verify:write', 'production:floor_label:write',
+        'inventory:lot_barcode:resolve', 'masterdata:floor_code:read', 'platform:uom_master:read'),
+      (p) => p.startsWith('location:') && isRead(p),
+    ),
+    sampleEmail: 'verifier@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_VERIFIER_PASSWORD',
+  },
+  {
+    // Mixer / blender (perfumer 2) — follows the coded steps in order, creates the batch, prints
+    // MIXED. Cannot mix a job they verified, and (P2) cannot QC their own batch.
+    code: 'mixer',
+    name: 'Mixer',
+    view: 'mixer',
+    select: anyOf(
+      oneOf('production:floor_queue:read', 'production:floor_mix:write', 'production:floor_label:write',
+        'inventory:lot_barcode:resolve', 'masterdata:floor_code:read'),
+      (p) => p.startsWith('location:') && isRead(p),
+    ),
+    sampleEmail: 'mixer@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_MIXER_PASSWORD',
+  },
+  {
+    // Packing — fills and seals QC-approved batches (today's filling/packaging records). The packing
+    // station itself is plan phase P2; this role holds what that station will read and write.
+    code: 'packing',
+    name: 'Packing',
+    view: 'packing',
+    select: oneOf(
+      'packaging:package_order:read', 'packaging:package_order_item:read', 'packaging:filling_session:read',
+      'packaging:filling_session:write', 'packaging:filling_session_details:read', 'packaging:filling_session_details:write',
+      'packaging:finished_good_batch_master:read', 'packaging:product_sku:read', 'inventory:lot_barcode:resolve',
+      'masterdata:floor_code:read', 'platform:uom_master:read',
+    ),
+    sampleEmail: 'packing@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_PACKING_PASSWORD',
+  },
+  {
+    // Logistics — dispatch documents, courier, AWB, handover (plan §9, phase P4). Cannot change a
+    // price or an order: no sales_order write, no customer write.
+    code: 'logistics',
+    name: 'Logistics',
+    view: 'logistics',
+    select: oneOf(
+      'sales:dispatch_master:read', 'sales:dispatch_master:write', 'sales:dispatch_items:read', 'sales:dispatch_items:write',
+      'sales:transporter_master:read', 'sales:sales_order:read', 'sales:sales_order_items:read',
+      'packaging:finished_good_batch_master:read', 'inventory:lot_barcode:resolve',
+    ),
+    sampleEmail: 'logistics@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_LOGISTICS_PASSWORD',
+  },
+  {
+    // Finance — releases PO payments (plan §10, §12.8): requests, approves and releases through lane B's
+    // procurement:po_payment_release gate, which refuses the person who raised the PO and the one who
+    // requested the same payment. Never holds PO create/edit (floorForbidden).
+    code: 'finance',
+    name: 'Finance',
+    view: 'finance',
+    select: oneOf(
+      'procurement:purchase_order:read', 'procurement:purchase_order_items:read', 'procurement:vendor_details:read',
+      'procurement:vendor_credit_note:read', 'procurement:vendor_credit_notes_allocation:read', 'inventory:grn_master:read',
+      'platform:policy:read', 'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
+    ),
+    sampleEmail: 'finance@rawaroma.local',
+    passwordEnv: 'BOOTSTRAP_FINANCE_PASSWORD',
   },
   {
     // Platform Super Admin — platform operations only (§106 UI, this launch's Platform Ops

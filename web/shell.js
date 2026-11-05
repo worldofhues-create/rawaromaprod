@@ -569,7 +569,9 @@
   function closePalette() { var w = $('ra-cmdk'); if (w) w.remove(); }
   function navTo(k, ref) {
     var R = ROLES[st.role]; if (!R || !R.nav.some(function (n) { return n[0] === k; })) return;
-    if (st.nav === k && !st.ref && !ref) return;
+    // PROD-A-7: choosing the screen already open still closes the phone drawer. A floor role's first
+    // screen IS its landing screen, so the drawer stayed over the kiosk and swallowed every tap.
+    if (st.nav === k && !st.ref && !ref) { if (window.innerWidth <= 1023 && st.drawer) { st.drawer = false; applyResponsive(); } return; }
     st.nav = k; st.search = ''; st.ref = ref || '';
     if (window.innerWidth <= 1023) st.drawer = false;
     setRoute(routeFor(k, st.ref), false);

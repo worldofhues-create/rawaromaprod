@@ -72,6 +72,8 @@ import { PRODUCTION_DB, drizzle, productionSchema } from './production.tokens.js
   ],
   // FACTORY-SETUP: CoaService is exported so an approved QC-spec proposal is written through the
   // same upsertSpec the QC screen uses, as the approving person.
-  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP, ProduceQueueService, CoaService],
+  // PROD-A: the floor stations (backend/api/src/floor) drive the existing pick -> issue -> mixing
+  // session -> oil batch flow through these services rather than writing those tables themselves.
+  exports: [PRODUCTION_DB, PRODUCTION_LOOKUP, ProduceQueueService, CoaService, PickingService, MixingService, BatchService],
 })
 export class ProductionModule {}

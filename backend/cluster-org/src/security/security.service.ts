@@ -91,6 +91,25 @@ const PLATFORMOPS_SENSITIVE = (code: string): boolean => code.startsWith('platfo
 // Mirrors scripts/ra-roles.ts PLATFORM_OPS_ROLES (owner added 2026-09-28, lane platform-roles).
 const PLATFORMOPS_ALLOWED_ROLES = ['platform_super_admin', 'owner'];
 
+/** PROD-A (production-floor plan §10): the floor roles, and what may never be mapped onto them at
+ * runtime. Mirrors FLOOR_ROLES / floorForbidden() in scripts/ra-roles.ts (the seed's copy), which
+ * floor-roles.test.ts holds equal. A floor role sees coded material only and gives no role. */
+export const FLOOR_ROLES = ['picker', 'verifier', 'mixer', 'packing', 'logistics', 'finance'];
+export const FLOOR_FORBIDDEN = (code: string): boolean =>
+  code === 'masterdata:material:reveal' ||
+  code.startsWith('iam:') ||
+  code.startsWith('formula:') ||
+  code.startsWith('vault:') ||
+  code.startsWith('platformops:') ||
+  code === 'production:manufacturing_instruction:read' ||
+  code === 'sales:manual_continuity:write' ||
+  code === 'platform:policy:write' ||
+  code === 'platform:policy_override:write' ||
+  code === 'masterdata:floor_family:write' ||
+  code === 'masterdata:floor_code:write' ||
+  code === 'procurement:purchase_order:write' ||
+  code === 'procurement:purchase_order_items:write';
+
 /** Target roles for user_role_mapping that get an explicit allow-list EXCEPTION to the
  * ordinary "you can only grant a subset of your own permissions" rule (security review
  * item 6) — see createUserRole. `owner`/`admin` never hold vault:* / formula:actual:read
@@ -395,7 +414,8 @@ export class SecurityService {
     const violatesVaultFormula = VAULT_FORMULA_SENSITIVE(permCode) &&
       !(approverOnly ? roleCode === 'vault_approver' : VAULT_FORMULA_ALLOWED_ROLES.includes(roleCode));
     const violatesPlatformOps = PLATFORMOPS_SENSITIVE(permCode) && !PLATFORMOPS_ALLOWED_ROLES.includes(roleCode);
-    if (violatesVaultFormula || violatesPlatformOps) {
+    const violatesFloor = FLOOR_ROLES.includes(roleCode) && FLOOR_FORBIDDEN(permCode);
+    if (violatesVaultFormula || violatesPlatformOps || violatesFloor) {
       if (this.auditSink) {
         await this.auditSink
           .record({

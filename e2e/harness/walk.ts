@@ -18,6 +18,9 @@ export const EMAIL: Record<string, string> = {
   compounding: 'compounding@rawaroma.local', production: 'production@rawaroma.local', filling: 'filling@rawaroma.local',
   packaging: 'packaging@rawaroma.local', sales: 'sales@rawaroma.local', formulator: 'formulator@rawaroma.local',
   vault_approver: 'vault.approver@rawaroma.local', platform_super_admin: 'platform.admin@rawaroma.local',
+  // PROD-A floor roles
+  picker: 'picker@rawaroma.local', verifier: 'verifier@rawaroma.local', mixer: 'mixer@rawaroma.local',
+  packing: 'packing@rawaroma.local', logistics: 'logistics@rawaroma.local', finance: 'finance@rawaroma.local',
 };
 
 const b64u = (v: string | Buffer) => Buffer.from(v).toString('base64url');
