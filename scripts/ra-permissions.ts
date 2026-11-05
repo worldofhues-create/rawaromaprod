@@ -218,6 +218,8 @@ export const RA_PERMISSIONS: string[] = [
   'procurement:stock_requirement:write',
   'procurement:vendor_contact:read',
   'procurement:vendor_contact:write',
+  'procurement:po_payment_release:read',
+  'procurement:po_payment_release:write',
   'procurement:vendor_credit_note:read',
   'procurement:vendor_credit_note:write',
   'procurement:vendor_credit_notes_allocation:read',

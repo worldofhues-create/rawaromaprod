@@ -43,10 +43,17 @@ test('station split: picker picks, verifier verifies, mixer mixes; none holds an
   for (const g of [p, v, m]) assert.ok(g.includes('inventory:lot_barcode:resolve') && g.includes('production:floor_label:write'));
 });
 
-test('logistics cannot change an order or a price; finance only reads', () => {
+test('logistics cannot change an order or a price', () => {
   const l = grantOf('logistics');
   assert.ok(!l.includes('sales:sales_order:write') && !l.includes('sales:sales_order_items:write') && !l.includes('sales:customer_master:write'));
-  assert.ok(grantOf('finance').every((p) => p.endsWith(':read')));
+});
+
+test('finance releases PO payments but can never raise or edit a PO (maker-checker by role)', () => {
+  const f = grantOf('finance');
+  assert.ok(f.includes('procurement:po_payment_release:read') && f.includes('procurement:po_payment_release:write'));
+  assert.ok(!f.includes('procurement:purchase_order:write') && !f.includes('procurement:purchase_order_items:write'));
+  assert.equal(floorForbidden('procurement:purchase_order:write'), true);
+  assert.equal(FLOOR_FORBIDDEN('procurement:purchase_order:write'), true);
 });
 
 test('the runtime refusal mirrors the seed rule exactly', () => {
@@ -86,6 +93,14 @@ test('runtime: mapping material reveal onto picker is refused; an allowed floor 
   const policyWrite = await permId('platform:policy:write');
   await assert.rejects(() => security.createRolePermission({ roleId: pickerRoleId, permissionId: reveal } as never, owner), /may never be mapped/);
   await assert.rejects(() => security.createRolePermission({ roleId: pickerRoleId, permissionId: policyWrite } as never, owner), /may never be mapped/);
-  const ok = await security.createRolePermission({ roleId: pickerRoleId, permissionId: await permId('production:floor_queue:read') } as never, owner);
+  // and PO create can never be mapped onto finance at runtime
+  const [fin] = await sql<{ role_id: string }[]>`select role_id from iam.role_master where role_code = 'finance'`;
+  const finId = fin?.role_id ?? uuidv7();
+  if (!fin) await sql`insert into iam.role_master (role_id, role_code, role_name, status, created_by, updated_by) values (${finId}, 'finance', 'Finance', 'ACTIVE', 'test', 'test')`;
+  const poWrite = await permId('procurement:purchase_order:write');
+  await assert.rejects(() => security.createRolePermission({ roleId: finId, permissionId: poWrite } as never, owner), /may never be mapped/);
+  const queueRead = await permId('production:floor_queue:read');
+  await sql`delete from iam.role_permission_mapping where role_id = ${pickerRoleId} and permission_id = ${queueRead}`; // a re-run on the same database
+  const ok = await security.createRolePermission({ roleId: pickerRoleId, permissionId: queueRead } as never, owner);
   assert.ok(ok);
 });

@@ -106,7 +106,9 @@ export const FLOOR_FORBIDDEN = (code: string): boolean =>
   code === 'platform:policy:write' ||
   code === 'platform:policy_override:write' ||
   code === 'masterdata:floor_family:write' ||
-  code === 'masterdata:floor_code:write';
+  code === 'masterdata:floor_code:write' ||
+  code === 'procurement:purchase_order:write' ||
+  code === 'procurement:purchase_order_items:write';
 
 /** Target roles for user_role_mapping that get an explicit allow-list EXCEPTION to the
  * ordinary "you can only grant a subset of your own permissions" rule (security review

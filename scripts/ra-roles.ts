@@ -162,7 +162,12 @@ export function floorForbidden(p: string): boolean {
     p === 'platform:policy:write' ||
     p === 'platform:policy_override:write' ||
     p === 'masterdata:floor_family:write' ||
-    p === 'masterdata:floor_code:write'
+    p === 'masterdata:floor_code:write' ||
+    // Finance releases payments against POs; it never raises or edits one, so the maker of a PO and
+    // the releaser of its payment can never be the same role (plan §10; per payment, lane B's
+    // release service also refuses the person who raised the PO).
+    p === 'procurement:purchase_order:write' ||
+    p === 'procurement:purchase_order_items:write'
   );
 }
 
@@ -653,15 +658,16 @@ export const ROLES: RoleDef[] = [
     passwordEnv: 'BOOTSTRAP_LOGISTICS_PASSWORD',
   },
   {
-    // Finance — reads POs, GRNs and supplier credit to release payments against them (plan §4/§12.8).
-    // The release gate itself is plan phase P2; maker-checker (never on a PO they raised) lives there.
+    // Finance — releases PO payments (plan §10, §12.8): requests, approves and releases through lane B's
+    // procurement:po_payment_release gate, which refuses the person who raised the PO and the one who
+    // requested the same payment. Never holds PO create/edit (floorForbidden).
     code: 'finance',
     name: 'Finance',
     view: 'finance',
     select: oneOf(
       'procurement:purchase_order:read', 'procurement:purchase_order_items:read', 'procurement:vendor_details:read',
       'procurement:vendor_credit_note:read', 'procurement:vendor_credit_notes_allocation:read', 'inventory:grn_master:read',
-      'platform:policy:read',
+      'platform:policy:read', 'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
     ),
     sampleEmail: 'finance@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_FINANCE_PASSWORD',
