@@ -3,6 +3,20 @@
  */
 import { BadRequestException } from '@nestjs/common';
 import { createHash, randomBytes, randomInt } from 'node:crypto';
+import { PgDialect } from 'drizzle-orm/pg-core';
+import type { SQL } from 'drizzle-orm';
+import type { Sql } from 'postgres';
+
+const dialect = new PgDialect();
+/** A postgres.js client or transaction as the `execute(sql\`…\`)` surface the kernel's helpers take. */
+export function drizzleExec(tx: Sql) {
+  return {
+    execute: (q: SQL) => {
+      const c = dialect.sqlToQuery(q);
+      return tx.unsafe(c.sql, c.params as never[]);
+    },
+  };
+}
 
 export type Clock = () => Date;
 export const systemClock: Clock = () => new Date();

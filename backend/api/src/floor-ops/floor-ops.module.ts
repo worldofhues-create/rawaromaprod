@@ -11,12 +11,19 @@ import { PrintAgentController, PrintController } from './print.controller.js';
 import { PrintService } from './print.service.js';
 import { ScaleController } from './scale.controller.js';
 import { ScaleService } from './scale.service.js';
+import { MacerationController } from './maceration.controller.js';
+import { MacerationService } from './maceration.service.js';
+import { FloorSweepService } from './floor-sweep.service.js';
 
-const SERVICES = [DevicesService, PrintService, ScaleService];
+const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService];
 
 @Module({
-  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })
 export class FloorOpsModule {}
+
+/** Worker: the floor sweeps (offline devices, stale print jobs, maceration alarms). */
+@Module({ providers: [...SERVICES, FloorSweepService] })
+export class FloorOpsWorkerModule {}

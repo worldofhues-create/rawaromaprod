@@ -13,7 +13,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, lt, ne, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_LOOKUP, type PackagingLookup } from '@ra/cluster-packaging';
 import { SALES_DB, salesSchema, type SalesDb } from '../sales.tokens.js';
@@ -152,6 +152,8 @@ export class DispatchService {
       // deadlocking against a concurrent multi-batch dispatch that locks the same two batches.
       for (const batchId of Array.from(perBatch.keys()).sort()) {
         const requested = perBatch.get(batchId)!;
+        // Lane pf-c (plan 8): a macerating batch cannot ship.
+        await assertNotMacerating(tx, { finishedGoodBatchId: batchId }, 'ship');
         const available = await this.fgAvailableLocked(tx, batchId);
         if (requested > available) {
           throw new ConflictException(

@@ -15,7 +15,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
-import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, macerationOnTransition, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -209,6 +209,9 @@ export class BatchService {
           `Oil batch ${id} was moved off ${current} by a concurrent request; refusing this stale ${current}→${tgt} transition.`,
         );
       }
+
+      // Lane pf-c (plan 8): QC 1 -> maceration -> freeze -> QC 2, enforced in this transaction.
+      await macerationOnTransition(tx, { oilBatchId: id, from: current, to: tgt, userId: principal.userId });
 
       await tx.insert(oilBatchEventHistory).values({
         oilBatchEventHistoryId: uuidv7(),
