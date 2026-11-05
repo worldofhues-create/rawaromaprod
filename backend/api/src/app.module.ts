@@ -63,6 +63,7 @@ import { ShelfModule } from './shelf/shelf.module.js';
 import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
 import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 import { RuhModule } from './ruh/ruh.module.js';
+import { PolicyModule } from './policy/policy.module.js';
 
 @Module({
   imports: [
@@ -109,6 +110,7 @@ import { RuhModule } from './ruh/ruh.module.js';
     AriaBridgeModule,
     // Always-on Ruh (owner rulings 2026-10-06): the panel's routes, and the guard interceptor that
     // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
+    PolicyModule,
     RuhModule,
   ],
   providers: [
