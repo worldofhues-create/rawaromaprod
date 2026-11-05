@@ -20,11 +20,12 @@ import { AnyAuthenticated, CurrentUser, Permissions, Public, PG_CLIENT, type Aut
 import { Inject } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { DevicesService } from './devices.service.js';
+import { DisplayService } from './display.service.js';
 import { ackAlert } from './floor-alerts.js';
 
 @Controller('v1')
 export class DevicesController {
-  constructor(private readonly devices: DevicesService, @Inject(PG_CLIENT) private readonly sql: Sql) {}
+  constructor(private readonly devices: DevicesService, @Inject(PG_CLIENT) private readonly sql: Sql, private readonly displaySvc: DisplayService) {}
 
   @Permissions('platform:device:read')
   @Get('devices')
@@ -56,6 +57,13 @@ export class DevicesController {
     return this.devices.revoke(id, principal);
   }
 
+  @AnyAuthenticated('the floor board (job numbers, stages, maceration days, QC backlog); coded, no formula or price')
+  @Get('floor/display')
+  board(@Query('station') station?: string) {
+    return this.displayFeed(station || null);
+  }
+  private displayFeed(station: string | null) { return this.displaySvc.feed(station); }
+
   @AnyAuthenticated('every station screen shows its own alerts (printer offline, maceration complete); alerts carry no formula or price')
   @Get('floor/alerts')
   alerts(@Query('station') station?: string) {
@@ -72,7 +80,16 @@ export class DevicesController {
 
 @Controller('v1/device-agent')
 export class DeviceAgentController {
-  constructor(private readonly devices: DevicesService) {}
+  constructor(private readonly devices: DevicesService, private readonly display: DisplayService) {}
+
+  /** A paired TV's screen: queue, maceration timers, QC backlog, its station's alerts. Read-only. */
+  @Public()
+  @Get('display')
+  async tv(@Headers('x-device-token') token: string) {
+    const d = await this.devices.authenticate(token);
+    if (d.kind !== 'display' && d.kind !== 'kiosk') throw new NotFoundException('Only a paired display or kiosk shows the floor board.');
+    return this.display.feed(d.station);
+  }
 
   /** Public by design: the device has no login. The 6-digit code (10 minutes, single use, throttled) is the credential. */
   @Public()

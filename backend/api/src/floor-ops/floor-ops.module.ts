@@ -19,8 +19,9 @@ import { PackingService } from './packing.service.js';
 import { CourierController, LogisticsController } from './logistics.controller.js';
 import { LogisticsService } from './logistics.service.js';
 import { CourierService } from './courier.service.js';
+import { DisplayService } from './display.service.js';
 
-const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService];
+const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService, DisplayService];
 
 @Module({
   controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController, LogisticsController, CourierController],
