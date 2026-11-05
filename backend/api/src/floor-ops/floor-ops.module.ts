@@ -7,11 +7,13 @@
 import { Module } from '@nestjs/common';
 import { DeviceAgentController, DevicesController } from './devices.controller.js';
 import { DevicesService } from './devices.service.js';
+import { PrintAgentController, PrintController } from './print.controller.js';
+import { PrintService } from './print.service.js';
 
-const SERVICES = [DevicesService];
+const SERVICES = [DevicesService, PrintService];
 
 @Module({
-  controllers: [DevicesController, DeviceAgentController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })

@@ -1,0 +1,28 @@
+/**
+ * The label renderer, server side (lane pf-c). There is ONE implementation of label layout and
+ * printer languages: web/label-render.js, a classic script the page, the print agent and this
+ * module all load. The API runs from a full checkout (DEPLOY.md §3), so it reads the same file
+ * and runs it in a vm, exactly as the tests do. Never fork it.
+ */
+import { readFileSync } from 'node:fs';
+import { runInNewContext } from 'node:vm';
+
+export interface LabelElement { t: 'text' | 'code128' | 'line'; x: number; y: number; w?: number; h?: number; s?: string; b?: boolean; d?: string }
+export interface LabelTemplate { v: 1; size: string; w: number; h: number; reprint: boolean; elements: LabelElement[]; src?: LabelContent }
+export interface LabelContent { brand?: string; title?: string; lines?: Array<[string, string | number | null]>; code?: string; footer?: string; reprint?: boolean }
+interface RaLabel {
+  SIZES: Record<string, { w: number; h: number | null; continuous?: boolean; name: string }>;
+  LANGUAGES: string[];
+  build(content: LabelContent, size: string): LabelTemplate;
+  render(t: LabelTemplate, language: string, opts?: { dpi?: number; copies?: number }): { language: string; encoding: 'utf8' | 'base64'; body: string };
+}
+
+let loaded: RaLabel | undefined;
+export function label(): RaLabel {
+  if (!loaded) {
+    const sandbox: Record<string, unknown> = { Buffer };
+    runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
+    loaded = sandbox.RaLabel as RaLabel;
+  }
+  return loaded;
+}
