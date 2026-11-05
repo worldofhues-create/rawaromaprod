@@ -23,7 +23,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { emitBridgeManualEvent, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, emitBridgeManualEvent, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { SHELF_DB, type ShelfDb, type ShelfTx } from './shelf.tokens.js';
 import { ShelfLayoutService, WALK_ORDER_SQL, type BinLocation } from './shelf-layout.service.js';
 import { PickLightService, colourFor, type PickLightCommand } from './pick-light.service.js';
@@ -260,6 +260,8 @@ export class ShelfTaskService {
       if (!t) throw new NotFoundException(`Task ${taskId} not found.`);
       if (t.kind !== 'PUTAWAY') throw new BadRequestException('That is not a put-away task.');
       if (t.status !== 'OPEN') throw new ConflictException(`This put-away is already ${t.status.toLowerCase()}.`);
+      // Lane pf-c (plan 8): a macerating batch cannot go to the FG rack.
+      await assertNotMacerating(tx, { finishedGoodBatchId: t.fg }, 'move to the finished-goods rack');
       const bin = await this.layout.resolve(binCode, tx);
       const fg = await this.fgBatch(t.fg, tx);
       if (fg.qc !== 'RELEASED') throw new ConflictException(qcRefusal(fg, 'put away'));
@@ -499,6 +501,7 @@ export class ShelfTaskService {
 
   async move(body: { finishedGoodBatchId: string; fromBinCode: string; toBinCode: string; qty?: number | null }, principal: AuthPrincipal) {
     return this.db.transaction(async (tx) => {
+      await assertNotMacerating(tx, { finishedGoodBatchId: body.finishedGoodBatchId }, 'move between finished-goods bins');
       const from = await this.layout.resolve(body.fromBinCode, tx);
       const to = await this.layout.resolve(body.toBinCode, tx);
       if (from.binId === to.binId) throw new BadRequestException('The two bins are the same.');

@@ -68,6 +68,11 @@
   <!-- PROD-B: production floor P2 (receiving audit, supplier payments, QC checkpoints, batch QC, lot hold
        and recall, raw-lot label). After ws-produce.js: it adds to ROLES like the other ws-*.js. -->
   <script src="/ws-floorb.js"></script>
+  <!-- Lane pf-c (production floor P3/P4): weight display (lane A's web/weight.js, loaded once above), the one label
+       template renderer, then Devices, Print queue, Maceration, Packing, Logistics, Couriers, Floor
+       board and kiosk lock. After the other ws-*.js (it adds to their ROLES). -->
+  <script src="/label-render.js"></script>
+  <script src="/ws-floor-ops.js"></script>
   <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
        raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
        ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->

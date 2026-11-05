@@ -15,7 +15,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, getTableColumns, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, emitBridgeOutbound, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { num, paginate, type Page } from '../_helpers.js';
@@ -48,6 +48,8 @@ export class ReservationService {
       if (!batch) {
         throw new NotFoundException(`finished_good_batch not found: ${body.finishedGoodBatchId}`);
       }
+      // Lane pf-c (plan 8): a macerating batch cannot be reserved to an order.
+      await assertNotMacerating(tx, { finishedGoodBatchId: body.finishedGoodBatchId }, 'be reserved');
 
       const dispatched = (await tx.execute(sql`
         select coalesce(sum(dispatched_qty), 0)::text as total from sales.dispatch_items

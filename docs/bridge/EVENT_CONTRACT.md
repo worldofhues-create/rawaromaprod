@@ -150,7 +150,7 @@ The Factory's answer when the goods reach ALEMBIC's shelf is the fact
 | `FgBatchAvailable` | Finished-good batch produced |
 | `AtpAllocationGranted` | FG allocated against this requirement |
 | `DispatchReady` | Ready to ship |
-| `Dispatched` | `{ awb, carrier, dispatched_at }` |
+| `Dispatched` | `{ awb, carrier, dispatched_at }`, plus `courier` (same as `carrier`), `lots` (batch numbers shipped), `dispatch_id`, `sales_order_id`. `awb`/`carrier` are null when the dispatch was not booked through the logistics station (lane pf-c). |
 | `ProductionRequirementCancelledAck` | Acknowledges an ALEMBIC-initiated cancellation |
 | `ProductionRequirementCompleted` | `{ requirement_id, correlation_id, order_ref, receipt_ref }` — RawProd applied `ProductionRequirementFulfilled`; exactly once per requirement. `Dispatched` remains for manual-continuity sales orders only. |
 

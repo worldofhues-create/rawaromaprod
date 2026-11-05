@@ -42,6 +42,14 @@ async function loadAt(ref: string): Promise<{ codes: string[]; roles: RolesModul
     for (const f of ['ra-permissions.ts', 'ra-roles.ts']) {
       writeFileSync(join(dir, f), execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8' }));
     }
+    // Both files import lane pf-c's ./pfc-grants.js from the first ref that has it on. Without the copy
+    // the import fails, so a --since at or after that ref could not load the old catalogue at all.
+    // A ref before it never imports it, and has no file to copy.
+    for (const f of ['pfc-grants.ts']) {
+      let src: string | null = null;
+      try { src = execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { src = null; }
+      if (src !== null) writeFileSync(join(dir, f), src);
+    }
     const perms = (await import(pathToFileURL(join(dir, 'ra-permissions.ts')).href)) as { RA_PERMISSIONS: string[] };
     const roles = (await import(pathToFileURL(join(dir, 'ra-roles.ts')).href)) as Partial<RolesModule>;
     return { codes: [...perms.RA_PERMISSIONS, ...(roles.CAPABILITY_PERMISSIONS ?? [])], roles: roles.ROLES ?? [] };

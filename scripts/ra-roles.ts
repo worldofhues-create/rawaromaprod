@@ -1,3 +1,5 @@
+import { pfcGrant } from './pfc-grants.js';
+
 // RA role catalog — the role → permission-subset matrix seeded into iam.role_master +
 // role_permission_mapping. Each role's `select(permissionCode)` decides which of the 263
 // RA_PERMISSIONS it is granted. Phase-1 roles mirror the portal design 1:1.
@@ -217,6 +219,7 @@ export const ROLES: RoleDef[] = [
     // G1/PB-08: admin is one of the two roles allowed to hold the sales manual-continuity
     // break-glass permission (owner is the other, via its blanket grant below).
     select: anyOf(
+      pfcGrant('admin'),
       startsWith('iam:'),
       oneOf('packaging:finished_good_batch_master:read', MANUAL_CONTINUITY_PERMISSION),
       // The Setup and Records entries on Admin's rail. Reference data: no formula and no material
@@ -290,6 +293,7 @@ export const ROLES: RoleDef[] = [
     name: 'QC Laboratory',
     view: 'qc',
     select: anyOf(
+      pfcGrant('qc'),
       startsWith('quality:'),
       oneOf(
         'production:production_qc:read',
@@ -328,6 +332,7 @@ export const ROLES: RoleDef[] = [
     name: 'Warehouse',
     view: 'warehouse',
     select: anyOf(
+      pfcGrant('warehouse'),
       oneOf(
         'inventory:inventory_batch:read',
         'inventory:inventory_batch:write',
@@ -402,6 +407,7 @@ export const ROLES: RoleDef[] = [
     name: 'Production Manager',
     view: 'production',
     select: anyOf(
+      pfcGrant('production'),
       oneOf(
         'platform:uom_master:read', // units only: the Unit list on the order form was empty without it
         'production:production_plan:read',
@@ -475,6 +481,7 @@ export const ROLES: RoleDef[] = [
     name: 'Packaging',
     view: 'packaging',
     select: anyOf(
+      pfcGrant('packaging'),
       startsWith('packaging:'),
       // Units: the Unit list on the package order was empty without it.
       oneOf('production:oil_batch_master:read', 'sales:dispatch_master:read', 'sales:dispatch_items:read', 'platform:uom_master:read', REVEAL),
@@ -495,6 +502,7 @@ export const ROLES: RoleDef[] = [
     // ordinary sales_order(_items):write permission only; the break-glass continuity path is
     // owner/admin-only (MANUAL_CONTINUITY_ROLES).
     select: anyOf(
+      pfcGrant('sales'),
       (p) => p.startsWith('sales:') && p !== MANUAL_CONTINUITY_PERMISSION,
       oneOf(
         'packaging:finished_good_batch_master:read',
@@ -634,12 +642,12 @@ export const ROLES: RoleDef[] = [
     code: 'packing',
     name: 'Packing',
     view: 'packing',
-    select: oneOf(
+    select: anyOf(pfcGrant('packing'), oneOf(
       'packaging:package_order:read', 'packaging:package_order_item:read', 'packaging:filling_session:read',
       'packaging:filling_session:write', 'packaging:filling_session_details:read', 'packaging:filling_session_details:write',
       'packaging:finished_good_batch_master:read', 'packaging:product_sku:read', 'inventory:lot_barcode:resolve',
       'masterdata:floor_code:read', 'platform:uom_master:read',
-    ),
+    )),
     sampleEmail: 'packing@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_PACKING_PASSWORD',
   },
@@ -649,11 +657,11 @@ export const ROLES: RoleDef[] = [
     code: 'logistics',
     name: 'Logistics',
     view: 'logistics',
-    select: oneOf(
+    select: anyOf(pfcGrant('logistics'), oneOf(
       'sales:dispatch_master:read', 'sales:dispatch_master:write', 'sales:dispatch_items:read', 'sales:dispatch_items:write',
       'sales:transporter_master:read', 'sales:sales_order:read', 'sales:sales_order_items:read',
       'packaging:finished_good_batch_master:read', 'inventory:lot_barcode:resolve',
-    ),
+    )),
     sampleEmail: 'logistics@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_LOGISTICS_PASSWORD',
   },

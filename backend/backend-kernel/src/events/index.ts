@@ -19,6 +19,7 @@ export {
   emitBridgeManualEvent,
   type BridgeEmitTx,
 } from './bridge-emit.js';
+export { assertNotMacerating, macerationOnTransition, macerationProgress } from './maceration-gate.js';
 export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';
 export {
   recordProduceAlert,

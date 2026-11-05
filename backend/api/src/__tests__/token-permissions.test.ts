@@ -197,18 +197,24 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 285 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 298 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
   // 283: + the 14 PROD-A floor/rules permissions (lane pf-a, 2026-11-05).
   // 285: + lane B's procurement:po_payment_release:read|write (plan 12.8 payment release).
-  assert.equal(ownerGrant.length, 285);
-  // Named, so a different 14 cannot stand in for these: each must be the owner's.
+  // 298: + lane pf-c's 13 device / print / maceration / packing / logistics / courier permissions
+  //      (scripts/pfc-grants.ts). The owner holds every one of them, release_early included.
+  assert.equal(ownerGrant.length, 298);
+  // Named, so a different 29 cannot stand in for these: each must be the owner's.
   for (const p of ['platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_code:read',
     'masterdata:floor_code:write', 'masterdata:floor_family:write', 'inventory:lot_barcode:resolve', 'inventory:lot_barcode:write',
     'production:floor_queue:read', 'production:floor_job:write', 'production:floor_pick:write', 'production:floor_verify:write',
-    'production:floor_mix:write', 'production:floor_label:write', 'procurement:po_payment_release:read', 'procurement:po_payment_release:write']) assert.ok(ownerGrant.includes(p), `owner holds ${p}`);
+    'production:floor_mix:write', 'production:floor_label:write', 'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
+    'packaging:packing_station:write', 'platform:courier_connector:read', 'platform:courier_connector:write',
+    'platform:device:read', 'platform:device:write', 'platform:print_job:read', 'platform:print_job:write',
+    'production:maceration:read', 'production:maceration:release_early', 'production:maceration:write',
+    'production:maceration_setting:write', 'sales:logistics:write', 'sales:shipment:read']) assert.ok(ownerGrant.includes(p), `owner holds ${p}`);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

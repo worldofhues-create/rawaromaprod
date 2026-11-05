@@ -66,6 +66,7 @@ import { RuhModule } from './ruh/ruh.module.js';
 import { PolicyModule } from './policy/policy.module.js';
 import { FloorModule } from './floor/floor.module.js';
 import { ProdfloorModule } from './prodfloor/prodfloor.module.js';
+import { FloorOpsModule } from './floor-ops/floor-ops.module.js';
 
 @Module({
   imports: [
@@ -116,6 +117,8 @@ import { ProdfloorModule } from './prodfloor/prodfloor.module.js';
     FloorModule,
     ProdfloorModule,
     RuhModule,
+    // Lane pf-c (production floor P3/P4): devices, print jobs, scales, maceration, packing, logistics.
+    FloorOpsModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up

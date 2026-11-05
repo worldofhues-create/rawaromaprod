@@ -1,6 +1,8 @@
 // RA permission catalog — every cluster:table:action string guarded by a @Permissions
 // decorator across the backend controllers. Grep-generated; regenerate if routes change.
 // Seeded into iam.permission_master (permission_code) and granted to the owner role.
+import { PFC_PERMISSIONS } from './pfc-grants.js';
+
 export const RA_PERMISSIONS: string[] = [
   'formula:actual:read',
   'formula:formula_access_policy:read',
@@ -313,4 +315,6 @@ export const RA_PERMISSIONS: string[] = [
   'production:floor_verify:write',
   'production:floor_mix:write',
   'production:floor_label:write',
+  // Lane pf-c (production floor P3/P4): scripts/pfc-grants.ts.
+  ...PFC_PERMISSIONS,
 ];

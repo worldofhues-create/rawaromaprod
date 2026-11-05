@@ -45,6 +45,7 @@ import { ComplianceCertificateSyncModule } from './vault-bridge/compliance-certi
 import { ShelfModule } from './shelf/shelf.module.js';
 import { ProduceSweepModule } from './produce/produce-sweep.module.js';
 import { RuhWorkerModule } from './ruh/ruh.module.js';
+import { FloorOpsWorkerModule } from './floor-ops/floor-ops.module.js';
 
 @Module({
   imports: [
@@ -90,6 +91,8 @@ import { RuhWorkerModule } from './ruh/ruh.module.js';
     // Always-on Ruh (owner rulings 2026-10-06): the watch engine (interval is a Ruh setting; 0 = off)
     // and the durable C3 queue toward ALEMBIC, retried with backoff until delivered.
     RuhWorkerModule,
+    // Lane pf-c: offline devices, stale print jobs, maceration alarms.
+    FloorOpsWorkerModule,
   ],
 })
 export class WorkerModule {}
