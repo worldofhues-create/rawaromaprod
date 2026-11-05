@@ -94,7 +94,7 @@
       if (j.status === 'browser') await browserPrint(j);
     }
     var sent = jobs.filter(function (j) { return j && j.status === 'queued'; }).length;
-    if (sent) toast(sent + ' label(s) sent to the station printer.', 'ok');
+    if (sent) toast(sent + ' label(s) sent to the station printer.', 'good');
   }
 
   /* ── navigation ──────────────────────────────────────────────────────────────────────────── */
@@ -175,7 +175,7 @@
     V.querySelectorAll('[data-revoke]').forEach(function (b) {
       b.addEventListener('click', async function () {
         if (!(await sure('Revoke this device now? It stops working at once and must be paired again.', 'Revoke'))) return;
-        if (await call('/v1/devices/' + b.getAttribute('data-revoke') + '/revoke', 'POST')) { toast('Revoked.', 'ok'); viewDevices(item, V); }
+        if (await call('/v1/devices/' + b.getAttribute('data-revoke') + '/revoke', 'POST')) { toast('Revoked.', 'good'); viewDevices(item, V); }
       });
     });
   }
@@ -246,7 +246,7 @@
     on('fo-ms', 'submit', async function (e) {
       e.preventDefault();
       var r = await call('/v1/maceration/settings/' + encodeURIComponent(val('fo-ms-f')), 'PUT', { required: document.getElementById('fo-ms-req').checked, minDays: Number(val('fo-ms-min')), maxDays: Number(val('fo-ms-max')), freezeRequired: document.getElementById('fo-ms-fz').checked, freezeNote: val('fo-ms-note') });
-      if (r) { toast('Saved.', 'ok'); viewMaceration(item, V); }
+      if (r) { toast('Saved.', 'good'); viewMaceration(item, V); }
     });
   }
 
@@ -330,7 +330,7 @@
     });
     on('fo-finish', 'click', async function () {
       var r = await call('/v1/packing/shipments/' + s.shipmentId + '/finish', 'POST', { station: stn() });
-      if (r) { await handleJobs(r.cartonLabels.concat([r.packingList])); toast('Packed. It is on the logistics queue.', 'ok'); viewShipment(item, V, stn); }
+      if (r) { await handleJobs(r.cartonLabels.concat([r.packingList])); toast('Packed. It is on the logistics queue.', 'good'); viewShipment(item, V, stn); }
     });
   }
 
@@ -360,7 +360,7 @@
     if (!cur) return;
     var awbTyped = true;
     on('fo-lg-awbv', 'keydown', function (e) { if (e.key && e.key.length === 1 && e.timeStamp - (FV.lastKey || 0) < 30) awbTyped = false; FV.lastKey = e.timeStamp; });
-    on('fo-lg-c', 'submit', async function (e) { e.preventDefault(); var r = await call('/v1/logistics/shipments/' + cur.shipmentId + '/cartons/scan', 'POST', { cartonCode: val('fo-lg-cc') }); if (r) { toast(r.checked + ' of ' + r.total + ' cartons' + (r.complete ? ': all here.' : '.'), 'ok'); viewLogistics(item, V); } });
+    on('fo-lg-c', 'submit', async function (e) { e.preventDefault(); var r = await call('/v1/logistics/shipments/' + cur.shipmentId + '/cartons/scan', 'POST', { cartonCode: val('fo-lg-cc') }); if (r) { toast(r.checked + ' of ' + r.total + ' cartons' + (r.complete ? ': all here.' : '.'), 'good'); viewLogistics(item, V); } });
     on('fo-lg-docs', 'click', async function () {
       var r = await call('/v1/logistics/shipments/' + cur.shipmentId + '/documents', 'POST', { station: stn() }); if (!r) return;
       var jobs = []; for (var i = 0; i < r.printJobs.length; i++) { if (r.printJobs[i].status === 'browser') jobs.push((await call('/v1/print-jobs?subjectRef=' + encodeURIComponent(r.printJobs[i].subjectRef))).items[0]); }
@@ -374,7 +374,7 @@
     on('fo-lg-ho', 'submit', async function (e) {
       e.preventDefault();
       var r = await call('/v1/logistics/shipments/' + cur.shipmentId + '/handover', 'POST', { handedTo: val('fo-lg-to') });
-      if (r) { toast('Handed over. Tracking goes to ALEMBIC with the AWB.', 'ok'); FV.lgId = null; viewLogistics(item, V); }
+      if (r) { toast('Handed over. Tracking goes to ALEMBIC with the AWB.', 'good'); FV.lgId = null; viewLogistics(item, V); }
     });
     V.querySelectorAll('[data-ex]').forEach(function (b) {
       b.addEventListener('click', async function () {
@@ -403,10 +403,10 @@
         var c = list[Number(b.getAttribute('data-cn'))];
         var a = await ask('Connect ' + c.displayName, 'The key is sealed on the server and never shown again.', [{ n: 'k', l: 'API key or login token', req: true }], 'Connect');
         if (!a) return;
-        var r = await call('/v1/couriers/' + c.provider + '/connect', 'POST', { credentials: { apiKey: a.k } }); if (r) { toast(r.healthNote || 'Saved.', r.health === 'ok' ? 'ok' : 'warn'); viewCouriers(item, V); }
+        var r = await call('/v1/couriers/' + c.provider + '/connect', 'POST', { credentials: { apiKey: a.k } }); if (r) { toast(r.healthNote || 'Saved.', r.health === 'ok' ? 'good' : 'warn'); viewCouriers(item, V); }
       });
     });
-    V.querySelectorAll('[data-ts]').forEach(function (b) { b.addEventListener('click', async function () { var r = await call('/v1/couriers/' + list[Number(b.getAttribute('data-ts'))].provider + '/test', 'POST'); if (r) { toast(r.healthNote || r.health, r.health === 'ok' ? 'ok' : 'warn'); viewCouriers(item, V); } }); });
+    V.querySelectorAll('[data-ts]').forEach(function (b) { b.addEventListener('click', async function () { var r = await call('/v1/couriers/' + list[Number(b.getAttribute('data-ts'))].provider + '/test', 'POST'); if (r) { toast(r.healthNote || r.health, r.health === 'ok' ? 'good' : 'warn'); viewCouriers(item, V); } }); });
     V.querySelectorAll('[data-dc]').forEach(function (b) { b.addEventListener('click', async function () { if (await sure('Disconnect? The stored credentials are deleted.', 'Disconnect') && await call('/v1/couriers/' + list[Number(b.getAttribute('data-dc'))].provider + '/disconnect', 'POST')) viewCouriers(item, V); }); });
     list.forEach(function (c, i) { on('fo-md-' + i, 'change', async function () { await call('/v1/couriers/' + c.provider + '/mode', 'POST', { mode: val('fo-md-' + i) }); viewCouriers(item, V); }); });
   }

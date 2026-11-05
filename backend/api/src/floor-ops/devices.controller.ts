@@ -60,9 +60,8 @@ export class DevicesController {
   @AnyAuthenticated('the floor board (job numbers, stages, maceration days, QC backlog); coded, no formula or price')
   @Get('floor/display')
   board(@Query('station') station?: string) {
-    return this.displayFeed(station || null);
+    return this.displaySvc.feed(station || null);
   }
-  private displayFeed(station: string | null) { return this.displaySvc.feed(station); }
 
   @AnyAuthenticated('every station screen shows its own alerts (printer offline, maceration complete); alerts carry no formula or price')
   @Get('floor/alerts')
