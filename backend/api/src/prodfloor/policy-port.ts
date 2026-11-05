@@ -1,55 +1,51 @@
 /**
- * PROD-B-1 — the PolicyService seam lane B codes against (production floor plan 12.0).
- *
- * Lane A owns the rules engine (backend/api/src/policy/: PolicyService.evaluate). Until it merges,
- * lane B's callers read policy through this port, which has EXACTLY the shared contract's shape:
- *
- *   evaluate(key, ctx, at?) -> { value, ruleId, version, explain }   throws PolicyUnresolved
- *
- * so binding lane A's service to POLICY_SERVICE is the whole merge. The stub below answers with
- * the owner's published defaults only, and says so in `explain` — it never pretends a rule matched
- * (ruleId null, version 0). A key it has no default for throws PolicyUnresolved, and every caller
- * HOLDS on that rather than guessing (12.0 "Safe failure").
+ * PROD-B-1 — lane B reads policy through lane A's PolicyService (backend/api/src/policy, PROD-A-1).
+ * This file only adapts the stored values to what lane B's rules need, and fails closed: a value of
+ * the wrong shape is a 409 HOLD, never a guessed threshold. PolicyUnresolved (no rule, no default:
+ * payment terms ship that way) is also a HOLD.
  */
-export interface PolicyDecision {
-  value: unknown;
-  ruleId: string | null;
-  version: number;
-  explain: string;
-}
+import { ConflictException } from '@nestjs/common';
+import { PolicyService, PolicyUnresolved, type PolicyResult } from '../policy/policy.service.js';
+import type { ShortfallPolicy } from './receiving-rule.js';
+import type { ReworkPolicy } from './qc-decision.js';
 
-export interface PolicyPort {
-  evaluate(key: string, ctx: Record<string, unknown>, at?: Date): Promise<PolicyDecision> | PolicyDecision;
-}
+export { PolicyService, PolicyUnresolved };
+export type PolicyPort = Pick<PolicyService, 'evaluate'>;
 
-export class PolicyUnresolved extends Error {
-  constructor(readonly key: string) {
-    super(`No rule and no default for policy "${key}". Held until an admin sets one.`);
-    this.name = 'PolicyUnresolved';
+export async function evaluateOrHold(p: PolicyPort, key: string, ctx: Record<string, unknown>): Promise<PolicyResult> {
+  try {
+    return await p.evaluate(key, ctx);
+  } catch (e) {
+    if (e instanceof PolicyUnresolved) throw new ConflictException(`${e.message} (${e.explain})`);
+    throw e;
   }
 }
 
-export const POLICY_SERVICE = Symbol.for('ra.policy.service');
+function pctToBps(v: unknown): number | null {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.round(v * 100) : null;
+}
 
-/** The owner's defaults (plan 12.1, 12.7, 12.8). Thresholds are basis points of quantity. */
-export const PFB_POLICY_DEFAULTS: Record<string, unknown> = {
-  // 12.1: PO-wide by default; short >= 20% rejects the short line(s); extra > 5% is held for purchase.
-  'receiving.shortfall': { scope: 'PO', shortRejectBps: 2000, extraHoldBps: 500 },
-  // 12.8: the global default pays only against what was accepted. Advance and credit come from rules.
-  'procurement.payment_terms': { mode: 'AGAINST_GRN' },
-  // 12.7: two reworks, cumulative adjustment within 5% of batch weight, any inspector.
-  'qc.rework': { maxReworks: 2, envelopeBps: 500, differentInspector: false },
-};
-
-export class DefaultPolicyStub implements PolicyPort {
-  constructor(private readonly defaults: Record<string, unknown> = PFB_POLICY_DEFAULTS) {}
-  evaluate(key: string): PolicyDecision {
-    if (!(key in this.defaults)) throw new PolicyUnresolved(key);
-    return {
-      value: structuredClone(this.defaults[key]),
-      ruleId: null,
-      version: 0,
-      explain: 'Otherwise: the default (no rule set on the Rules screen yet)',
-    };
+/** receiving.shortfall: lane A stores { basis: 'po'|'line', shortPct, extraPct }. */
+export function shortfallFrom(v: unknown): ShortfallPolicy {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const basis = String(o.basis ?? o.scope ?? '').toUpperCase();
+  const s = o.shortRejectBps ?? pctToBps(o.shortPct), e = o.extraHoldBps ?? pctToBps(o.extraPct);
+  if ((basis !== 'PO' && basis !== 'LINE') || typeof s !== 'number' || s > 10000 || typeof e !== 'number') {
+    throw new ConflictException('The receiving.shortfall policy value is not a valid rule, so this delivery is held. Ask an admin to fix it on the Rules screen.');
   }
+  return { scope: basis, shortRejectBps: s, extraHoldBps: e };
+}
+
+/** The 12.7.3 envelope the plan gives as its example (5% of batch weight), used only when the
+ *  qc.rework rule does not set one; the round records which applied. */
+export const DEFAULT_ENVELOPE_BPS = 500;
+
+/** qc.rework: lane A stores { maxReworks } and may add envelopePct / differentInspector. */
+export function reworkFrom(v: unknown): ReworkPolicy & { envelopeDefaulted: boolean } {
+  const o = (v ?? {}) as Record<string, unknown>;
+  const m = o.maxReworks;
+  if (typeof m !== 'number' || !Number.isInteger(m) || m < 0 || m > 10) throw new ConflictException('The qc.rework policy has no valid rework ceiling, so QC is held.');
+  const env = (o.envelopeBps as number | undefined) ?? pctToBps(o.envelopePct);
+  if (env != null && (typeof env !== 'number' || env > 10000)) throw new ConflictException('The qc.rework envelope is not valid, so QC is held.');
+  return { maxReworks: m, envelopeBps: env ?? DEFAULT_ENVELOPE_BPS, differentInspector: o.differentInspector === true, envelopeDefaulted: env == null };
 }

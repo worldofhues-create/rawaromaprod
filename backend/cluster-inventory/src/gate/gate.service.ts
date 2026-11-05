@@ -5,7 +5,7 @@
  * status + created/updated by (username = principal.userId).
  */
 import { Inject, Injectable } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import {
@@ -76,7 +76,24 @@ export class GateService {
         documents.push(row);
       }
 
-      return { gateEntry: master, documents };
+      // PROD-B-4 (plan 4, 13): a delivery with no PO, a PO that is not open, or the wrong vendor was
+      // let in like any other and could be received against nothing. It is now HELD at the gate with
+      // the reason; the receiving audit refuses a held entry until purchase resolves it.
+      let holdReason: string | null = null;
+      if (!master.purchaseOrderId) holdReason = 'No purchase order: held at the gate until purchase names one.';
+      else {
+        const po = ((await tx.execute(sql`select status, vendor_id::text as vendor_id from procurement.purchase_order where purchase_order_id = ${master.purchaseOrderId}`)) as unknown as Array<{ status: string | null; vendor_id: string | null }>)[0];
+        const st = String(po?.status ?? '').toUpperCase();
+        if (!po) holdReason = 'The purchase order was not found: held at the gate.';
+        else if (!['APPROVED', 'ISSUED', 'ACKNOWLEDGED', 'PARTIALLY_RECEIVED'].includes(st)) holdReason = `The purchase order is ${st || 'not open'}: held at the gate.`;
+        else if (master.vendorId && po.vendor_id && po.vendor_id !== master.vendorId) holdReason = 'The vendor is not the purchase order\'s vendor: held at the gate.';
+      }
+      if (holdReason) {
+        await tx.execute(sql`update inventory.gate_entry_master set status = 'HELD', hold_reason = ${holdReason} where gate_entry_id = ${gateEntryId}`);
+        master.status = 'HELD';
+      }
+
+      return { gateEntry: { ...master, holdReason }, documents };
     });
   }
 

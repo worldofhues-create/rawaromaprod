@@ -61,7 +61,7 @@ export class PolicyService {
     const rows = await this.sql<VersionRow[]>`
       select policy_key, version, body, reason, created_by, created_dt::text as created_dt
         from platform.policy_version
-       where policy_key = ${key} and created_dt <= ${at ?? new Date()}
+       where policy_key = ${key} and created_dt <= ${(at ?? new Date()).toISOString()}::timestamptz
        order by version desc limit 1`;
     if (!rows[0]) throw new PolicyUnresolved(key, 0, 'No version of this policy was in force at that time');
     return { ...rows[0], body: parseBody(rows[0].body) };
@@ -72,11 +72,13 @@ export class PolicyService {
     const recordType = ctx.record_type == null ? null : String(ctx.record_type);
     const recordId = ctx.record_id == null ? null : String(ctx.record_id);
     if (recordType && recordId) {
-      const when = at ?? new Date();
+      // PROD-B-8: an ISO string, not a Date: once any cluster wraps PG_CLIENT in Drizzle its Date serializer is
+      // replaced and a Date parameter throws (TypeError: "string" argument ... Received an instance of Date).
+      const when = (at ?? new Date()).toISOString();
       const [o] = await this.sql<{ override_id: string; value: unknown; reason: string; created_by: string }[]>`
         select override_id, value, reason, created_by from platform.policy_override
          where policy_key = ${key} and record_type = ${recordType} and record_id = ${recordId}
-           and created_dt <= ${when} and (revoked_dt is null or revoked_dt > ${when})
+           and created_dt <= ${when}::timestamptz and (revoked_dt is null or revoked_dt > ${when}::timestamptz)
          order by created_dt desc limit 1`;
       if (o) {
         // jsonb arrives parsed (the Drizzle wrapper only passes dates through as text).
