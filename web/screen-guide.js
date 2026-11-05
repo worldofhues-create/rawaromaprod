@@ -40,6 +40,11 @@
     __shelfdisplay__: 'A live board for the floor: what to put away and what to pick, bin by bin.',
     __factorysetup__: 'The checklist that gets the factory ready. Approve Ruh\'s drafts one row at a time or together.',
     __formulasetup__: 'Which formula each product is made from. The recipe itself stays in the Vault.',
+    __recvaudit__: 'Check each PO line as it comes off the truck. The rule for short and extra is shown before you start.',
+    __payrelease__: 'Ask for, approve and release supplier payments. The person who raised the PO cannot pay it.',
+    __qccheckpoints__: 'What QC tests for each product. Saving makes a new version; old batches keep theirs.',
+    __qcgate__: 'Test a batch on every checkpoint. The decision and any rework follow the rules.',
+    __lotrecall__: 'Lots on hold, and for any raw lot the batches and shipped orders that used it.',
     __tutorial__: 'Short guided tours of this workspace. Each one walks you through a real task.',
     '/v1/production-plans': 'Plans group the orders you mean to make in a period.',
     '/v1/production-plan-items': 'Each line is one product and quantity inside a production plan.',
@@ -168,7 +173,7 @@
   /** Rail groups, in this order. A workspace with more than nine screens shows them under these. */
   var GROUPS = ['Start here', 'Production', 'Quality', 'Buying', 'Receiving', 'Stock and storage', 'Packing and sales', 'Setup', 'Records', 'Help'];
   var GROUP_OF = {
-    __dash__: 0, __produce__: 0, __shelftasks__: 0, __factorysetup__: 0, '/v1/bridge/requirements': 0,
+    __dash__: 0, __produce__: 0, __qcgate__: 2, __qccheckpoints__: 2, __lotrecall__: 2, __payrelease__: 3, __recvaudit__: 4, __shelftasks__: 0, __factorysetup__: 0, '/v1/bridge/requirements': 0,
     '/v1/production-plans': 1, '/v1/production-plan-items': 1, '/v1/production-orders': 1, '/v1/production-order-ingredients': 1,
     '/v1/material-pick-lists': 1, '/v1/material-pick-list-items': 1, '/v1/material-issues': 1, '/v1/mixing-sessions': 1,
     '/v1/weighing-records': 1, '/v1/oil-batches': 1,

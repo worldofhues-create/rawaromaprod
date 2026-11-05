@@ -61,6 +61,10 @@
   <!-- Lane vaultsetup (2026-10-05): Formula setup — the two-owner "Let Ruh draft formulas" grant,
        formula shells per product, and the guarded product -> formula link. After ws-produce.js. -->
   <script src="/ws-formula-setup.js"></script>
+  <script src="/weight.js"></script>
+  <!-- PROD-B: production floor P2 (receiving audit, supplier payments, QC checkpoints, batch QC, lot hold
+       and recall, raw-lot label). After ws-produce.js: it adds to ROLES like the other ws-*.js. -->
+  <script src="/ws-floorb.js"></script>
   <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
        raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
        ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->

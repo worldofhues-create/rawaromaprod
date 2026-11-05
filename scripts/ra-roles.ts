@@ -662,9 +662,9 @@ export const ROLES: RoleDef[] = [
       'procurement:purchase_order:read', 'procurement:purchase_order_items:read', 'procurement:vendor_details:read',
       'procurement:vendor_credit_note:read', 'procurement:vendor_credit_notes_allocation:read', 'inventory:grn_master:read',
       'platform:policy:read',
-      // PROD-B-5 (plan 12.8): finance requests, approves and releases supplier payments; maker-checker
-      // is enforced per payment (payment-gate.ts), so holding the permission never lets one person do both.
-      'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
+      // PROD-B-5: finance sees supplier payments. It only reads (PROD-A-3), so requesting, approving and
+      // releasing stay with procurement and owner, under the per-payment maker-checker (payment-gate.ts).
+      'procurement:po_payment_release:read',
     ),
     sampleEmail: 'finance@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_FINANCE_PASSWORD',
