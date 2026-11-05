@@ -13,3 +13,5 @@ export {
   type SalesLookup,
   SALES_LOOKUP,
 } from './public-api.js';
+// Lane pf-c: the logistics station books its handover through the one dispatch flow.
+export { DispatchService } from './dispatch/dispatch.service.js';

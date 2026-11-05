@@ -98,6 +98,11 @@ export const createDispatch = z.object({
   dispatchDate: z.string().optional(),
   vehicleNumber: z.string().optional(),
   transporterId: z.string().uuid().optional(),
+  // Lane pf-c (plan 9.5): the logistics station's handover carries the courier, the AWB and the
+  // lots, and ALEMBIC hears them on Dispatched. Optional: a dispatch without them is unchanged.
+  awb: z.string().trim().min(1).max(60).optional(),
+  courier: z.string().trim().min(1).max(40).optional(),
+  lots: z.array(z.string().trim().min(1).max(50)).max(100).optional(),
   items: z.array(dispatchItemInput).min(1),
 });
 export type CreateDispatch = z.infer<typeof createDispatch>;

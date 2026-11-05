@@ -56,7 +56,9 @@ export class PrintService {
           select device_id, config from platform.device_master
            where station = ${req.station} and kind = 'label_printer' and status in ('active', 'offline')
            order by (status = 'active') desc, created_at limit 1`)[0];
-    const cfg = (printer?.config ?? {}) as Record<string, unknown>;
+    const raw = printer?.config ?? {};
+    // jsonb arrives as text when a drizzle wrapper shares the client (it swaps the parsers).
+    const cfg = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
     const size = req.size ?? (typeof cfg.size === 'string' ? cfg.size : DEFAULT_SIZE);
     if (!label().SIZES[size]) throw new BadRequestException(`Unknown label size ${size}.`);
     const template = { ...label().build(req.content, size), src: req.content } as LabelTemplate;
@@ -76,7 +78,7 @@ export class PrintService {
     const [row] = await this.sql`
       insert into platform.print_job (print_job_id, device_id, station, label_kind, subject_ref, template, status, next_attempt_at,
                                       reprint_of, reprint_reason, requested_by, created_at, updated_at)
-      values (${uuidv7()}::uuid, ${j.deviceId}::uuid, ${j.station}, ${j.labelKind}, ${j.subjectRef}, ${this.sql.json(JSON.parse(JSON.stringify(j.template)))},
+      values (${uuidv7()}::uuid, ${j.deviceId}::uuid, ${j.station}, ${j.labelKind}, ${j.subjectRef}, ${JSON.stringify(j.template)}::text::jsonb,
               ${j.deviceId ? 'queued' : 'browser'}, ${now}::timestamptz, ${j.reprintOf}::uuid, ${j.reprintReason}, ${principal.userId}::uuid,
               ${now}::timestamptz, ${now}::timestamptz)
       returning *`;

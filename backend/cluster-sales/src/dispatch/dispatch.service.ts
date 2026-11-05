@@ -227,9 +227,16 @@ export class DispatchService {
           dispatch_id: dispatchId,
           sales_order_id: body.salesOrderId,
         });
+        // Lane pf-c: the contract's Dispatched { awb, carrier, dispatched_at } (docs/bridge/
+        // EVENT_CONTRACT.md), plus `courier` (= carrier) and the lot list. Null when not held.
         await emitBridgeOutbound(tx, 'Dispatched', productionOrderId, {
           dispatch_id: dispatchId,
           sales_order_id: body.salesOrderId,
+          awb: body.awb ?? null,
+          carrier: body.courier ?? null,
+          courier: body.courier ?? null,
+          lots: body.lots ?? [],
+          dispatched_at: new Date().toISOString(),
         });
       }
 

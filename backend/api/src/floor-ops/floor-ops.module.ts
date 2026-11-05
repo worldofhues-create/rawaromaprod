@@ -16,16 +16,19 @@ import { MacerationService } from './maceration.service.js';
 import { FloorSweepService } from './floor-sweep.service.js';
 import { PackingController } from './packing.controller.js';
 import { PackingService } from './packing.service.js';
+import { CourierController, LogisticsController } from './logistics.controller.js';
+import { LogisticsService } from './logistics.service.js';
+import { CourierService } from './courier.service.js';
 
-const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService];
+const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService];
 
 @Module({
-  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController, LogisticsController, CourierController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })
 export class FloorOpsModule {}
 
-/** Worker: the floor sweeps (offline devices, stale print jobs, maceration alarms). */
-@Module({ providers: [...SERVICES, FloorSweepService] })
+/** Worker: the floor sweeps (offline devices, stale print jobs, maceration alarms, courier sync). */
+@Module({ providers: [DevicesService, PrintService, MacerationService, CourierService, FloorSweepService] })
 export class FloorOpsWorkerModule {}

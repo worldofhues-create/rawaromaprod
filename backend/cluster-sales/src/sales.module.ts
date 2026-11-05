@@ -35,6 +35,7 @@ import { SALES_DB, drizzle, salesSchema } from './sales.tokens.js';
     SalesLookupService,
     { provide: SALES_LOOKUP, useExisting: SalesLookupService },
   ],
-  exports: [SALES_DB, SALES_LOOKUP],
+  // DispatchService: the logistics station (lane pf-c) books its handover through the same dispatch flow.
+  exports: [SALES_DB, SALES_LOOKUP, DispatchService],
 })
 export class SalesModule {}

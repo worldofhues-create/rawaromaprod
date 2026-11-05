@@ -8,6 +8,7 @@ import { Interval } from '@nestjs/schedule';
 import { DevicesService } from './devices.service.js';
 import { MacerationService } from './maceration.service.js';
 import { PrintService } from './print.service.js';
+import { CourierService } from './courier.service.js';
 
 @Injectable()
 export class FloorSweepService {
@@ -17,6 +18,7 @@ export class FloorSweepService {
     private readonly devices: DevicesService,
     private readonly print: PrintService,
     private readonly maceration: MacerationService,
+    private readonly couriers: CourierService,
   ) {}
 
   @Interval('floor-sweep', 60_000)
@@ -28,6 +30,7 @@ export class FloorSweepService {
         ['devices', () => this.devices.sweepOffline()],
         ['print', () => this.print.sweepStale()],
         ['maceration', () => this.maceration.sweepAlarms()],
+        ['couriers', () => this.couriers.syncAll()],
       ] as const) {
         try { await fn(); } catch (e) { this.log.warn(`${name} sweep failed: ${(e as Error).message}`); }
       }

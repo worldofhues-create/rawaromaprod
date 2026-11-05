@@ -66,7 +66,7 @@ export class DevicesService {
     const now = this.clock();
     const [row] = await this.sql`
       insert into platform.device_master (device_id, kind, station, site, name, status, config, created_by, created_at, updated_at)
-      values (${deviceId}::uuid, ${kind}, ${station}, ${site}, ${name}, 'pending', ${this.sql.json(config as never)}, ${principal.userId}::uuid,
+      values (${deviceId}::uuid, ${kind}, ${station}, ${site}, ${name}, 'pending', ${JSON.stringify(config)}::text::jsonb, ${principal.userId}::uuid,
               ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)
       returning *`;
     const pairing = await this.issueCode(deviceId, principal);
@@ -123,7 +123,7 @@ export class DevicesService {
         update platform.device_master
            set status = 'active', paired_at = ${now.toISOString()}::timestamptz, last_seen_at = ${now.toISOString()}::timestamptz,
                updated_at = ${now.toISOString()}::timestamptz,
-               config = config || ${tx.json({ agent: info && typeof info === 'object' ? JSON.stringify(info).slice(0, 300) : null } as never)}
+               config = config || ${JSON.stringify({ agent: info && typeof info === 'object' ? JSON.stringify(info).slice(0, 300) : null })}::text::jsonb
          where device_id = ${p.device_id}::uuid
          returning *`;
       const token = newDeviceToken();
@@ -205,7 +205,7 @@ export class DevicesService {
     const [dev] = await this.sql`
       update platform.device_master
          set name = coalesce(${name}, name), station = coalesce(${station}, station),
-             config = case when ${config ? 'y' : 'n'} = 'y' then ${this.sql.json((config ?? {}) as never)} else config end,
+             config = case when ${config ? 'y' : 'n'} = 'y' then ${JSON.stringify(config ?? {})}::text::jsonb else config end,
              updated_at = ${this.clock().toISOString()}::timestamptz
        where device_id = ${deviceId}::uuid and status <> 'revoked'
        returning *`;
