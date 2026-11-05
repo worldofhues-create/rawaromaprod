@@ -64,6 +64,7 @@ import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
 import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 import { RuhModule } from './ruh/ruh.module.js';
 import { PolicyModule } from './policy/policy.module.js';
+import { FloorOpsModule } from './floor-ops/floor-ops.module.js';
 
 @Module({
   imports: [
@@ -112,6 +113,8 @@ import { PolicyModule } from './policy/policy.module.js';
     // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
     PolicyModule,
     RuhModule,
+    // Lane pf-c (production floor P3/P4): devices, print jobs, scales, maceration, packing, logistics.
+    FloorOpsModule,
   ],
   providers: [
     // Edge guards run in registration order: authenticate, then authorize, then step-up

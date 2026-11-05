@@ -2429,6 +2429,9 @@ create table if not exists production.floor_label (
   printed_by     varchar(255) not null,
   printed_dt     timestamptz not null default now(),
   check (not reprint or (reason is not null and btrim(reason) <> ''))
+);
+
+
 -- Lane pf-c (2026-11-05): scripts/migrations/2026-11-05-pfc-floor.sql mirrored here (gen_random_uuid() for
 -- uuidv7(), as everywhere in this harness; the app-role grant block is left out).
 
