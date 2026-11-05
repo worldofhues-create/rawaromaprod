@@ -123,7 +123,10 @@ test('Maceration, Couriers, Print queue and the Floor board open and say what th
   await signIn(page, 'factory', 'owner');
   for (const [nav, text] of [['Maceration', 'Macerating now'], ['Couriers', 'Add a courier'], ['Print queue', 'labels for one station'], ['Floor board', 'Floor queue']] as const) {
     await openNav(page, nav);
-    await expect(page.getByText(text).first()).toBeVisible();
+    // Inside a card, not anywhere on the page: since lanes A+C merged, 'Floor queue' is also lane A's nav
+    // item, and at 375 that rail entry sits hidden in the closed drawer, so .first() found it and never
+    // looked at the board. The board's own heading is what this asserts.
+    await expect(page.locator('.card').getByText(text).first()).toBeVisible();
     await noSideScroll(page);
   }
 });
