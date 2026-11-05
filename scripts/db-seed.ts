@@ -35,6 +35,8 @@ import {
   VAULT_APPROVER_FORBIDDEN_PERMISSIONS,
   MANUFACTURING_INSTRUCTION_PERMISSION,
   MANUFACTURING_INSTRUCTION_ROLES,
+  FLOOR_ROLES,
+  floorForbidden,
   MANUAL_CONTINUITY_PERMISSION,
   MANUAL_CONTINUITY_ROLES,
   SHOWCASE_ROLE,
@@ -153,6 +155,16 @@ async function grantRole(
     throw new Error(
       `SECURITY: role '${role.code}' must not be granted ${MANUAL_CONTINUITY_PERMISSION} — only ${MANUAL_CONTINUITY_ROLES.join('/')} may hold it (G1/PB-08)`,
     );
+  }
+  // HARD INVARIANT (PROD-A, production-floor plan §10): a floor role sees coded material only and
+  // gives no role — see floorForbidden() in scripts/ra-roles.ts.
+  if (FLOOR_ROLES.includes(role.code)) {
+    const offending = granted.filter((p) => floorForbidden(p.code));
+    if (offending.length) {
+      throw new Error(
+        `SECURITY: floor role '${role.code}' must not be granted [${offending.map((p) => p.code).join(', ')}] (PROD-A, plan §10)`,
+      );
+    }
   }
   const mapped = await db
     .select({ pid: rolePermissionMapping.permissionId })

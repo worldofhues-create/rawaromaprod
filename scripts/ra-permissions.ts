@@ -295,4 +295,20 @@ export const RA_PERMISSIONS: string[] = [
   'vault:rm_compliance:read',
   'vault:rm_compliance:write',
   'vault:compliance_calc:read',
+  // PROD-A (lane pf-a, production-floor plan P1): the rules engine, floor codes, lot barcodes and
+  // the Picker / Verifier / Mixer stations. Guarded in backend/api/src/policy and backend/api/src/floor.
+  'platform:policy:read',
+  'platform:policy:write',
+  'platform:policy_override:write',
+  'masterdata:floor_code:read',
+  'masterdata:floor_code:write',
+  'masterdata:floor_family:write',
+  'inventory:lot_barcode:resolve',
+  'inventory:lot_barcode:write',
+  'production:floor_queue:read',
+  'production:floor_job:write',
+  'production:floor_pick:write',
+  'production:floor_verify:write',
+  'production:floor_mix:write',
+  'production:floor_label:write',
 ];
