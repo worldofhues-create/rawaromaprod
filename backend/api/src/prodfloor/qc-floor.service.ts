@@ -21,7 +21,7 @@ import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { PolicyService, evaluateOrHold, reworkFrom } from './policy-port.js';
 import { decideQc, type Checkpoint, type QcResult } from './qc-decision.js';
 import { toBaseUnits } from './receiving-rule.js';
-import { holdSubject } from './lot-trace.service.js';
+import { holdSubject, resolveRmLot } from './lot-trace.service.js';
 
 type Row = Record<string, unknown>;
 const TYPES = ['PASS_FAIL', 'RANGE', 'REFERENCE'];
@@ -113,6 +113,8 @@ export class QcFloorService {
   }
 
   async recordRound(oilBatchId: string, body: Row, principal: AuthPrincipal) {
+    // WALK2-RP-13: the faulty / added raw lot is typed or scanned by its lot number, not its uuid.
+    if (body.rmBatchId) body = { ...body, rmBatchId: await resolveRmLot(this.sql, body.rmBatchId) };
     const results = Array.isArray(body.results) ? (body.results as QcResult[]) : [];
     return this.sql.begin(async (tx) => {
       const b = (await tx`select oil_batch_id, produced_qty::text as qty, u.uom_code from production.oil_batch_master o left join platform.uom_master u on u.uom_id = o.uom_id
@@ -174,6 +176,8 @@ export class QcFloorService {
   }
 
   async recordRework(oilBatchId: string, body: Row, principal: AuthPrincipal) {
+    // WALK2-RP-13: the faulty / added raw lot is typed or scanned by its lot number, not its uuid.
+    if (body.rmBatchId) body = { ...body, rmBatchId: await resolveRmLot(this.sql, body.rmBatchId) };
     const adj = body.adjustmentMg;
     const note = String(body.note ?? '').trim();
     if (typeof adj !== 'number' || !Number.isSafeInteger(adj) || adj < 0) throw new BadRequestException('The adjustment is a whole number of mg, 0 or more.');

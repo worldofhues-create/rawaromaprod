@@ -166,7 +166,12 @@ test('checkpoints are versioned: an old batch keeps the set it was first tested 
   // re-QC refused until the rework is recorded; envelope 5% of 100 kg = 5 kg
   await assert.rejects(() => qc.recordRound(oil, { results: [] }, principal({ userId: QC1 })), /Record the rework/);
   await assert.rejects(() => qc.recordRework(oil, { adjustmentMg: 6 * KG, note: 'add' }, principal()), /envelope/);
-  await qc.recordRework(oil, { adjustmentMg: 1 * KG, note: 'raised strength' }, principal());
+  // WALK2-RP-13: the raw lot added is named by its lot number; an unknown one is refused before anything is written.
+  const addRm = randomUUID(), addNo = 'RMA-' + addRm.slice(0, 8);
+  await sql()`insert into inventory.rm_batch_master (rm_batch_id, batch_number, received_qty, uom_id, status) values (${addRm}, ${addNo}, 5, ${kg}, 'ACTIVE')`;
+  await assert.rejects(() => qc.recordRework(oil, { adjustmentMg: 1 * KG, note: 'raised strength', rmBatchId: 'NO-SUCH-LOT' }, principal()), /No raw lot/);
+  await qc.recordRework(oil, { adjustmentMg: 1 * KG, note: 'raised strength', rmBatchId: addNo.toLowerCase() }, principal());
+  assert.equal((await sql()`select rm_batch_id::text as id from quality.batch_rework where oil_batch_id = ${oil}`)[0]!.id, addRm);
   await assert.rejects(() => qc.recordRound(oil, { results: [{ checkpointId: c2!.id, value: 10 }] }, principal({ userId: QC1 })), /Odour profile/);
   // same checkpoint fails again -> hold + CAPA, batch frozen
   const r2 = await qc.recordRound(oil, { results: [{ checkpointId: c1!.id, pass: true }, { checkpointId: c2!.id, value: 9.2 }], defectType: 'STRENGTH' }, principal({ userId: QC1 }));

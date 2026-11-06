@@ -31,6 +31,18 @@ export async function isLotHeld(run: (q: string, p: unknown[]) => Promise<Row[]>
                       where ib.inventory_batch_id = $1`, [inventoryBatchId])).length > 0;
 }
 
+/** A raw lot by its id or by its lot number (any case): WALK2-RP-11. Batch QC uses it too (RP-13). */
+export async function resolveRmLot(sql: Sql, ref: unknown): Promise<string> {
+  const v = String(ref ?? '').trim();
+  if (!v) throw new BadRequestException('Scan or type the raw lot number.');
+  const rows = UUID.test(v)
+    ? await sql`select rm_batch_id::text as id from inventory.rm_batch_master where rm_batch_id = ${v}::uuid`
+    : await sql`select rm_batch_id::text as id from inventory.rm_batch_master where upper(batch_number) = upper(${v}) limit 2`;
+  if (!rows.length) throw new NotFoundException(`No raw lot ${v} on file.`);
+  if (rows.length > 1) throw new ConflictException(`More than one raw lot is numbered ${v}; open it from Stock instead.`);
+  return String(rows[0]!.id);
+}
+
 @Injectable()
 export class LotTraceService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
@@ -38,16 +50,7 @@ export class LotTraceService {
   /** WALK2-RP-11: Lot hold & recall asked for a typed rm_batch_id uuid, and anything else (the lot number
    *  on the label in someone's hand) reached Postgres as a uuid and failed as a server error. A raw lot is
    *  found by its id or by its lot number; the bin by its id or its code. */
-  private async rmLotId(ref: string): Promise<string> {
-    const v = String(ref ?? '').trim();
-    if (!v) throw new BadRequestException('Scan or type the raw lot number.');
-    const rows = UUID.test(v)
-      ? await this.sql`select rm_batch_id::text as id from inventory.rm_batch_master where rm_batch_id = ${v}::uuid`
-      : await this.sql`select rm_batch_id::text as id from inventory.rm_batch_master where upper(batch_number) = upper(${v}) limit 2`;
-    if (!rows.length) throw new NotFoundException(`No raw lot ${v} on file.`);
-    if (rows.length > 1) throw new ConflictException(`More than one raw lot is numbered ${v}; open it from Stock instead.`);
-    return String(rows[0]!.id);
-  }
+  private rmLotId(ref: string): Promise<string> { return resolveRmLot(this.sql, ref); }
   private async binRef(ref: unknown): Promise<{ id: string; code: string | null } | null> {
     const v = typeof ref === 'string' ? ref.trim() : '';
     if (!v) return null;

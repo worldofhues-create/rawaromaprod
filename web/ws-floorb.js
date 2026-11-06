@@ -286,6 +286,8 @@
   /* ── Batch QC ───────────────────────────────────────────────────────────────────────── */
   var QD = { APPROVE: ['g', 'Approve'], REWORK: ['a', 'Rework'], HOLD_RETEST: ['a', 'Hold: retest'], REJECT: ['r', 'Reject'], REVIEW: ['r', 'Review: perfumer + vault approver'], HOLD_CAPA: ['r', 'Hold + CAPA'] };
   var DEFECTS = ['STRENGTH', 'CONCENTRATION', 'COLOUR', 'CLARITY', 'DENSITY', 'REFRACTIVE_INDEX', 'CONTAMINATION', 'FOREIGN_MATTER', 'WRONG_ODOUR', 'MICROBIAL', 'STABILITY', 'FORMULA_MISMATCH', 'FAULTY_RAW_LOT'];
+  // WALK2-RP-13: defect types read as wire codes (REFRACTIVE_INDEX, FAULTY_RAW_LOT).
+  function defWord(x) { x = String(x || '').replace(/_/g, ' ').toLowerCase(); return x.charAt(0).toUpperCase() + x.slice(1); }
   async function viewQc(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
     var batches = await getRows('/v1/oil-batches?limit=100');
@@ -302,11 +304,11 @@
     var needRework = last && last.decision === 'REWORK' && d.reworks.length < Number(last.reworkNo) + 1;
     var closed = last && /APPROVE|REJECT|REVIEW|HOLD_CAPA/.test(last.decision);
     var hist = d.rounds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Round</th><th>Spec</th><th>Decision</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
-      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>v' + r.specVersion + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType || '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
+      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>v' + r.specVersion + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType ? defWord(r.defectType) : '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p>No QC round yet.</p>';
     var form = '';
-    if (closed) form = '<p>' + chip('n', 'Last decision ' + last.decision) + ' No further round is taken here.</p>';
-    else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" class="fld" placeholder="RM batch id">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
+    if (closed) form = '<p>' + chip('n', 'Last decision: ' + (QD[last.decision] || [0, last.decision])[1]) + ' No further round is taken here.</p>';
+    else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" class="fld" autocomplete="off" placeholder="scan or type the lot number">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
     else {
       var cpList = cps;
       form = '<form id="fb-qr" style="display:flex;flex-direction:column;gap:var(--s-snug)">' +
@@ -316,8 +318,8 @@
             (c.checkType === 'RANGE' ? '<input class="fld" data-v inputmode="decimal" placeholder="' + esc(c.min) + ' – ' + esc(c.max) + '" style="width:140px">' : '<select class="fld" data-v><option value="">Result…</option><option value="1">Pass</option><option value="0">Fail</option></select>') +
             (c.photoRequired ? '<input class="fld" data-photo placeholder="Photo ref" style="width:140px">' : '') + '</div>';
         }).join('') : '<p class="t-cap">Choose the product to load its checkpoints.</p>') + '</div>' +
-        row(field('Defect type (if anything failed)', '<select id="fb-qdef" class="fld"><option value="">—</option>' + DEFECTS.map(function (x) { return '<option>' + x + '</option>'; }).join('') + '</select>') +
-          field('Faulty raw lot (RM batch id)', '<input id="fb-qlot" class="fld">') +
+        row(field('Defect type (if anything failed)', '<select id="fb-qdef" class="fld"><option value="">—</option>' + DEFECTS.map(function (x) { return '<option value="' + x + '">' + esc(defWord(x)) + '</option>'; }).join('') + '</select>') +
+          field('Faulty raw lot (scan or type the lot number)', '<input id="fb-qlot" class="fld" autocomplete="off">') +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fb-qdoubt"> Instrument doubt</label>') +
         '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div><button type="submit" class="btn p">Record QC round</button></form>';
     }
