@@ -97,7 +97,7 @@
       if (j.status === 'browser') await browserPrint(j);
     }
     var sent = jobs.filter(function (j) { return j && j.status === 'queued'; }).length;
-    if (sent) toast(sent + ' label(s) sent to the station printer.', 'good');
+    if (sent) toast(sent + (sent === 1 ? ' label' : ' labels') + ' sent to the station printer.', 'good');
   }
 
   /* ── navigation ──────────────────────────────────────────────────────────────────────────── */
@@ -158,7 +158,7 @@
       sel('fo-size', 'Label size', Object.keys((window.RaLabel || { SIZES: {} }).SIZES).map(function (k) { return [k, RaLabel.SIZES[k].name]; }), '100x50'),
       sel('fo-screen', 'Kiosk screen', [['packing', 'Packing station'], ['logistics', 'Logistics station'], ['maceration', 'Maceration'], ['printq', 'Print queue'], ['floorboard', 'Floor board']], 'packing'),
       fld('fo-res', 'Scale resolution (mg)', 'type="number" min="1" placeholder="10"'), btn('', 'Add device', 'p', ' type="submit"')]) + '</form><div id="fo-pair" style="margin-top:12px">' + (FV.pair || '') + '</div>') : '';
-    var al = (alerts.items || []).map(function (a) { return '<tr><td>' + chip('bad', a.kind.replace(/_/g, ' ')) + '</td><td>' + escHtml(a.station || '') + '</td><td>' + escHtml(a.title) + '<div class="t-cap">' + escHtml(a.body || '') + '</div></td><td>' + escHtml(when(a.raisedAt)) + '</td></tr>'; });
+    var al = (alerts.items || []).map(function (a) { return '<tr><td>' + chip('bad', (function (k) { k = String(k || '').replace(/_/g, ' ').toLowerCase(); return k.charAt(0).toUpperCase() + k.slice(1); })(a.kind)) + '</td><td>' + escHtml(a.station || '') + '</td><td>' + escHtml(a.title) + '<div class="t-cap">' + escHtml(a.body || '') + '</div></td><td>' + escHtml(when(a.raisedAt)) + '</td></tr>'; });
     V.innerHTML = form + card('Devices', (d.items || []).length + ' registered', table(['Name', 'Kind', 'Station', 'Status', 'Set-up', 'Last seen', ''], rows)) + card('Station alerts', al.length + ' open', table(['Alert', 'Station', 'What', 'Since'], al));
     on('fo-add', 'submit', async function (e) {
       e.preventDefault();
@@ -191,11 +191,13 @@
     var d = await call('/v1/print-jobs' + (stn ? '?station=' + encodeURIComponent(stn) : '')); var L = document.getElementById('fo-pq-list'); if (!L) return;
     if (!d) { L.innerHTML = errBox('Print jobs are not available.'); return; }
     var TONE = { printed: 'ok', queued: 'warn', sent: 'warn', browser: 'warn', failed: 'bad', parked: 'bad', cancelled: 'neutral' };
+    // WALK2-RP-8: the chip printed the wire word (queued, browser, parked) where people read a sentence.
+    var WORD = { printed: 'Printed', queued: 'Waiting for the printer', sent: 'Sent to the printer', browser: 'Print in the browser', failed: 'Failed', parked: 'Stopped after retries', cancelled: 'Cancelled' };
     var jobs = d.items || [];
     L.innerHTML = card('Jobs', jobs.length + ' shown', table(['When', 'Label', 'For', 'Status', 'Tries', ''], jobs.map(function (j, i) {
       return '<tr><td>' + escHtml(when(j.createdAt)) + '</td><td>' + escHtml(j.labelKind) + (j.reprintOf ? ' ' + chip('warn', 'REPRINT') : '') + '</td><td class="mono">' + escHtml(j.subjectRef || '') + (j.reprintReason ? '<div class="t-cap">' + escHtml(j.reprintReason) + '</div>' : '') + '</td>' +
-        '<td>' + chip(TONE[j.status] || 'neutral', j.status) + (j.lastError ? '<div class="t-cap">' + escHtml(j.lastError) + '</div>' : '') + '</td><td>' + j.attempts + '/' + j.maxAttempts + '</td><td style="white-space:nowrap">' +
-        (j.status !== 'printed' && j.status !== 'sent' ? btn('', 'Print in browser', 'sm', ' data-bp="' + i + '"') + ' ' : '') +
+        '<td>' + chip(TONE[j.status] || 'neutral', WORD[j.status] || j.status) + (j.lastError ? '<div class="t-cap">' + escHtml(j.lastError) + '</div>' : '') + '</td><td>' + j.attempts + '/' + j.maxAttempts + '</td><td style="white-space:nowrap">' +
+        (j.status !== 'printed' && j.status !== 'sent' && j.status !== 'cancelled' ? btn('', 'Print in browser', 'sm', ' data-bp="' + i + '"') + ' ' : '') +
         ((j.status === 'parked' || j.status === 'failed') && j.deviceId ? btn('', 'Send again', 'sm', ' data-retry="' + i + '"') + ' ' : '') +
         (j.status === 'printed' ? btn('', 'Reprint', 'sm', ' data-rp="' + i + '"') : '') + '</td></tr>';
     })));
@@ -216,21 +218,26 @@
     V.innerHTML = '<div class="loading">Loading…</div>';
     var runs = await call('/v1/maceration/runs'); if (!runs) { V.innerHTML = errBox('Maceration is not available.'); return; }
     var settings = can('production:maceration_setting:write') ? await call('/v1/maceration/settings') : null;
+    // WALK2-RP-7: the setting asked for a typed formula uuid and listed settings by uuid. A picker of the
+    // formulas by code and name (every page), and names in the table; a failed list is said.
+    var fr = settings && typeof fkRows === 'function' ? await fkRows('/v1/formulas') : { rows: [] };
+    var FN = {}; (fr.rows || []).forEach(function (f) { FN[f.formulaId] = (f.formulaCode || '') + (f.formulaName ? ' · ' + f.formulaName : ''); });
     var canWrite = can('production:maceration:write'), canEarly = can('production:maceration:release_early');
     var list = runs.items || [];
     var rows = list.map(function (r, i) {
       var pct = Math.min(100, Math.round(((r.day - 1) / Math.max(1, r.needDays)) * 100));
       var state = r.overMax ? chip('bad', 'Past maximum') : r.readyForQc2 ? chip('ok', 'Ready for QC 2') : r.minReached ? chip('warn', 'Freeze step due') : chip('neutral', 'Macerating');
-      return '<tr><td class="mono">' + escHtml(r.batchNumber || r.oilBatchId) + '</td><td><b>' + escHtml(r.label) + '</b><div style="height:6px;background:var(--panel-2);border-radius:3px;margin-top:4px"><div style="height:6px;width:' + pct + '%;background:var(--accent,#c60);border-radius:3px"></div></div><div class="t-cap">ends ' + escHtml(when(r.endsAt)) + ' · max ' + r.maxDays + ' days' + (r.restartCount ? ' · restarted ' + r.restartCount + '×' : '') + '</div></td>' +
+      return '<tr><td class="mono">' + escHtml(r.batchNumber || 'No batch number yet') + '</td><td><b>' + escHtml(r.label) + '</b><div style="height:6px;background:var(--panel-2);border-radius:3px;margin-top:4px"><div style="height:6px;width:' + pct + '%;background:var(--accent,#c60);border-radius:3px"></div></div><div class="t-cap">ends ' + escHtml(when(r.endsAt)) + ' · max ' + r.maxDays + ' days' + (r.restartCount ? ' · restarted ' + r.restartCount + '×' : '') + '</div></td>' +
         '<td>' + state + (r.releasedEarlyAt ? '<div class="t-cap">Released early: ' + escHtml(r.earlyReleaseReason || '') + ' — QC 2 still required</div>' : '') + '</td>' +
         '<td>' + (r.freezeRequired ? (r.freezeDoneAt ? chip('ok', 'Freeze done') : canWrite ? btn('', 'Freeze done', 'sm', ' data-fz="' + i + '"') : chip('warn', 'Freeze due')) : '<span class="t-cap">none</span>') + '</td>' +
         '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canEarly && !r.releasedEarlyAt && !r.minReached ? btn('', 'Release early', 'sm', ' data-early="' + i + '"') : '') + '</td></tr>';
     });
-    var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid([fld('fo-ms-f', 'Formula id', 'placeholder="the formula\'s id" required'),
+    var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid(['<label style="display:flex;flex-direction:column;gap:5px;min-width:0"><span class="t-cap">Formula</span><select id="fo-ms-f" class="fld" required' + (fr.error ? ' aria-invalid="true"' : '') + '><option value="">' + escHtml(fr.error || 'Choose a formula…') + '</option>' +
+        (fr.rows || []).map(function (f) { return '<option value="' + escHtml(f.formulaId) + '">' + escHtml(FN[f.formulaId] || f.formulaId) + '</option>'; }).join('') + '</select>' + (fr.error ? '<span role="alert" class="t-cap" style="color:var(--bad,#b3261e)">' + escHtml(fr.error) + '</span>' : '') + '</label>',
       '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-req" type="checkbox" checked> Maceration required</label>', fld('fo-ms-min', 'Minimum days', 'type="number" min="1" max="365" value="30"'), fld('fo-ms-max', 'Maximum days', 'type="number" min="1" max="365" value="120"'),
       '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-fz" type="checkbox"> Freeze / chill-filter step</label>', fld('fo-ms-note', 'Freeze note', 'placeholder="chill 24 h at 4 °C, filter"'), btn('', 'Save', 'p', ' type="submit"')]) + '</form>' +
-      table(['Formula', 'Required', 'Days', 'Freeze'], (settings.items || []).map(function (s) { return '<tr><td class="mono">' + escHtml(s.formulaId) + '</td><td>' + (s.required ? 'Yes' : 'No') + '</td><td>' + s.minDays + '–' + s.maxDays + '</td><td>' + (s.freezeRequired ? escHtml(s.freezeNote || 'Yes') : 'No') + '</td></tr>'; }))) : '';
-    V.innerHTML = card('Macerating now', list.length + ' batches · they cannot ship, go to FG or be reserved until QC 2 passes', table(['Batch', 'Timer', 'State', 'Freeze', ''], rows)) + setCard;
+      table(['Formula', 'Required', 'Days', 'Freeze'], (settings.items || []).map(function (s) { return '<tr><td>' + escHtml(FN[s.formulaId] || 'Formula not in your list') + '</td><td>' + (s.required ? 'Yes' : 'No') + '</td><td>' + s.minDays + '–' + s.maxDays + '</td><td>' + (s.freezeRequired ? escHtml(s.freezeNote || 'Yes') : 'No') + '</td></tr>'; }))) : '';
+    V.innerHTML = card('Macerating now', list.length + (list.length === 1 ? ' batch' : ' batches') + ' · they cannot ship, go to FG or be reserved until QC 2 passes', table(['Batch', 'Timer', 'State', 'Freeze', ''], rows)) + setCard;
     V.querySelectorAll('[data-fz]').forEach(function (b) { b.addEventListener('click', async function () { if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-fz'))].macerationRunId + '/freeze-done', 'POST', {})) viewMaceration(item, V); }); });
     V.querySelectorAll('[data-ext]').forEach(function (b) {
       b.addEventListener('click', async function () {
