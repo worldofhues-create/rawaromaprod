@@ -129,18 +129,23 @@ export class PolicyService {
   async history(key: string) {
     await this.versionAt(key);
     const versions = await this.sql`
-      select version, body, reason, created_by as "createdBy", created_dt::text as "createdDt"
-        from platform.policy_version where policy_key = ${key} order by version desc`;
+      select version, body, reason, created_by as "createdBy", created_dt::text as "createdDt",
+             -- WALK2-RP-10: the Rules screen printed created_by, a user id; the person's name or email.
+             case when created_by = 'system' then 'System default'
+                  else (select coalesce(nullif(u.user_name, ''), u.email) from iam.user_master u where u.user_id::text = pv.created_by) end as "createdByName"
+        from platform.policy_version pv where policy_key = ${key} order by version desc`;
     const overrides = await this.sql`
       select override_id as "overrideId", record_type as "recordType", record_id as "recordId", value::text as value, reason,
-             created_by as "createdBy", created_dt::text as "createdDt", revoked_by as "revokedBy", revoked_dt::text as "revokedDt", revoke_reason as "revokeReason"
-        from platform.policy_override where policy_key = ${key} order by created_dt desc limit 200`;
+             created_by as "createdBy", created_dt::text as "createdDt", revoked_by as "revokedBy", revoked_dt::text as "revokedDt", revoke_reason as "revokeReason",
+             (select coalesce(nullif(u.user_name, ''), u.email) from iam.user_master u where u.user_id::text = o.created_by::text) as "createdByName"
+        from platform.policy_override o where policy_key = ${key} order by created_dt desc limit 200`;
     const decisions = await this.sql`
       select decision_id as "decisionId", version, rule_id as "ruleId", record_type as "recordType", record_id as "recordId", explain,
              decided_by as "decidedBy", decided_dt::text as "decidedDt"
         from platform.policy_decision where policy_key = ${key} order by decided_dt desc limit 50`;
     const j = (v: unknown) => (typeof v === 'string' ? JSON.parse(v) : v);
-    return { key, versions: versions.map((v) => ({ ...v, body: j(v.body) }) as Record<string, unknown>), overrides: overrides.map((o) => ({ ...o, value: JSON.parse(String(o.value)) }) as Record<string, unknown>), decisions };
+    const [meta] = await this.sql`select title from platform.policy where policy_key = ${key}`;
+    return { key, title: (meta?.title as string | undefined) ?? null, versions: versions.map((v) => ({ ...v, body: j(v.body) }) as Record<string, unknown>), overrides: overrides.map((o) => ({ ...o, value: JSON.parse(String(o.value)) }) as Record<string, unknown>), decisions };
   }
 
   /** Try a case against a draft body (nothing saved), or against the version in force. */

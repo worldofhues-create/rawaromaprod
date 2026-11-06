@@ -122,3 +122,14 @@ test('through the Drizzle-wrapped PG_CLIENT (as in the app): evaluate with a tim
   assert.equal((await svc.evaluate(key, { record_type: 'po', record_id: 'PO-W' }, new Date(Date.now() + 1000))).value, 'y');
   assert.equal((await svc.evaluate(key, {}, new Date(Date.now() - 60_000))).value, 'x');
 });
+
+test('WALK2-RP-10: history names who published a version and carries the policy title, never a bare user id', async () => {
+  const sql = testClient();
+  const uid = (await sql`insert into iam.user_master (user_id, user_name, email, is_active, status) values (gen_random_uuid(), 'Meera Iyer', ${'meera.' + Date.now() + '@rawaroma.local'}, true, 'ACTIVE') returning user_id::text as id`)[0]!.id as string;
+  const who = principal({ roles: ['admin'], userId: uid });
+  const key = await freshPolicy({ rules: [], hasDefault: true, defaultValue: 1 });
+  await svc.publish(key, { rules: [], hasDefault: true, defaultValue: 2 }, 'named', who);
+  const h = await svc.history(key) as { title: string | null; versions: Array<{ createdByName: string | null }> };
+  assert.equal(h.versions[0]!.createdByName, 'Meera Iyer');
+  assert.ok(h.title, 'the editor heading reads the policy title');
+});

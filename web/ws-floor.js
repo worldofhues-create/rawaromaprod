@@ -344,7 +344,7 @@
     }
     function render() {
       V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:1000px">' +
-        '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + btn('fl-back', '← All rules', 'sm') + '<b>' + esc(key) + '</b><span>in force: v' + esc((h.versions[0] || {}).version) + '</span></div>' +
+        '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + btn('fl-back', '← All rules', 'sm') + '<b>' + esc(h.title || key) + '</b><span>in force: v' + esc((h.versions[0] || {}).version) + '</span></div>' +
         draft.rules.map(function (r, ri) {
           return '<div class="card" style="display:flex;flex-direction:column;gap:8px"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><b>' + (ri === 0 ? 'IF' : 'ELSE IF') + '</b> Rule ' + (ri + 1) +
             '<select class="fld" data-f="scope" data-r="' + ri + '" style="max-width:180px">' + SCOPES.map(function (s) { return '<option value="' + s[0] + '"' + (s[0] === r.scope ? ' selected' : '') + '>' + s[1] + '</option>'; }).join('') + '</select>' +
@@ -360,8 +360,8 @@
         (canOverride ? '<form id="fl-ov" class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end"><b style="grid-column:1/-1">Override on one record (admin or owner, with a reason)</b>' +
           '<label>Record type<input id="fl-ovt" class="fld" placeholder="po, floor_job"></label><label>Record<input id="fl-ovi" class="fld" placeholder="PO-123"></label><label>Value<input id="fl-ovv" class="fld"></label><label>Reason<input id="fl-ovr" class="fld"></label>' +
           btn('fl-ovgo', 'Override', '', ' type="submit"') + '<div id="fl-overr" role="alert" style="color:var(--red);grid-column:1/-1"></div></form>' : '') +
-        '<div class="card"><b>Versions</b>' + h.versions.map(function (v) { return '<div>v' + esc(v.version) + ' · ' + esc(localTime(v.createdDt)) + ' · ' + esc(v.createdBy) + ' · ' + esc(v.reason) + '</div>'; }).join('') +
-        '<b style="display:block;margin-top:8px">Overrides</b>' + (h.overrides.length ? h.overrides.map(function (o) { return '<div>' + chip(o.revokedDt ? 'n' : 'a', o.revokedDt ? 'Revoked' : 'OVERRIDDEN') + ' ' + esc(o.recordType) + ' ' + esc(o.recordId) + ' → ' + esc(showVal(o.value)) + ' · ' + esc(o.reason) + (!o.revokedDt && canOverride ? ' ' + btn('fl-rv-' + o.overrideId, 'Revoke', 'sm', ' data-rev="' + esc(o.overrideId) + '"') : '') + '</div>'; }).join('') : '<div>None.</div>') +
+        '<div class="card"><b>Versions</b>' + h.versions.map(function (v) { return '<div>v' + esc(v.version) + ' · ' + esc(localTime(v.createdDt)) + ' · ' + esc(v.createdByName || 'Someone no longer on file') + ' · ' + esc(v.reason) + '</div>'; }).join('') +
+        '<b style="display:block;margin-top:8px">Overrides</b>' + (h.overrides.length ? h.overrides.map(function (o) { return '<div>' + chip(o.revokedDt ? 'n' : 'a', o.revokedDt ? 'Revoked' : 'OVERRIDDEN') + ' ' + esc(o.recordType) + ' ' + esc(o.recordId) + ' → ' + esc(showVal(o.value)) + ' · ' + esc(o.reason) + (!o.revokedDt && canOverride ? ' ' + btn('fl-rv-' + o.overrideId, 'Withdraw', 'sm', ' data-rev="' + esc(o.overrideId) + '"') : '') + '</div>'; }).join('') : '<div>None.</div>') +
         '<b style="display:block;margin-top:8px">Recent decisions</b>' + (h.decisions.length ? h.decisions.map(function (d) { return '<div>v' + esc(d.version) + ' · ' + esc(d.recordType || '') + ' ' + esc(d.recordId || '') + ' · ' + esc(d.explain) + '</div>'; }).join('') : '<div>None yet.</div>') + '</div></div>';
       bind();
     }
