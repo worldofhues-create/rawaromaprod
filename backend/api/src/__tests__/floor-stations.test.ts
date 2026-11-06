@@ -313,3 +313,19 @@ test('two kiosks: concurrent picks of the same line — exactly one wins', async
   assert.equal(tries.filter((t) => t.status === 'fulfilled').length, 1);
   assert.match(String((tries.find((t) => t.status === 'rejected') as PromiseRejectedResult).reason), /already picked/);
 });
+
+test('WALK2-RP-12: job candidates are the runs with a pick list not yet on the floor', async () => {
+  const fam = await family();
+  const m = await material(fam);
+  await lot(m.id, 1000);
+  const waiting = await order([{ materialId: m.id, grams: 5 }]);
+  const g = await gramUom();
+  const noList = uid();
+  await sql()`insert into production.production_order (production_order_id, order_qty, uom_id, status) values (${noList}, 1, ${g}, 'INPROGRESS')`;
+  let ids = (await stations.jobCandidates()).items.map((r) => r.productionOrderId);
+  assert.ok(ids.includes(waiting));
+  assert.ok(!ids.includes(noList), 'no pick list, not offered');
+  await stations.createJob(waiting, {}, admin);
+  ids = (await stations.jobCandidates()).items.map((r) => r.productionOrderId);
+  assert.ok(!ids.includes(waiting), 'on the floor, not offered again');
+});

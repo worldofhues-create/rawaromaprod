@@ -78,6 +78,10 @@ export class FloorController {
   }
 
   @Permissions('production:floor_job:write')
+  @Get('v1/floor/job-candidates')
+  candidates() { return this.stations.jobCandidates(); }
+
+  @Permissions('production:floor_job:write')
   @Post('v1/floor/jobs')
   create(@Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     const id = s(b?.productionOrderId);

@@ -125,6 +125,18 @@ export class FloorStationService {
 
   /* ── jobs ────────────────────────────────────────────────────────────────────────────── */
 
+  /** WALK2-RP-12: the runs a job can be opened for, by order number (the Floor queue asked for a typed
+   *  production-order uuid): an active pick list and not on the floor yet. createJob re-checks all of it. */
+  async jobCandidates() {
+    const rows = await this.sql<{ id: string; order_number: string | null; status: string | null }[]>`
+      select po.production_order_id::text as id, po.order_number, po.status
+        from production.production_order po
+       where exists (select 1 from production.material_pick_list pl where pl.production_order_id = po.production_order_id and coalesce(pl.status, 'ACTIVE') = 'ACTIVE')
+         and not exists (select 1 from production.floor_job fj where fj.production_order_id = po.production_order_id)
+       order by po.created_dt`;
+    return { items: rows.map((r) => ({ productionOrderId: r.id, orderNumber: r.order_number, status: r.status })) };
+  }
+
   /** Open a floor job for a production order that has a pick list. Every line must have a floor
    *  code and a mass unit, or the job is refused (nothing reaches the floor uncoded or unweighable). */
   async createJob(

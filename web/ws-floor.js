@@ -251,11 +251,16 @@
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The floor queue is not available.')); return; }
     var d = data(res) || { items: [], counters: {} }, c = d.counters || {};
     var canOpen = can('production:floor_job:write');
+    // WALK2-RP-12: the run was typed as a production-order uuid; chosen by its order number.
+    var cand = canOpen ? await call('/v1/floor/job-candidates') : null, runs = (cand && cand.status < 400 && (data(cand) || {}).items) || [];
+    var candErr = cand && cand.status >= 400 ? err(cand, 'The runs did not load.') : '';
     V.innerHTML = '<div class="stats">' + kpi('activity', String(c.total || 0), 'On the floor') + kpi('zap', String(c.ready || 0), 'Ready') + kpi('alert', String(c.delayed || 0), 'Delayed') +
       kpi('lock', String(c.waiting || 0), 'Waiting on stock') + kpi('shieldCheck', String(c.held || 0), 'Held') + '</div>' +
-      (canOpen ? '<form id="fl-new" class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><label style="flex:1;min-width:240px">Production order id (a run with a pick list)<input id="fl-po" class="fld" autocomplete="off"></label>' +
+      (canOpen ? '<form id="fl-new" class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><label style="flex:1;min-width:240px">Production run (with a pick list)<select id="fl-po" class="fld"><option value="">' + esc(candErr || (runs.length ? 'Choose a run…' : 'No run with a pick list is waiting')) + '</option>' +
+        runs.map(function (r) { return '<option value="' + esc(r.productionOrderId) + '">' + esc(r.orderNumber || 'Run without a number') + '</option>'; }).join('') + '</select></label>' +
         '<label style="flex:1;min-width:240px">Extra mixing steps, one per line (optional)<textarea id="fl-steps" class="fld" rows="2"></textarea></label>' +
-        '<label style="flex:1;min-width:240px">Approved suggestion id (optional: ranks below customer orders)<input id="fl-cs" class="fld" autocomplete="off"></label>' + btn('fl-newgo', 'Put on the floor', 'p', ' type="submit"') + '<div id="fl-nerr" role="alert" style="color:var(--red);width:100%"></div></form>' : '') +
+        '<label style="flex:1;min-width:240px">Approved stock-cover suggestion (optional: ranks below customer orders)<select id="fl-cs" class="fld"><option value="">None</option>' +
+          (d.planned || []).map(function (s) { return '<option value="' + esc(s.coverSuggestionId) + '">' + esc(s.sku + ': make ' + s.qty) + '</option>'; }).join('') + '</select></label>' + btn('fl-newgo', 'Put on the floor', 'p', ' type="submit"') + '<div id="fl-nerr" role="alert" style="color:var(--red);width:100%"></div></form>' : '') +
       // PROD-D-2: each job's late prediction from measured station times, maceration and stock; at-risk
       // jobs are flagged before they are Delayed. Approved stock-cover suggestions are listed below.
       (d.pipeline && d.pipeline.atRisk ? '<div class="card" id="fl-risk" role="status">' + chip('r', d.pipeline.atRisk + ' at risk') + ' Predicted to finish after the promise date: expedite before they become Delayed.</div>' : '') +
@@ -263,16 +268,17 @@
       (d.items.length ? d.items.map(function (j) {
         var p = j.prediction;
         var fin = !p ? '' : p.atRisk ? chip('r', 'Late by ' + p.lateByDays + 'd') + ' ' + esc(p.explain) : esc(p.explain);
-        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin + '</td></tr>';
+        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin + '</td></tr>';
       }).join('') : '<tr><td colspan="6">Nothing on the floor.</td></tr>') + '</tbody></table></div>' +
       ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
-        return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Open a job with this suggestion\'s id: ' + esc(s.coverSuggestionId) + '</span></p>';
+        return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Choose it as the stock-cover suggestion when you put a run on the floor.</span></p>';
       }).join('') + '</div>' : '');
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();
       var steps = $('fl-steps').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-      var r = await call('/v1/floor/jobs', { method: 'POST', body: { productionOrderId: $('fl-po').value.trim(), steps: steps, coverSuggestionId: ($('fl-cs') && $('fl-cs').value.trim()) || undefined } });
+      if (!$('fl-po').value) { $('fl-nerr').textContent = 'Choose the run.'; return; }
+      var r = await call('/v1/floor/jobs', { method: 'POST', body: { productionOrderId: $('fl-po').value, steps: steps, coverSuggestionId: ($('fl-cs') && $('fl-cs').value) || undefined } });
       if (r.status >= 400) { $('fl-nerr').textContent = err(r, 'The job was not opened.'); return; }
       toast('On the floor as ' + data(r).jobNo, 'good'); loadView();
     };
@@ -291,7 +297,7 @@
       $('fl-sco').innerHTML = '<div class="card"><table>' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
-        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', x.status)) + row('Hazard', esc(x.hazard)) + '</table></div>';
+        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) + '</table></div>';
     };
   }
 
