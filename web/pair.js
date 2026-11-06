@@ -40,14 +40,20 @@
         await api('POST', '/v1/device-agent/heartbeat', {}, d.token);
         var b = await api('GET', '/v1/device-agent/display', null, d.token);
         var B = document.getElementById('board');
+        var STAGE = { PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix' };
+        var qb = b.qcBacklog || {}, q2 = qb.qc2Ready || [], pq = qb.packagingQc || [];
+        var at = new Date(b.at), atText = isNaN(at) ? '' : at.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
         B.innerHTML = '<div class="grid">' +
-          '<div class="panel"><h2>Floor queue</h2>' + ((b.queue || []).map(function (j) { return row(j.jobNo, j.stage, (j.orderRef || '') + (j.expedite ? ' · URGENT' : '')); }).join('') || '<div class="t-cap">Queue empty.</div>') + '</div>' +
+          '<div class="panel"><h2>Floor queue</h2>' + ((b.queue || []).map(function (j) { return row(j.jobNo, STAGE[j.stage] || j.stage, (j.orderRef || '') + (j.expedite ? ' · URGENT' : '')); }).join('') || '<div class="t-cap">Queue empty.</div>') + '</div>' +
           '<div class="panel"><h2>Maceration</h2>' + ((b.maceration || []).map(function (r) { return row(r.batchNumber || '', r.label, r.overMax ? 'PAST MAXIMUM' : r.readyForQc2 ? 'Ready for QC 2' : ''); }).join('') || '<div class="t-cap">Nothing macerating.</div>') + '</div>' +
-          '<div class="panel"><h2>QC backlog</h2>' + row('QC 2 ready', String(b.qcBacklog.qc2Ready.length), b.qcBacklog.qc2Ready.slice(0, 6).join(', ')) + row('Packaging QC', String(b.qcBacklog.packagingQc.length), b.qcBacklog.packagingQc.slice(0, 6).join(', ')) + '</div>' +
+          '<div class="panel"><h2>QC backlog</h2>' + row('QC 2 ready', String(q2.length), q2.slice(0, 6).join(', ')) + row('Packaging QC', String(pq.length), pq.slice(0, 6).join(', ')) + '</div>' +
           ((b.alerts || []).length ? '<div class="panel" style="grid-column:1/-1"><h2>Alerts · ' + esc(b.station || '') + '</h2>' + b.alerts.map(function (a) { return row(a.title, '', a.body || ''); }).join('') + '</div>' : '') +
-          '</div><div class="t-cap" style="margin-top:10px">' + esc(d.station) + ' · updated ' + esc(String(b.at).slice(11, 19)) + '</div>';
+          '</div><div class="t-cap" style="margin-top:10px">' + esc(d.station) + ' · updated ' + esc(atText) + '</div>';
       } catch (e) {
         if (/revoked|not recognised|not paired/i.test(e.message)) { try { localStorage.removeItem(KEY); } catch (x) { /* ignore */ } location.reload(); return; }
+        // A failed read said nothing: the TV kept a board of unknown age, or stayed blank.
+        var Bd = document.getElementById('board'), old = document.getElementById('stale'); if (old) old.remove();
+        Bd.insertAdjacentHTML('afterbegin', '<div id="stale" role="alert" class="panel bad" style="font-size:22px;font-weight:600;margin:0 0 16px">The floor board did not update' + (Bd.querySelector('.grid') ? '; showing the last one' : '') + '. Trying again every 15 seconds.</div>');
       }
     }
     function startBoard() {
