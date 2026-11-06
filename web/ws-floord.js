@@ -150,6 +150,7 @@
     var rows = data(res) || [];
     var list = rows.length ? rows.map(function (r) {
       var s = r.decisionStatus === 'CONFIRMED' ? chip('g', 'Decided: ' + OUT[r.proposedOutcome]) : r.decisionStatus === 'PROPOSED' ? chip('a', OUT[r.proposedOutcome] + ' proposed by the ' + (r.proposedAs === 'PERFUMER' ? 'perfumer' : 'vault approver')) : chip('r', 'Waiting for a decision');
+      s = s.replace('<span class="chip', '<span style="white-space:normal;height:auto;max-width:100%;text-align:left" class="chip'); // RP-26: the chip wraps too
       return '<button type="button" class="glass" data-ob="' + esc(r.oilBatchId) + '" style="text-align:left;padding:var(--s-snug);display:flex;flex-direction:column;gap:4px;width:100%;min-width:0;overflow-wrap:anywhere;cursor:pointer;border:1px solid var(--line)">' + // WALK2-RP-26: the batch code was cut at narrow widths
         '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><strong style="font-family:var(--font-mono)">' + esc(r.batchNumber || 'Batch without a number') + '</strong><span>' + esc(r.productName || '') + '</span>' + s + '</span>' +
         '<span class="t-cap" style="color:var(--ink-3)">In review since ' + esc(when(r.reviewSince)) + ' · round ' + esc(r.roundNo) + '</span></button>';

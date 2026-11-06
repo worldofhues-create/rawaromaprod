@@ -43,3 +43,6 @@ test('RP-29: the offline banner never rewrites itself in a loop', () => {
   assert.match(js, /if \(b\.textContent !== msg\) b\.textContent = msg;/);
   assert.match(js, /t\.id === 'fo-net' \|\| \(t\.closest && t\.closest\('#fo-net'\)\)/);
 });
+test('RP-26: the QC review decision chip wraps at narrow widths', () => {
+  assert.match(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /white-space:normal;height:auto;max-width:100%;text-align:left" class="chip/);
+});
