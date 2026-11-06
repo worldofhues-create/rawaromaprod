@@ -27,3 +27,14 @@ test('RP-26: QC review batch cards wrap their code and never fall back to the uu
 test('RP-27: decided suggestions read Approved/Dismissed, not the wire word', () => {
   assert.match(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /\{ APPROVED: 'Approved', DISMISSED: 'Dismissed' \}\)\[x\.status\]/);
 });
+test('RP-28: an unreachable server is a failure on the floor stations, not an empty queue', async () => {
+  const js = readFileSync(join(root, 'web/ws-floor.js'), 'utf8');
+  const s = js.indexOf('  async function call('), e = js.indexOf('\n  }\n', s) + 4;
+  const ctx: Record<string, unknown> = { tunnel: async () => { throw new Error('down'); } }; vm.createContext(ctx);
+  vm.runInContext(js.slice(s, e) + '\nthis.f = call;', ctx);
+  const r = await (ctx.f as (p: string) => Promise<{ status: number }>)('/v1/floor/queue');
+  assert.ok(r.status >= 400);
+});
+test('RP-28: Stock cover and QC review treat an unreachable server as a failure too', () => {
+  assert.doesNotMatch(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /catch \(e\) \{ return \{ status: 0,/);
+});

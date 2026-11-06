@@ -33,7 +33,9 @@
   function localTime(v) { var d = new Date(v); if (!v || isNaN(d)) return v ? String(v) : ''; var p = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
   function code(v) { return '<span style="font-family:var(--font-mono);font-size:20px;font-weight:600">' + esc(v) + '</span>'; }
   async function call(path, opts) {
-    try { return await tunnel(path, opts); } catch (e) { return { status: 0, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
+    // WALK2-RP-28: an unreachable server answered status 0, which every `status >= 400` check read as
+    // success: with the API down the picker read "Nothing waiting at this station". 503, so it is a failure.
+    try { return await tunnel(path, opts); } catch (e) { return { status: 503, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
   }
 
   /* ── nav: new floor roles and who sees which screen ─────────────────────────────────── */

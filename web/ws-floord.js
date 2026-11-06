@@ -27,7 +27,7 @@
   function stale(nav) { return st.nav !== nav; }
   function scroll(inner) { return '<div style="overflow-x:auto;max-width:100%">' + inner + '</div>'; }
   async function call(path, opts) {
-    try { return await tunnel(path, opts); } catch (e) { return { status: 0, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
+    try { return await tunnel(path, opts); } catch (e) { return { status: 503, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
   }
   function when(v) { return v ? String(v).replace('T', ' ').slice(0, 16) : ''; }
 
