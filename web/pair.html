@@ -31,6 +31,8 @@
     .row { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 22px; margin-top: 6px; }
     .mono { font-family: 'JetBrains Mono', monospace; }
     h2 { font: 600 26px/1.2 Outfit, system-ui, sans-serif; margin: 0 0 8px; }
+    /* WALK2-RP-20: a 4K TV showed the 1080p board at a quarter of the screen. */
+    @media (min-width: 2500px) { #board { padding: 40px; } .grid { grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 32px; } .row { font-size: 44px; padding: 18px 24px; } h2 { font-size: 52px; } #board .t-cap { font-size: 28px; } .panel { padding: 36px; } }
     #net { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px; text-align: center; background: var(--bad); color: #fff; display: none; font-weight: 600; }
   </style>
 </head>

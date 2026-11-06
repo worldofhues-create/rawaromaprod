@@ -37,3 +37,15 @@ test('RP-9: packing chooses the order and lots by number; shipment words', () =>
 test('RP-17: the Rules list says the default in words', () => {
   assert.match(floor, /'otherwise ' \+ esc\(sayVal\(p\.body\.defaultValue\)\)/);
 });
+test('RP-18: kiosk and floor-role controls are 56px', () => {
+  assert.doesNotMatch(ops, /min-height:52px/);
+  assert.match(ops, /\.ra-kiosk \.btn,\.ra-kiosk \.gbtn,\.ra-kiosk button,\.ra-floor \.btn,\.ra-floor \.gbtn,\.ra-floor button\{min-height:56px!important/);
+  assert.match(ops, /\.ra-kiosk #ra-dock-toggle/);
+  assert.match(ops, /FLOOR_ROLES = \{ picker: 1, verifier: 1, mixer: 1, packing: 1, logistics: 1 \}/);
+});
+test('RP-19/20: kiosk tag clear of the header; TV board scales to the screen and names alert stations', () => {
+  assert.match(ops, /position:fixed;left:0;bottom:0;z-index:2147483500/);
+  assert.match(ops, /var f = big \? Math\.max\(1\.6, Math\.min\(3, \(window\.innerWidth \|\| 1280\) \/ 1280\)\) : 1;/);
+  assert.match(ops, /a\.station \? ' · ' \+ escHtml\(a\.station\)/);
+  assert.match(readFileSync(join(root, 'web/pair.html'), 'utf8'), /@media \(min-width: 2500px\)/);
+});

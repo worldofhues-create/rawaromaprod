@@ -301,8 +301,8 @@
     var orders = (cand && cand.orders) || [], lots = (cand && cand.lots) || [];
     var startForm = !cand ? '' : '<form id="fo-pk-new" style="margin-top:10px">' + grid([
       sel('fo-pk-so', 'Sales order', [['', orders.length ? 'Choose an order…' : 'No confirmed orders']].concat(orders.map(function (o) { return [o.salesOrderId, (o.soNumber || 'Order without a number') + (o.customerName ? ' · ' + o.customerName : '')]; })), ''),
-      '<fieldset style="border:0;padding:0;margin:0;min-width:0"><legend class="t-cap">QC-approved lots it ships from</legend>' + (lots.length ? '<div style="display:flex;flex-direction:column;gap:4px;max-height:240px;overflow:auto">' + lots.map(function (l, i) {
-        return '<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="fo-pk-lot" value="' + escHtml(l.finishedGoodBatchId) + '" id="fo-pk-lot-' + i + '"><span class="mono">' + escHtml(l.batchNumber || 'No batch number') + '</span><span class="t-cap">' + escHtml([l.productName, l.packSize].filter(Boolean).join(' · ')) + '</span></label>';
+      '<fieldset style="border:0;padding:0;margin:0;min-width:0;grid-column:1/-1"><legend class="t-cap">QC-approved lots it ships from</legend>' + (lots.length ? '<div style="display:flex;flex-direction:column;gap:4px;max-height:240px;overflow:auto">' + lots.map(function (l, i) {
+        return '<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="fo-pk-lot" value="' + escHtml(l.finishedGoodBatchId) + '" id="fo-pk-lot-' + i + '"><span class="mono" style="white-space:nowrap">' + escHtml(l.batchNumber || 'No batch number') + '</span><span class="t-cap">' + escHtml([l.productName, l.packSize].filter(Boolean).join(' · ')) + '</span></label>';
       }).join('') + '</div>' : '<div class="t-cap">No lot has passed packaging QC yet.</div>') + '</fieldset>',
       btn('', 'Start packing', 'p', ' type="submit" data-net')]) + '</form>';
     V.innerHTML = card('Packing station', 'QC-approved lots only', grid([fld('fo-pk-st', 'Station', 'value="' + escHtml(station('packing', 'Packing 1')) + '"' + (kiosk() ? ' disabled' : ''))]) + startForm) +
@@ -441,21 +441,23 @@
 
   /* ── Floor board (TV) ────────────────────────────────────────────────────────────────────── */
   function boardHtml(b, big) {
-    var f = big ? 1.6 : 1;
+    // WALK2-RP-20: on a 4K TV the board was 280px cards of 16px text in a corner. TV mode scales with the
+    // screen width (3x at 3840) and alerts name their station (two looked identical).
+    var f = big ? Math.max(1.6, Math.min(3, (window.innerWidth || 1280) / 1280)) : 1;
     var h = function (t) { return '<h2 style="font:600 ' + (20 * f) + 'px/1.2 var(--font-ui);margin:0 0 8px">' + escHtml(t) + '</h2>'; };
     var STAGE = { PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix' };
-    var q = (b.queue || []).map(function (j) { return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(j.jobNo) + '</b><span>' + escHtml(STAGE[j.stage] || j.stage) + '</span><span class="t-cap">' + escHtml(j.orderRef || '') + (j.expedite ? ' · URGENT' : '') + '</span></div>'; }).join('') || '<div class="t-cap">Queue empty.</div>';
-    var m = (b.maceration || []).map(function (r) { return '<div style="padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(r.batchNumber || '') + '</b> <span style="float:right">' + escHtml(r.label) + '</span><div class="t-cap">' + (r.overMax ? 'PAST MAXIMUM' : r.readyForQc2 ? 'Ready for QC 2' : r.freezeDue && r.day >= r.needDays ? 'Freeze step due' : 'ends ' + escHtml(when(r.endsAt))) + '</div></div>'; }).join('') || '<div class="t-cap">Nothing macerating.</div>';
+    var q = (b.queue || []).map(function (j) { return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(j.jobNo) + '</b><span>' + escHtml(STAGE[j.stage] || j.stage) + '</span><span class="t-cap">' + escHtml(j.orderRef || '') + (j.expedite ? ' · URGENT' : '') + '</span></div>'; }).join('') || '<div class="t-cap" style="font-size:' + (14 * f) + 'px">Queue empty.</div>';
+    var m = (b.maceration || []).map(function (r) { return '<div style="padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(r.batchNumber || '') + '</b> <span style="float:right">' + escHtml(r.label) + '</span><div class="t-cap">' + (r.overMax ? 'PAST MAXIMUM' : r.readyForQc2 ? 'Ready for QC 2' : r.freezeDue && r.day >= r.needDays ? 'Freeze step due' : 'ends ' + escHtml(when(r.endsAt))) + '</div></div>'; }).join('') || '<div class="t-cap" style="font-size:' + (14 * f) + 'px">Nothing macerating.</div>';
     var qb = b.qcBacklog || {}, q2 = qb.qc2Ready || [], pq = qb.packagingQc || [];
     var qc = '<div style="font-size:' + (16 * f) + 'px">QC 2 ready: <b>' + q2.length + '</b> ' + escHtml(q2.join(', ')) + '<br>Packaging QC waiting: <b>' + pq.length + '</b> ' + escHtml(pq.slice(0, 8).join(', ')) + '</div>';
     var sh = b.shipments || {};
-    var al = (b.alerts || []).map(function (a) { return '<div style="padding:8px 10px;border-left:6px solid var(--bad,#c33);background:var(--panel-2);border-radius:6px;font-size:' + (15 * f) + 'px"><b>' + escHtml(a.title) + '</b><div class="t-cap">' + escHtml(a.body || '') + '</div></div>'; }).join('');
-    return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;padding:' + (big ? 20 : 0) + 'px">' +
+    var al = (b.alerts || []).map(function (a) { return '<div style="padding:8px 10px;border-left:6px solid var(--bad,#c33);background:var(--panel-2);border-radius:6px;font-size:' + (15 * f) + 'px"><b>' + escHtml(a.title) + (a.station ? ' · ' + escHtml(a.station) : '') + '</b><div class="t-cap" style="font-size:' + (13 * f) + 'px">' + escHtml(a.body || '') + '</div></div>'; }).join('');
+    return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(' + Math.round(280 * f) + 'px,1fr));gap:' + Math.round(14 * f) + 'px;padding:' + (big ? Math.round(20 * f) : 0) + 'px">' +
       '<div class="card"><div class="card-bd">' + h('Floor queue') + '<div style="display:grid;gap:6px">' + q + '</div></div></div>' +
       '<div class="card"><div class="card-bd">' + h('Maceration') + '<div style="display:grid;gap:6px">' + m + '</div></div></div>' +
       '<div class="card"><div class="card-bd">' + h('QC backlog') + qc + h('Shipping') + '<div style="font-size:' + (16 * f) + 'px">Packing ' + (sh.PACKING || 0) + ' · Packed ' + (sh.PACKED || 0) + ' · Docs ready ' + (sh.DOCS_READY || 0) + ' · AWB ' + (sh.AWB_ASSIGNED || 0) + ' · Held ' + (sh.HOLD || 0) + '</div></div></div>' +
       (al ? '<div class="card" style="grid-column:1/-1"><div class="card-bd">' + h('Alerts') + '<div style="display:grid;gap:6px">' + al + '</div></div></div>' : '') +
-      '</div><div class="t-cap" style="padding:0 ' + (big ? 20 : 0) + 'px">Updated ' + escHtml(when(b.at)) + '</div>';
+      '</div><div class="t-cap" style="padding:0 ' + (big ? Math.round(20 * f) : 0) + 'px;font-size:' + (13 * f) + 'px">Updated ' + escHtml(when(b.at)) + '</div>';
   }
   async function viewBoard(item, V) {
     clearTimeout(FV.boardTimer);
@@ -510,6 +512,15 @@
   window.addEventListener('online', netBanner); window.addEventListener('offline', netBanner);
   new MutationObserver(function () { if (!navigator.onLine) netBanner(); }).observe(document.documentElement, { childList: true, subtree: true });
 
+  // WALK2-RP-18: kiosk targets were 52px buttons, 48px fields and 44px header buttons (Ruh, alerts),
+  // under the 56px floor for gloved hands. A locked kiosk, and a floor role's own station screens
+  // (picker, verifier, mixer, packing, logistics), get 56px on every control.
+  var size = document.createElement('style');
+  size.textContent = '.ra-kiosk .btn,.ra-kiosk .gbtn,.ra-kiosk button,.ra-floor .btn,.ra-floor .gbtn,.ra-floor button{min-height:56px!important;font-size:17px}' +
+    '.ra-kiosk .fld:not([type=checkbox]):not([type=radio]),.ra-kiosk select,.ra-floor .fld:not([type=checkbox]):not([type=radio]),.ra-floor select{min-height:56px!important;font-size:17px}';
+  document.head.appendChild(size);
+  var FLOOR_ROLES = { picker: 1, verifier: 1, mixer: 1, packing: 1, logistics: 1 };
+  setInterval(function () { document.documentElement.classList.toggle('ra-floor', !!(session && st.role && FLOOR_ROLES[st.role])); }, 500);
   var K = kiosk();
   if (K) {
     // The kiosk's own heartbeat (its device token from /pair.html), so Admin sees it online.
@@ -521,7 +532,7 @@
     document.documentElement.classList.add('ra-kiosk');
     var css = document.createElement('style');
     // Kiosk: one station's screen, big touch targets for gloved hands, no rail and no way out.
-    css.textContent = '.ra-kiosk .rail,.ra-kiosk nav.rail,.ra-kiosk .dock,.ra-kiosk [data-dock]{display:none!important}.ra-kiosk .btn{min-height:52px;font-size:17px}.ra-kiosk .fld{min-height:48px;font-size:17px}';
+    css.textContent = '.ra-kiosk .rail,.ra-kiosk nav.rail,.ra-kiosk .dock,.ra-kiosk [data-dock],.ra-kiosk #ra-dock-toggle{display:none!important}';
     document.head.appendChild(css);
     var lockTries = 0;
     var lockT = setInterval(function () {
@@ -534,7 +545,8 @@
       if (!R.nav.length) { toast('This kiosk is for ' + want[1] + ' at ' + K.station + ', which your role cannot open. Ask an admin.', 'bad'); return; }
       var orig = window.navTo;
       window.navTo = function (k, ref) { if (k !== K.screen) { toast('This tablet is locked to ' + want[1] + ' at ' + K.station + '.', 'warn'); return; } return orig(k, ref); };
-      var tag = document.createElement('div'); tag.style.cssText = 'position:fixed;top:0;right:0;z-index:2147483500;padding:6px 12px;background:#111;color:#fff;font:600 13px/1.2 var(--font-ui);border-bottom-left-radius:8px';
+      var tag = document.createElement('div'); // WALK2-RP-19: the tag sat on top of Ruh and Ask Ruh at the top right; it sits at the bottom left now.
+      tag.style.cssText = 'position:fixed;left:0;bottom:0;z-index:2147483500;padding:6px 12px;background:#111;color:#fff;font:600 13px/1.2 var(--font-ui);border-top-right-radius:8px;pointer-events:none';
       tag.textContent = 'Kiosk · ' + K.station + ' · ' + want[1]; document.body.appendChild(tag);
       orig(K.screen);
       netBanner();
