@@ -360,14 +360,14 @@
     var hd = data(res), holds = Array.isArray(hd) ? hd : ((hd && hd.items) || []), canWrite = can('inventory:rm_batch_master:write');
     V.innerHTML = '<div class="grid">' +
       card('On hold now', holds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>What</th><th>Number</th><th>Why</th><th>Since</th><th></th></tr></thead><tbody>' + holds.map(function (h) {
-        return '<tr><td>' + (h.subjectType === 'RM_LOT' ? 'Raw lot' : 'Batch') + '</td><td style="font-family:var(--font-mono)">' + esc(h.number || h.subjectId) + '</td><td>' + esc(h.reason) + '</td><td>' + esc(String(h.heldDt).slice(0, 10)) + '</td><td>' +
-          (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + h.subjectId + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') + '</td></tr>';
+        return '<tr><td>' + (h.subjectType === 'RM_LOT' ? 'Raw lot' : 'Batch') + '</td><td style="font-family:var(--font-mono)">' + esc(h.number || 'No number on file') + '</td><td>' + esc(h.reason) + '</td><td>' + esc(new Date(h.heldDt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })) + '</td><td>' +
+          (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + esc(h.subjectId) + '" data-trace-no="' + esc(h.number || '') + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p>Nothing is on hold.</p>') +
-      card('A raw lot', row(field('RM batch id', '<input id="fb-lot" class="fld" style="min-width:280px">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
+      card('A raw lot', row(field('Raw lot number (scan or type)', '<input id="fb-lot" class="fld" autocomplete="off" placeholder="e.g. RM-2026-0042" style="min-width:0;width:min(280px,100%)">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
         (canWrite ? '<button type="button" class="btn" id="fb-hold">Hold this lot</button>' : '') +
-        field('Bin (for the label)', '<input id="fb-bin" class="fld" placeholder="Bin id">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
+        field('Bin (for the label)', '<input id="fb-bin" class="fld" autocomplete="off" placeholder="scan the bin label">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
       '<div id="fb-rc" class="c12"></div></div>';
-    [].forEach.call(V.querySelectorAll('[data-trace]'), function (b) { b.onclick = function () { $('fb-lot').value = b.getAttribute('data-trace'); trace(); }; });
+    [].forEach.call(V.querySelectorAll('[data-trace]'), function (b) { b.onclick = function () { $('fb-lot').value = b.getAttribute('data-trace-no') || b.getAttribute('data-trace'); trace(); }; });
     [].forEach.call(V.querySelectorAll('[data-rel]'), function (b) {
       b.onclick = function () {
         askReason('Release the hold', 'Why is the hold lifted? Name the evidence (retest, COA).', 'Release hold', function (why) {
@@ -377,22 +377,22 @@
     });
     $('fb-trace').onclick = trace;
     var hb = $('fb-hold'); if (hb) hb.onclick = function () {
-      var lot = $('fb-lot').value.trim(); if (!lot) { toast('Enter the lot.', 'bad'); return; }
+      var lot = $('fb-lot').value.trim(); if (!lot) { toast('Scan or type the raw lot number.', 'bad'); return; }
       askReason('Hold this lot', 'Why is this lot held?', 'Hold lot', function (why) {
         return tunnel('/v1/prodfloor/holds', { method: 'POST', body: { subjectType: 'RM_LOT', subjectId: lot, reason: why } }).then(function (r) { if (r.status < 400) { toast('Lot held', 'good'); viewRecall(item, V); } return r; });
       });
     };
     $('fb-label').onclick = function () {
-      var lot = $('fb-lot').value.trim(); if (!lot) { toast('Enter the lot.', 'bad'); return; }
-      tunnel('/v1/prodfloor/putaway/' + lot + '/label', { method: 'POST', body: { storageLocationId: $('fb-bin').value.trim() || undefined } }).then(function (r) {
+      var lot = $('fb-lot').value.trim(); if (!lot) { toast('Scan or type the raw lot number.', 'bad'); return; }
+      tunnel('/v1/prodfloor/putaway/' + encodeURIComponent(lot) + '/label', { method: 'POST', body: { storageLocationId: $('fb-bin').value.trim() || undefined } }).then(function (r) {
         if (r.status >= 400) { toast(err(r, 'No label.'), 'bad'); return; }
         printLabel(data(r));
       });
     };
     async function trace() {
-      var lot = $('fb-lot').value.trim(), host = $('fb-rc'); if (!lot) return;
+      var lot = $('fb-lot').value.trim(), host = $('fb-rc'); if (!lot) { toast('Scan or type the raw lot number.', 'bad'); return; }
       host.innerHTML = '<div class="loading">Loading…</div>';
-      var r = await tunnel('/v1/prodfloor/recall/rm-lot/' + lot);
+      var r = await tunnel('/v1/prodfloor/recall/rm-lot/' + encodeURIComponent(lot));
       if (r.status >= 400) { host.innerHTML = errBox(err(r, 'That lot was not found.')); return; }
       var d = data(r);
       function tbl(rows, cols) { return rows.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr>' + cols.map(function (c) { return '<th>' + c[0] + '</th>'; }).join('') + '</tr></thead><tbody>' + rows.map(function (x) { return '<tr>' + cols.map(function (c) { return '<td>' + esc(x[c[1]]) + '</td>'; }).join('') + '</tr>'; }).join('') + '</tbody></table></div>' : '<p>None.</p>'; }
@@ -406,7 +406,7 @@
     var qr = ''; try { var q = qrcode(0, 'M'); q.addData(String(p.lotId)); q.make(); qr = q.createSvgTag(3, 0); } catch (e) { /* no QR */ }
     var w = window.open('', '_blank', 'width=420,height=320'); if (!w) { toast('Allow pop-ups to print the label.', 'bad'); return; }
     w.document.write('<!doctype html><meta charset="utf-8"><title>Raw lot ' + esc(p.lotId) + '</title><style>@page{size:100mm 50mm;margin:2mm}body{font:12px system-ui;margin:0;display:flex;gap:8px}h1{font:700 15px ui-monospace,monospace;margin:0 0 4px}p{margin:2px 0}.hz{font-weight:700}</style>' +
-      '<div>' + qr + '</div><div><h1>' + esc(p.lotId) + (p.reprint ? ' · REPRINT' : '') + '</h1><p>Code ' + esc(p.floorCode || '—') + '</p><p>Qty ' + esc(p.qty) + ' ' + esc(p.uom || '') + '</p><p>Expiry ' + esc(p.expiry || '—') + '</p><p>Received ' + esc(p.received || '') + '</p><p>Bin ' + esc(p.storageLocationId || '') + '</p><p class="hz">' + esc(p.hazard) + '</p></div>');
+      '<div>' + qr + '</div><div><h1>' + esc(p.lotId) + (p.reprint ? ' · REPRINT' : '') + '</h1><p>Code ' + esc(p.floorCode || '—') + '</p><p>Qty ' + esc(p.qty) + ' ' + esc(p.uom || '') + '</p><p>Expiry ' + esc(p.expiry || '—') + '</p><p>Received ' + esc(p.received || '') + '</p><p>Bin ' + esc(p.binCode || 'not on file') + '</p><p class="hz">' + esc(p.hazard) + '</p></div>');
     w.document.close(); w.focus(); setTimeout(function () { w.print(); }, 200);
   }
 

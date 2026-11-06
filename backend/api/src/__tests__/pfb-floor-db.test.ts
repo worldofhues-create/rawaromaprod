@@ -201,13 +201,20 @@ test('lot hold: a faulty raw lot is frozen, recall lists its batches and shipped
   await s`insert into sales.dispatch_master (dispatch_id, sales_order_id, status) values (${disp}, ${so}, 'DISPATCHED')`;
   await s`insert into sales.dispatch_items (dispatch_item_id, dispatch_id, finished_good_batch_id, dispatched_qty) values (${randomUUID()}, ${disp}, ${fg}, 1)`;
 
-  const label = await lots.putawayLabel(rm, { storageLocationId: randomUUID() }, principal());
+  // A real bin (WALK2-RP-11: an unknown bin id is refused, and the label prints the bin's code).
+  const bin = randomUUID(), binCode = 'B-' + bin.slice(0, 6).toUpperCase();
+  await s`insert into location.storage_location_master (storage_location_id, storage_location_code, status) values (${bin}, ${binCode}, 'ACTIVE')`;
+  await assert.rejects(() => lots.putawayLabel(rm, { storageLocationId: randomUUID() }, principal()), /No bin/);
+  const label = await lots.putawayLabel(rm, { storageLocationId: binCode }, principal());
+  assert.equal(label.storageLocationId, bin);
+  assert.equal(label.binCode, binCode);
   assert.equal(label.hazard, 'Classification pending: handle as hazardous');
   assert.equal(label.reprint, false);
   assert.equal((await lots.putawayLabel(rm, {}, principal())).reprint, true);
 
   await lots.hold({ subjectType: 'RM_LOT', subjectId: rm, reason: 'Batch failed, cause traced to this lot' }, principal());
-  const rc = await lots.recall(rm);
+  const rc = await lots.recall('rmb-' + rm.slice(0, 8)); // WALK2-RP-11: by the lot number on the label, any case
+  await assert.rejects(() => lots.recall('NOT-A-LOT'), /No raw lot NOT-A-LOT/);
   assert.ok(rc.hold);
   assert.deepEqual(rc.batches.map((b) => b.oilBatchId), [oil]);
   assert.deepEqual(rc.finishedGoods.map((f) => f.finishedGoodBatchId), [fg]);

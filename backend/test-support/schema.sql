@@ -2965,3 +2965,12 @@ create table if not exists quality.batch_review_decision (
 -- One live decision per batch: a second proposal while one waits is refused, not stacked.
 create unique index if not exists batch_review_decision_live_uq on quality.batch_review_decision (oil_batch_id) where status in ('PROPOSED', 'CONFIRMED');
 
+-- WALK2-RP-11: the raw-lot label resolves its bin by code, exactly as scripts/migrations/0003_location.sql
+-- creates the table.
+create table if not exists location.storage_location_master (
+  storage_location_id uuid primary key default gen_random_uuid() not null,
+  warehouse_id uuid, floor_id uuid, zone_id uuid, rack_id uuid, shelf_id uuid, bin_id uuid,
+  storage_location_code varchar(50), storage_location_name varchar(200), status varchar(30),
+  created_dt timestamptz default now() not null, updated_dt timestamptz default now() not null,
+  created_by varchar(255), updated_by varchar(255)
+);

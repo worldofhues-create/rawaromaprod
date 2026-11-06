@@ -81,7 +81,7 @@ test('lot hold & recall: a released lot traces, then is held and listed', async 
   const lot = await releasedStock(2);
   await signIn(page, 'factory', 'owner');
   await openNav(page, 'Lot hold & recall');
-  await page.locator('#fb-lot').fill(lot.rmBatch);
+  await page.locator('#fb-lot').fill(lot.batchNumber); // WALK2-RP-11: the number on the label, not a uuid
   await page.locator('#fb-trace').click();
   await expect(page.getByText('Lot ' + lot.batchNumber)).toBeVisible();
   await expect(page.getByText(/Shipped orders \(0\)/)).toBeVisible();

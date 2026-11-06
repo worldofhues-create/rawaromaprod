@@ -17,6 +17,7 @@ import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 
 type Row = Record<string, unknown>;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const HAZARD_PENDING = 'Classification pending: handle as hazardous';
 
 export async function holdSubject(tx: TransactionSql | Sql, type: 'RM_LOT' | 'OIL_BATCH', id: string, reason: string, source: string, by: string) {
@@ -34,6 +35,29 @@ export async function isLotHeld(run: (q: string, p: unknown[]) => Promise<Row[]>
 export class LotTraceService {
   constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
 
+  /** WALK2-RP-11: Lot hold & recall asked for a typed rm_batch_id uuid, and anything else (the lot number
+   *  on the label in someone's hand) reached Postgres as a uuid and failed as a server error. A raw lot is
+   *  found by its id or by its lot number; the bin by its id or its code. */
+  private async rmLotId(ref: string): Promise<string> {
+    const v = String(ref ?? '').trim();
+    if (!v) throw new BadRequestException('Scan or type the raw lot number.');
+    const rows = UUID.test(v)
+      ? await this.sql`select rm_batch_id::text as id from inventory.rm_batch_master where rm_batch_id = ${v}::uuid`
+      : await this.sql`select rm_batch_id::text as id from inventory.rm_batch_master where upper(batch_number) = upper(${v}) limit 2`;
+    if (!rows.length) throw new NotFoundException(`No raw lot ${v} on file.`);
+    if (rows.length > 1) throw new ConflictException(`More than one raw lot is numbered ${v}; open it from Stock instead.`);
+    return String(rows[0]!.id);
+  }
+  private async binRef(ref: unknown): Promise<{ id: string; code: string | null } | null> {
+    const v = typeof ref === 'string' ? ref.trim() : '';
+    if (!v) return null;
+    const [r] = UUID.test(v)
+      ? await this.sql`select storage_location_id::text as id, storage_location_code as code from location.storage_location_master where storage_location_id = ${v}::uuid`
+      : await this.sql`select storage_location_id::text as id, storage_location_code as code from location.storage_location_master where upper(storage_location_code) = upper(${v}) limit 1`;
+    if (!r) throw new NotFoundException(`No bin ${v} on file.`);
+    return { id: String(r.id), code: (r.code as string) ?? null };
+  }
+
   async holds() {
     const rows = await this.sql`select h.lot_hold_id::text as "lotHoldId", h.subject_type as "subjectType", h.subject_id::text as "subjectId", h.reason, h.source,
         h.held_by as "heldBy", h.held_dt as "heldDt", coalesce(rb.batch_number, ob.batch_number) as "number"
@@ -49,7 +73,7 @@ export class LotTraceService {
     const reason = String(body.reason ?? '').trim();
     if (!type || !body.subjectId) throw new BadRequestException('Name the raw lot or batch to hold.');
     if (!reason) throw new BadRequestException('Say why it is held.');
-    const id = String(body.subjectId);
+    const id = type === 'RM_LOT' ? await this.rmLotId(String(body.subjectId)) : String(body.subjectId);
     const exists = type === 'RM_LOT'
       ? await this.sql`select 1 from inventory.rm_batch_master where rm_batch_id = ${id}`
       : await this.sql`select 1 from production.oil_batch_master where oil_batch_id = ${id}`;
@@ -67,7 +91,8 @@ export class LotTraceService {
     return r[0];
   }
 
-  async recall(rmBatchId: string) {
+  async recall(ref: string) {
+    const rmBatchId = await this.rmLotId(ref);
     const lot = (await this.sql`select rm_batch_id::text as "rmBatchId", batch_number as "lotNumber", status, expiry_date::text as "expiryDate" from inventory.rm_batch_master where rm_batch_id = ${rmBatchId}`)[0];
     if (!lot) throw new NotFoundException('Raw lot not found.');
     const hold = (await this.sql`select lot_hold_id::text as "lotHoldId", reason, held_dt as "heldDt" from inventory.lot_hold where subject_type = 'RM_LOT' and subject_id = ${rmBatchId} and released_dt is null`)[0] ?? null;
@@ -104,7 +129,9 @@ export class LotTraceService {
     return { lot, hold, batches, finishedGoods: fg, shippedOrders: shipped };
   }
 
-  async putawayLabel(rmBatchId: string, body: Row, principal: AuthPrincipal) {
+  async putawayLabel(ref: string, body: Row, principal: AuthPrincipal) {
+    const rmBatchId = await this.rmLotId(ref);
+    const bin = await this.binRef(body.storageLocationId);
     return this.sql.begin(async (tx) => {
       const b = (await tx`select rb.rm_batch_id::text as id, rb.batch_number, rb.status, rb.expiry_date::text as expiry, rb.received_qty::text as qty, u.uom_code,
                                  rb.storage_location_id::text as loc, ra.alias_name as floor_code, rb.created_dt::date::text as received
@@ -118,12 +145,13 @@ export class LotTraceService {
       if ((await tx`select 1 from inventory.lot_hold where subject_type = 'RM_LOT' and subject_id = ${rmBatchId} and released_dt is null`).length) throw new ConflictException('This lot is on hold.');
       if (b.expiry && String(b.expiry) < new Date().toISOString().slice(0, 10)) throw new ConflictException('This lot is past its expiry: QC must retest and re-date it first.');
       const lastLoc = (await tx`select storage_location_id::text as loc from inventory.raw_lot_label where rm_batch_id = ${rmBatchId} order by printed_dt desc limit 1`)[0]?.loc as string | undefined;
-      const loc = (body.storageLocationId as string) ?? (b.loc as string) ?? lastLoc ?? null;
+      const loc = bin?.id ?? (b.loc as string) ?? lastLoc ?? null;
       if (!loc) throw new BadRequestException('Scan the bin first: the label carries where the lot sits.');
+      const binCode = bin?.code ?? ((await tx`select storage_location_code as code from location.storage_location_master where storage_location_id = ${loc}::uuid`)[0]?.code as string | undefined) ?? null;
       const prev = Number((await tx`select count(*)::int as n from inventory.raw_lot_label where rm_batch_id = ${rmBatchId}`)[0]!.n);
       const payload = {
         lotId: String(b.batch_number), floorCode: (b.floor_code as string) ?? null, qty: b.qty, uom: b.uom_code ?? null, expiry: b.expiry ?? null,
-        received: b.received, storageLocationId: loc, hazard: HAZARD_PENDING, reprint: prev > 0,
+        received: b.received, storageLocationId: loc, binCode, hazard: HAZARD_PENDING, reprint: prev > 0,
       };
       await tx`insert into inventory.raw_lot_label (rm_batch_id, storage_location_id, payload, reprint, printed_by) values (${rmBatchId}, ${loc}, ${JSON.stringify(payload)}::jsonb, ${prev > 0}, ${principal.userId})`;
       return payload;
