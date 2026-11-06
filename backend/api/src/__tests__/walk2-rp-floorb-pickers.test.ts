@@ -17,8 +17,8 @@ function load(tunnel: (p: string) => Promise<unknown>) {
   const e = js.indexOf('  /* ── navigation');
   const ctx: Record<string, unknown> = { tunnel, escHtml: (x: string) => String(x), failText: undefined };
   vm.createContext(ctx);
-  vm.runInContext(js.slice(s, e) + '\nthis.getRows = getRows; this.pick = pick;', ctx);
-  return ctx as { getRows: (p: string) => Promise<any[] & { failed?: string }>; pick: (...a: unknown[]) => string };
+  vm.runInContext(js.slice(s, e) + '\nthis.getRows = getRows; this.pick = pick; this.firstThenRest = firstThenRest;', ctx);
+  return ctx as { getRows: (p: string) => Promise<any[] & { failed?: string }>; pick: (...a: unknown[]) => string; firstThenRest: (p: string) => { first: Promise<any>; rest: Promise<any> } };
 }
 
 test('every page is read', async () => {
@@ -40,4 +40,18 @@ test('a refused list is said under the picker, not shown as empty', async () => 
 test('an unreachable list is said too', async () => {
   const { getRows } = load(async () => { throw new Error('down'); });
   assert.match(String((await getRows('/v1/purchase-orders?limit=100')).failed), /connect/);
+});
+
+test('WALK2-RP-23: the picker is drawn from the first page; the rest follow', async () => {
+  let release!: () => void; const gate = new Promise<void>((r) => { release = r; });
+  const { firstThenRest } = load(async (p) => {
+    if (p.endsWith('cursor=c2')) { await gate; return { status: 200, json: { data: [{ id: 2 }], meta: {} } }; }
+    return { status: 200, json: { data: [{ id: 1 }], meta: { cursor: 'c2' } } };
+  });
+  const l = firstThenRest('/v1/oil-batches?limit=100');
+  const first = await l.first;
+  assert.equal(JSON.stringify(first.map((r: { id: number }) => r.id)), '[1]');
+  assert.equal(first.more, true, 'drawn before page 2 has answered');
+  release();
+  assert.equal(JSON.stringify((await l.rest).map((r: { id: number }) => r.id)), '[1,2]');
 });

@@ -61,6 +61,34 @@
     } while (cursor && ++n < 100);
     return out;
   }
+  /** WALK2-RP-23: reading every page before drawing anything took 3 s on Slow 4G with 620 batches (7 round
+   *  trips). The picker is drawn from the first page; the rest arrive behind it, the choice kept. */
+  function firstThenRest(path) {
+    var first, rest = new Promise(function (resolve) {
+      var out = [], cursor = null, n = 0, told = false;
+      (async function () {
+        do {
+          var r; try { r = await tunnel(path + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')); } catch (e) { out.failed = 'Can\'t connect, so this list may be incomplete. Reload to try again.'; break; }
+          if (!r || r.status >= 400) { out.failed = err(r, 'This list did not load.') + (out.length ? ' It may be incomplete.' : ''); break; }
+          var d = data(r); out = out.concat((d && (d.items || d)) || []);
+          cursor = r.json && r.json.meta && r.json.meta.cursor;
+          if (!told) { told = true; var f = out.slice(); if (out.failed) f.failed = out.failed; f.more = !!cursor; first(f); }
+        } while (cursor && ++n < 100);
+        if (!told) { var f2 = out.slice(); f2.failed = out.failed; first(f2); }
+        resolve(out);
+      })();
+    });
+    return { first: new Promise(function (r) { first = r; }), rest: rest };
+  }
+  function fillLater(id, rest, keep, val, text) {
+    rest.then(function (all) {
+      var sel = $(id); if (!sel) return;
+      var rows = all.filter(keep), cur = sel.value, ph = sel.options[0] ? sel.options[0].outerHTML : '';
+      sel.innerHTML = ph + rows.map(function (r) { return '<option value="' + esc(r[val]) + '"' + (r[val] === cur ? ' selected' : '') + '>' + esc(text(r)) + '</option>'; }).join('');
+      if (all.failed) { var e = $(id + '-err'); if (!e) { sel.insertAdjacentHTML('afterend', '<span id="' + id + '-err" role="alert" style="color:var(--bad,#b3261e);font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui)"></span>'); e = $(id + '-err'); } e.textContent = all.failed; }
+    });
+  }
+  function word(v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v.charAt(0).toUpperCase() + v.slice(1); }
   function pick(id, rows, val, text, placeholder) {
     return '<select id="' + id + '" class="fld"' + (rows.failed ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : '') + '><option value="">' + esc(placeholder) + '</option>' +
       rows.map(function (r) { return '<option value="' + esc(r[val]) + '">' + esc(text(r)) + '</option>'; }).join('') + '</select>' +
@@ -98,12 +126,14 @@
 
   async function viewRecv(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
-    var pos = (await getRows('/v1/purchase-orders?limit=100')).filter(function (p) { return /APPROVED|ISSUED|ACKNOWLEDGED|PARTIALLY_RECEIVED/i.test(p.status || ''); });
+    var openPo = function (p) { return /APPROVED|ISSUED|ACKNOWLEDGED|PARTIALLY_RECEIVED/i.test(p.status || ''); }, poText = function (p) { return (p.poNumber || 'PO without a number') + ' · ' + word(p.status); };
+    var lpo = firstThenRest('/v1/purchase-orders?limit=100'), first = await lpo.first, pos = first.filter(openPo); pos.failed = first.failed;
     if (stale('recvaudit')) return;
-    V.innerHTML = '<div class="grid">' + card('Which delivery?', row(field('Purchase order', pick('fb-po', pos, 'purchaseOrderId', function (p) { return (p.poNumber || p.purchaseOrderId) + ' · ' + (p.status || ''); }, 'Choose an open PO…'))) +
+    V.innerHTML = '<div class="grid">' + card('Which delivery?', row(field('Purchase order', pick('fb-po', pos, 'purchaseOrderId', poText, 'Choose an open PO…'))) +
       '<p class="t-cap" style="margin-top:8px;color:var(--ink-3)">A truck with no PO, a closed PO or the wrong vendor is held at the gate and cannot be audited until purchase resolves it.</p>') +
       '<div id="fb-recv" class="c12"></div></div>';
     $('fb-po').onchange = function () { if (this.value) loadPo(this.value); else $('fb-recv').innerHTML = ''; };
+    if (first.more) fillLater('fb-po', lpo.rest, openPo, 'purchaseOrderId', poText);
   }
 
   async function loadPo(poId) {
@@ -179,10 +209,12 @@
   var PST = { REQUESTED: ['a', 'Requested'], APPROVED: ['b', 'Approved'], RELEASED: ['g', 'Released'], REFUSED: ['r', 'Refused'] };
   async function viewPay(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
-    var pos = await getRows('/v1/purchase-orders?limit=100');
+    var ptext = function (p) { return (p.poNumber || 'PO without a number') + ' · ' + word(p.status); };
+    var lp = firstThenRest('/v1/purchase-orders?limit=100'), pos = await lp.first;
     if (stale('payrelease')) return;
-    V.innerHTML = '<div class="grid">' + card('Purchase order', row(field('Purchase order', pick('fb-ppo', pos, 'purchaseOrderId', function (p) { return (p.poNumber || p.purchaseOrderId) + ' · ' + (p.status || ''); }, 'Choose a PO…')))) + '<div id="fb-pay" class="c12"></div></div>';
+    V.innerHTML = '<div class="grid">' + card('Purchase order', row(field('Purchase order', pick('fb-ppo', pos, 'purchaseOrderId', ptext, 'Choose a PO…')))) + '<div id="fb-pay" class="c12"></div></div>';
     $('fb-ppo').onchange = function () { if (this.value) loadPay(this.value); };
+    if (pos.more) fillLater('fb-ppo', lp.rest, function () { return true; }, 'purchaseOrderId', ptext);
   }
   async function loadPay(poId) {
     var host = $('fb-pay'); host.innerHTML = '<div class="loading">Loading…</div>';
@@ -290,10 +322,12 @@
   function defWord(x) { x = String(x || '').replace(/_/g, ' ').toLowerCase(); return x.charAt(0).toUpperCase() + x.slice(1); }
   async function viewQc(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
-    var batches = await getRows('/v1/oil-batches?limit=100');
+    var btext = function (b) { return (b.batchNumber || 'Batch without a number') + ' · ' + word(b.status); };
+    var lb = firstThenRest('/v1/oil-batches?limit=100'), batches = await lb.first;
     if (stale('qcgate')) return;
-    V.innerHTML = '<div class="grid">' + card('Batch', row(field('Oil batch', pick('fb-qb', batches, 'oilBatchId', function (b) { return (b.batchNumber || b.oilBatchId) + ' · ' + (b.status || ''); }, 'Choose a batch…')))) + '<div id="fb-qc" class="c12"></div></div>';
+    V.innerHTML = '<div class="grid">' + card('Batch', row(field('Oil batch', pick('fb-qb', batches, 'oilBatchId', btext, 'Choose a batch…')))) + '<div id="fb-qc" class="c12"></div></div>';
     $('fb-qb').onchange = function () { if (this.value) loadQc(this.value); };
+    if (batches.more) fillLater('fb-qb', lb.rest, function () { return true; }, 'oilBatchId', btext);
   }
   async function loadQc(id) {
     var host = $('fb-qc'); host.innerHTML = '<div class="loading">Loading…</div>';
