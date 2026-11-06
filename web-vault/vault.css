@@ -25,6 +25,8 @@
 /* WALK2-RP-16: text fields and pickers were 31px tall on a phone or tablet, under the 44px touch floor every
    button already keeps. Checkboxes and radios keep their own size (their label is the target). */
 @media (pointer:coarse){ .fld:not([type=checkbox]):not([type=radio]),select.fld{min-height:var(--ch-touch-floor-coarse-pointer)} }
+/* WALK2-RP-22: the CSV import file pickers (Compliance data, Recipes needed) were 24px tall on touch. */
+@media (pointer:coarse){ input[type=file]{min-height:var(--ch-touch-floor-coarse-pointer);padding:8px 0;font-size:16px} input[type=file]::file-selector-button{min-height:var(--ch-touch-floor-coarse-pointer);padding:0 16px} }
 @media (max-width:900px){ .btn.p{min-height:var(--ch-touch-floor-coarse-pointer)} }
 @media (prefers-reduced-motion: reduce){
   *,*::before,*::after{animation-duration:.01ms !important;animation-iteration-count:1 !important;animation-delay:0s !important;transition:none !important;scroll-behavior:auto !important}
