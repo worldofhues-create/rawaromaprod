@@ -72,6 +72,17 @@
     var lead = m.stationDays != null && m.qcDays != null
       ? 'Lead time measured from ' + m.samples + ' finished floor job(s): stations ' + m.stationDays + ' days, QC ' + m.qcDays + ' days, plus each formula\'s maceration days.'
       : 'Station or QC times are not measured yet: a product holds unless its rule sets defaultLeadDays.';
+    // WALK2-RP-25: the rule line printed the engine's trace with its JSON value
+    // ('Rule 1: sku = X → {"mode":"dynamic","defaultLeadDays":21}'); the value in words.
+    function sayVal(v) {
+      if (v === null || v === undefined) return 'nothing';
+      if (typeof v !== 'object') return String(v);
+      if (Array.isArray(v)) return v.map(sayVal).join(', ');
+      return Object.keys(v).map(function (k) { return k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase() + ': ' + sayVal(v[k]); }).join(', ');
+    }
+    function ruleWords(x) {
+      return String(x || '').replace(/(→|otherwise)\s*(\{.*\}|\[.*\])\s*$/, function (m, arrow, j) { try { return arrow + ' ' + sayVal(JSON.parse(j)); } catch (e) { return m; } });
+    }
     var rows = d.items.map(function (it, i) {
       var t = TONE[it.status] || ['n', it.status];
       var act = canWrite && it.status === 'SUGGEST'
@@ -81,7 +92,7 @@
         (it.status === 'SUGGEST' ? '<b style="margin-left:auto;font-size:18px">Make ' + it.qty + '</b>' : '') + '</div>' +
         '<p style="margin:0" data-why>' + esc(it.why) + '</p>' +
         (it.raw && it.raw.checked && it.raw.short.length ? '<p style="margin:0;color:var(--red)">' + esc(it.raw.note) + '</p>' : it.raw && it.status === 'SUGGEST' ? '<p class="t-cap" style="margin:0;color:var(--ink-3)">' + esc(it.raw.note) + '</p>' : '') +
-        '<p class="t-cap" style="margin:0;color:var(--ink-3)">Rule: ' + esc(it.policy.explain) + (it.policy.version ? ' (v' + it.policy.version + ')' : '') + '</p>' + act + '</div>';
+        '<p class="t-cap" style="margin:0;color:var(--ink-3)">Rule: ' + esc(ruleWords(it.policy.explain)) + (it.policy.version ? ' (v' + it.policy.version + ')' : '') + '</p>' + act + '</div>';
     }).join('');
     var decided = (d.decided || []).length
       ? scroll('<table class="tbl" style="min-width:560px"><thead><tr><th>When</th><th>SKU</th><th>Decision</th><th>Qty</th><th>Why</th></tr></thead><tbody>' +
