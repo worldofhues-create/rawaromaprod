@@ -58,3 +58,15 @@ test('RP-31: status words keep acronyms (QC, COA, MSDS) and the floor pickers us
   assert.equal(w('COA'), 'COA'); assert.equal(w('MSDS'), 'MSDS'); assert.equal(w('AWAITING_QC_SIGNOFF'), 'Awaiting QC signoff');
   assert.match(readFileSync(join(root, 'web/ws-floorb.js'), 'utf8'), /function word\(v\) \{ if \(window\.RaGuide && RaGuide\.statusWord\) return RaGuide\.statusWord\(v\);/);
 });
+test('RP-34: Vault and Platform never show the browser\'s "Failed to fetch"', () => {
+  for (const f of ['web-vault/vault.js', 'web-platform/platform.js']) {
+    const js = readFileSync(join(root, f), 'utf8');
+    assert.match(js, /catch \(netErr\) \{ aesKey = null; handshakePromise = null; throw new (Vault|Platform)Error\('NETWORK'/, f);
+    assert.match(js, /try \{ await handshake\(\); \} catch \(e\)/, f);
+  }
+});
+test('RP-35: dates and counts use the Indian format, not the browser default', () => {
+  for (const f of ['web/shell.js', 'web/ruh.js', 'web/ws-produce.js', 'web/ws-setup.js', 'web-vault/vault.js', 'web-platform/platform.js', 'web-vault/ruh.js', 'web-platform/ruh.js']) {
+    assert.doesNotMatch(readFileSync(join(root, f), 'utf8'), /\.toLocaleString\(\)/, f);
+  }
+});

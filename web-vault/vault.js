@@ -124,17 +124,21 @@
      * by construction, not by convention. */
     return async function tunnel(path, opts) {
       opts = opts || {};
-      await handshake();
+      try { await handshake(); } catch (e) { handshakePromise = null; throw new VaultError('NETWORK', 'Can\'t connect to the Vault. Check the network and try again.', 0); }
       var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
       if (opts.body !== undefined) payload.body = opts.body;
       if (opts.idemKey) payload.idempotencyKey = opts.idemKey; // SWEEP2-R1: the Vault API honours it (formula.idempotency_key)
       if (session.token) payload.token = session.token;
-      var res = await fetch(base + '/rpc', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', 'x-ra-key': keyId },
-        body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }),
-      });
-      var envelope = await res.json();
+      // WALK2-RP-34: an unreachable Vault API surfaced the browser's 'Failed to fetch' on every screen.
+      var res, envelope;
+      try {
+        res = await fetch(base + '/rpc', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', 'x-ra-key': keyId },
+          body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }),
+        });
+        envelope = await res.json();
+      } catch (netErr) { aesKey = null; handshakePromise = null; throw new VaultError('NETWORK', 'Can\'t connect to the Vault. Check the network and try again.', 0); }
       if (!envelope || !envelope.data || !envelope.data.enc) {
         // Transient failure (cold start / dropped connection) — reset and let the caller retry.
         aesKey = null; handshakePromise = null;
@@ -460,7 +464,7 @@
     var word = { DRAFT: 'Draft', VERSIONED: 'Finalized', REVIEW: 'In review', APPROVED: 'Approved', LOCKED: 'Locked', SUPERSEDED: 'Replaced by newer', REJECTED: 'Rejected', ARCHIVED: 'Archived' }[status];
     return h('span', { class: 'chip ' + tone }, [word || (status ? String(status).charAt(0) + String(status).slice(1).toLowerCase().replace(/_/g, ' ') : 'Unknown')]);
   }
-  function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
+  function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
 
   /* ---------------------------------------------------------------------------------------
    * 3b. "How to use the Vault" — ticket G4's how-to for this console. Deliberately the ONLY
@@ -792,7 +796,7 @@
     ]);
     var view = h('section', { class: 'pageview' }, [h('div', { id: 'vault-place' }),
       !trail && HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
-    var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString()])]), bar, h('div', { class: 'content' }, [view])]);
+    var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })])]), bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
       [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Vault home', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
        h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'All sections', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },

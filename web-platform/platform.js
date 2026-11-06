@@ -74,7 +74,7 @@
   async function tunnel(path, opts, _retried) {
     if (_retried === undefined && !(opts && opts.ruhConfirmed)) { var once = raOnce(path, opts, function (key) { return tunnel(path, Object.assign({}, opts, { idemKey: key }), false); }); if (once) return once; }
     opts = opts || {};
-    await handshake();
+    try { await handshake(); } catch (e) { handshakePromise = null; throw new PlatformError('NETWORK', 'Can\'t connect. Check the network and try again.', 0); }
     var payload = { method: (opts.method || 'GET').toUpperCase(), path: path };
     if (opts.body !== undefined) payload.body = opts.body;
     if (opts.idemKey) payload.idempotencyKey = opts.idemKey; // SWEEP2-R1
@@ -82,8 +82,12 @@
     // Keep this console's session across reloads in the tunnel's HttpOnly cookie
     // (backend/api/src/crypto/session-cookie.ts) — the refresh token never reaches page script.
     if (path.indexOf('/auth/') === 0) payload.persist = true;
-    var res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
-    var envelope = await res.json();
+    // WALK2-RP-34: an unreachable API surfaced the browser's 'Failed to fetch'.
+    var res, envelope;
+    try {
+      res = await fetch(API + '/rpc', { method: 'POST', headers: { 'content-type': 'application/json', 'x-ra-key': keyId }, body: JSON.stringify({ enc: await seal(JSON.stringify(payload)) }) });
+      envelope = await res.json();
+    } catch (netErr) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Can\'t connect. Check the network and try again.', 0); }
     if (!envelope || !envelope.data || !envelope.data.enc) { aesKey = null; handshakePromise = null; throw new PlatformError('NETWORK', 'Can\'t connect. Try again.', 0); }
     var inner = JSON.parse(await open(envelope.data.enc));
     // Access token expired mid-session (15-min TTL): refresh once from the saved-session cookie
@@ -274,7 +278,7 @@
     // Focus lands on the first field, so the keyboard and screen readers start inside the dialog.
     var first = sheet.querySelector('input,select,textarea,button:not(.xp)'); if (first) first.focus();
   }
-  function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString(); }
+  function fmtDt(v) { if (!v) return '—'; var d = new Date(v); return isNaN(d) ? String(v) : d.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
   function notBuilt(title, why, needs) {
     return h('div', { class: 'card notbuilt' }, [h('h2', {}, [title]), h('p', {}, [why]), needs ? h('div', { class: 'needs' }, [needs]) : null]);
   }
