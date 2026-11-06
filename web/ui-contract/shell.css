@@ -141,6 +141,8 @@ tr.row-detail-row:hover{background:transparent}
 
 /* disabled row action + its plain-language reason (tooltip on hover, inline on touch) */
 .ra-act[disabled]{cursor:not-allowed}
+/* WALK2-RP-24: row actions (Edit, Submit, Print, Assign role…) were 24px tall on a touch screen. */
+@media (pointer:coarse){ .ra-act{min-height:var(--ch-touch-floor-coarse-pointer)} }
 .ra-act .act-hint{display:none}
 @media (pointer:coarse){
   .ra-act[disabled] .act-hint{display:block;font:var(--w-reg) var(--t-micro)/var(--lh-cap) var(--ui);color:var(--ink-3);white-space:normal;margin-top:2px;max-width:140px}
