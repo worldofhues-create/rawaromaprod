@@ -418,7 +418,8 @@
     var STAGE = { PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix' };
     var q = (b.queue || []).map(function (j) { return '<div style="display:flex;justify-content:space-between;gap:10px;padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(j.jobNo) + '</b><span>' + escHtml(STAGE[j.stage] || j.stage) + '</span><span class="t-cap">' + escHtml(j.orderRef || '') + (j.expedite ? ' · URGENT' : '') + '</span></div>'; }).join('') || '<div class="t-cap">Queue empty.</div>';
     var m = (b.maceration || []).map(function (r) { return '<div style="padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px"><b class="mono">' + escHtml(r.batchNumber || '') + '</b> <span style="float:right">' + escHtml(r.label) + '</span><div class="t-cap">' + (r.overMax ? 'PAST MAXIMUM' : r.readyForQc2 ? 'Ready for QC 2' : r.freezeDue && r.day >= r.needDays ? 'Freeze step due' : 'ends ' + escHtml(when(r.endsAt))) + '</div></div>'; }).join('') || '<div class="t-cap">Nothing macerating.</div>';
-    var qc = '<div style="font-size:' + (16 * f) + 'px">QC 2 ready: <b>' + (b.qcBacklog.qc2Ready.length) + '</b> ' + escHtml(b.qcBacklog.qc2Ready.join(', ')) + '<br>Packaging QC waiting: <b>' + b.qcBacklog.packagingQc.length + '</b> ' + escHtml(b.qcBacklog.packagingQc.slice(0, 8).join(', ')) + '</div>';
+    var qb = b.qcBacklog || {}, q2 = qb.qc2Ready || [], pq = qb.packagingQc || [];
+    var qc = '<div style="font-size:' + (16 * f) + 'px">QC 2 ready: <b>' + q2.length + '</b> ' + escHtml(q2.join(', ')) + '<br>Packaging QC waiting: <b>' + pq.length + '</b> ' + escHtml(pq.slice(0, 8).join(', ')) + '</div>';
     var sh = b.shipments || {};
     var al = (b.alerts || []).map(function (a) { return '<div style="padding:8px 10px;border-left:6px solid var(--bad,#c33);background:var(--panel-2);border-radius:6px;font-size:' + (15 * f) + 'px"><b>' + escHtml(a.title) + '</b><div class="t-cap">' + escHtml(a.body || '') + '</div></div>'; }).join('');
     return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;padding:' + (big ? 20 : 0) + 'px">' +
@@ -443,7 +444,21 @@
     var h = document.createElement('div'); h.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:var(--bg,#EDEDEB);overflow:auto';
     document.body.appendChild(h); FV.tvHost = h;
     try { var fs = document.documentElement.requestFullscreen && document.documentElement.requestFullscreen(); if (fs && fs.catch) fs.catch(function () {}); } catch (e) { /* not allowed without a gesture */ }
-    var tick = async function () { var b = await call('/v1/floor/display'); if (b && FV.tvHost) FV.tvHost.innerHTML = boardHtml(b, true); FV.tvTimer = setTimeout(tick, 15000); };
+    // WALK2-RP-3: the TV read the whole floor even on a station's paired display (viewBoard asks for its
+    // station), and a failed read left a blank screen, or the last board with nothing saying it was old.
+    var tick = async function () {
+      var k = kiosk();
+      var b = await call('/v1/floor/display' + (k && k.station ? '?station=' + encodeURIComponent(k.station) : ''));
+      if (!FV.tvHost) return;
+      if (b) FV.tvHost.innerHTML = boardHtml(b, true);
+      else {
+        var note = '<div id="fo-tv-stale" role="alert" style="margin:20px;padding:14px 18px;border-left:8px solid var(--bad,#c33);background:var(--panel-2);font:600 24px/1.3 var(--font-ui)">The floor board did not update. Showing the last one; trying again every 15 seconds.</div>';
+        var old = FV.tvHost.querySelector('#fo-tv-stale'); if (old) old.remove();
+        if (FV.tvHost.innerHTML) FV.tvHost.insertAdjacentHTML('afterbegin', note);
+        else FV.tvHost.innerHTML = note.replace('Showing the last one; trying', 'Trying');
+      }
+      FV.tvTimer = setTimeout(tick, 15000);
+    };
     document.addEventListener('keydown', function esc(e) { if (e.key === 'Escape' && FV.tvHost) { FV.tvHost.remove(); FV.tvHost = null; clearTimeout(FV.tvTimer); document.removeEventListener('keydown', esc); } });
     tick();
   }
