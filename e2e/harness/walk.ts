@@ -49,15 +49,13 @@ export async function signIn(page: Page, consoleName: ConsoleName, role: string)
   // Returns once the console's assertion exchange has answered, not when the page has loaded: the shell
   // scrubs the hash and exchanges asynchronously, so a walk's first call could go out before the session
   // existed and read 401 (production-orders at 375, PF-REL2 run 3).
-  // The Factory exchanges inside its encrypted tunnel (POST /rpc), so no response URL names the route
-  // there (every Factory walk timed out on it, PF-REL2 run 4). Its signed-in rail is drawn only after
-  // enterPortal holds the session, so that is the Factory's signal; the other two call the route directly.
-  const exchanged = consoleName === 'factory'
-    ? null
-    : page.waitForResponse((r) => r.url().includes('/auth/alembic-assertion'), { timeout: 30_000 });
+  // All three consoles exchange inside their encrypted tunnel (POST /rpc) and scrub the hash first, so
+  // neither a response URL nor the address shows the exchange (waiting on the route's URL timed out every
+  // walk, PF-REL2 runs 4-5). The Factory's signed-in rail is drawn only after enterPortal holds the
+  // session, and every Factory walk signs in a floor role that has one, so that is its signal. Platform
+  // and Vault walks assert on screens that need the session, which auto-wait; they had no such race.
   await page.goto(`${URLS[consoleName]}/#assertion=${encodeURIComponent(mintAssertion(EMAIL[role]!, consoleName))}`);
-  if (exchanged) await exchanged;
-  else await page.locator('#ra-side').waitFor({ state: 'attached', timeout: 30_000 });
+  if (consoleName === 'factory') await page.locator('#ra-side').waitFor({ state: 'attached', timeout: 30_000 });
 }
 
 /** Read the real database. Assert on this as well as the screen, so a stale page cannot pass. */
