@@ -1973,9 +1973,11 @@
       { n: 'purchaseRequestId', l: 'From purchase request', t: 'select', fk: '/v1/purchase-requests', fv: 'purchaseRequestId', fl: 'prNumber', req: true },
       { n: 'rfqDate', l: 'RFQ date', t: 'date', req: true }, { n: 'submissionDeadline', l: 'Submission deadline', t: 'date' }
     ] },
+    // WALK2-RP-14: 'IFRA Certificate' was offered as a new type. IFRA certifies nothing: a house declares
+    // conformity (CLAUDE.md fail-closed rule). Records already filed under it still render (doc-format.js).
     '/v1/document-registry': { title: 'New document', perm: 'platform:document_master:write', fields: [
       { n: 'title', l: 'Title', t: 'text', req: true },
-      { n: 'documentType', l: 'Type', t: 'select', en: ['IFRA Certificate', 'IFRA Conformity Certificate', 'Allergen Declaration', 'COA', 'MSDS', 'GST Certificate', 'FSSAI Licence', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
+      { n: 'documentType', l: 'Type', t: 'select', en: ['IFRA Conformity Certificate', 'Allergen Declaration', 'COA', 'MSDS', 'GST Certificate', 'FSSAI Licence', 'Contract', 'PO Copy', 'Invoice', 'Other'], req: true },
       { n: 'entityType', l: 'Relates to', t: 'select', en: ['vendor', 'material', 'formula', 'customer', 'other'] },
       { n: 'entityId', l: 'Entity ID (optional)', t: 'text' },
       { n: 'referenceNo', l: 'Reference no.', t: 'text' },
