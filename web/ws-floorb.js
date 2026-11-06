@@ -48,12 +48,23 @@
           .catch(function () { fail('Can\'t connect. Try again.'); });
       } });
   }
+  /** Every page of a list (WALK2-RP-4: one page of 100 hid every older PO and batch from the pickers,
+   *  and a refused or unreachable list read as "nothing open"). The array carries `.failed` when a
+   *  page did not load, and pick() says so under the picker. */
   async function getRows(path) {
-    try { var r = await tunnel(path); return r.status < 400 ? ((data(r) && (data(r).items || data(r))) || []) : []; } catch (e) { return []; }
+    var out = [], cursor = null, n = 0;
+    do {
+      var r; try { r = await tunnel(path + (cursor ? '&cursor=' + encodeURIComponent(cursor) : '')); } catch (e) { out.failed = 'Can\'t connect, so this list may be incomplete. Reload to try again.'; return out; }
+      if (!r || r.status >= 400) { out.failed = err(r, 'This list did not load.') + (out.length ? ' It may be incomplete.' : ''); return out; }
+      var d = data(r); out = out.concat((d && (d.items || d)) || []);
+      cursor = r.json && r.json.meta && r.json.meta.cursor;
+    } while (cursor && ++n < 100);
+    return out;
   }
   function pick(id, rows, val, text, placeholder) {
-    return '<select id="' + id + '" class="fld"><option value="">' + esc(placeholder) + '</option>' +
-      rows.map(function (r) { return '<option value="' + esc(r[val]) + '">' + esc(text(r)) + '</option>'; }).join('') + '</select>';
+    return '<select id="' + id + '" class="fld"' + (rows.failed ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : '') + '><option value="">' + esc(placeholder) + '</option>' +
+      rows.map(function (r) { return '<option value="' + esc(r[val]) + '">' + esc(text(r)) + '</option>'; }).join('') + '</select>' +
+      (rows.failed ? '<span id="' + id + '-err" role="alert" style="color:var(--bad,#b3261e);font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui)">' + esc(rows.failed) + '</span>' : '');
   }
 
   /* ── navigation ─────────────────────────────────────────────────────────────────────── */
