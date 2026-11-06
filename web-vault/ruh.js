@@ -243,7 +243,7 @@
       el('div', { class: 'ruh-meta' }, [
         el('span', { class: 'chip ' + ({ urgent: 'r', warn: 'a', suggest: 'b', info: 'n' }[i.severity] || 'n'), text: SEV_LABEL[i.severity] || 'Note' }),
         el('span', { text: when(i.createdAt) }),
-        i.status === 'snoozed' ? el('span', { text: 'snoozed until ' + new Date(i.snoozedUntil).toLocaleString() }) : null,
+        i.status === 'snoozed' ? el('span', { text: 'snoozed until ' + new Date(i.snoozedUntil).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) }) : null,
         other ? el('span', { text: CONSOLE_LABEL[i.console] }) : null,
       ]),
       el('h3', { text: i.title }),

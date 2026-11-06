@@ -448,7 +448,7 @@
     if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r);
     // The chip says the status in words (screen-guide.js); the code stays in the row for search/sort.
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus' || k === 'lifecycleStatus' || (k === 'result' && /^[A-Z_]+$/.test(String(v)))) { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(statusWord(v)) + '</span>'; }
-    if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString()) + '</span>'; }
+    if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })) + '</span>'; }
     if (k === 'result' && typeof v === 'string' && v.indexOf('Refused') === 0) return '<span style="color:var(--red)">' + escCell(v) + '</span>';
     if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + escCell(String(v).slice(0, 8).toUpperCase()) + '</span>';
     if (/Dt$|Date$|_dt$/.test(k) && isStamp(v)) return '<span style="color:var(--ink-2)">' + escCell(fmtStamp(k, v)) + '</span>';
@@ -1066,7 +1066,7 @@
   function kpiSet(p, role) {
     var c = p.counts;
     var S = {
-      superadmin: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['pkg', c.unitsPacked.toLocaleString(), 'Units packed'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
+      superadmin: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['pkg', c.unitsPacked.toLocaleString('en-IN'), 'Units packed'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       admin: [['users', c.usersTotal, 'Total users'], ['shield', c.usersActive, 'Active'], ['lock', c.roles, 'Roles defined'], ['bell', c.usersTotal - c.usersActive, 'Pending']],
       procurement: [['clipboard', c.posOpen, 'Open POs'], ['bell', c.posPending, 'Pending approvals'], ['truck', c.vendors, 'Suppliers'], ['box', c.materials, 'Materials']],
       receiving: [['truck', c.grns, 'Goods receipts'], ['layers', c.rmBatches, 'RM batches'], ['box', c.invOnHand, 'Units on hand'], ['flask', c.qcQueue, 'Awaiting QC']],
@@ -1074,8 +1074,8 @@
       warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg == null ? '—' : c.zoneCapAvg + '%', 'Bins in use']],
       production: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       compounding: [['beaker', c.mixing, 'Mixing sessions'], ['layers', c.runsActive, 'Active runs'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
-      filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString(), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],
-      packaging: [['box', c.packageOrders, 'Pack orders'], ['pkg', c.fgBatches, 'Finished batches'], ['activity', c.unitsPacked.toLocaleString(), 'Units packed'], ['truck', c.salesOrders, 'Sales orders']],
+      filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString('en-IN'), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],
+      packaging: [['box', c.packageOrders, 'Pack orders'], ['pkg', c.fgBatches, 'Finished batches'], ['activity', c.unitsPacked.toLocaleString('en-IN'), 'Units packed'], ['truck', c.salesOrders, 'Sales orders']],
       sales: [['clipboard', c.salesOrders, 'Sales orders'], ['truck', (p.flow.salesDispatch && p.flow.salesDispatch.dispatched) || 0, 'Dispatched'], ['users', c.customers, 'Customers'], ['pkg', c.fgBatches, 'Finished goods']]
     };
     return (S[role] || S.superadmin).map(function (k) { var v = String(k[1]); return [k[0], v, k[2], '', (parseInt(v, 10) || v.length) * 13 + 3]; });
@@ -1668,7 +1668,7 @@
         '.sign{margin-top:56px;display:flex;justify-content:space-between}.sign div{border-top:1px solid #D6D6D2;padding-top:6px;font-size:12px;color:#66665E;width:210px;text-align:center}' +
         '@media print{.noprint{display:none}}</style></head><body>' +
         '<h1>Raw Aromachem</h1><hr>' +
-        '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString() + '</div>' +
+        '<h2>' + docTitle + '</h2><div class="sub">Generated ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + '</div>' +
         '<table>' + rowsHtml(row) + '</table>' + (extra || '') +
         '<div class="sign"><div>Prepared by</div><div>Authorised signatory</div></div>' +
         '<div class="noprint" style="margin-top:30px;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#E9F260;color:#141413;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px">Print</button></div>' +

@@ -62,7 +62,7 @@
 
     var steps = [
       step(cat.products > 0, 'Catalogue from the sales system',
-        cat.products > 0 ? escHtml(cat.products + ' products received — ' + cat.singleChemicals + ' single chemicals, ' + cat.blends + ' blends') + (cat.lastSyncedAt ? ' · last update ' + escHtml(new Date(cat.lastSyncedAt).toLocaleString()) : '')
+        cat.products > 0 ? escHtml(cat.products + ' products received — ' + cat.singleChemicals + ' single chemicals, ' + cat.blends + ' blends') + (cat.lastSyncedAt ? ' · last update ' + escHtml(new Date(cat.lastSyncedAt).toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })) : '')
           : 'Nothing received yet. In the sales admin console, open Produce &amp; dispatch → Factory setup and press “Set up factory catalogue”.'),
       step(packs.needsDensity === 0, 'Pack sizes',
         escHtml(packs.ok + ' pack sizes have a weight') + (packs.needsDensity ? ' · ' + escHtml(packs.needsDensity + ' sold by volume need a density (' + packs.productsNeedingDensity + ' products)') + ' — Ruh drafts them and an admin approves them in the sales admin console.' : '.')),
