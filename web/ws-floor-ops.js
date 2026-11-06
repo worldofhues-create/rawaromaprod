@@ -192,10 +192,12 @@
     if (!d) { L.innerHTML = errBox('Print jobs are not available.'); return; }
     var TONE = { printed: 'ok', queued: 'warn', sent: 'warn', browser: 'warn', failed: 'bad', parked: 'bad', cancelled: 'neutral' };
     // WALK2-RP-8: the chip printed the wire word (queued, browser, parked) where people read a sentence.
+    // WALK2-RP-32: the Label column read wire kinds (courier, dispatch_doc) and For read 'SHP-…-1:EWAY_BILL'.
+    var KINDW = { customer: 'Customer label', carton: 'Carton label', packing_list: 'Packing list', courier: 'Courier label', dispatch_doc: 'Shipping document', raw_lot: 'Raw-lot label', picked: 'PICKED label', verified: 'VERIFIED label', mixed: 'MIXED label' };
     var WORD = { printed: 'Printed', queued: 'Waiting for the printer', sent: 'Sent to the printer', browser: 'Print in the browser', failed: 'Failed', parked: 'Stopped after retries', cancelled: 'Cancelled' };
     var jobs = d.items || [];
     L.innerHTML = card('Jobs', jobs.length + ' shown', table(['When', 'Label', 'For', 'Status', 'Tries', ''], jobs.map(function (j, i) {
-      return '<tr><td>' + escHtml(when(j.createdAt)) + '</td><td>' + escHtml(j.labelKind) + (j.reprintOf ? ' ' + chip('warn', 'REPRINT') : '') + '</td><td class="mono">' + escHtml(j.subjectRef || '') + (j.reprintReason ? '<div class="t-cap">' + escHtml(j.reprintReason) + '</div>' : '') + '</td>' +
+      return '<tr><td>' + escHtml(when(j.createdAt)) + '</td><td>' + escHtml(KINDW[j.labelKind] || shipWord(j.labelKind)) + (j.reprintOf ? ' ' + chip('warn', 'REPRINT') : '') + '</td><td class="mono">' + escHtml(String(j.subjectRef || '').replace(/:([A-Z_]+)$/, function (m, t) { return ' · ' + shipWord(t); })) + (j.reprintReason ? '<div class="t-cap">' + escHtml(j.reprintReason) + '</div>' : '') + '</td>' +
         '<td>' + chip(TONE[j.status] || 'neutral', WORD[j.status] || j.status) + (j.lastError ? '<div class="t-cap">' + escHtml(j.lastError) + '</div>' : '') + '</td><td>' + j.attempts + '/' + j.maxAttempts + '</td><td style="white-space:nowrap">' +
         (j.status !== 'printed' && j.status !== 'sent' && j.status !== 'cancelled' ? btn('', 'Print in browser', 'sm', ' data-bp="' + i + '"') + ' ' : '') +
         ((j.status === 'parked' || j.status === 'failed') && j.deviceId ? btn('', 'Send again', 'sm', ' data-retry="' + i + '"') + ' ' : '') +

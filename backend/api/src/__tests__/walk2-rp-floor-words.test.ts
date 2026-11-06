@@ -49,3 +49,8 @@ test('RP-19/20: kiosk tag clear of the header; TV board scales to the screen and
   assert.match(ops, /a\.station \? ' · ' \+ escHtml\(a\.station\)/);
   assert.match(readFileSync(join(root, 'web/pair.html'), 'utf8'), /@media \(min-width: 2500px\)/);
 });
+test('RP-32: print queue label kinds and subjects in words', () => {
+  assert.match(ops, /escHtml\(KINDW\[j\.labelKind\] \|\| shipWord\(j\.labelKind\)\)/);
+  assert.match(ops, /dispatch_doc: 'Shipping document'/);
+  assert.match(ops, /replace\(\/:\(\[A-Z_\]\+\)\$\/, function \(m, t\) \{ return ' · ' \+ shipWord\(t\); \}\)/);
+});
