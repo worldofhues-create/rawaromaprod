@@ -19,3 +19,8 @@ test('RP-25: the stock-cover rule line says its value in words', () => {
   assert.equal(f('No rule matched → otherwise {"mode":"fixed"}'), 'No rule matched → otherwise mode: fixed');
   assert.match(js, /esc\(ruleWords\(it\.policy\.explain\)\)/);
 });
+test('RP-26: QC review batch cards wrap their code and never fall back to the uuid', () => {
+  const js = readFileSync(join(root, 'web/ws-floord.js'), 'utf8');
+  assert.match(js, /width:100%;min-width:0;overflow-wrap:anywhere;cursor:pointer/);
+  assert.doesNotMatch(js, /r\.batchNumber \|\| r\.oilBatchId/);
+});

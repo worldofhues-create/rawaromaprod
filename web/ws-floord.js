@@ -150,8 +150,8 @@
     var rows = data(res) || [];
     var list = rows.length ? rows.map(function (r) {
       var s = r.decisionStatus === 'CONFIRMED' ? chip('g', 'Decided: ' + OUT[r.proposedOutcome]) : r.decisionStatus === 'PROPOSED' ? chip('a', OUT[r.proposedOutcome] + ' proposed by the ' + (r.proposedAs === 'PERFUMER' ? 'perfumer' : 'vault approver')) : chip('r', 'Waiting for a decision');
-      return '<button type="button" class="glass" data-ob="' + esc(r.oilBatchId) + '" style="text-align:left;padding:var(--s-snug);display:flex;flex-direction:column;gap:4px;width:100%;cursor:pointer;border:1px solid var(--line)">' +
-        '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><strong style="font-family:var(--font-mono)">' + esc(r.batchNumber || r.oilBatchId) + '</strong><span>' + esc(r.productName || '') + '</span>' + s + '</span>' +
+      return '<button type="button" class="glass" data-ob="' + esc(r.oilBatchId) + '" style="text-align:left;padding:var(--s-snug);display:flex;flex-direction:column;gap:4px;width:100%;min-width:0;overflow-wrap:anywhere;cursor:pointer;border:1px solid var(--line)">' + // WALK2-RP-26: the batch code was cut at narrow widths
+        '<span style="display:flex;gap:8px;flex-wrap:wrap;align-items:center"><strong style="font-family:var(--font-mono)">' + esc(r.batchNumber || 'Batch without a number') + '</strong><span>' + esc(r.productName || '') + '</span>' + s + '</span>' +
         '<span class="t-cap" style="color:var(--ink-3)">In review since ' + esc(when(r.reviewSince)) + ' · round ' + esc(r.roundNo) + '</span></button>';
     }).join('') : '<p>No batch is waiting for review.</p>';
     V.innerHTML = '<div class="grid">' + card('Batches in review', '<p class="t-cap" style="color:var(--ink-3)">A batch comes here when it fails again after its last allowed rework, or past its adjustment envelope. A perfumer and a vault approver decide it together: one proposes, the other confirms.</p>' +
