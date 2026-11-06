@@ -102,6 +102,7 @@
       } });
   }
 
+  // WALK2-RP-33: the station card read 'New  New: taken in turn…': the chip already says New / Delayed Nd.
   /* ── job picker shared by the three stations ────────────────────────────────────────── */
   var FS = { jobs: {} };
   async function pickJob(V, stage, title, open) {
@@ -117,7 +118,7 @@
         var tone = j.priority === 'HOLD' ? 'r' : !j.ready ? 'a' : j.lane === 'DELAYED' ? 'r' : 'b';
         return '<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px">' +
           '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + (j.position ? '<b style="font-size:20px">#' + j.position + '</b>' : '') + code(j.jobNo) + chip(tone, j.priority === 'HOLD' ? 'Held' : !j.ready ? 'Waiting' : j.lane === 'DELAYED' ? 'Delayed ' + j.daysLate + 'd' : 'New') + '</div>' +
-          '<div style="color:var(--ink-3);margin-top:4px">' + esc(j.orderRef || '') + (j.tote ? ' · tote ' + esc(j.tote) : '') + '</div><div style="margin-top:4px">' + esc(j.why) + '</div></div>' +
+          '<div style="color:var(--ink-3);margin-top:4px">' + esc(j.orderRef || '') + (j.tote ? ' · tote ' + esc(j.tote) : '') + '</div><div style="margin-top:4px">' + esc(String(j.why || '').replace(/^(New|Delayed \d+ days?): /, '')) + '</div></div>' +
           (j.ready && j.priority !== 'HOLD' ? btn('fl-open-' + j.floorJobId, title, 'p', big(' data-job="' + esc(j.floorJobId) + '"')) : '') + '</div>';
       }).join('') : '<div class="card">Nothing waiting at this station.</div>') + '</div>';
     V.querySelectorAll('[data-job]').forEach(function (b) { b.onclick = function () { open(b.getAttribute('data-job')); }; });

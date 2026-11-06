@@ -54,3 +54,6 @@ test('RP-32: print queue label kinds and subjects in words', () => {
   assert.match(ops, /dispatch_doc: 'Shipping document'/);
   assert.match(ops, /replace\(\/:\(\[A-Z_\]\+\)\$\/, function \(m, t\) \{ return ' · ' \+ shipWord\(t\); \}\)/);
 });
+test('RP-33: the station card does not repeat the lane the chip shows', () => {
+  assert.match(floor, /esc\(String\(j\.why \|\| ''\)\.replace\(\/\^\(New\|Delayed \\d\+ days\?\): \/, ''\)\)/);
+});
