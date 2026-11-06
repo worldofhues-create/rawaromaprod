@@ -84,7 +84,8 @@ export class FloorController {
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('Choose a production order.');
     const steps = Array.isArray(b?.steps) ? (b.steps as unknown[]).map(s) : [];
     return this.stations.createJob(id, { promiseDt: b?.promiseDt ? s(b.promiseDt) : null, expedite: b?.expedite === true, steps,
-      channel: b?.channel ? s(b.channel) : null, customerTier: b?.customerTier ? s(b.customerTier) : null }, p);
+      channel: b?.channel ? s(b.channel) : null, customerTier: b?.customerTier ? s(b.customerTier) : null,
+      coverSuggestionId: /^[0-9a-f-]{36}$/i.test(s(b?.coverSuggestionId)) ? s(b.coverSuggestionId) : null }, p);
   }
 
   @Permissions('production:floor_pick:write')

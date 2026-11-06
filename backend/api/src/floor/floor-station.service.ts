@@ -129,7 +129,7 @@ export class FloorStationService {
    *  code and a mass unit, or the job is refused (nothing reaches the floor uncoded or unweighable). */
   async createJob(
     productionOrderId: string,
-    opts: { promiseDt?: string | null; expedite?: boolean; steps?: string[]; channel?: string | null; customerTier?: string | null },
+    opts: { promiseDt?: string | null; expedite?: boolean; steps?: string[]; channel?: string | null; customerTier?: string | null; coverSuggestionId?: string | null },
     principal: AuthPrincipal,
   ) {
     const [order] = await this.sql<{ status: string | null; order_number: string | null }[]>`
@@ -169,13 +169,25 @@ export class FloorStationService {
       ...(opts.steps ?? []).map((s) => String(s).trim()).filter(Boolean),
     ];
     return this.sql.begin(async (tx) => {
+      // PROD-D-4: a job made for an approved cover suggestion is SUGGESTED and ranks below every
+      // customer order; the suggestion is linked so it is not counted as planned stock twice.
+      let source = 'ORDER';
+      if (opts.coverSuggestionId) {
+        const [cs] = await tx<{ status: string; floor_job_id: string | null }[]>`
+          select status, floor_job_id::text from production.cover_suggestion where cover_suggestion_id = ${opts.coverSuggestionId} for update`;
+        if (!cs) throw new NotFoundException('No such cover suggestion.');
+        if (cs.status !== 'APPROVED') throw new ConflictException('Only an approved suggestion goes to the floor.');
+        if (cs.floor_job_id) throw new ConflictException('That suggestion is already on the floor.');
+        source = 'SUGGESTED';
+      }
       const [seqRow] = await tx<{ n: string }[]>`select nextval('production.floor_job_no_seq')::text as n`;
       const n = seqRow!.n;
       const jobNo = `J-${n.padStart(4, '0')}`;
       const jobId = uuidv7();
-      await tx`insert into production.floor_job (floor_job_id, job_no, production_order_id, material_pick_list_id, promise_dt, expedite, order_ref, channel, customer_tier, created_by)
+      await tx`insert into production.floor_job (floor_job_id, job_no, production_order_id, material_pick_list_id, promise_dt, expedite, order_ref, channel, customer_tier, created_by, source, cover_suggestion_id)
         values (${jobId}, ${jobNo}, ${productionOrderId}, ${pl.material_pick_list_id}, ${promise}, ${!!opts.expedite}, ${req?.order_ref ?? order.order_number ?? null},
-                ${opts.channel ?? null}, ${opts.customerTier ?? null}, ${principal.userId})`;
+                ${opts.channel ?? null}, ${opts.customerTier ?? null}, ${principal.userId}, ${source}, ${opts.coverSuggestionId ?? null})`;
+      if (opts.coverSuggestionId) await tx`update production.cover_suggestion set floor_job_id = ${jobId} where cover_suggestion_id = ${opts.coverSuggestionId}`;
       for (const [i, l] of lines.entries()) {
         await tx`insert into production.floor_line (floor_line_id, floor_job_id, material_pick_list_item_id, material_id, seq, target_mg, tolerance_ppm)
           values (${uuidv7()}, ${jobId}, ${l.id}, ${l.materialId}, ${i + 1}, ${l.mg}, ${ppm})`;
@@ -183,7 +195,7 @@ export class FloorStationService {
       for (const [i, s] of steps.entries()) {
         await tx`insert into production.floor_mix_step (floor_job_id, seq, instruction) values (${jobId}, ${i + 1}, ${s})`;
       }
-      return { floorJobId: jobId, jobNo, lines: lines.length, steps: steps.length, promiseDt: promise };
+      return { floorJobId: jobId, jobNo, lines: lines.length, steps: steps.length, promiseDt: promise, source };
     });
   }
 

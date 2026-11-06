@@ -1,4 +1,5 @@
 import { pfcGrant } from './pfc-grants.js';
+import { pfdGrant } from './pfd-grants.js';
 
 // RA role catalog — the role → permission-subset matrix seeded into iam.role_master +
 // role_permission_mapping. Each role's `select(permissionCode)` decides which of the 263
@@ -220,6 +221,7 @@ export const ROLES: RoleDef[] = [
     // break-glass permission (owner is the other, via its blanket grant below).
     select: anyOf(
       pfcGrant('admin'),
+      pfdGrant('admin'),
       startsWith('iam:'),
       oneOf('packaging:finished_good_batch_master:read', MANUAL_CONTINUITY_PERMISSION),
       // The Setup and Records entries on Admin's rail. Reference data: no formula and no material
@@ -245,6 +247,7 @@ export const ROLES: RoleDef[] = [
     name: 'Procurement',
     view: 'procurement',
     select: anyOf(
+      pfdGrant('procurement'),
       startsWith('procurement:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
       (p) => p.startsWith('platform:') && isRead(p),
@@ -294,6 +297,7 @@ export const ROLES: RoleDef[] = [
     view: 'qc',
     select: anyOf(
       pfcGrant('qc'),
+      pfdGrant('qc'),
       startsWith('quality:'),
       oneOf(
         'production:production_qc:read',
@@ -408,6 +412,7 @@ export const ROLES: RoleDef[] = [
     view: 'production',
     select: anyOf(
       pfcGrant('production'),
+      pfdGrant('production'),
       oneOf(
         'platform:uom_master:read', // units only: the Unit list on the order form was empty without it
         'production:production_plan:read',
@@ -528,7 +533,8 @@ export const ROLES: RoleDef[] = [
     code: 'formulator',
     name: 'Formulator',
     view: 'vault_formulator',
-    select: oneOf(
+    // PROD-D (lane pf-d): the QC review signature (scripts/pfd-grants.ts), on the main box only.
+    select: anyOf(pfdGrant('formulator'), oneOf(
       'formula:formula_master:read',
       'formula:formula_master:write',
       'formula:formula_version:read',
@@ -552,7 +558,7 @@ export const ROLES: RoleDef[] = [
       'vault:rm_compliance:write',
       'vault:compliance_calc:read',
       VAULT_PLAINTEXT_PERMISSION,
-    ),
+    )),
     sampleEmail: 'formulator@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_FORMULATOR_PASSWORD',
   },
@@ -567,7 +573,8 @@ export const ROLES: RoleDef[] = [
     code: 'vault_approver',
     name: 'Vault Approver',
     view: 'vault_approver',
-    select: oneOf(
+    // PROD-D (lane pf-d): the QC review signature (scripts/pfd-grants.ts), on the main box only.
+    select: anyOf(pfdGrant('vault_approver'), oneOf(
       'formula:formula_master:read',
       'formula:formula_version:read',
       'formula:formula_version:write',
@@ -588,7 +595,7 @@ export const ROLES: RoleDef[] = [
       'vault:rm_compliance:write',
       'vault:compliance_calc:read',
       VAULT_PLAINTEXT_PERMISSION,
-    ),
+    )),
     sampleEmail: 'vault.approver@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_VAULT_APPROVER_PASSWORD',
   },

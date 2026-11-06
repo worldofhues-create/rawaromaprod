@@ -2,6 +2,7 @@
 // decorator across the backend controllers. Grep-generated; regenerate if routes change.
 // Seeded into iam.permission_master (permission_code) and granted to the owner role.
 import { PFC_PERMISSIONS } from './pfc-grants.js';
+import { PFD_PERMISSIONS } from './pfd-grants.js';
 
 export const RA_PERMISSIONS: string[] = [
   'formula:actual:read',
@@ -317,4 +318,6 @@ export const RA_PERMISSIONS: string[] = [
   'production:floor_label:write',
   // Lane pf-c (production floor P3/P4): scripts/pfc-grants.ts.
   ...PFC_PERMISSIONS,
+  // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.
+  ...PFD_PERMISSIONS,
 ];

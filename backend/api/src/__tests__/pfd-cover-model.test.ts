@@ -115,6 +115,12 @@ test('stock counts finished goods, in production and in maceration (with its rea
   assert.match(s.why, /100 in production/);
 });
 
+test('approved suggestions not yet started count as planned stock, so nothing is suggested twice', () => {
+  const s = suggestCover(input({ plannedUnits: 221, lead: { stationDays: 2, qcDays: 1, macerationDays: 45 } }));
+  assert.equal(s.status, 'NONE');
+  assert.match(s.why, /221 approved and not started/);
+});
+
 test('fixed weeks (e.g. seasonal rule) and min/max caps', () => {
   const s = suggestCover(input({ rule: { mode: 'fixed', coverWeeks: 8 }, fgUnits: 0 }));
   assert.equal(s.qty, 38 * 8);

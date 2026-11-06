@@ -52,6 +52,8 @@ export interface CoverInput {
   inProductionUnits: number;
   inMacerationUnits: number;
   macerationReadyBy: string | null;
+  /** Approved suggestions not yet on the floor: already planned, so not suggested twice. */
+  plannedUnits?: number;
   lead: LeadTime;
   /** Reasons the product may not be suggested (open QC reject, lot hold). */
   blocked: string[];
@@ -170,7 +172,8 @@ export function suggestCover(i: CoverInput): CoverSuggestion {
   const weeks = weeklyBuckets(kept, i.now);
   const wr = weightedRate(weeks), sd = stdDev(weeks), trend = trendOf(weeks);
   const forecast = wr * trend.factor;
-  const available = i.fgUnits + i.inProductionUnits + i.inMacerationUnits;
+  const planned = i.plannedUnits ?? 0;
+  const available = i.fgUnits + i.inProductionUnits + i.inMacerationUnits + planned;
   const numbers: CoverNumbers = {
     weeks, weightedRate: wr, ratePerWeek: r1(wr), forecastPerWeek: r1(forecast), sdPerWeek: r1(sd), trend,
     leadDays: null, bufferUnits: 0, targetUnits: 0, availableUnits: available, rawSuggestion: 0,
@@ -179,7 +182,8 @@ export function suggestCover(i: CoverInput): CoverSuggestion {
   const reasons: string[] = [];
   const stockText = [`${i.fgUnits} in stock`,
     ...(i.inProductionUnits ? [`${i.inProductionUnits} in production`] : []),
-    ...(i.inMacerationUnits ? [`${i.inMacerationUnits} in maceration${i.macerationReadyBy ? ` ready ${fmtDate(i.macerationReadyBy)}` : ''}`] : [])].join(', ');
+    ...(i.inMacerationUnits ? [`${i.inMacerationUnits} in maceration${i.macerationReadyBy ? ` ready ${fmtDate(i.macerationReadyBy)}` : ''}`] : []),
+    ...(planned ? [`${planned} approved and not started`] : [])].join(', ');
   const out = (status: CoverStatus, qty: number, why: string): CoverSuggestion => ({ sku: i.sku, status, qty, why, reasons, numbers });
 
   if (i.blocked.length) {

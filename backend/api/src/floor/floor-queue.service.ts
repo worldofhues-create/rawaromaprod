@@ -21,6 +21,7 @@ import type { Sql } from 'postgres';
 import { PG_CLIENT } from '@core/backend-kernel';
 import { PolicyService, PolicyUnresolved } from '../policy/policy.service.js';
 import { FloorCodeService, qtyToMg } from './floor-code.service.js';
+import { stationMedians, predictLate, groupByFormula, type PipelineJob, type Prediction } from './pipeline.js';
 
 export interface QueueJob {
   floorJobId: string;
@@ -139,9 +140,9 @@ export class FloorQueueService {
   async jobs(stage?: string | null): Promise<QueueJob[]> {
     const rows = await this.sql<{
       floor_job_id: string; job_no: string; stage: string; order_ref: string | null; tote: string | null; promise_dt: string | null;
-      created_dt: string; expedite: boolean; channel: string | null; customer_tier: string | null;
+      created_dt: string; expedite: boolean; channel: string | null; customer_tier: string | null; source: string | null;
     }[]>`
-      select floor_job_id::text, job_no, stage, order_ref, tote, promise_dt::text, created_dt::text, expedite, channel, customer_tier
+      select floor_job_id::text, job_no, stage, order_ref, tote, promise_dt::text, created_dt::text, expedite, channel, customer_tier, source
         from production.floor_job
        where stage <> 'DONE' ${stage ? this.sql`and stage = ${stage.toUpperCase()}` : this.sql``}
        order by created_dt limit 500`;
@@ -167,7 +168,7 @@ export class FloorQueueService {
       out.push({
         floorJobId: r.floor_job_id, jobNo: r.job_no, stage: r.stage, orderRef: r.order_ref, tote: r.tote, promiseDt: r.promise_dt,
         createdDt: r.created_dt, expedite: r.expedite, channel: r.channel, customerTier: r.customer_tier,
-        ready: waitingOn.length === 0, waitingOn,
+        ready: waitingOn.length === 0, waitingOn, source: r.source === 'SUGGESTED' ? 'SUGGESTED' : 'ORDER',
       });
     }
     return out;
@@ -190,9 +191,14 @@ export class FloorQueueService {
         else throw e;
       }
     }
-    const items = rankQueue(jobs, now, (j) => answers.get(j.floorJobId) ?? null);
+    const ranked = rankQueue(jobs, now, (j) => answers.get(j.floorJobId) ?? null);
+    const pipe = await this.pipeline(ranked, now);
+    const items = groupByFormula(ranked, (j) => pipe.formula.get(j.floorJobId) ?? null)
+      .map((j) => ({ ...j, prediction: pipe.predictions.get(j.floorJobId) ?? null }));
     return {
       items,
+      planned: await this.planned(),
+      pipeline: { measuredJobs: pipe.samples, atRisk: items.filter((i) => i.prediction?.atRisk).length },
       counters: {
         total: items.length,
         ready: items.filter((i) => i.ready && i.priority !== 'HOLD').length,
@@ -201,5 +207,75 @@ export class FloorQueueService {
         held: items.filter((i) => i.priority === 'HOLD').length,
       },
     };
+  }
+
+  /** PROD-D-2: what pipeline.ts needs from the database: measured station times, QC days, each job's
+   *  formula (grouping only, never returned) and maceration days, and when waited-on stock is due. */
+  private async pipeline(ranked: RankedJob[], now: Date): Promise<{ predictions: Map<string, Prediction>; formula: Map<string, string>; samples: number }> {
+    const done = await this.sql<{ created_dt: string; picked_dt: string | null; verified_dt: string | null; mixed_dt: string | null }[]>`
+      select created_dt::text, picked_dt::text, verified_dt::text, mixed_dt::text from production.floor_job
+       where stage = 'DONE' and mixed_dt is not null order by mixed_dt desc limit 50`;
+    const m = stationMedians(done.map((d) => ({ createdDt: d.created_dt, pickedDt: d.picked_dt, verifiedDt: d.verified_dt, mixedDt: d.mixed_dt })));
+    const qc = await this.sql<{ d: number }[]>`
+      select extract(epoch from (r.created_dt - coalesce(ob.produced_dt, ob.created_dt)))::float8 / 86400 as d
+        from quality.batch_qc_round r join production.oil_batch_master ob on ob.oil_batch_id = r.oil_batch_id
+       where r.decision = 'APPROVE' order by r.created_dt desc limit 50`;
+    const qs = qc.map((r) => Math.max(0, Number(r.d))).sort((a, b) => a - b);
+    const qcDays = qs.length ? Math.round(qs[Math.floor(qs.length / 2)]! * 10) / 10 : null;
+    const formula = new Map<string, string>();
+    const jobs: PipelineJob[] = [];
+    const live = ranked.filter((j) => j.priority !== 'HOLD');
+    const ids = live.map((j) => j.floorJobId);
+    const meta = ids.length ? await this.sql<{ floor_job_id: string; formula_id: string | null; mac: number | null }[]>`
+      select fj.floor_job_id::text, coalesce(pm.formula_id, ppi.formula_id)::text as formula_id,
+             (select ms.min_days from production.maceration_setting ms where ms.formula_id = coalesce(pm.formula_id, ppi.formula_id) and ms.required) as mac
+        from production.floor_job fj join production.production_order po on po.production_order_id = fj.production_order_id
+        left join production.production_plan_items ppi on ppi.production_plan_item_id = po.production_plan_item_id
+        left join lateral (select s.product_id from bridge.production_requirement r join packaging.product_sku s on s.sku_code = r.mapped_sku
+                            where r.production_order_id = po.production_order_id limit 1) sk on true
+        left join packaging.product_master pm on pm.product_id = sk.product_id
+       where fj.floor_job_id = any(${ids}::uuid[])` : [];
+    const byId = new Map(meta.map((r) => [r.floor_job_id, r]));
+    for (const j of live) {
+      const r = byId.get(j.floorJobId);
+      if (r?.formula_id) formula.set(j.floorJobId, r.formula_id);
+      let stockReadyAt: string | null | undefined = null;
+      if (!j.ready) stockReadyAt = await this.stockDue(j.floorJobId, now);
+      jobs.push({ ...j, macerationDays: Number(r?.mac ?? 0), stockReadyAt });
+    }
+    return { predictions: predictLate(jobs, m, qcDays, now), formula, samples: m.samples };
+  }
+
+  /** When the last unpicked short line's stock is due: an open PO's order date + the vendor lead time,
+   *  else today + the preferred vendor's lead time; undefined when neither is on record. */
+  private async stockDue(jobId: string, now: Date): Promise<string | undefined> {
+    const lines = await this.sql<{ material_id: string }[]>`select material_id::text from production.floor_line where floor_job_id = ${jobId} and picked_batch_id is null`;
+    let latest = now.getTime();
+    for (const l of lines) {
+      const [po] = await this.sql<{ due: string | null }[]>`
+        select min(po.order_date + make_interval(days => coalesce(vm.lead_time_days, 0)))::text as due
+          from procurement.purchase_order_items poi join procurement.purchase_order po on po.purchase_order_id = poi.purchase_order_id
+          left join procurement.vendor_rm_mapping vm on vm.vendor_id = po.vendor_id and vm.material_id = poi.material_id
+         where poi.material_id = ${l.material_id} and upper(coalesce(po.status, '')) in ('APPROVED', 'ISSUED', 'ACKNOWLEDGED', 'PARTIALLY_RECEIVED')
+           and po.order_date is not null and vm.lead_time_days is not null`;
+      let due = po?.due ? Date.parse(po.due) : NaN;
+      if (!Number.isFinite(due)) {
+        const [vm] = await this.sql<{ d: number | null }[]>`select lead_time_days as d from procurement.vendor_rm_mapping where material_id = ${l.material_id} and lead_time_days is not null order by is_preferred desc nulls last limit 1`;
+        if (vm?.d == null) {
+          // A line with enough stock is not what the job waits on; only a short line with no date is unknown.
+          continue;
+        }
+        due = now.getTime() + Number(vm.d) * 86_400_000;
+      }
+      latest = Math.max(latest, due);
+    }
+    return latest > now.getTime() ? new Date(latest).toISOString() : undefined;
+  }
+
+  /** Approved cover suggestions not yet on the floor: below every customer job, waiting for a job. */
+  private async planned() {
+    return this.sql`select cover_suggestion_id::text as "coverSuggestionId", sku_code as sku, qty_units as qty, reasoning, decided_by as "approvedBy", decided_dt as "approvedDt",
+                           'Approved suggestion: production opens a job for it; it then ranks below every customer order.' as why
+                      from production.cover_suggestion where status = 'APPROVED' and floor_job_id is null order by decided_dt limit 100`;
   }
 }
