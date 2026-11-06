@@ -273,7 +273,7 @@ export class PackingService {
         lines: [
           ['Order', s.so_number ?? String(s.sales_order_id)], ['Shipment', s.shipment_no], ['Cartons', N],
           ...cartons.map((c) => [`Carton ${c.seq}`, `${c.carton_code} · ${weightText(Number(c.gross_mg))}`] as [string, string]),
-          ...lotLines.map(([lot, n]) => [`Lot ${lot}`, `${n} unit(s)`] as [string, string]),
+          ...lotLines.map(([lot, n]) => [`Lot ${lot}`, `${n} ${Number(n) === 1 ? 'unit' : 'units'}`] as [string, string]),
         ].slice(0, 20) as Array<[string, string | number]>,
         code: String(s.shipment_no),
       },

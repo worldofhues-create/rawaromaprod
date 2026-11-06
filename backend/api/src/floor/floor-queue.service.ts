@@ -102,9 +102,13 @@ export function rankQueue(
     // an admin expedites it (an explicit call) — the floor.queue rule cannot lift it above orders.
     const priority = j.expedite ? 'EXPEDITE' : j.source === 'SUGGESTED' ? 'SUGGESTED'
       : v && typeof v === 'object' && String(v.priority).toLowerCase() === 'top' ? 'TOP' : 'ALTERNATE';
+    // WALK2-RP-17: the picker read the engine's trace ("New; No rule matched → otherwise {"mode":"alternate"}")
+    // and "1 day(s)". The default turn is said in words; a matched rule keeps its own explanation.
+    const late = `Delayed ${j.daysLate} ${j.daysLate === 1 ? 'day' : 'days'}`;
+    const turn = /^No rule matched/.test(d.explain) ? (j.lane === 'NEW' ? 'taken in turn with delayed jobs' : 'taken in turn with new jobs') : d.explain;
     const why = priority === 'EXPEDITE' ? 'Expedited by an admin' : priority === 'TOP' ? d.explain
       : priority === 'SUGGESTED' ? 'Suggested by order intelligence and approved: below every customer order'
-      : `${j.lane === 'NEW' ? 'New' : `Delayed ${j.daysLate} day(s)`}; ${d.explain}`;
+      : `${j.lane === 'NEW' ? 'New' : late}: ${turn}`;
     groups[priority].push({ ...j, position: null, priority, why, policyVersion: d.version });
   }
   const ordered = [

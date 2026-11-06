@@ -327,13 +327,21 @@
   var SCOPES = [['record', 'One record'], ['vendor', 'Vendor'], ['material_family', 'Material family'], ['global', 'General']];
   function parseVal(t) { var s = String(t == null ? '' : t).trim(); if (s === '') return ''; try { return JSON.parse(s); } catch (e) { return s; } }
   function showVal(v) { return typeof v === 'string' ? v : JSON.stringify(v); }
+  // WALK2-RP-17: the Rules list read 'otherwise {"mode":"alternate"}'. Words for reading; the editor's
+  // inputs keep the exact value (showVal) because that is what is published.
+  function sayVal(v) {
+    if (v === null || v === undefined) return 'nothing';
+    if (typeof v !== 'object') return String(v);
+    if (Array.isArray(v)) return v.map(sayVal).join(', ');
+    return Object.keys(v).map(function (k) { return k.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase() + ': ' + sayVal(v[k]); }).join(', ');
+  }
   async function viewRules(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
     var res = await call('/v1/policies');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The rules are not available.')); return; }
     var list = data(res) || [];
     V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:1000px"><div class="card">Each policy is a list of rules: IF the conditions hold THEN this value, ELSE IF the next rule…, OTHERWISE the default. A rule for one record beats a vendor rule, which beats a material-family rule, which beats a general rule. With no match and no default the system holds and asks.</div>' +
-      list.map(function (p) { return '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>' + esc(p.title) + '</b> <span style="font-family:var(--font-mono);color:var(--ink-3)">' + esc(p.key) + '</span><div style="color:var(--ink-3)">' + esc(p.description || '') + '</div><div>v' + esc(p.version) + ' · ' + (function (n) { return n + (n === 1 ? ' rule' : ' rules'); })((p.body.rules || []).length) + ' · ' + (p.body.hasDefault ? 'otherwise ' + esc(showVal(p.body.defaultValue)) : chip('a', 'no default: holds')) + (p.activeOverrides ? ' · ' + p.activeOverrides + (Number(p.activeOverrides) === 1 ? ' override' : ' overrides') : '') + '</div></div>' + btn('fl-pol-' + p.key.replace(/\W/g, '_'), 'Open', '', ' data-pol="' + esc(p.key) + '"') + '</div>'; }).join('') + '</div>';
+      list.map(function (p) { return '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px"><b>' + esc(p.title) + '</b> <span style="font-family:var(--font-mono);color:var(--ink-3)">' + esc(p.key) + '</span><div style="color:var(--ink-3)">' + esc(p.description || '') + '</div><div>v' + esc(p.version) + ' · ' + (function (n) { return n + (n === 1 ? ' rule' : ' rules'); })((p.body.rules || []).length) + ' · ' + (p.body.hasDefault ? 'otherwise ' + esc(sayVal(p.body.defaultValue)) : chip('a', 'no default: holds')) + (p.activeOverrides ? ' · ' + p.activeOverrides + (Number(p.activeOverrides) === 1 ? ' override' : ' overrides') : '') + '</div></div>' + btn('fl-pol-' + p.key.replace(/\W/g, '_'), 'Open', '', ' data-pol="' + esc(p.key) + '"') + '</div>'; }).join('') + '</div>';
     V.querySelectorAll('[data-pol]').forEach(function (b) { b.onclick = function () { ruleEditor(V, b.getAttribute('data-pol')); }; });
   }
   async function ruleEditor(V, key) {

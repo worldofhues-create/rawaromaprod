@@ -34,3 +34,6 @@ test('RP-9: packing chooses the order and lots by number; shipment words', () =>
   assert.doesNotMatch(ops, /s\.soNumber \|\| s\.salesOrderId/);
   assert.match(ops, /d\.blanks\.map\(fieldWords\)/);
 });
+test('RP-17: the Rules list says the default in words', () => {
+  assert.match(floor, /'otherwise ' \+ esc\(sayVal\(p\.body\.defaultValue\)\)/);
+});

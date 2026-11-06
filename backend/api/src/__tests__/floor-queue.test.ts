@@ -118,3 +118,13 @@ test('queue on the DB: default floor.queue is alternation; readiness reads real 
   assert.match(qb.why, /OVERRIDDEN/);
   assert.ok(q.items.findIndex((i) => i.floorJobId === b) < q.items.findIndex((i) => i.floorJobId === a));
 });
+
+test('WALK2-RP-17: the default turn reads as words, never the rule engine trace or "day(s)"', () => {
+  const r = rankQueue([job('J-A'), job('J-B', { promiseDt: '2026-11-04T12:00:00Z' })], NOW, () => ({ value: { mode: 'alternate' }, explain: 'No rule matched → otherwise {"mode":"alternate"}', version: 1 }));
+  for (const j of r) {
+    assert.doesNotMatch(j.why, /No rule matched|\{|day\(s\)/);
+    assert.match(j.why, /taken in turn with (new|delayed) jobs/);
+  }
+  assert.match(r.find((j) => j.jobNo === 'J-B')!.why, /^Delayed 1 day:/);
+});
+
