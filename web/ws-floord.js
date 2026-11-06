@@ -96,7 +96,7 @@
     }).join('');
     var decided = (d.decided || []).length
       ? scroll('<table class="tbl" style="min-width:560px"><thead><tr><th>When</th><th>SKU</th><th>Decision</th><th>Qty</th><th>Why</th></tr></thead><tbody>' +
-        d.decided.map(function (x) { return '<tr><td>' + esc(when(x.decidedDt)) + '</td><td>' + esc(x.sku) + '</td><td>' + esc(x.status) + (x.floorJobId ? ' · on the floor' : '') + '</td><td>' + esc(x.qty) + '</td><td>' + esc(x.note || x.reasoning) + '</td></tr>'; }).join('') + '</tbody></table>')
+        d.decided.map(function (x) { return '<tr><td>' + esc(when(x.decidedDt)) + '</td><td>' + esc(x.sku) + '</td><td>' + esc(({ APPROVED: 'Approved', DISMISSED: 'Dismissed' })[x.status] || x.status) + (x.floorJobId ? ' · on the floor' : '') + '</td><td>' + esc(x.qty) + '</td><td>' + esc(x.note || x.reasoning) + '</td></tr>'; }).join('') + '</tbody></table>')
       : '<p>No suggestion approved or dismissed yet.</p>';
     V.innerHTML = '<div class="grid">' + banner +
       '<div class="stats c12">' + kpi('activity', String(count('SUGGEST')), 'Suggested') + kpi('lock', String(count('HOLD')), 'Held') + kpi('alert', String(count('BLOCKED')), 'Blocked') + kpi('shieldCheck', String(count('NONE')), 'Covered') + '</div>' +

@@ -24,3 +24,6 @@ test('RP-26: QC review batch cards wrap their code and never fall back to the uu
   assert.match(js, /width:100%;min-width:0;overflow-wrap:anywhere;cursor:pointer/);
   assert.doesNotMatch(js, /r\.batchNumber \|\| r\.oilBatchId/);
 });
+test('RP-27: decided suggestions read Approved/Dismissed, not the wire word', () => {
+  assert.match(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /\{ APPROVED: 'Approved', DISMISSED: 'Dismissed' \}\)\[x\.status\]/);
+});
