@@ -129,7 +129,7 @@ test('WALK2-RP-10: history names who published a version and carries the policy 
   const who = principal({ roles: ['admin'], userId: uid });
   const key = await freshPolicy({ rules: [], hasDefault: true, defaultValue: 1 });
   await svc.publish(key, { rules: [], hasDefault: true, defaultValue: 2 }, 'named', who);
-  const h = await svc.history(key) as { title: string | null; versions: Array<{ createdByName: string | null }> };
+  const h = (await svc.history(key)) as unknown as { title: string | null; versions: Array<{ createdByName: string | null }> };
   assert.equal(h.versions[0]!.createdByName, 'Meera Iyer');
   assert.ok(h.title, 'the editor heading reads the policy title');
 });
