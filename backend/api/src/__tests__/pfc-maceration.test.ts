@@ -200,3 +200,13 @@ test('alarm: the minimum reached raises one alert at the production station', as
   assert.equal(crm.length, 1);
   assert.equal((crm[0]!.payload as Record<string, unknown>).status, 'MACERATION_COMPLETE');
 });
+
+test('WALK2-RP-15: a setting is chosen by a product with a linked formula, by code and name', async () => {
+  const pid = randomUUID(), fid = randomUUID(), code = 'P-' + pid.slice(0, 6);
+  await testClient()`insert into packaging.product_master (product_id, product_code, product_name, formula_id, status) values (${pid}, ${code}, 'Ruh Khus Night', ${fid}, 'ACTIVE')`;
+  const items = await new MacerationService(testClient()).settingProducts();
+  const row = items.find((i) => i.formulaId === fid);
+  assert.ok(row);
+  assert.equal(row!.productCode, code);
+  assert.equal(row!.productName, 'Ruh Khus Night');
+});

@@ -21,6 +21,10 @@ export class MacerationController {
   settings() { return this.mac.settings().then((items) => ({ items })); }
 
   @Permissions('production:maceration_setting:write')
+  @Get('setting-products')
+  settingProducts() { return this.mac.settingProducts().then((items) => ({ items })); }
+
+  @Permissions('production:maceration_setting:write')
   @Put('settings/:formulaId')
   put(@Param('formulaId', new ParseUUIDPipe()) formulaId: string, @Body() body: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.mac.putSetting(formulaId, body ?? {}, p);

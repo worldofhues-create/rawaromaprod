@@ -30,6 +30,16 @@ export class MacerationService {
     this.clock = clock ?? systemClock;
   }
 
+  /** WALK2-RP-15: what a maceration setting is chosen by. The screen read the Vault formula directory, which
+   *  an admin (who sets maceration) may not read, so the picker said "Missing permission". A setting is per
+   *  product, and the main box knows each product's linked formula: products with one, by code and name. */
+  async settingProducts() {
+    const rows = await this.sql`
+      select formula_id::text as formula_id, product_code, product_name from packaging.product_master
+       where formula_id is not null order by product_code nulls last, product_name`;
+    return rows.map((r) => ({ formulaId: String(r.formula_id), productCode: (r.product_code as string) ?? null, productName: (r.product_name as string) ?? null }));
+  }
+
   async settings() {
     const rows = await this.sql`select * from production.maceration_setting order by updated_at desc`;
     return rows.map((r) => this.shapeSetting(r));

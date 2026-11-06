@@ -218,10 +218,12 @@
     V.innerHTML = '<div class="loading">Loading…</div>';
     var runs = await call('/v1/maceration/runs'); if (!runs) { V.innerHTML = errBox('Maceration is not available.'); return; }
     var settings = can('production:maceration_setting:write') ? await call('/v1/maceration/settings') : null;
-    // WALK2-RP-7: the setting asked for a typed formula uuid and listed settings by uuid. A picker of the
-    // formulas by code and name (every page), and names in the table; a failed list is said.
-    var fr = settings && typeof fkRows === 'function' ? await fkRows('/v1/formulas') : { rows: [] };
-    var FN = {}; (fr.rows || []).forEach(function (f) { FN[f.formulaId] = (f.formulaCode || '') + (f.formulaName ? ' · ' + f.formulaName : ''); });
+    // WALK2-RP-7: the setting asked for a typed formula uuid and listed settings by uuid. WALK2-RP-15: the
+    // picker read the Vault directory, which the admin who sets maceration cannot read; it lists the
+    // products with a linked formula (a setting is per product), by code and name. A failure is said.
+    var fr = { rows: [] };
+    if (settings) { try { var sp = await tunnel('/v1/maceration/setting-products'); fr = sp.status < 400 ? { rows: data(sp).items || [] } : { rows: [], error: err(sp, 'The products did not load.') }; } catch (e) { fr = { rows: [], error: 'Can\'t connect, so the products did not load.' }; } }
+    var FN = {}; (fr.rows || []).forEach(function (f) { FN[f.formulaId] = [f.productCode, f.productName].filter(Boolean).join(' · ') || 'Product without a name'; });
     var canWrite = can('production:maceration:write'), canEarly = can('production:maceration:release_early');
     var list = runs.items || [];
     var rows = list.map(function (r, i) {
@@ -232,11 +234,11 @@
         '<td>' + (r.freezeRequired ? (r.freezeDoneAt ? chip('ok', 'Freeze done') : canWrite ? btn('', 'Freeze done', 'sm', ' data-fz="' + i + '"') : chip('warn', 'Freeze due')) : '<span class="t-cap">none</span>') + '</td>' +
         '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canEarly && !r.releasedEarlyAt && !r.minReached ? btn('', 'Release early', 'sm', ' data-early="' + i + '"') : '') + '</td></tr>';
     });
-    var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid(['<label style="display:flex;flex-direction:column;gap:5px;min-width:0"><span class="t-cap">Formula</span><select id="fo-ms-f" class="fld" required' + (fr.error ? ' aria-invalid="true"' : '') + '><option value="">' + escHtml(fr.error || 'Choose a formula…') + '</option>' +
+    var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid(['<label style="display:flex;flex-direction:column;gap:5px;min-width:0"><span class="t-cap">Formula</span><select id="fo-ms-f" class="fld" required' + (fr.error ? ' aria-invalid="true"' : '') + '><option value="">' + escHtml(fr.error || (fr.rows.length ? 'Choose a product…' : 'No product has a formula linked yet')) + '</option>' +
         (fr.rows || []).map(function (f) { return '<option value="' + escHtml(f.formulaId) + '">' + escHtml(FN[f.formulaId] || f.formulaId) + '</option>'; }).join('') + '</select>' + (fr.error ? '<span role="alert" class="t-cap" style="color:var(--bad,#b3261e)">' + escHtml(fr.error) + '</span>' : '') + '</label>',
       '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-req" type="checkbox" checked> Maceration required</label>', fld('fo-ms-min', 'Minimum days', 'type="number" min="1" max="365" value="30"'), fld('fo-ms-max', 'Maximum days', 'type="number" min="1" max="365" value="120"'),
       '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-fz" type="checkbox"> Freeze / chill-filter step</label>', fld('fo-ms-note', 'Freeze note', 'placeholder="chill 24 h at 4 °C, filter"'), btn('', 'Save', 'p', ' type="submit"')]) + '</form>' +
-      table(['Formula', 'Required', 'Days', 'Freeze'], (settings.items || []).map(function (s) { return '<tr><td>' + escHtml(FN[s.formulaId] || 'Formula not in your list') + '</td><td>' + (s.required ? 'Yes' : 'No') + '</td><td>' + s.minDays + '–' + s.maxDays + '</td><td>' + (s.freezeRequired ? escHtml(s.freezeNote || 'Yes') : 'No') + '</td></tr>'; }))) : '';
+      table(['Product', 'Required', 'Days', 'Freeze'], (settings.items || []).map(function (s) { return '<tr><td>' + escHtml(FN[s.formulaId] || 'No product linked to this formula') + '</td><td>' + (s.required ? 'Yes' : 'No') + '</td><td>' + s.minDays + '–' + s.maxDays + '</td><td>' + (s.freezeRequired ? escHtml(s.freezeNote || 'Yes') : 'No') + '</td></tr>'; }))) : '';
     V.innerHTML = card('Macerating now', list.length + (list.length === 1 ? ' batch' : ' batches') + ' · they cannot ship, go to FG or be reserved until QC 2 passes', table(['Batch', 'Timer', 'State', 'Freeze', ''], rows)) + setCard;
     V.querySelectorAll('[data-fz]').forEach(function (b) { b.addEventListener('click', async function () { if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-fz'))].macerationRunId + '/freeze-done', 'POST', {})) viewMaceration(item, V); }); });
     V.querySelectorAll('[data-ext]').forEach(function (b) {

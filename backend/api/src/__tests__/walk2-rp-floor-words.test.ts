@@ -15,7 +15,7 @@ const floor = strip(readFileSync(join(root, 'web/ws-floor.js'), 'utf8'));
 test('RP-7: the maceration setting picks a formula by name', () => {
   assert.doesNotMatch(ops, /Formula id/);
   assert.match(ops, /<select id="fo-ms-f"/);
-  assert.match(ops, /fkRows\('\/v1\/formulas'\)/);
+  assert.match(ops, /\/v1\/maceration\/setting-products/); // WALK2-RP-15: not the Vault directory an admin cannot read
   assert.doesNotMatch(ops, /escHtml\(s\.formulaId\)/);
   assert.doesNotMatch(ops, /r\.batchNumber \|\| r\.oilBatchId/);
 });
