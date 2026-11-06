@@ -46,3 +46,8 @@ test('RP-29: the offline banner never rewrites itself in a loop', () => {
 test('RP-26: the QC review decision chip wraps at narrow widths', () => {
   assert.match(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /white-space:normal;height:auto;max-width:100%;text-align:left" class="chip/);
 });
+test('RP-30: the reason on a disabled Edit says the status in words', () => {
+  const js = readFileSync(join(root, 'web/shell.js'), 'utf8');
+  assert.doesNotMatch(js, /Only a DRAFT purchase/);
+  assert.match(js, /Only a draft purchase order can be edited; this one is ' \+ String\(statusWord\(r\.status\)\)\.toLowerCase\(\)/);
+});
