@@ -38,3 +38,8 @@ test('RP-28: an unreachable server is a failure on the floor stations, not an em
 test('RP-28: Stock cover and QC review treat an unreachable server as a failure too', () => {
   assert.doesNotMatch(readFileSync(join(root, 'web/ws-floord.js'), 'utf8'), /catch \(e\) \{ return \{ status: 0,/);
 });
+test('RP-29: the offline banner never rewrites itself in a loop', () => {
+  const js = readFileSync(join(root, 'web/ws-floor-ops.js'), 'utf8');
+  assert.match(js, /if \(b\.textContent !== msg\) b\.textContent = msg;/);
+  assert.match(js, /t\.id === 'fo-net' \|\| \(t\.closest && t\.closest\('#fo-net'\)\)/);
+});

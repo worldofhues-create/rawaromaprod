@@ -505,12 +505,19 @@
     var b = document.getElementById('fo-net');
     if (!navigator.onLine) {
       if (!b) { b = document.createElement('div'); b.id = 'fo-net'; b.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:2147483600;padding:10px 16px;background:#b3261e;color:#fff;font:600 16px/1.3 var(--font-ui);text-align:center'; document.body.appendChild(b); }
-      b.textContent = 'No network: read-only. Nothing can be completed until the network is back.';
+      var msg = 'No network: read-only. Nothing can be completed until the network is back.';
+      if (b.textContent !== msg) b.textContent = msg;
     } else if (b) b.remove();
-    document.querySelectorAll('[data-net]').forEach(function (x) { x.disabled = !navigator.onLine; });
+    document.querySelectorAll('[data-net]').forEach(function (x) { if (x.disabled !== !navigator.onLine) x.disabled = !navigator.onLine; });
   }
   window.addEventListener('online', netBanner); window.addEventListener('offline', netBanner);
-  new MutationObserver(function () { if (!navigator.onLine) netBanner(); }).observe(document.documentElement, { childList: true, subtree: true });
+  // WALK2-RP-29: offline, the banner rewrote its own text on every mutation, which was itself a mutation:
+  // the page spun at 100% CPU and stopped answering. It writes only on a change, and the observer ignores
+  // the banner's own nodes.
+  new MutationObserver(function (ms) {
+    if (navigator.onLine) return;
+    for (var i = 0; i < ms.length; i++) { var t = ms[i].target; if (!(t && (t.id === 'fo-net' || (t.closest && t.closest('#fo-net'))))) { netBanner(); return; } }
+  }).observe(document.documentElement, { childList: true, subtree: true });
 
   // WALK2-RP-18: kiosk targets were 52px buttons, 48px fields and 44px header buttons (Ruh, alerts),
   // under the 56px floor for gloved hands. A locked kiosk, and a floor role's own station screens
