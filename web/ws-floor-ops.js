@@ -46,7 +46,10 @@
   }
   function val(id) { var e = document.getElementById(id); return e ? String(e.value || '').trim() : ''; }
   function on(id, ev, fn) { var e = document.getElementById(id); if (e) e.addEventListener(ev, fn); }
-  function when(v) { return v ? String(v).replace('T', ' ').slice(0, 16) : ''; }
+  // WALK2-RP-6: the server sends UTC ISO times; slicing the string printed the UTC clock, 5h30 behind
+  // the floor's. Local time, same YYYY-MM-DD HH:mm shape.
+  function localTime(v) { var d = new Date(v); if (!v || isNaN(d)) return v ? String(v) : ''; var p = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
+  function when(v) { return localTime(v); }
   async function call(path, method, body) {
     if (method && method !== 'GET' && !navigator.onLine) { toast('No network. Nothing was saved; try again when the network is back.', 'bad'); return null; }
     var res;

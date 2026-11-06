@@ -28,6 +28,9 @@
     return '<span style="display:inline-flex;align-items:center;gap:8px"><span aria-hidden="true" style="width:22px;height:22px;border-radius:6px;border:1px solid var(--line);background:' + esc(l.colourHex) + '"></span>' +
       '<b>' + esc(l.colourName) + '</b> <span style="font-family:var(--font-mono)">(' + esc(l.initial) + ')</span></span>';
   }
+  // WALK2-RP-6: printed and shown times were the UTC clock sliced out of the ISO string (a label's
+  // time 5h30 off is a wrong record). Local time, same YYYY-MM-DD HH:mm shape.
+  function localTime(v) { var d = new Date(v); if (!v || isNaN(d)) return v ? String(v) : ''; var p = function (n) { return (n < 10 ? '0' : '') + n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); }
   function code(v) { return '<span style="font-family:var(--font-mono);font-size:20px;font-weight:600">' + esc(v) + '</span>'; }
   async function call(path, opts) {
     try { return await tunnel(path, opts); } catch (e) { return { status: 0, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
@@ -74,7 +77,7 @@
     if (!l) return;
     var w = window.open('', '_blank', 'width=420,height=320');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
-    var time = String(l.printedDt || '').replace('T', ' ').slice(0, 16);
+    var time = localTime(l.printedDt);
     w.document.write('<!doctype html><meta charset="utf-8"><title>' + esc(l.kind) + ' ' + esc(l.jobNo) + '</title>' +
       '<style>@page{size:75mm 50mm;margin:0}body{margin:0;font:11px/1.3 system-ui,sans-serif}.l{width:71mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000}' +
       'h1{margin:0 0 1mm;font-size:22px;letter-spacing:.06em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:6px;font-size:13px}td{padding:0 4px 0 0;vertical-align:top}</style>' +
@@ -357,7 +360,7 @@
         (canOverride ? '<form id="fl-ov" class="card" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px;align-items:end"><b style="grid-column:1/-1">Override on one record (admin or owner, with a reason)</b>' +
           '<label>Record type<input id="fl-ovt" class="fld" placeholder="po, floor_job"></label><label>Record<input id="fl-ovi" class="fld" placeholder="PO-123"></label><label>Value<input id="fl-ovv" class="fld"></label><label>Reason<input id="fl-ovr" class="fld"></label>' +
           btn('fl-ovgo', 'Override', '', ' type="submit"') + '<div id="fl-overr" role="alert" style="color:var(--red);grid-column:1/-1"></div></form>' : '') +
-        '<div class="card"><b>Versions</b>' + h.versions.map(function (v) { return '<div>v' + esc(v.version) + ' · ' + esc(String(v.createdDt).slice(0, 16)) + ' · ' + esc(v.createdBy) + ' · ' + esc(v.reason) + '</div>'; }).join('') +
+        '<div class="card"><b>Versions</b>' + h.versions.map(function (v) { return '<div>v' + esc(v.version) + ' · ' + esc(localTime(v.createdDt)) + ' · ' + esc(v.createdBy) + ' · ' + esc(v.reason) + '</div>'; }).join('') +
         '<b style="display:block;margin-top:8px">Overrides</b>' + (h.overrides.length ? h.overrides.map(function (o) { return '<div>' + chip(o.revokedDt ? 'n' : 'a', o.revokedDt ? 'Revoked' : 'OVERRIDDEN') + ' ' + esc(o.recordType) + ' ' + esc(o.recordId) + ' → ' + esc(showVal(o.value)) + ' · ' + esc(o.reason) + (!o.revokedDt && canOverride ? ' ' + btn('fl-rv-' + o.overrideId, 'Revoke', 'sm', ' data-rev="' + esc(o.overrideId) + '"') : '') + '</div>'; }).join('') : '<div>None.</div>') +
         '<b style="display:block;margin-top:8px">Recent decisions</b>' + (h.decisions.length ? h.decisions.map(function (d) { return '<div>v' + esc(d.version) + ' · ' + esc(d.recordType || '') + ' ' + esc(d.recordId || '') + ' · ' + esc(d.explain) + '</div>'; }).join('') : '<div>None yet.</div>') + '</div></div>';
       bind();
