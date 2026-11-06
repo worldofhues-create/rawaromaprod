@@ -70,8 +70,8 @@ test('Packing then Logistics: unit, carton, finish, carton check, documents, AWB
        insert into sales.courier_connector (provider, display_name) values ('${courier}', 'Walk Courier')`);
   await signIn(page, 'factory', 'owner');
   await openNav(page, 'Packing station');
-  await page.locator('#fo-pk-so').fill(so);
-  await page.locator('#fo-pk-lots').fill(fg);
+  await page.locator('#fo-pk-so').selectOption({ label: soNo }); // WALK2-RP-9: by order number, not a typed uuid
+  await page.getByRole('checkbox', { name: new RegExp(`FG-${soNo}`) }).check();
   await page.getByRole('button', { name: 'Start packing' }).click();
   await expect(page.getByText('Fill a unit')).toBeVisible();
   await noSideScroll(page);
@@ -93,9 +93,9 @@ test('Packing then Logistics: unit, carton, finish, carton check, documents, AWB
   await expect(page.locator('tr', { hasText: 'in carton 1' })).toBeVisible();
   await page.locator('#fo-c-w').fill('60');
   await page.getByRole('button', { name: 'Weigh + close carton' }).click();
-  await expect(page.locator('tr', { hasText: 'CLOSED' })).toBeVisible();
+  await expect(page.locator('tr', { hasText: 'Closed' })).toBeVisible();
   await page.getByRole('button', { name: /Finish packing/ }).click();
-  await expect(page.locator('.chip', { hasText: 'PACKED' })).toBeVisible();
+  await expect(page.locator('.chip', { hasText: 'Packed' })).toBeVisible();
   expect(sql(`select status || ' ' || carton_count from sales.shipment where sales_order_id='${so}'`)).toBe('PACKED 1');
 
   await openNav(page, 'Logistics station');
@@ -106,7 +106,7 @@ test('Packing then Logistics: unit, carton, finish, carton check, documents, AWB
   await page.getByRole('button', { name: 'Check carton' }).click();
   await expect(page.getByText(/1 of 1 cartons scanned/)).toBeVisible();
   await page.getByRole('button', { name: 'Generate + print documents' }).click();
-  await expect(page.getByText(/INVOICE \(blank: invoiceNumber/)).toBeVisible();
+  await expect(page.getByText(/Invoice \(blank: invoice number/)).toBeVisible();
   const awb = `WALK${Date.now()}`;
   await page.locator('#fo-lg-cr').selectOption(courier);
   await page.locator('#fo-lg-awbv').fill(awb);

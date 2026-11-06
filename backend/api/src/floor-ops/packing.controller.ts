@@ -2,6 +2,7 @@
  * PackingController (lane pf-c, plan section 6, station 5). `station` names the packing bench, so
  * labels go to its paired printer and weights must come from its own scale.
  *   GET  /v1/packing/queue                         shipments being packed            sales:shipment:read
+ *   GET  /v1/packing/candidates                    open orders + QC-passed lots      packaging:packing_station:write
  *   GET  /v1/shipments/:id                         one shipment, cartons, units      sales:shipment:read
  *   POST /v1/packing/shipments {salesOrderId, finishedGoodBatchIds}                  packaging:packing_station:write
  *   POST /v1/packing/shipments/:id/units {finishedGoodBatchId, targetMg, toleranceMg, mg, weightSource, scaleReadingId?, sealed, station}
@@ -27,6 +28,10 @@ export class PackingController {
   @Permissions('sales:shipment:read')
   @Get('packing/queue')
   queue() { return this.packing.queue().then((items) => ({ items })); }
+
+  @Permissions('packaging:packing_station:write')
+  @Get('packing/candidates')
+  candidates() { return this.packing.candidates(); }
 
   @Permissions('sales:shipment:read')
   @Get('shipments/:id')

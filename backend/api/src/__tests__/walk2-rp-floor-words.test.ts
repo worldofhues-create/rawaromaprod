@@ -26,3 +26,11 @@ test('RP-8: plain words and plurals', () => {
   assert.doesNotMatch(ops, /chip\('bad', a\.kind\.replace/);
   assert.match(ops, /j\.status !== 'cancelled' \? btn\(/);
 });
+test('RP-9: packing chooses the order and lots by number; shipment words', () => {
+  assert.doesNotMatch(ops, /Sales order id|Lot ids/);
+  assert.match(ops, /\/v1\/packing\/candidates/);
+  assert.doesNotMatch(ops, /l\.slice\(0, 8\)/);
+  assert.doesNotMatch(ops, /s\.status\.replace\('_', ' '\)/);
+  assert.doesNotMatch(ops, /s\.soNumber \|\| s\.salesOrderId/);
+  assert.match(ops, /d\.blanks\.map\(fieldWords\)/);
+});

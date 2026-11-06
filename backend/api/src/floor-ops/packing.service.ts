@@ -91,7 +91,38 @@ export class PackingService {
     if (!r) throw new NotFoundException('That shipment was not found.');
     const cartons = await this.sql`select * from sales.shipment_carton where shipment_id = ${id}::uuid order by seq`;
     const units = await this.sql`select * from sales.shipment_unit where shipment_id = ${id}::uuid order by created_at`;
-    return { ...this.shapeShipment(r), cartons: cartons.map((c) => this.shapeCarton(c)), units: units.map((u) => this.shapeUnit(u)) };
+    const shaped = this.shapeShipment(r);
+    return { ...shaped, lotNames: await this.lotNames(((r.lots as string[]) ?? []).map(String)), cartons: cartons.map((c) => this.shapeCarton(c)), units: units.map((u) => this.shapeUnit(u)) };
+  }
+
+  /** WALK2-RP-9: what a packer chooses from, by name: the station asked for a typed sales-order uuid
+   *  and comma-separated lot uuids. Open orders, and lots whose latest packaging QC passed (start()
+   *  still refuses one that is macerating or no longer approved). */
+  async candidates() {
+    const orders = await this.sql`
+      select so.sales_order_id, so.so_number, so.order_date, c.customer_name
+        from sales.sales_order so left join sales.customer_master c on c.customer_id = so.customer_id
+       where upper(coalesce(so.status, '')) = 'CONFIRMED' order by so.order_date nulls last, so.so_number`;
+    const lots = await this.sql`
+      select f.finished_good_batch_id, f.batch_number, s.pack_size, pm.product_name
+        from packaging.finished_good_batch_master f
+        left join packaging.product_sku s on s.product_sku_id = f.product_sku_id
+        left join packaging.product_master pm on pm.product_id = s.product_id
+       where (select upper(coalesce(q.overall_result, '')) from packaging.packaging_qc q
+               where q.finished_good_batch_id = f.finished_good_batch_id order by q.created_dt desc limit 1) = 'PASS'
+       order by f.created_dt`;
+    return {
+      orders: orders.map((o) => ({ salesOrderId: String(o.sales_order_id), soNumber: o.so_number ?? null, customerName: o.customer_name ?? null, orderDate: o.order_date ? iso(o.order_date) : null })),
+      lots: lots.map((l) => ({ finishedGoodBatchId: String(l.finished_good_batch_id), batchNumber: l.batch_number ?? null, productName: l.product_name ?? null, packSize: l.pack_size ?? null })),
+    };
+  }
+
+  /** The shipment's lots by batch number, for the unit picker (it showed the first 8 characters of a uuid). */
+  private async lotNames(ids: string[]) {
+    if (!ids.length) return [];
+    const rows = await this.sql`select finished_good_batch_id, batch_number from packaging.finished_good_batch_master where finished_good_batch_id = any(${this.sql.array(ids)}::uuid[])`;
+    const by = new Map(rows.map((r) => [String(r.finished_good_batch_id), r.batch_number ?? null]));
+    return ids.map((id) => ({ finishedGoodBatchId: id, batchNumber: by.get(id) ?? null }));
   }
 
   async queue() {

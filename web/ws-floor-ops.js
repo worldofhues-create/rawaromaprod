@@ -284,20 +284,36 @@
     };
   }
 
+  // WALK2-RP-9: shipment and carton chips read the wire words (PACKING, DOCS READY, OPEN), and documents
+  // read INVOICE (blank: invoiceNumber, ...): field names, not words.
+  var SHIPW = { PACKING: 'Packing', PACKED: 'Packed', DOCS_READY: 'Documents ready', AWB_ASSIGNED: 'AWB assigned', HOLD: 'Held', HANDED_OVER: 'Handed over', OPEN: 'Open', CLOSED: 'Closed', EWAY_BILL: 'E-way bill', DG_DECLARATION: 'Dangerous goods declaration' };
+  function shipWord(v) { v = String(v || ''); return SHIPW[v] || (v.charAt(0) + v.slice(1).toLowerCase()).replace(/_/g, ' '); }
+  function fieldWords(k) { if (/^(gstin|hsn|awb)$/i.test(k)) return String(k).toUpperCase(); return String(k || '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/_/g, ' ').toLowerCase(); }
   /* ── Packing station ─────────────────────────────────────────────────────────────────────── */
   async function viewPacking(item, V) {
     var stn = function () { return val('fo-pk-st') || station('packing', 'Packing 1'); };
     if (FV.shipmentId) return viewShipment(item, V, stn);
     var q = await call('/v1/packing/queue');
-    V.innerHTML = card('Packing station', 'QC-approved lots only', grid([fld('fo-pk-st', 'Station', 'value="' + escHtml(station('packing', 'Packing 1')) + '"' + (kiosk() ? ' disabled' : ''))]) +
-      '<form id="fo-pk-new" style="margin-top:10px">' + grid([fld('fo-pk-so', 'Sales order id', 'required'), fld('fo-pk-lots', 'Lot ids (comma separated)', 'required'), btn('', 'Start packing', 'p', ' type="submit" data-net')]) + '</form>') +
+    // WALK2-RP-9: the order and its lots were typed as uuids. Chosen by order number and batch number.
+    var cand = can('packaging:packing_station:write') ? await call('/v1/packing/candidates') : null;
+    var orders = (cand && cand.orders) || [], lots = (cand && cand.lots) || [];
+    var startForm = !cand ? '' : '<form id="fo-pk-new" style="margin-top:10px">' + grid([
+      sel('fo-pk-so', 'Sales order', [['', orders.length ? 'Choose an order…' : 'No confirmed orders']].concat(orders.map(function (o) { return [o.salesOrderId, (o.soNumber || 'Order without a number') + (o.customerName ? ' · ' + o.customerName : '')]; })), ''),
+      '<fieldset style="border:0;padding:0;margin:0;min-width:0"><legend class="t-cap">QC-approved lots it ships from</legend>' + (lots.length ? '<div style="display:flex;flex-direction:column;gap:4px;max-height:240px;overflow:auto">' + lots.map(function (l, i) {
+        return '<label style="display:flex;gap:8px;align-items:center;min-height:44px"><input type="checkbox" name="fo-pk-lot" value="' + escHtml(l.finishedGoodBatchId) + '" id="fo-pk-lot-' + i + '"><span class="mono">' + escHtml(l.batchNumber || 'No batch number') + '</span><span class="t-cap">' + escHtml([l.productName, l.packSize].filter(Boolean).join(' · ')) + '</span></label>';
+      }).join('') + '</div>' : '<div class="t-cap">No lot has passed packaging QC yet.</div>') + '</fieldset>',
+      btn('', 'Start packing', 'p', ' type="submit" data-net')]) + '</form>';
+    V.innerHTML = card('Packing station', 'QC-approved lots only', grid([fld('fo-pk-st', 'Station', 'value="' + escHtml(station('packing', 'Packing 1')) + '"' + (kiosk() ? ' disabled' : ''))]) + startForm) +
       card('Being packed', ((q && q.items) || []).length + '', table(['Shipment', 'Order', 'Started', ''], ((q && q.items) || []).map(function (s) {
-        return '<tr><td class="mono">' + escHtml(s.shipmentNo) + '</td><td>' + escHtml(s.soNumber || s.salesOrderId) + '</td><td>' + escHtml(when(s.createdAt)) + '</td><td>' + btn('', 'Open', 'sm', ' data-open="' + s.shipmentId + '"') + '</td></tr>';
+        return '<tr><td class="mono">' + escHtml(s.shipmentNo) + '</td><td>' + escHtml(s.soNumber || 'Order without a number') + '</td><td>' + escHtml(when(s.createdAt)) + '</td><td>' + btn('', 'Open', 'sm', ' data-open="' + s.shipmentId + '"') + '</td></tr>';
       })));
     on('fo-pk-st', 'change', function () { setStation('packing', val('fo-pk-st')); });
     on('fo-pk-new', 'submit', async function (e) {
       e.preventDefault();
-      var r = await call('/v1/packing/shipments', 'POST', { salesOrderId: val('fo-pk-so'), finishedGoodBatchIds: val('fo-pk-lots').split(/[\s,]+/).filter(Boolean) });
+      var picked = [].map.call(V.querySelectorAll('input[name="fo-pk-lot"]:checked'), function (x) { return x.value; });
+      if (!val('fo-pk-so')) { toast('Choose the sales order.', 'bad'); return; }
+      if (!picked.length) { toast('Tick at least one lot it ships from.', 'bad'); return; }
+      var r = await call('/v1/packing/shipments', 'POST', { salesOrderId: val('fo-pk-so'), finishedGoodBatchIds: picked });
       if (r) { FV.shipmentId = r.shipmentId; viewPacking(item, V); }
     });
     V.querySelectorAll('[data-open]').forEach(function (b) { b.addEventListener('click', function () { FV.shipmentId = b.getAttribute('data-open'); viewPacking(item, V); }); });
@@ -307,10 +323,10 @@
     var open = (s.cartons || []).filter(function (c) { return c.status === 'OPEN'; })[0];
     var units = s.units || [];
     var unitRows = units.map(function (u) { return '<tr><td class="mono">' + escHtml(u.unitCode) + '</td><td>' + escHtml(u.batchNumber || '') + '</td><td>' + escHtml(W.formatWeight(u.netMg, 'g')) + ' <span class="t-cap">' + escHtml(u.weightSource === 'scale' ? 'from scale' : 'typed') + '</span></td><td>' + (u.cartonId ? chip('ok', 'in carton ' + ((s.cartons || []).filter(function (c) { return c.cartonId === u.cartonId; })[0] || {}).seq) : chip('warn', 'not in a carton')) + '</td></tr>'; });
-    var cartonRows = (s.cartons || []).map(function (c) { return '<tr><td class="mono">' + escHtml(c.cartonCode) + '</td><td>' + chip(c.status === 'OPEN' ? 'warn' : 'ok', c.status) + '</td><td>' + (c.grossMg ? escHtml(W.formatWeight(c.grossMg, 'g')) : '') + '</td></tr>'; });
+    var cartonRows = (s.cartons || []).map(function (c) { return '<tr><td class="mono">' + escHtml(c.cartonCode) + '</td><td>' + chip(c.status === 'OPEN' ? 'warn' : 'ok', shipWord(c.status)) + '</td><td>' + (c.grossMg ? escHtml(W.formatWeight(c.grossMg, 'g')) : '') + '</td></tr>'; });
     var packing = s.status === 'PACKING';
-    V.innerHTML = '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' + btn('fo-back', '← Shipments', 'sm') + '<b class="mono">' + escHtml(s.shipmentNo) + '</b> ' + chip(packing ? 'warn' : 'ok', s.status) + ' <span class="t-cap">order ' + escHtml(s.soNumber || s.salesOrderId) + ' · station ' + escHtml(stn()) + '</span></div>' +
-      (packing ? card('Fill a unit', 'weigh, seal, label', '<form id="fo-u">' + grid([sel('fo-u-lot', 'Lot', s.lots.map(function (l) { return [l, l.slice(0, 8)]; }), s.lots[0]),
+    V.innerHTML = '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">' + btn('fo-back', '← Shipments', 'sm') + '<b class="mono">' + escHtml(s.shipmentNo) + '</b> ' + chip(packing ? 'warn' : 'ok', shipWord(s.status)) + ' <span class="t-cap">order ' + escHtml(s.soNumber || 'Order without a number') + ' · station ' + escHtml(stn()) + '</span></div>' +
+      (packing ? card('Fill a unit', 'weigh, seal, label', '<form id="fo-u">' + grid([sel('fo-u-lot', 'Lot', (s.lotNames || s.lots.map(function (l) { return { finishedGoodBatchId: l }; })).map(function (l) { return [l.finishedGoodBatchId, l.batchNumber || 'No batch number']; }), s.lots[0]),
         fld('fo-u-t', 'Target (g)', 'inputmode="decimal" required value="' + escHtml(FV.target || '') + '"'), fld('fo-u-tol', 'Tolerance ± (g)', 'inputmode="decimal" required value="' + escHtml(FV.tol || '') + '"'), weightField('fo-u-w', 'Net weight'),
         '<label style="display:flex;gap:6px;align-items:center"><input id="fo-u-seal" type="checkbox"> Sealed / capped / tamper seal</label>', btn('', 'Record unit + print label', 'p', ' type="submit" data-net')]) + '</form>') +
         card('Carton', open ? 'scan units into ' + open.cartonCode : 'open the next carton', open ? '<form id="fo-scan">' + grid([fld('fo-scan-u', 'Scan unit label', 'autofocus autocomplete="off"'), btn('', 'Add to carton', 'p', ' type="submit" data-net')]) + '</form><form id="fo-close" style="margin-top:10px">' + grid([weightField('fo-c-w', 'Carton gross weight'), btn('', 'Weigh + close carton', 'sm', ' type="submit" data-net')]) + '</form>' : btn('fo-open', 'Open next carton', 'p', ' data-net')) +
@@ -352,14 +368,14 @@
     var list = q.items || [];
     var cur = list.filter(function (s) { return s.shipmentId === FV.lgId; })[0];
     var TONE = { PACKED: 'warn', DOCS_READY: 'warn', AWB_ASSIGNED: 'ok', HOLD: 'bad' };
-    var rows = list.map(function (s) { return '<tr' + (cur && cur.shipmentId === s.shipmentId ? ' style="background:var(--panel-2)"' : '') + '><td class="mono">' + escHtml(s.shipmentNo) + '</td><td>' + escHtml(s.soNumber || '') + '</td><td>' + chip(TONE[s.status] || 'neutral', s.status.replace('_', ' ')) + (s.holdReason ? '<div class="t-cap">' + escHtml(s.holdReason) + '</div>' : '') + '</td><td>' + s.cartonsChecked + ' / ' + (s.cartonCount || 0) + '</td><td>' + escHtml(s.awb || '') + '</td><td>' + btn('', 'Work on it', 'sm', ' data-lg="' + s.shipmentId + '"') + '</td></tr>'; });
+    var rows = list.map(function (s) { return '<tr' + (cur && cur.shipmentId === s.shipmentId ? ' style="background:var(--panel-2)"' : '') + '><td class="mono">' + escHtml(s.shipmentNo) + '</td><td>' + escHtml(s.soNumber || '') + '</td><td>' + chip(TONE[s.status] || 'neutral', shipWord(s.status)) + (s.holdReason ? '<div class="t-cap">' + escHtml(s.holdReason) + '</div>' : '') + '</td><td>' + s.cartonsChecked + ' / ' + (s.cartonCount || 0) + '</td><td>' + escHtml(s.awb || '') + '</td><td>' + btn('', 'Work on it', 'sm', ' data-lg="' + s.shipmentId + '"') + '</td></tr>'; });
     var work = '';
     if (cur) {
       var cOpts = couriers.items.map(function (c) { return [c.provider, c.displayName]; });
       work = card('Shipment ' + cur.shipmentNo, 'order ' + (cur.soNumber || '') + ' · ' + cur.cartonsChecked + ' of ' + (cur.cartonCount || 0) + ' cartons scanned',
         '<form id="fo-lg-c">' + grid([fld('fo-lg-cc', 'Scan carton label', 'autocomplete="off" autofocus'), btn('', 'Check carton', 'p', ' type="submit" data-net')]) + '</form>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fo-lg-docs', 'Generate + print documents', 'sm', ' data-net') + '</div>' +
-        (cur.docs ? '<div class="t-cap" style="margin-top:8px">' + cur.docs.map(function (d) { return escHtml(d.type.replace(/_/g, ' ')) + (d.blanks && d.blanks.length ? ' (blank: ' + escHtml(d.blanks.join(', ')) + ')' : '') + (d.note ? ' — ' + escHtml(d.note) : ''); }).join('<br>') + '</div>' : '') +
+        (cur.docs ? '<div class="t-cap" style="margin-top:8px">' + cur.docs.map(function (d) { return escHtml(shipWord(d.type)) + (d.blanks && d.blanks.length ? ' (blank: ' + escHtml(d.blanks.map(fieldWords).join(', ')) + ')' : '') + (d.note ? ' — ' + escHtml(d.note) : ''); }).join('<br>') + '</div>' : '') +
         '<form id="fo-lg-awb" style="margin-top:10px">' + grid([cOpts.length ? sel('fo-lg-cr', 'Courier', cOpts, cur.courierCode || cOpts[0][0]) : fld('fo-lg-cr', 'Courier code', 'placeholder="from the transporter list"'), fld('fo-lg-awbv', 'AWB (scan or type)', 'autocomplete="off" value="' + escHtml(cur.awb || '') + '"'), btn('', 'Save AWB + print courier label', 'sm', ' type="submit" data-net')]) + '</form>' +
         '<form id="fo-lg-ho" style="margin-top:10px">' + grid([fld('fo-lg-to', 'Handed to (courier person)', ''), btn('', 'Handed over', 'p', ' type="submit" data-net')]) + '</form>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('', 'Courier did not come', 'sm', ' data-ex="COURIER_NO_SHOW" data-net') + btn('', 'Carton damaged', 'sm', ' data-ex="CARTON_DAMAGED" data-net') + btn('', 'Address does not match', 'sm', ' data-ex="ADDRESS_MISMATCH" data-net') + (cur.status === 'HOLD' ? btn('', 'Release hold', 'sm', ' data-ex="RELEASE_HOLD" data-net') : '') + '</div>');

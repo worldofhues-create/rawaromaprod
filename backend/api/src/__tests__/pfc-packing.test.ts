@@ -144,3 +144,18 @@ test('finish: needs every unit in a closed carton and its label printed; prints 
   assert.match(done.packingList.template.elements.map((e) => e.s).join(' '), /PACKING LIST/);
   await assert.rejects(async () => packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer), /PACKED/);
 });
+
+test('WALK2-RP-9: candidates list open orders and QC-passed lots by number; a shipment names its lots', async () => {
+  const so = await order();
+  const ok = await fgLot(), failed = await fgLot({ qc: 'FAIL' }), none = await fgLot({ qc: null });
+  const c = await packing.candidates();
+  assert.ok(c.orders.some((o) => o.salesOrderId === so && /^SO-/.test(String(o.soNumber))));
+  const ids = c.lots.map((l) => l.finishedGoodBatchId);
+  assert.ok(ids.includes(ok));
+  assert.ok(!ids.includes(failed) && !ids.includes(none), 'only a lot whose latest packaging QC passed');
+  assert.match(String(c.lots.find((l) => l.finishedGoodBatchId === ok)!.batchNumber), /^FG-/);
+  const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [ok] }, packer);
+  const full = await packing.shipment(s.shipmentId);
+  assert.deepEqual(full.lotNames.map((l) => l.finishedGoodBatchId), [ok]);
+  assert.match(String(full.lotNames[0]!.batchNumber), /^FG-/);
+});
