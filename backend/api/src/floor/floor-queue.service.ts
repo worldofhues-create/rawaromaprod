@@ -11,7 +11,10 @@
  *   Hold       if the policy cannot answer for a job (no rule, no default), the job is HELD and says
  *              why; it is never ranked by a guess.
  *
- * Pipeline-intelligence late prediction (§12.3) is not built here (stretch).
+ * PROD-D-2 adds, on top: a SUGGESTED job (from an approved order-intelligence suggestion, plan 11)
+ * ranks below every customer job; a ready job pulled ahead of a waiting one says which job it
+ * passed and why; and pipeline.ts predicts "will be late by N days" and groups same-formula jobs
+ * where that moves a job one slot at most.
  */
 import { Inject, Injectable } from '@nestjs/common';
 import type { Sql } from 'postgres';
@@ -32,13 +35,15 @@ export interface QueueJob {
   customerTier: string | null;
   ready: boolean;
   waitingOn: string[];
+  /** ORDER (a customer order, the default) or SUGGESTED (an approved cover suggestion). */
+  source?: 'ORDER' | 'SUGGESTED';
 }
 
 export interface RankedJob extends QueueJob {
   position: number | null;
   lane: 'NEW' | 'DELAYED';
   daysLate: number;
-  priority: 'EXPEDITE' | 'TOP' | 'ALTERNATE' | 'HOLD';
+  priority: 'EXPEDITE' | 'TOP' | 'ALTERNATE' | 'SUGGESTED' | 'HOLD';
   why: string;
   policyVersion: number | null;
 }
@@ -84,7 +89,7 @@ export function rankQueue(
     b.daysLate - a.daysLate || String(a.promiseDt).localeCompare(String(b.promiseDt)) || fifo(a, b);
 
   const held: RankedJob[] = [];
-  const groups: Record<'EXPEDITE' | 'TOP' | 'ALTERNATE', RankedJob[]> = { EXPEDITE: [], TOP: [], ALTERNATE: [] };
+  const groups: Record<'EXPEDITE' | 'TOP' | 'ALTERNATE' | 'SUGGESTED', RankedJob[]> = { EXPEDITE: [], TOP: [], ALTERNATE: [], SUGGESTED: [] };
   for (const j of enriched) {
     const d = decide(j);
     if (!d) {
@@ -92,18 +97,30 @@ export function rankQueue(
       continue;
     }
     const v = d.value as { priority?: string } | null;
-    const priority = j.expedite ? 'EXPEDITE' : v && typeof v === 'object' && String(v.priority).toLowerCase() === 'top' ? 'TOP' : 'ALTERNATE';
-    const why = priority === 'EXPEDITE' ? 'Expedited by an admin' : priority === 'TOP' ? d.explain : `${j.lane === 'NEW' ? 'New' : `Delayed ${j.daysLate} day(s)`}; ${d.explain}`;
+    // A suggested job is stock for later, not a customer waiting: below every customer job, unless
+    // an admin expedites it (an explicit call) — the floor.queue rule cannot lift it above orders.
+    const priority = j.expedite ? 'EXPEDITE' : j.source === 'SUGGESTED' ? 'SUGGESTED'
+      : v && typeof v === 'object' && String(v.priority).toLowerCase() === 'top' ? 'TOP' : 'ALTERNATE';
+    const why = priority === 'EXPEDITE' ? 'Expedited by an admin' : priority === 'TOP' ? d.explain
+      : priority === 'SUGGESTED' ? 'Suggested by order intelligence and approved: below every customer order'
+      : `${j.lane === 'NEW' ? 'New' : `Delayed ${j.daysLate} day(s)`}; ${d.explain}`;
     groups[priority].push({ ...j, position: null, priority, why, policyVersion: d.version });
   }
   const ordered = [
     ...groups.EXPEDITE.sort(fifo),
     ...groups.TOP.sort(overdue),
     ...alternate(groups.ALTERNATE.filter((j) => j.lane === 'NEW').sort(fifo), groups.ALTERNATE.filter((j) => j.lane === 'DELAYED').sort(overdue)),
+    ...groups.SUGGESTED.sort(fifo),
   ];
   // A station never starves: ready jobs keep their relative order and come first; waiting jobs
-  // follow in the same order, each saying what it waits on.
-  const ready = ordered.filter((j) => j.ready);
+  // follow in the same order, each saying what it waits on. A ready job that passed a waiting one
+  // names the job it passed (PROD-D-2), so nobody reads the jump as the rule being ignored.
+  const ready = ordered.filter((j) => j.ready).map((j) => {
+    const passed = ordered.slice(0, ordered.indexOf(j)).filter((w) => !w.ready);
+    if (!passed.length) return j;
+    const w = passed[0]!;
+    return { ...j, why: `Pulled ahead of ${w.jobNo} (waiting on ${w.waitingOn.join(', ')})${passed.length > 1 ? ` and ${passed.length - 1} more waiting` : ''} so the station keeps working. ${j.why}` };
+  });
   const waiting = ordered.filter((j) => !j.ready).map((j) => ({ ...j, why: `Waiting on ${j.waitingOn.join(', ')}. ${j.why}` }));
   const all = [...ready, ...waiting];
   all.forEach((j, i) => (j.position = i + 1));
