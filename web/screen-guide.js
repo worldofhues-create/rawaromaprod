@@ -213,9 +213,11 @@
     var up = s.toUpperCase();
     if (STATUS_WORD[up]) return STATUS_WORD[up];
     if (s !== up) return s; // already in words
-    var w = up.replace(/_/g, ' ').toLowerCase();
+    // WALK2-RP-31: acronyms were lowercased with the rest ("Qc pending", document types "Coa", "Msds").
+    var w = up.replace(/_/g, ' ').toLowerCase().split(' ').map(function (x) { return ACRONYM[x.toUpperCase()] ? x.toUpperCase() : x; }).join(' ');
     return w.charAt(0).toUpperCase() + w.slice(1);
   }
+  var ACRONYM = { QC: 1, COA: 1, MSDS: 1, SDS: 1, GST: 1, GSTIN: 1, PO: 1, SO: 1, GRN: 1, FG: 1, RM: 1, AWB: 1, UN: 1, IFRA: 1, DG: 1, HSN: 1, CAPA: 1, UTR: 1, SKU: 1, FSSAI: 1, TV: 1, ID: 1 };
 
   /** Column headings where the field name says nothing to a person. */
   var COLUMN = {

@@ -51,3 +51,10 @@ test('RP-30: the reason on a disabled Edit says the status in words', () => {
   assert.doesNotMatch(js, /Only a DRAFT purchase/);
   assert.match(js, /Only a draft purchase order can be edited; this one is ' \+ String\(statusWord\(r\.status\)\)\.toLowerCase\(\)/);
 });
+test('RP-31: status words keep acronyms (QC, COA, MSDS) and the floor pickers use them', () => {
+  const ctx: { window: Record<string, any> } = { window: {} }; vm.createContext(ctx);
+  vm.runInContext(readFileSync(join(root, 'web/screen-guide.js'), 'utf8'), ctx);
+  const w = ctx.window.RaGuide.statusWord as (v: string) => string;
+  assert.equal(w('COA'), 'COA'); assert.equal(w('MSDS'), 'MSDS'); assert.equal(w('AWAITING_QC_SIGNOFF'), 'Awaiting QC signoff');
+  assert.match(readFileSync(join(root, 'web/ws-floorb.js'), 'utf8'), /function word\(v\) \{ if \(window\.RaGuide && RaGuide\.statusWord\) return RaGuide\.statusWord\(v\);/);
+});

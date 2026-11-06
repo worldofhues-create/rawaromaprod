@@ -88,7 +88,7 @@
       if (all.failed) { var e = $(id + '-err'); if (!e) { sel.insertAdjacentHTML('afterend', '<span id="' + id + '-err" role="alert" style="color:var(--bad,#b3261e);font:var(--w-reg) var(--t-cap)/1.3 var(--font-ui)"></span>'); e = $(id + '-err'); } e.textContent = all.failed; }
     });
   }
-  function word(v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v.charAt(0).toUpperCase() + v.slice(1); }
+  function word(v) { if (window.RaGuide && RaGuide.statusWord) return RaGuide.statusWord(v); v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v.charAt(0).toUpperCase() + v.slice(1); }
   function pick(id, rows, val, text, placeholder) {
     return '<select id="' + id + '" class="fld"' + (rows.failed ? ' aria-invalid="true" aria-describedby="' + id + '-err"' : '') + '><option value="">' + esc(placeholder) + '</option>' +
       rows.map(function (r) { return '<option value="' + esc(r[val]) + '">' + esc(text(r)) + '</option>'; }).join('') + '</select>' +
