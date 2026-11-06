@@ -2318,6 +2318,9 @@
       '.screen-intro .crumbs li+li::before{content:"\\203A";margin-right:4px;color:var(--ink-3)}' +
       '.screen-intro .crumbs a{color:var(--ink-2);text-decoration:none;border-radius:4px}.screen-intro .crumbs a:hover{text-decoration:underline}' +
       '.screen-intro .crumbs a:focus-visible{outline:2px solid var(--accent-ink);outline-offset:2px}' +
+      // WALK2-RP-2: on a touch screen the trail's link was a 15px target; 44px tall, with the extra
+      // height in negative margin so the trail's line does not move.
+      '@media (pointer:coarse){.screen-intro .crumbs a{display:inline-flex;align-items:center;min-height:44px;margin:-14px 0}}' +
       '.screen-intro .crumbs [aria-current]{color:var(--ink);overflow-wrap:anywhere}' +
       '.screen-intro .screen-help{margin:0;font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch}' +
       '.rs.rs-group{margin-top:var(--s-snug)}' +
