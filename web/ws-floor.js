@@ -251,16 +251,25 @@
     V.innerHTML = '<div class="stats">' + kpi('activity', String(c.total || 0), 'On the floor') + kpi('zap', String(c.ready || 0), 'Ready') + kpi('alert', String(c.delayed || 0), 'Delayed') +
       kpi('lock', String(c.waiting || 0), 'Waiting on stock') + kpi('shieldCheck', String(c.held || 0), 'Held') + '</div>' +
       (canOpen ? '<form id="fl-new" class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end"><label style="flex:1;min-width:240px">Production order id (a run with a pick list)<input id="fl-po" class="fld" autocomplete="off"></label>' +
-        '<label style="flex:1;min-width:240px">Extra mixing steps, one per line (optional)<textarea id="fl-steps" class="fld" rows="2"></textarea></label>' + btn('fl-newgo', 'Put on the floor', 'p', ' type="submit"') + '<div id="fl-nerr" role="alert" style="color:var(--red);width:100%"></div></form>' : '') +
-      '<div class="card"><table class="tbl" style="width:100%"><thead><tr><th>#</th><th>Job</th><th>Station</th><th>Order</th><th>Why here</th></tr></thead><tbody>' +
+        '<label style="flex:1;min-width:240px">Extra mixing steps, one per line (optional)<textarea id="fl-steps" class="fld" rows="2"></textarea></label>' +
+        '<label style="flex:1;min-width:240px">Approved suggestion id (optional: ranks below customer orders)<input id="fl-cs" class="fld" autocomplete="off"></label>' + btn('fl-newgo', 'Put on the floor', 'p', ' type="submit"') + '<div id="fl-nerr" role="alert" style="color:var(--red);width:100%"></div></form>' : '') +
+      // PROD-D-2: each job's late prediction from measured station times, maceration and stock; at-risk
+      // jobs are flagged before they are Delayed. Approved stock-cover suggestions are listed below.
+      (d.pipeline && d.pipeline.atRisk ? '<div class="card" id="fl-risk" role="status">' + chip('r', d.pipeline.atRisk + ' at risk') + ' Predicted to finish after the promise date: expedite before they become Delayed.</div>' : '') +
+      '<div class="card" style="overflow-x:auto"><table class="tbl" style="width:100%;min-width:640px"><thead><tr><th>#</th><th>Job</th><th>Station</th><th>Order</th><th>Why here</th><th>Finish</th></tr></thead><tbody>' +
       (d.items.length ? d.items.map(function (j) {
-        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + '</td><td>' + esc(j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td></tr>';
-      }).join('') : '<tr><td colspan="5">Nothing on the floor.</td></tr>') + '</tbody></table></div>';
+        var p = j.prediction;
+        var fin = !p ? '' : p.atRisk ? chip('r', 'Late by ' + p.lateByDays + 'd') + ' ' + esc(p.explain) : esc(p.explain);
+        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin + '</td></tr>';
+      }).join('') : '<tr><td colspan="6">Nothing on the floor.</td></tr>') + '</tbody></table></div>' +
+      ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
+        return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Open a job with this suggestion\'s id: ' + esc(s.coverSuggestionId) + '</span></p>';
+      }).join('') + '</div>' : '');
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();
       var steps = $('fl-steps').value.split('\n').map(function (s) { return s.trim(); }).filter(Boolean);
-      var r = await call('/v1/floor/jobs', { method: 'POST', body: { productionOrderId: $('fl-po').value.trim(), steps: steps } });
+      var r = await call('/v1/floor/jobs', { method: 'POST', body: { productionOrderId: $('fl-po').value.trim(), steps: steps, coverSuggestionId: ($('fl-cs') && $('fl-cs').value.trim()) || undefined } });
       if (r.status >= 400) { $('fl-nerr').textContent = err(r, 'The job was not opened.'); return; }
       toast('On the floor as ' + data(r).jobNo, 'good'); loadView();
     };

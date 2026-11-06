@@ -41,7 +41,7 @@ export function reviewOptions(c: ReviewContext): ReviewOptions {
   else if (!c.downgrade) DOWNGRADE = { enabled: false, why: `No downgrade target is defined for ${name}. A vault approver or admin defines one first (a grade or another product).` };
   else DOWNGRADE = { enabled: true, why: `May be sold as ${c.downgrade.targetGrade ?? c.downgrade.targetProductName ?? 'the defined product'}.` };
   let REBLEND: OptionState;
-  if (!c.formulaId) REBLEND = { enabled: false, why: 'The batch\'s formula is not known (its production order names no plan item), so reblending cannot be checked.' };
+  if (!c.formulaId) REBLEND = { enabled: false, why: 'The batch\'s formula is not known (neither its product nor its production order names one), so reblending cannot be checked.' };
   else if (!c.reblend || !c.reblend.allowed) REBLEND = { enabled: false, why: 'This formula does not allow reblending a failed batch into another (no reblend rule says it may).' };
   else REBLEND = { enabled: true, why: `The formula allows it, up to ${(c.reblend.maxShareBps ?? 0) / 100}% of the receiving batch.` };
   return { REJECT: { enabled: true, why: 'The batch stays quarantined, a CAPA opens and the stock is written off or returned.' }, DOWNGRADE, REBLEND };

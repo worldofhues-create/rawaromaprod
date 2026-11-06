@@ -73,6 +73,9 @@
        board and kiosk lock. After the other ws-*.js (it adds to their ROLES). -->
   <script src="/label-render.js"></script>
   <script src="/ws-floor-ops.js"></script>
+  <!-- Lane pf-d: Stock cover (order intelligence) and QC review (perfumer + vault approver decision).
+       After the other ws-*.js (it adds to their ROLES, and a QC-review-only workspace for the two Vault roles). -->
+  <script src="/ws-floord.js"></script>
   <!-- G4: in-app tutorial engine runner. Depends on globals from shell.js (tunnel/can/openSheet/
        raConfirm/toast/escHtml/$/st/session) — must load after it, but has no dependency on the
        ws-*.js workspace modules beyond the data-tutorial-target attributes they/shell.js carry. -->
