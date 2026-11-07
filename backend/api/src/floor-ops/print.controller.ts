@@ -4,6 +4,7 @@
  *   GET  /v1/print-jobs?station=&subjectRef=&status=   history (reprints included)       platform:print_job:read
  *   POST /v1/print-jobs {station,labelKind,subjectRef,content,size?}  queue a label         platform:print_job:write
  *   POST /v1/print-jobs/:id/reprint {reason}           REPRINT, logged with the person      platform:print_job:write
+ *   POST /v1/print-jobs/bin-sheet {binCodes,reason?}    FLOOR-3: the A4 bin-label sheet, logged; again = REPRINT + reason
  *   POST /v1/print-jobs/:id/retry                      send a parked/failed job again        platform:print_job:write
  *   POST /v1/print-jobs/:id/browser-printed            printed with the browser fallback     platform:print_job:write
  *   GET  /v1/label-sizes                               the plan 12.4 sizes                   any signed-in person
@@ -58,6 +59,12 @@ export class PrintController {
       content: content(body.content),
       size: typeof body.size === 'string' ? body.size : undefined,
     }, principal);
+  }
+
+  @Permissions('platform:print_job:write')
+  @Post('print-jobs/bin-sheet')
+  binSheet(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
+    return this.print.binSheet({ binCodes: body?.binCodes, station: body?.station, reason: body?.reason }, principal);
   }
 
   @Permissions('platform:print_job:write')

@@ -13,6 +13,7 @@
  *   reprint            only with a reason; a new job pointing at the original, naming the person,
  *                      and the label says REPRINT. A duplicate lot label is a recall risk.
  */
+import { createHash } from 'node:crypto';
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -211,6 +212,38 @@ export class PrintService {
       station: orig.station, labelKind: orig.labelKind, subjectRef: orig.subjectRef, template,
       reprintOf: orig.reprintOf ?? orig.printJobId, reprintReason: why,
     }, principal);
+  }
+
+  /** FLOOR-3 (R7): the A4 sheet of bin labels, logged like a single label. One sheet is one set of
+   *  bins (order does not matter); the first print is a job naming the person, and another sheet of
+   *  the same bins is a REPRINT with a reason. Always the browser: an A4 sheet never goes to a
+   *  station's thermal printer. */
+  async binSheet(req: { binCodes: unknown; station?: unknown; reason?: unknown }, principal: AuthPrincipal) {
+    const codes = Array.isArray(req.binCodes) ? [...new Set(req.binCodes.map((c) => String(c ?? '').trim()).filter(Boolean))] : [];
+    if (!codes.length) throw new BadRequestException('Choose at least one bin for the sheet.');
+    if (codes.length > 5000) throw new BadRequestException('At most 5000 bins on one sheet.');
+    const found = await this.sql<{ bin_code: string }[]>`select bin_code from location.bin_master where bin_code = any(${codes}::text[])`;
+    const have = new Set(found.map((r) => r.bin_code));
+    const missing = codes.filter((c) => !have.has(c));
+    if (missing.length) throw new NotFoundException(`No bin ${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ` and ${missing.length - 5} more` : ''} on file.`);
+    const sorted = [...codes].sort();
+    const subjectRef = `BINSHEET:${createHash('sha256').update(sorted.join('\n')).digest('hex').slice(0, 16)}:${sorted.length}`;
+    const station = typeof req.station === 'string' && req.station.trim() ? req.station.trim().slice(0, 80) : 'Office';
+    const [first] = await this.sql<{ print_job_id: string; created_at: Date; requested_by: string | null }[]>`
+      select print_job_id::text, created_at, requested_by::text from platform.print_job
+       where label_kind = 'bin_sheet' and subject_ref = ${subjectRef} and reprint_of is null order by created_at limit 1`;
+    if (first) {
+      const why = typeof req.reason === 'string' ? req.reason.trim() : '';
+      if (!why) {
+        const [u] = first.requested_by ? await this.sql<{ n: string | null }[]>`select coalesce(user_name, email) as n from iam.user_master where user_id::text = ${first.requested_by}` : [];
+        throw new ConflictException(`This sheet of ${sorted.length} bin label(s) was already printed${u?.n ? ` by ${u.n}` : ''} on ${first.created_at.toISOString().slice(0, 10)}. A reprint needs a reason (it is logged with your name): a second label on a bin is a mis-shelving risk.`);
+      }
+      return { reprint: true, bins: sorted.length, subjectRef, job: await this.reprint(first.print_job_id, why, principal) };
+    }
+    const content: LabelContent = { brand: 'RAW AROMA CHEM', title: 'BIN LABEL SHEET', lines: [['Bins', String(sorted.length)], ['First', sorted[0]!], ['Last', sorted[sorted.length - 1]!]] };
+    const template = { ...buildOr400(content, 'a4'), src: content } as LabelTemplate;
+    const job = await this.insert({ deviceId: null, station, labelKind: 'bin_sheet', subjectRef, template, reprintOf: null, reprintReason: null }, principal);
+    return { reprint: false, bins: sorted.length, subjectRef, job };
   }
 
   /** True when every job for this subject+kind has printed (agent or browser). */

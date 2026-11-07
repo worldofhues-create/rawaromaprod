@@ -50,13 +50,15 @@
     produce: ['produce', 'Produce next', 'zap', '__produce__'],
     shelftasks: ['shelftasks', 'Put-away & pick', 'boxIn', '__shelftasks__'],
     racklayout: ['racklayout', 'Rack layout', 'layout', '__racklayout__'],
-    shelfdisplay: ['shelfdisplay', 'Shelf display', 'monitor', '__shelfdisplay__']
+    shelfdisplay: ['shelfdisplay', 'Shelf display', 'monitor', '__shelfdisplay__'],
+    fgzones: ['fgzones', 'FG zones', 'tag', '__fgzones__']
   };
   var BY_ROLE = {
-    superadmin: ['produce', 'shelftasks', 'racklayout', 'shelfdisplay'],
+    superadmin: ['produce', 'shelftasks', 'racklayout', 'shelfdisplay', 'fgzones'],
+    admin: ['fgzones'],
     production: ['produce', 'shelftasks', 'shelfdisplay'],
     compounding: ['produce'],
-    warehouse: ['shelftasks', 'racklayout', 'shelfdisplay'],
+    warehouse: ['shelftasks', 'racklayout', 'shelfdisplay', 'fgzones'],
     packaging: ['shelftasks', 'shelfdisplay'],
     sales: ['shelftasks', 'shelfdisplay'],
     filling: ['shelfdisplay']
@@ -306,18 +308,66 @@
     }, { title: 'Cancel task', confirmLabel: 'Cancel task' });
   }
 
+  // FLOOR-2 (F7): put away to an FG zone. Each zone shows its colour NAME and initials beside the
+  // swatch (colour is never the only signal); the server picks a free bin inside the zone.
+  function zoneWord(z) { return z ? (z.colourName ? z.zoneCode + ' · ' + z.colourName + ' (' + z.initials + ')' : z.zoneCode + ' · no colour set') : ''; }
+  function zoneChip(z) {
+    if (!z) return '';
+    var code = z.code || z.zoneCode;
+    if (!z.colourName) return '<span class="mono">' + escHtml(code) + '</span> <span class="t-cap">no colour set</span>';
+    return '<span style="display:inline-flex;align-items:center;gap:6px"><span aria-hidden="true" style="width:16px;height:16px;border-radius:4px;border:1px solid var(--line);background:' + escHtml(z.colourHex) + '"></span>' +
+      '<b class="mono">' + escHtml(code) + '</b> ' + escHtml(z.colourName) + ' <span class="mono">(' + escHtml(z.initials) + ')</span></span>';
+  }
   function assignRack(fgId) {
-    var m = openSheet({ tag: 'form', id: 'pv-assign', style: 'max-width:420px', title: 'Assign a rack',
-      body: '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Bin (blank = suggest one)') + '<input id="pv-abin" class="fld" autocomplete="off"></label>' +
-        '<p class="t-cap" style="margin:0">Suggested: a bin already holding this SKU, else the first empty bin in walking order.</p>' +
-        '<button type="submit" class="btn p" style="width:100%;justify-content:center">Assign</button>' });
-    m.sheet.onsubmit = function (e) {
-      e.preventDefault(); var v = $('pv-abin').value.trim(); m.close();
-      tunnel('/v1/shelf/putaway', { method: 'POST', body: { finishedGoodBatchId: fgId, binCode: v || null } }).then(function (res) {
-        if (res.status >= 400) { toast(err(res, 'Not assigned. Try again.'), 'bad'); return; }
-        var t = data(res) || {}; toast(t.label ? 'Put away on ' + t.label : 'Task open — no free bin yet; add bins on Rack layout', t.label ? 'good' : 'bad'); loadView();
-      }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
-    };
+    tunnel('/v1/shelf/fg-zones').then(function (zr) { return zr.status < 400 ? (data(zr) || []) : []; }).catch(function () { return []; }).then(function (zones) {
+      var m = openSheet({ tag: 'form', id: 'pv-assign', style: 'max-width:420px', title: 'Assign a rack',
+        body: '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('FG zone (blank = any)') + '<select id="pv-azone" class="fld"><option value="">Any zone</option>' +
+            zones.map(function (z) { return '<option value="' + escHtml(z.zoneCode) + '">' + escHtml(zoneWord(z)) + '</option>'; }).join('') + '</select></label>' +
+          '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Bin (blank = suggest one)') + '<input id="pv-abin" class="fld" autocomplete="off"></label>' +
+          '<p class="t-cap" style="margin:0">Suggested: a bin already holding this SKU, else the first empty bin in walking order (inside the zone, when one is chosen).</p>' +
+          '<button type="submit" class="btn p" style="width:100%;justify-content:center">Assign</button>' });
+      m.sheet.onsubmit = function (e) {
+        e.preventDefault(); var v = $('pv-abin').value.trim(), zc = $('pv-azone').value; m.close();
+        tunnel('/v1/shelf/putaway', { method: 'POST', body: { finishedGoodBatchId: fgId, binCode: v || null, zoneCode: zc || null } }).then(function (res) {
+          if (res.status >= 400) { toast(err(res, 'Not assigned. Try again.'), 'bad'); return; }
+          var t = data(res) || {}; toast(t.label ? 'Put away on ' + t.label + (t.zone ? ' · zone ' + t.zone : '') : 'Task open — no free bin yet; add bins on Rack layout', t.label ? 'good' : 'bad'); loadView();
+        }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+      };
+    });
+  }
+
+  /* ── FLOOR-2 (F7): FG zones — the admin sets each zone's colour, colour name and initials ── */
+  async function viewFgZones(item, V) {
+    var res;
+    try { res = await tunnel('/v1/shelf/fg-zones'); } catch (e) { V.innerHTML = errBox('Can\'t connect. Try again.'); return; }
+    if (stale('fgzones')) return;
+    if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The FG zones are not available (' + res.status + ').')); return; }
+    var rows = data(res) || [], canEdit = can('location:fg_zone:write');
+    V.innerHTML = '<div class="stack-base" style="max-width:960px">' +
+      '<div class="card"><div class="card-bd">Each finished-goods zone has a colour, the colour\'s name and initials. Labels and the TV board print the name and the initials with the colour, so colour is never the only signal. A zone\'s colour cannot change while lots labelled with it sit there.</div></div>' +
+      '<div class="card"><div class="card-hd"><h2>FG zones</h2><span class="n">' + rows.length + ' zones</span></div><div class="card-bd"><div style="overflow-x:auto"><table><thead><tr><th>Zone</th><th>Colour</th><th>Bins</th><th>Lots on the rack</th>' + (canEdit ? '<th></th>' : '') + '</tr></thead><tbody>' +
+      (rows.length ? rows.map(function (z, i) {
+        return '<tr><td class="mono">' + escHtml(z.zoneCode) + (z.zoneName ? ' <span class="t-cap">' + escHtml(z.zoneName) + '</span>' : '') + '</td><td>' + zoneChip(z) + '</td><td>' + z.bins + '</td><td>' + z.lots + '</td>' +
+          (canEdit ? '<td>' + btn('pv-fz-' + i, 'Set colour', 'sm', ' data-fz="' + i + '"') + '</td>' : '') + '</tr>';
+      }).join('') : '<tr><td colspan="5"><div class="empty"><h3>No zones yet</h3><p>Zones come from Rack layout: add a rack with its zone code first.</p></div></td></tr>') +
+      '</tbody></table></div></div></div></div>';
+    [].forEach.call(V.querySelectorAll('[data-fz]'), function (b) {
+      b.onclick = function () {
+        var z = rows[Number(b.getAttribute('data-fz'))];
+        var m = openSheet({ tag: 'form', id: 'pv-fz', style: 'max-width:420px', title: 'Zone ' + z.zoneCode, meta: 'Colour, its name and initials',
+          body: '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Colour name (printed)') + '<input id="pv-fz-n" class="fld" autocomplete="off" placeholder="Green" value="' + escHtml(z.colourName || '') + '"></label>' +
+            '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Colour') + '<input id="pv-fz-h" class="fld" type="color" value="' + escHtml(z.colourHex || '#2E8B57') + '"></label>' +
+            '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Initials (1 to 3 letters, printed)') + '<input id="pv-fz-i" class="fld" autocomplete="off" maxlength="3" placeholder="GR" value="' + escHtml(z.initials || '') + '"></label>' +
+            '<div id="pv-fz-err" role="alert" style="color:var(--red);min-height:18px"></div><button type="submit" class="btn p" style="width:100%;justify-content:center">Save</button>' });
+        m.sheet.onsubmit = function (e) {
+          e.preventDefault();
+          tunnel('/v1/shelf/fg-zones/' + encodeURIComponent(z.zoneCode), { method: 'PUT', body: { colourName: $('pv-fz-n').value.trim(), colourHex: $('pv-fz-h').value, initials: $('pv-fz-i').value.trim() } }).then(function (r) {
+            if (r.status >= 400) { $('pv-fz-err').textContent = err(r, 'Not saved.'); return; }
+            m.close(); toast('Zone ' + z.zoneCode + ' saved', 'good'); loadView();
+          }).catch(function () { $('pv-fz-err').textContent = 'Can\'t connect. Try again.'; });
+        };
+      };
+    });
   }
 
   /* ── printed sheets (A4 / 80 mm thermal), in walking order, with task QR ─────────────── */
@@ -430,12 +480,44 @@
     try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
     catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + escHtml(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
   }
-  function printBinLabels(bins) {
+  // FLOOR-3 (R7): the sheet was printed with no record, so a second sheet of the same bins (two labels
+  // on a bin) left no trace. It is logged like a single label: the first sheet is a print job naming
+  // the person, the same bins again is a REPRINT that asks why, and the sheet says REPRINT.
+  function binSheetHtml(bins, reprint) {
     var cells = bins.map(function (b) {
-      return '<div class="lb"><div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
+      return '<div class="lb">' + (reprint ? '<div class="rp">REPRINT</div>' : '') + '<div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
     }).join('');
-    openPrint('Bin labels', '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid}.c{font:700 18px Arial}.z{font-size:10px;color:#444}@media print{.noprint{display:none}}</style>' +
-      '<div class="grid">' + cells + '</div>');
+    return '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid;position:relative}.c{font:700 18px Arial}.z{font-size:10px;color:#444}.rp{position:absolute;top:1mm;right:1.5mm;font:700 9px Arial;border:1.5px solid #000;padding:0 2px}@media print{.noprint{display:none}}</style>' +
+      '<div class="grid">' + cells + '</div>';
+  }
+  async function sheetJob(bins, reason) {
+    var res;
+    try { res = await tunnel('/v1/print-jobs/bin-sheet', { method: 'POST', body: { binCodes: bins.map(function (b) { return b.binCode; }), station: 'Office', reason: reason || undefined } }); }
+    catch (e) { toast('Can\'t connect. Nothing was printed; try again.', 'bad'); return null; }
+    return res;
+  }
+  async function printBinLabels(bins) {
+    if (!bins || !bins.length) { toast('No bins to print yet. Add a rack first.', 'warn'); return; }
+    var res = await sheetJob(bins, null);
+    if (!res) return;
+    if (res.status === 409) {
+      askForm({ title: 'Reprint bin labels', submit: 'Reprint', intro: err(res, 'This sheet was already printed. A reprint needs a reason.'),
+        fields: [{ n: 'reason', l: 'Why reprint?', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var r2 = await sheetJob(bins, v.reason);
+          if (!r2) return;
+          if (r2.status >= 400) { fail(err(r2, 'The sheet was not reprinted.')); return; }
+          close(); openSheet2(bins, data(r2));
+        } });
+      return;
+    }
+    if (res.status >= 400) { toast(err(res, 'The sheet was not printed.'), 'bad'); return; }
+    openSheet2(bins, data(res));
+  }
+  function openSheet2(bins, d) {
+    var w = openPrint((d && d.reprint ? 'REPRINT ' : '') + 'Bin labels', binSheetHtml(bins, !!(d && d.reprint)));
+    if (w && d && d.job) tunnel('/v1/print-jobs/' + d.job.printJobId + '/browser-printed', { method: 'POST', body: {} }).catch(function () { /* the job stays "browser" in Print queue */ });
+    if (d) toast((d.reprint ? 'Reprint logged: ' : 'Logged: ') + d.bins + ' bin label(s).', 'good');
   }
 
   /* ── Shelf display (TV / tablet at the shelves) ─────────────────────────────────────── */
@@ -513,6 +595,7 @@
     __produce__: viewProduce,
     __shelftasks__: viewShelfTasks,
     __racklayout__: viewRackLayout,
+    __fgzones__: viewFgZones,
     __shelfdisplay__: function (item, V) { return viewShelfDisplay(item, V, false); }
   });
 
@@ -547,7 +630,9 @@
       '<div class="row"><span>Net qty</span><b>' + escHtml(c.netQuantity + (c.unit ? ' ' + c.unit : '')) + (c.packSize ? ' × ' + escHtml(c.packSize) : '') + '</b></div>' +
       '<div class="row"><span>Mfg</span><b>' + escHtml(c.manufacturingDate) + '</b><span>Exp</span><b>' + escHtml(c.expiryDate) + '</b></div>' +
       '<div class="row"><span>QC</span><b class="qc">' + escHtml(c.qcStatus) + '</b>' + (c.qcReleasedAt ? '<span>' + escHtml(String(c.qcReleasedAt).slice(0, 10)) + '</span>' : '') + '</div>' +
-      dg + '<div class="rack"><span>RACK</span><b>' + escHtml(c.rack || '—') + '</b></div></div>';
+      dg + '<div class="rack"><span>RACK</span><b>' + escHtml(c.rack || '—') + '</b></div>' +
+      // FLOOR-2 (F7): the FG zone, its colour NAME and initials (a thermal print loses the colour; the words do not).
+      (c.zone ? '<div class="zone"><span>ZONE</span><b>' + escHtml(c.zone.code) + '</b>' + (c.zone.colourName ? '<span class="zsw" style="background:' + escHtml(c.zone.colourHex) + '"></span><b>' + escHtml(c.zone.colourName) + ' (' + escHtml(c.zone.initials) + ')</b>' : '<span>no colour set</span>') + '</div>' : '') + '</div>';
   }
   function printLabel(fgId, size) {
     tunnel('/v1/finished-good-batches/' + fgId + '/label').then(function (res) {
@@ -560,6 +645,7 @@
         '.wrap{display:flex;flex-wrap:wrap;gap:4mm}.lbl{box-sizing:border-box;border:1px solid #000;border-radius:2mm;padding:2.5mm;display:flex;flex-direction:column;gap:1.2mm;page-break-inside:avoid;overflow:hidden}' +
         '.top{display:flex;justify-content:space-between;gap:2mm}.pn{font-weight:700;font-size:' + (s.small ? '12px' : '18px') + '}.sm{font-size:' + (s.small ? '8px' : '11px') + '}' +
         '.row{display:flex;gap:2mm;align-items:baseline;font-size:' + (s.small ? '8px' : '12px') + '}.row span{color:#333}.big{font-size:' + (s.small ? '12px' : '20px') + '}.qc{border:1px solid #000;padding:0 1mm}' +
+        '.zone{display:flex;gap:2mm;align-items:center;font-size:' + (s.small ? '9px' : '14px') + '}.zsw{display:inline-block;width:3mm;height:3mm;border:1px solid #000}' +
         '.dg{border:1.5px solid #000;padding:1mm;font-size:' + (s.small ? '7px' : '10px') + '}.sw{font-weight:700}.rack{margin-top:auto;display:flex;gap:2mm;align-items:baseline;border-top:1px solid #000;padding-top:1mm}.rack b{font-size:' + (s.small ? '14px' : '26px') + '}' +
         '@media print{.noprint{display:none}}</style><div class="wrap">' + body + '</div>');
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
