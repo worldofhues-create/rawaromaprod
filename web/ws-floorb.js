@@ -342,7 +342,7 @@
     }).join('') + '</tbody></table></div>' : '<p>No QC round yet.</p>';
     var form = '';
     if (closed) form = '<p>' + chip('n', 'Last decision: ' + (QD[last.decision] || [0, last.decision])[1]) + ' No further round is taken here.</p>';
-    else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" class="fld" autocomplete="off" placeholder="scan or type the lot number">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
+    else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" data-scan class="fld" autocomplete="off" placeholder="scan or type the lot number">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
     else {
       var cpList = cps;
       form = '<form id="fb-qr" style="display:flex;flex-direction:column;gap:var(--s-snug)">' +
@@ -353,7 +353,7 @@
             (c.photoRequired ? '<input class="fld" data-photo placeholder="Photo ref" style="width:140px">' : '') + '</div>';
         }).join('') : '<p class="t-cap">Choose the product to load its checkpoints.</p>') + '</div>' +
         row(field('Defect type (if anything failed)', '<select id="fb-qdef" class="fld"><option value="">—</option>' + DEFECTS.map(function (x) { return '<option value="' + x + '">' + esc(defWord(x)) + '</option>'; }).join('') + '</select>') +
-          field('Faulty raw lot (scan or type the lot number)', '<input id="fb-qlot" class="fld" autocomplete="off">') +
+          field('Faulty raw lot (scan or type the lot number)', '<input id="fb-qlot" data-scan class="fld" autocomplete="off">') +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fb-qdoubt"> Instrument doubt</label>') +
         '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div><button type="submit" class="btn p">Record QC round</button></form>';
     }
@@ -399,9 +399,9 @@
         return '<tr><td>' + (h.subjectType === 'RM_LOT' ? 'Raw lot' : 'Batch') + '</td><td style="font-family:var(--font-mono)">' + esc(h.number || 'No number on file') + '</td><td>' + esc(h.reason) + '</td><td>' + esc(new Date(h.heldDt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })) + '</td><td>' +
           (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + esc(h.subjectId) + '" data-trace-no="' + esc(h.number || '') + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p>Nothing is on hold.</p>') +
-      card('A raw lot', row(field('Raw lot number (scan or type)', '<input id="fb-lot" class="fld" autocomplete="off" placeholder="e.g. RM-2026-0042" style="min-width:0;width:min(280px,100%)">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
+      card('A raw lot', row(field('Raw lot number (scan or type)', '<input id="fb-lot" data-scan class="fld" autocomplete="off" placeholder="e.g. RM-2026-0042" style="min-width:0;width:min(280px,100%)">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
         (canWrite ? '<button type="button" class="btn" id="fb-hold">Hold this lot</button>' : '') +
-        field('Bin (for the label)', '<input id="fb-bin" class="fld" autocomplete="off" placeholder="scan the bin label">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
+        field('Bin (for the label)', '<input id="fb-bin" data-scan class="fld" autocomplete="off" placeholder="scan the bin label">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
       '<div id="fb-rc" class="c12"></div></div>';
     [].forEach.call(V.querySelectorAll('[data-trace]'), function (b) { b.onclick = function () { $('fb-lot').value = b.getAttribute('data-trace-no') || b.getAttribute('data-trace'); trace(); }; });
     [].forEach.call(V.querySelectorAll('[data-rel]'), function (b) {

@@ -112,7 +112,7 @@
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The floor queue is not available.')); return; }
     var items = (data(res) || {}).items || [];
     var find = stage === 'PICK' ? '' :
-      '<form id="fl-find" class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label style="flex:1;min-width:200px">Scan the tote<input id="fl-tote" class="fld" autocomplete="off" placeholder="T-12" style="min-height:52px;font-size:18px"></label>' + btn('fl-go', 'Open', 'p', big(' type="submit"')) + '</form>';
+      '<form id="fl-find" class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><label style="flex:1;min-width:200px">Scan the tote<input id="fl-tote" data-scan class="fld" autocomplete="off" placeholder="T-12" style="min-height:52px;font-size:18px"></label>' + btn('fl-go', 'Open', 'p', big(' type="submit"')) + '</form>';
     V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:880px">' + find +
       (items.length ? items.map(function (j) {
         var tone = j.priority === 'HOLD' ? 'r' : !j.ready ? 'a' : j.lane === 'DELAYED' ? 'r' : 'b';
@@ -147,13 +147,13 @@
       var t = next.takeLot;
       body = '<form id="fl-pick" class="card" style="display:flex;flex-direction:column;gap:12px"><div style="font-size:18px">Line ' + next.seq + ': ' + code(next.floorCode) + ' ' + swatch(next) + '</div>' +
         (t ? '<div style="font-size:18px">Go to bin <b>' + esc(t.bin || '—') + '</b>, take lot <b>' + esc(t.lot || t.barcode) + '</b>' + (t.expiry ? ' (expires ' + esc(t.expiry) + ')' : '') + '.</div>' : '<div class="card" role="alert" style="color:var(--red)">' + esc(next.waiting) + '</div>') +
-        '<label>Scan the bin<input id="fl-bin" class="fld" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
-        '<label>Scan the lot label<input id="fl-lot" class="fld" autocomplete="off" placeholder="L-…" style="min-height:52px;font-size:18px"></label>' +
+        '<label>Scan the bin<input id="fl-bin" data-scan class="fld" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
+        '<label>Scan the lot label<input id="fl-lot" data-scan class="fld" autocomplete="off" placeholder="L-…" style="min-height:52px;font-size:18px"></label>' +
         '<label id="fl-why-l" hidden>Reason for taking a different lot<input id="fl-why" class="fld" style="min-height:52px;font-size:18px"></label>' +
         '<div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-tick', 'Picked', 'p', big(' type="submit"')) + '</form>';
     } else {
       body = '<form id="fl-done" class="card" style="display:flex;flex-direction:column;gap:12px"><div style="font-size:18px">Every line is picked. Scan the tote, then finish.</div>' +
-        '<label>Tote<input id="fl-tote2" class="fld" autocomplete="off" placeholder="T-12" style="min-height:52px;font-size:18px"></label><div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' +
+        '<label>Tote<input id="fl-tote2" data-scan class="fld" autocomplete="off" placeholder="T-12" style="min-height:52px;font-size:18px"></label><div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' +
         btn('fl-finish', 'Finish and print PICKED', 'p', big(' type="submit"')) + '</form>';
     }
     V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:880px">' + head + body + '<div class="card">' + list + '</div></div>';
@@ -289,7 +289,7 @@
 
   /* ── Scan a lot ─────────────────────────────────────────────────────────────────────── */
   function viewScan(item, V) {
-    V.innerHTML = '<form id="fl-sc" class="card" style="display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
+    V.innerHTML = '<form id="fl-sc" class="card" style="display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
     $('fl-sci').focus();
     $('fl-sc').onsubmit = async function (e) {
       e.preventDefault();
