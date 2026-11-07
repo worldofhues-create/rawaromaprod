@@ -213,3 +213,73 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   expect(sql(`select status from sales.shipment where sales_order_id='${so}'`)).toBe('HANDED_OVER');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 });
+
+/* FLOOR-2 F7 (owner: the FG rack "color coded and initial based"): the admin gives an FG zone a colour,
+ * its name and initials; the finished lot is put away to that zone; its FG lot label prints the zone,
+ * the colour name and the initials (never the colour alone); the floor board (TV) shows the zone. */
+test('F7: FG zone colour and initials, put-away to the zone, on the FG lot label and the TV board', async ({ page }, info) => {
+  test.setTimeout(150_000);
+  const t = Date.now().toString(36).toUpperCase();
+  const zone = `FGZ${info.project.name.endsWith('375') ? 'M' : 'D'}${t}`;
+  await must('warehouse', 'POST', '/v1/shelf/layout/rack', { zoneCode: zone, rackCode: `R${zone}`, shelves: 1, binsPerShelf: 2 });
+  const colour = 'Jade' + letters().toLowerCase(), ini = letters().slice(0, 3);
+
+  // the admin sets the zone's colour, name and initials
+  await signIn(page, 'factory', 'admin');
+  await openNav(page, 'FG zones');
+  const zr = page.locator('tr', { hasText: zone }).first();
+  await expect(zr).toContainText('no colour set');
+  await zr.getByRole('button', { name: 'Set colour', exact: true }).click();
+  await page.locator('#pv-fz-n').fill(colour);
+  await page.locator('#pv-fz-h').fill('#00a86b');
+  await page.locator('#pv-fz-i').fill(ini.toLowerCase());
+  await page.getByRole('button', { name: 'Save', exact: true }).click();
+  await expect(page.locator('tr', { hasText: zone }).first()).toContainText(`${colour} (${ini})`);
+  expect(sql(`select s.colour_hex || ' ' || s.initials from location.fg_zone_style s join location.zone_master z using (zone_id) where z.zone_code = '${zone}'`)).toBe(`#00A86B ${ini}`);
+
+  // a QC-released finished lot (traceable to its oil batch and a released COA)
+  const product = randomUUID(), sku = randomUUID(), oil = randomUUID(), po = randomUUID(), fg = randomUUID(), who = randomUUID();
+  const fgNo = `FG-Z${t}${info.project.name.endsWith('375') ? 'M' : 'D'}`;
+  sql(`insert into packaging.product_master (product_id, product_code, product_name, status) values ('${product}', 'P-${fgNo}', 'Amber Zone', 'ACTIVE');
+       insert into packaging.product_sku (product_sku_id, product_id, sku_code, pack_size, status) values ('${sku}', '${product}', 'SKU-${fgNo}', '10 ml', 'ACTIVE');
+       insert into production.oil_batch_master (oil_batch_id, batch_number, produced_qty, status) values ('${oil}', 'OB-${fgNo}', 10, 'RELEASED');
+       insert into production.batch_coa (oil_batch_id, product_id, sg_result, sg_spec_min, sg_spec_max, sg_pass, flash_point_result_c, flash_point_spec_min_c, flash_point_spec_max_c, flash_point_pass,
+         colour_appearance, colour_appearance_pass, odour_description, odour_pass, production_date, best_before, overall_result, tested_by, released_by, released_dt, status)
+         values ('${oil}', '${product}', 0.99, 0.95, 1.5, true, 116, 110, 120, true, 'Amber', true, 'Warm', true, current_date, current_date + 700, 'PASS', '${who}', '${who}', now(), 'RELEASED');
+       insert into packaging.package_order (package_order_id, product_sku_id, oil_batch_id, order_qty, status) values ('${po}', '${sku}', '${oil}', 4, 'COMPLETED');
+       insert into packaging.finished_good_batch_master (finished_good_batch_id, package_order_id, product_sku_id, batch_number, produced_qty, manufacturing_date, expiry_date, status)
+         values ('${fg}', '${po}', '${sku}', '${fgNo}', 4, current_date, current_date + 700, 'ACTIVE')`);
+
+  // put away to the zone (Finished batches -> Put away -> the zone, shown by colour name and initials)
+  await signIn(page, 'factory', 'owner');
+  await openNav(page, 'Finished batches');
+  const fgRow = page.locator('tr', { hasText: fgNo }).first();
+  await fgRow.getByRole('button', { name: 'Put away', exact: true }).click();
+  await page.locator('#pv-azone').selectOption({ label: `${zone} · ${colour} (${ini})` });
+  await page.locator('#pv-assign').getByRole('button', { name: 'Assign', exact: true }).click();
+  await expect.poll(() => sql(`select z.zone_code from location.shelf_task t join location.bin_master b on b.bin_id = t.to_bin_id join location.shelf_master sh on sh.shelf_id = b.shelf_id
+    join location.rack_master r on r.rack_id = sh.rack_id join location.zone_master z on z.zone_id = r.zone_id where t.finished_good_batch_id = '${fg}' and t.kind = 'PUTAWAY'`)).toBe(zone);
+
+  // the FG lot label: both codes of the lot, and the zone, colour name and initials as words
+  await openNav(page, 'Finished batches');
+  await page.locator('tr', { hasText: fgNo }).first().getByRole('button', { name: 'Print FG lot label', exact: true }).click();
+  const job = await printedJob('fg_lot', fgNo);
+  const text = JSON.stringify(job.template.elements);
+  expect(text).toContain(zone);
+  expect(text).toContain(`${colour} (${ini})`);
+  await jobDecodes(page, job.template, fgNo);
+  await page.locator('tr', { hasText: fgNo }).first().getByRole('button', { name: 'Reprint FG lot label', exact: true }).click();
+  await page.locator('[data-ask="reason"]').fill('Zone label redone');
+  await page.getByRole('button', { name: 'Reprint', exact: true }).last().click();
+  expect(JSON.stringify((await printedJob('fg_lot', fgNo, { reprint: true })).template.elements)).toContain(`${colour} (${ini})`);
+
+  // the floor board, and its TV mode: the lot with its zone, colour name and initials
+  await openNav(page, 'Floor board');
+  const board = page.locator('#fo-fgrack');
+  await expect(board).toContainText(fgNo);
+  await expect(board.locator('div', { hasText: fgNo }).last()).toContainText(`${zone} ${colour} (${ini})`);
+  await page.locator('#fo-tv').click();
+  await expect(page.locator('#fo-fgrack').last()).toContainText(`${colour} (${ini})`);
+  await page.keyboard.press('Escape');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+});

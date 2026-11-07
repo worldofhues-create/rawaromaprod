@@ -282,8 +282,10 @@
       // FLOOR-1 (R8): plan §6 "Leftover goes back to stock as a partial lot with a new label".
       '<form id="fl-lo" class="card" style="display:flex;flex-direction:column;gap:10px"><b>Leftover back to stock</b>' +
       '<div style="color:var(--ink-3)">What is left in a picked lot goes back as a new lot with its own code and label. It keeps the lot\'s number, QC release and expiry.</div>' +
-      '<label>Scan the lot the leftover is in<input id="fl-lo-lot" data-scan class="fld" autocomplete="off" placeholder="L-…" style="min-height:52px;font-size:18px"></label>' +
+      // Weight first: a scan's suffix moves on to the next empty scan field and the last one submits
+      // (scan-input.js), so weigh, then scan the lot, then scan the bin, and the bin's scan returns it.
       '<label>Leftover weight (g)<input id="fl-lo-wt" class="fld" inputmode="decimal" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
+      '<label>Scan the lot the leftover is in<input id="fl-lo-lot" data-scan class="fld" autocomplete="off" placeholder="L-…" style="min-height:52px;font-size:18px"></label>' +
       '<label>Scan the bin it goes back to<input id="fl-lo-bin" data-scan class="fld" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
       '<div id="fl-lo-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-lo-go', 'Return and print the lot label', '', big(' type="submit"')) +
       '<div id="fl-lo-list"></div></form></div>';

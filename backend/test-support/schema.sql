@@ -2981,10 +2981,10 @@ alter table platform.device_master add constraint device_master_kind_check
   check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner'));
 
 -- FLOOR-GAPS (2026-11-07): the stock ledger table exactly as scripts/migrations/0006_inventory.sql creates it
--- (a lot split writes one row per side), then scripts/migrations/2026-11-07-floor-gaps.sql mirrored here
+-- (a lot split writes one row per side; gen_random_uuid for uuidv7, as everywhere here), then scripts/migrations/2026-11-07-floor-gaps.sql mirrored here
 -- (body after @target; the app-role grant block is left out).
 CREATE TABLE IF NOT EXISTS "inventory"."inventory_transaction" (
-	"inventory_transaction_id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
+	"inventory_transaction_id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"inventory_batch_id" uuid,
 	"inventory_transaction_type_id" uuid,
 	"transaction_qty" numeric(18, 4),
