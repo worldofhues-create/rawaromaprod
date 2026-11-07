@@ -26,3 +26,30 @@ test('SCAN-9: one Print / Reprint helper; reprint asks for a reason and goes thr
   assert.match(rp, /Why reprint\?', req: true/);
   assert.match(rp, /\/reprint', 'POST', \{ reason: v\.reason \}/);
 });
+
+/** The source between `start` and the next `function ` at the same depth, roughly: enough to assert on. */
+const near = (src: string, start: string, len = 4000) => { const i = src.indexOf(start); assert.ok(i >= 0, `found ${start}`); return src.slice(i, i + len); };
+
+test('SCAN-10 raw flow: every step offers Print + Reprint with both codes', () => {
+  const shell = read('web/shell.js'), fb = read('web/ws-floorb.js');
+  // R1 PO, R2 gate entry, R4 GRN, R5 incoming QC, raw batches and containers: row actions on their screens
+  for (const [ep, kind, code] of [['/v1/purchase-orders', 'po', 'poNumber'], ['/v1/gate-entries', 'gate_entry', 'gateEntryNumber'], ['/v1/grns', 'grn', 'grnNumber'],
+    ['/v1/qc-inspections', 'qc_tag', 'batchNumber'], ['/v1/rm-batches', 'rm_lot', 'batchNumber'], ['/v1/grn-containers', 'container', 'containerCode']]) {
+    const block = near(shell, `'${ep}': [\n`, 6000);
+    assert.match(block, new RegExp(`label: 'Print label'[^\\n]*stepLabel\\('${kind}'`), `${ep} Print label`);
+    assert.match(block, new RegExp(`label: 'Reprint label'[^\\n]*stepLabel\\('${kind}'`), `${ep} Reprint label`);
+    assert.match(near(shell, `${kind}: function (r)`, 600), new RegExp(`code: r\\.${code}`), `${kind} encodes ${code}`);
+  }
+  assert.doesNotMatch(shell, /openQrLabel\(/, 'no QR-only label left on the generic screens');
+  // R3/R4 receiving audit result: GRN label (with the line decisions) and each new lot's quarantine tag
+  const recv = near(fb, "toast('Audit saved · GRN '", 3000);
+  assert.match(recv, /SB\('fb-grn', \{ labelKind: 'grn'/);
+  assert.match(recv, /SB\('fb-q-' \+ i, \{ labelKind: 'rm_lot', subjectRef: x\.batchNumber, code: x\.batchNumber, title: 'QUARANTINE'/);
+  assert.match(fb, /function SB\(id, o\) \{ return window\.RA && window\.RA\.stepButtons \? window\.RA\.stepButtons\(id, o\)/);
+  // R6 putaway: raw-lot reprint with a reason; the bin label
+  assert.match(fb, /id="fb-label-rp"/);
+  assert.match(fb, /reprintReason: why/);
+  assert.match(fb, /id="fb-binlabel"/);
+  // R9 hold tag on every held lot
+  assert.match(near(fb, 'async function viewRecall(', 3000), /SB\('fb-ht-' \+ i, \{ labelKind: 'hold_tag'/);
+});

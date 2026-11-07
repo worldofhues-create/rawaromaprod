@@ -1147,6 +1147,28 @@
   // Segregation of duties: a document's creator may not approve it (the backend enforces this
   // authoritatively; this just hides the button so the button isn't offered in the first place).
   function isCreator(r) { return !!(r && session && session.user && r.createdBy && r.createdBy === session.user.userId); }
+
+  /* SCAN-10: the raw-flow steps on the generic screens print a label with both codes (Code 128 + QR)
+   * of the record's own number, the opaque id the next step scans: PO, gate entry, GRN, the incoming
+   * QC tag (QUARANTINE until QC decides), the raw lot, the container. Print and Reprint go through the
+   * print queue (RA.stepPrint / RA.stepReprint in ws-floor-ops.js), so a reprint asks why and says
+   * REPRINT. */
+  var STEP_LABEL = {
+    po: function (r) { return { labelKind: 'po', code: r.poNumber, title: 'PURCHASE ORDER', lines: [['Vendor', r.vendorName], ['Status', r.status]], defaultStation: 'Office' }; },
+    gate_entry: function (r) { return { labelKind: 'gate_entry', code: r.gateEntryNumber, title: 'GATE ENTRY', lines: [['Vehicle', r.vehicleNumber], ['Driver', r.driverName]], defaultStation: 'Gate' }; },
+    grn: function (r) { return { labelKind: 'grn', code: r.grnNumber, title: 'GOODS RECEIPT', lines: [['Date', r.grnDate], ['Status', r.status]], defaultStation: 'Receiving 1' }; },
+    qc_tag: function (r) { var x = UP(r.overallResult); return { labelKind: 'qc_tag', code: r.batchNumber, title: x === 'ACCEPT' ? 'QC RELEASED' : x === 'REJECT' ? 'QC REJECTED' : x === 'HOLD' ? 'QC HOLD' : x === 'REWORK' ? 'QC REWORK' : 'QUARANTINE', lines: [['Inspected', r.inspectionDt ? String(r.inspectionDt).slice(0, 10) : null]], defaultStation: 'QC lab' }; },
+    rm_lot: function (r) { return { labelKind: 'rm_lot', code: r.batchNumber, title: 'RAW LOT', lines: [['Expiry', r.expiryDate], ['Status', r.status]], defaultStation: 'Stores' }; },
+    container: function (r) { return { labelKind: 'container', code: r.containerCode, title: 'CONTAINER', lines: [], defaultStation: 'Receiving 1' }; }
+  };
+  function stepLabel(kind, r, again) {
+    if (!window.RA || !window.RA.stepPrint) { toast('Printing did not load. Reload the page.', 'bad'); return; }
+    var o = STEP_LABEL[kind](r);
+    if (!o.code) { toast('This record has no number to print yet.', 'warn'); return; }
+    o.subjectRef = o.code;
+    return again ? window.RA.stepReprint(o) : window.RA.stepPrint(o);
+  }
+
   var ACTIONS = {
     // Owner ruling 2026-09-28 — COA data from factory QC. The sheets live in ws-mfg.js
     // (openCoaSpec / openCoaRecord / releaseCoa); the server re-checks every rule.
@@ -1201,6 +1223,8 @@
       { label: 'Reject', perm: 'procurement:purchase_request:write', tone: 'bad', when: function (r) { return ['DRAFT', 'SUBMITTED'].indexOf(UP(r.status)) >= 0; }, run: function (r) { rejectDoc('purchase-requests', 'purchaseRequestId', r); } }
     ],
     '/v1/purchase-orders': [
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('po', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('po', r, true); } },
       { label: 'Approve', perm: 'procurement:purchase_order:write', tone: 'good', when: function (r) { return UP(r.status) === 'DRAFT' && !isCreator(r); }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/approve'; }, body: {} },
       { label: 'Issue', perm: 'procurement:purchase_order:write', when: function (r) { return ['ISSUED', 'ACKNOWLEDGED', 'DRAFT', 'REJECTED', 'CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/issue'; }, body: {} },
       { label: 'Acknowledge', perm: 'procurement:purchase_order:write', when: function (r) { return UP(r.status) === 'ISSUED'; }, path: function (r) { return '/v1/purchase-orders/' + r.purchaseOrderId + '/acknowledge'; }, body: {} },
@@ -1210,12 +1234,23 @@
       { label: 'Amend', perm: 'procurement:purchase_order:write', tone: 'accent', when: function (r) { return ['DRAFT', 'CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, run: function (r) { amendPurchaseOrder(r); } },
       { label: 'Cancel', perm: 'procurement:purchase_order:write', tone: 'bad', when: function (r) { return ['CANCELLED', 'AMENDED'].indexOf(UP(r.status)) < 0; }, run: function (r) { cancelPurchaseOrderFlow(r); } }
     ],
+    '/v1/gate-entries': [
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('gate_entry', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('gate_entry', r, true); } }
+    ],
+    '/v1/grns': [
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('grn', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('grn', r, true); } }
+    ],
     '/v1/rm-batches': [
-      { label: 'QR label', perm: 'inventory:rm_batch_master:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Batch ' + (r.batchNumber || ''), (r.batchNumber || String(r.rmBatchId).slice(0, 8)), 'RA-BATCH:' + (r.batchNumber || '') + ':' + r.rmBatchId, 'RM batch'); } },
+      // SCAN-10: was a QR-only label of 'RA-BATCH:<no>:<uuid>' (not opaque, not what any scan field reads).
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('rm_lot', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('rm_lot', r, true); } },
       { label: 'Release to stock', perm: 'inventory:rm_batch_master:write', when: function (r) { return UP(r.status) !== 'RELEASED'; }, path: function (r) { return '/v1/rm-batches/' + r.rmBatchId + '/release'; }, body: {} }
     ],
     '/v1/grn-containers': [
-      { label: 'QR label', perm: 'inventory:grn_container:read', tone: 'accent', when: function () { return true; }, run: function (r) { openQrLabel('Container ' + (r.containerCode || ''), (r.containerCode || String(r.grnContainerId).slice(0, 8)), 'RA-CONTAINER:' + (r.containerCode || '') + ':' + r.grnContainerId, 'GRN ' + (r.grnNumber || '') + (r.containerQty != null ? ' · ' + r.containerQty : '')); } }
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('container', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('container', r, true); } },
     ],
     '/v1/qc-rejected-grns': [
       { label: 'Replacement PO', perm: 'procurement:purchase_order:write', tone: 'accent', when: function () { return true; }, run: function (r) { generateReplacementPo(r); } }
@@ -1227,6 +1262,8 @@
       { label: 'Select as final vendor', perm: 'procurement:quotation_items:write', tone: 'good', when: function (r) { return UP(r.status) !== 'SELECTED'; }, run: function (r) { setStatus('quotations', 'quotationId', r, 'SELECTED', 'Vendor selected'); } }
     ],
     '/v1/qc-inspections': [
+      { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('qc_tag', r); } },
+      { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('qc_tag', r, true); } },
       // once dispositioned, the inspection's overallResult becomes the code → hide the buttons.
       { label: 'Record results', perm: 'quality:qc_inspections:write', tone: 'accent', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, run: function (r) { openRecordQc(r); } },
       { label: 'Accept', perm: 'quality:qc_inspections:write', tone: 'good', when: function (r) { return ['ACCEPT', 'REJECT', 'REWORK', 'HOLD'].indexOf(UP(r.overallResult)) < 0; }, path: function (r) { return '/v1/qc-inspections/' + r.qcInspectionId + '/disposition'; }, body: { dispositionCode: 'ACCEPT' } },

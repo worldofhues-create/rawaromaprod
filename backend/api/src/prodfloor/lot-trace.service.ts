@@ -158,13 +158,16 @@ export class LotTraceService {
       if (!loc) throw new BadRequestException('Scan the bin first: the label carries where the lot sits.');
       const binCode = bin?.code ?? ((await tx`select storage_location_code as code from location.storage_location_master where storage_location_id = ${loc}::uuid`)[0]?.code as string | undefined) ?? null;
       const prev = Number((await tx`select count(*)::int as n from inventory.raw_lot_label where rm_batch_id = ${rmBatchId}`)[0]!.n);
+      // SCAN-10: a second label is a REPRINT; it needs a reason, kept with the label row.
+      const reprintReason = typeof body.reprintReason === 'string' ? body.reprintReason.trim().slice(0, 300) : '';
+      if (prev > 0 && !reprintReason) throw new BadRequestException('This lot already has a label: a reprint needs a reason (it is logged with your name).');
       // SCAN-5: the label's scan code is the lot's opaque L- id (what pick and scan-resolve read), minted
       // once per stock row. A lot with no stock row yet keeps its RM batch number as the code.
       const [ib] = await tx`select inventory_batch_id::text as id from inventory.inventory_batch where rm_batch_id = ${rmBatchId} order by created_dt nulls last limit 1`;
       const barcode = ib && this.codes ? await this.codes.lotBarcode(String(ib.id), principal) : null;
       const payload = {
         lotId: String(b.batch_number), barcode, floorCode: (b.floor_code as string) ?? null, qty: b.qty, uom: b.uom_code ?? null, expiry: b.expiry ?? null,
-        received: b.received, storageLocationId: loc, binCode, hazard: HAZARD_PENDING, reprint: prev > 0,
+        received: b.received, storageLocationId: loc, binCode, hazard: HAZARD_PENDING, reprint: prev > 0, ...(prev > 0 ? { reprintReason } : {}),
       };
       await tx`insert into inventory.raw_lot_label (rm_batch_id, storage_location_id, payload, reprint, printed_by) values (${rmBatchId}, ${loc}, ${JSON.stringify(payload)}::jsonb, ${prev > 0}, ${principal.userId})`;
       return payload;

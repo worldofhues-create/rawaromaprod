@@ -221,7 +221,11 @@ test('lot hold: a faulty raw lot is frozen, recall lists its batches and shipped
   assert.match(String(label.barcode), /^L-[0-9A-HJKMNP-TV-Z]{7}$/);
   assert.equal((await sql()`select inventory_batch_id::text as id from inventory.lot_barcode where barcode = ${label.barcode}`)[0]!.id, ib);
   assert.equal(await resolveRmLot(sql(), String(label.barcode)), rm);
-  assert.equal((await lots.putawayLabel(rm, {}, principal())).reprint, true);
+  // SCAN-10: a second raw-lot label is a REPRINT and needs a reason (a duplicate lot label is a recall risk).
+  await assert.rejects(() => lots.putawayLabel(rm, {}, principal()), /reprint needs a reason/i);
+  const rp = await lots.putawayLabel(rm, { reprintReason: 'label smudged by solvent' }, principal());
+  assert.equal(rp.reprint, true);
+  assert.equal((await sql()`select payload->>'reprintReason' as r from inventory.raw_lot_label where rm_batch_id = ${rm} order by printed_dt desc limit 1`)[0]!.r, 'label smudged by solvent');
 
   await lots.hold({ subjectType: 'RM_LOT', subjectId: rm, reason: 'Batch failed, cause traced to this lot' }, principal());
   const rc = await lots.recall('rmb-' + rm.slice(0, 8)); // WALK2-RP-11: by the lot number on the label, any case

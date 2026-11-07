@@ -41,6 +41,8 @@
     var n = Number(s); return isFinite(n) && n >= 0 ? Math.round(n * 1000) : null;
   }
   /** One reason, asked in the console's own sheet (never the browser's prompt). */
+  // SCAN-10: Print / Reprint for a step's label (ws-floor-ops.js RA.stepButtons), or nothing if it failed to load.
+  function SB(id, o) { return window.RA && window.RA.stepButtons ? window.RA.stepButtons(id, o) : ''; }
   function askReason(title, label, submit, send) {
     askForm({ title: title, submit: submit, fields: [{ n: 'reason', l: label, t: 'textarea', req: true }],
       onSubmit: function (v, fail, close) {
@@ -199,8 +201,11 @@
           '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Line</th><th>Decision</th><th>Accepted</th><th>Rejected</th><th>Held</th><th>Short</th><th>Why</th></tr></thead><tbody>' +
           r.lines.map(function (l, i) { var dd = DEC[l.decision] || ['n', l.decision]; return '<tr><td>' + (i + 1) + '</td><td>' + chip(dd[0], (l.overridden ? 'OVERRIDDEN · ' : '') + dd[1]) + '</td><td>' + mg(l.acceptedBase, l.unit) + '</td><td>' + mg(l.rejectedBase, l.unit) + '</td><td>' + mg(l.excessHeldBase, l.unit) + '</td><td>' + mg(l.shortBase, l.unit) + '</td><td>' + esc(l.explain) + '</td></tr>'; }).join('') +
           '</tbody></table></div>' + (r.debitNote ? '<p style="margin-top:8px">Debit note ' + esc(r.debitNote.debitNoteNumber) + ' raised for ' + inr(r.debitNote.amountPaise) + '.</p>' : '') +
-          '<p class="t-cap">Raw lots go to quarantine for incoming QC; print each lot\'s label at putaway (Lot hold & recall).</p>' +
-          '<p>' + r.rmBatches.map(function (x) { return '<span style="font-family:var(--font-mono)">' + esc(x.batchNumber) + '</span>'; }).join(' · ') + '</p>');
+          (r.grnNumber ? '<p>' + SB('fb-grn', { labelKind: 'grn', subjectRef: r.grnNumber, code: r.grnNumber, title: 'GOODS RECEIPT', defaultStation: 'Receiving 1',
+            lines: [['Delivery', r.deliveryNo]].concat(r.lines.slice(0, 8).map(function (l, i) { return ['Line ' + (i + 1), (DEC[l.decision] || [0, l.decision])[1]]; })) }) + '</p>' : '') +
+          '<p class="t-cap">Raw lots go to quarantine for incoming QC: tag each one now; print its raw-lot label at putaway (Lot hold & recall).</p>' +
+          r.rmBatches.map(function (x, i) { return '<p style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span style="font-family:var(--font-mono)">' + esc(x.batchNumber) + '</span>' +
+            SB('fb-q-' + i, { labelKind: 'rm_lot', subjectRef: x.batchNumber, code: x.batchNumber, title: 'QUARANTINE', defaultStation: 'Receiving 1', lines: [['GRN', r.grnNumber], ['Status', 'Awaiting incoming QC']] }) + '</p>'; }).join(''));
       }).catch(function () { b.disabled = false; b.textContent = 'Submit audit'; errEl.textContent = 'Can\'t connect. Try again.'; });
     };
   }
@@ -395,13 +400,16 @@
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'Holds are not available.')); return; }
     var hd = data(res), holds = Array.isArray(hd) ? hd : ((hd && hd.items) || []), canWrite = can('inventory:rm_batch_master:write');
     V.innerHTML = '<div class="grid">' +
-      card('On hold now', holds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>What</th><th>Number</th><th>Why</th><th>Since</th><th></th></tr></thead><tbody>' + holds.map(function (h) {
+      card('On hold now', holds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>What</th><th>Number</th><th>Why</th><th>Since</th><th></th></tr></thead><tbody>' + holds.map(function (h, i) {
         return '<tr><td>' + (h.subjectType === 'RM_LOT' ? 'Raw lot' : 'Batch') + '</td><td style="font-family:var(--font-mono)">' + esc(h.number || 'No number on file') + '</td><td>' + esc(h.reason) + '</td><td>' + esc(new Date(h.heldDt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })) + '</td><td>' +
-          (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + esc(h.subjectId) + '" data-trace-no="' + esc(h.number || '') + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') + '</td></tr>';
+          (h.subjectType === 'RM_LOT' ? '<button type="button" class="btn sm" data-trace="' + esc(h.subjectId) + '" data-trace-no="' + esc(h.number || '') + '">Recall review</button> ' : '') + (canWrite ? '<button type="button" class="btn sm" data-rel="' + h.lotHoldId + '">Release</button>' : '') +
+          (h.number ? ' ' + SB('fb-ht-' + i, { labelKind: 'hold_tag', subjectRef: h.number, code: h.number, title: 'ON HOLD', defaultStation: 'Stores', lines: [['Why', h.reason], ['Since', new Date(h.heldDt).toLocaleDateString('en-IN')], ['Do not use', 'until QC releases the hold']] }) : '') + '</td></tr>';
       }).join('') + '</tbody></table></div>' : '<p>Nothing is on hold.</p>') +
       card('A raw lot', row(field('Raw lot number (scan or type)', '<input id="fb-lot" data-scan class="fld" autocomplete="off" placeholder="e.g. RM-2026-0042" style="min-width:0;width:min(280px,100%)">') + '<button type="button" class="btn p" id="fb-trace">Recall review</button>' +
         (canWrite ? '<button type="button" class="btn" id="fb-hold">Hold this lot</button>' : '') +
-        field('Bin (for the label)', '<input id="fb-bin" data-scan class="fld" autocomplete="off" placeholder="scan the bin label">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>')) +
+        field('Bin (for the label)', '<input id="fb-bin" data-scan class="fld" autocomplete="off" placeholder="scan the bin label">') + '<button type="button" class="btn" id="fb-label">Print raw-lot label</button>' +
+        '<button type="button" class="btn" id="fb-label-rp">Reprint raw-lot label</button>' +
+        '<button type="button" class="btn" id="fb-binlabel">Print bin label</button><button type="button" class="btn" id="fb-binlabel-rp">Reprint bin label</button>')) +
       '<div id="fb-rc" class="c12"></div></div>';
     [].forEach.call(V.querySelectorAll('[data-trace]'), function (b) { b.onclick = function () { $('fb-lot').value = b.getAttribute('data-trace-no') || b.getAttribute('data-trace'); trace(); }; });
     [].forEach.call(V.querySelectorAll('[data-rel]'), function (b) {
@@ -418,6 +426,16 @@
         return tunnel('/v1/prodfloor/holds', { method: 'POST', body: { subjectType: 'RM_LOT', subjectId: lot, reason: why } }).then(function (r) { if (r.status < 400) { toast('Lot held', 'good'); viewRecall(item, V); } return r; });
       });
     };
+    // SCAN-10: the raw-lot label's second print is a REPRINT and needs a reason (a duplicate lot label is a recall risk).
+    $('fb-label-rp').onclick = function () {
+      var lot = $('fb-lot').value.trim(); if (!lot) { toast('Scan or type the raw lot number.', 'bad'); return; }
+      askReason('Reprint raw-lot label', 'Why reprint? It says REPRINT and is logged with your name.', 'Reprint', function (why) {
+        return tunnel('/v1/prodfloor/putaway/' + encodeURIComponent(lot) + '/label', { method: 'POST', body: { storageLocationId: $('fb-bin').value.trim() || undefined, reprintReason: why } }).then(function (r) { if (r.status < 400) printLabel(data(r)); return r; });
+      });
+    };
+    function binSpec() { var b = $('fb-bin').value.trim(); return b ? { labelKind: 'bin', subjectRef: b, code: b, title: 'BIN', defaultStation: 'Stores', lines: [] } : null; }
+    $('fb-binlabel').onclick = function () { var o = binSpec(); if (!o) { toast('Scan or type the bin.', 'bad'); return; } window.RA.stepPrint(o); };
+    $('fb-binlabel-rp').onclick = function () { var o = binSpec(); if (!o) { toast('Scan or type the bin.', 'bad'); return; } window.RA.stepReprint(o); };
     $('fb-label').onclick = function () {
       var lot = $('fb-lot').value.trim(); if (!lot) { toast('Scan or type the raw lot number.', 'bad'); return; }
       tunnel('/v1/prodfloor/putaway/' + encodeURIComponent(lot) + '/label', { method: 'POST', body: { storageLocationId: $('fb-bin').value.trim() || undefined } }).then(function (r) {
