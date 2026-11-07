@@ -44,8 +44,9 @@ async function loadAt(ref: string): Promise<{ codes: string[]; roles: RolesModul
     }
     // Both files import lane pf-c's ./pfc-grants.js from the first ref that has it on. Without the copy
     // the import fails, so a --since at or after that ref could not load the old catalogue at all.
-    // A ref before it never imports it, and has no file to copy.
-    for (const f of ['pfc-grants.ts']) {
+    // A ref before it never imports it, and has no file to copy. FLOOR-4: lane pf-d's ./pfd-grants.js
+    // the same way (a --since at or after pf-d failed with "Cannot find module './pfd-grants.js'").
+    for (const f of ['pfc-grants.ts', 'pfd-grants.ts']) {
       let src: string | null = null;
       try { src = execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { src = null; }
       if (src !== null) writeFileSync(join(dir, f), src);
