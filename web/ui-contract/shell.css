@@ -204,6 +204,10 @@ tr.row-detail-row:hover{background:transparent}
 .ring-s{margin-top:var(--s-hair);font:var(--w-med) var(--t-micro)/1 var(--font-ui);letter-spacing:.1em;text-transform:uppercase;color:var(--ink-3)}
 .loading{padding:var(--s-open);text-align:center;font:var(--w-reg) var(--t-cap)/1 var(--font-ui);color:var(--ink-3)}
 
+/* STOCK2-5: .card brings no padding of its own: its .card-hd and .card-bd do. A card holding plain content
+   had its text on the edge, clipped by the corner, on every floor station. An inline padding still wins. */
+#ra-view .card:not(.empty):not(.notbuilt):not(:has(> .card-hd, > .card-bd, > .card-ft, > table)){padding:16px}
+
 /* ---------------- quick-access dock (web/dock.js) ----------------
  * Owner 2026-09-29: "dock is abnormally huge, it won't be responsive". The dock now carries at most
  * eight primary destinations + "All sections" + Ask Aria. Same block, verbatim, in
@@ -240,7 +244,3 @@ body .content,body .main > .content{padding-bottom:var(--dock-runway) !important
 .ri-pin:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px;opacity:1}
 .ri-reset{margin-top:8px}
 @media (pointer:coarse){ .ri-pin{opacity:1;width:40px;height:40px} .ri-row > .ri{padding-right:48px} }
-
-/* STOCK2-5: .card brings no padding of its own: its .card-hd and .card-bd do. A card holding plain content
-   had its text on the edge, clipped by the corner, on every floor station. An inline padding still wins. */
-#ra-view .card:not(.empty):not(.notbuilt):not(:has(> .card-hd, > .card-bd, > .card-ft, > table)){padding:16px}
