@@ -7,7 +7,7 @@
  * Every loader is independent: when one fails (the Vault does not answer, a table is busy), only
  * that group's insights are left as they were this tick.
  */
-import { netQty, signOf, type QtyPart } from '@core/data-kernel';
+import { netQty, notTotalled, signOf, type Netted, type QtyPart } from '@core/data-kernel';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { bridge as bridgeContracts } from '@core/contracts';
@@ -23,6 +23,7 @@ import type { RuhSettings } from './ruh-settings.service.js';
 import { RuhSignalService } from './ruh-signal.service.js';
 import { RUH_PRINCIPAL } from '@ra/cluster-org';
 
+type Refused = Extract<Netted, { refused: string }>;
 const num = (v: unknown) => Number(v ?? 0) || 0;
 const hoursSince = (v: Date | string | null, now: Date) => (v ? (now.getTime() - new Date(isoOf(v)).getTime()) / 3_600_000 : 0);
 
@@ -212,7 +213,7 @@ export class RuhFactsService {
            and upper(coalesce(tt.type_code, '')) ~ '(ISSUE|CONSUME|OUT|PICK)'
          group by 1),
       planned_u as (
-        select i.material_id, u.uom_code as uom, sum(coalesce(i.required_qty, 0))::text as qty
+        select i.material_id, u.uom_code as uom, sum(greatest(coalesce(i.required_qty, 0) - coalesce(i.issued_amount, 0), 0))::text as qty
           from production.production_order_ingredients i
           join production.production_order o on o.production_order_id = i.production_order_id
           left join platform.uom_master u on u.uom_id = i.uom_id
@@ -231,6 +232,7 @@ export class RuhFactsService {
     // STOCK2-3: per lot, what is free of its own reservations and not under quarantine, in the lot's
     // unit; then per material in one unit. A material that cannot be totalled gets no stock fact: a
     // days-left warning off a sum of kilograms and litres would be a number nobody could stand behind.
+    // STOCK3-5: it goes on notTotalled instead. Left out silently, it read as a material with no problem.
     const lots = (await this.sql`
       select ib.material_id::text as id, coalesce(ib.quantity_on_hand, 0)::text as qty, um.uom_code as uom, coalesce(r.parts, '[]'::json) as held
         from inventory.inventory_batch ib
@@ -244,25 +246,28 @@ export class RuhFactsService {
                    group by 2) x) r on true
        where ib.material_id is not null and coalesce(rb.status, '') <> 'QUARANTINE'`) as unknown as Array<{ id: string; qty: string; uom: string | null; held: QtyPart[] }>;
     const free = new Map<string, QtyPart[]>();
-    const unsure = new Set<string>();
+    const unsure = new Map<string, Refused>();
     for (const l of lots) {
       const n = netQty([{ qty: l.qty, uom: l.uom }], l.held, l.uom);
-      if ('refused' in n) { unsure.add(l.id); continue; }
+      if ('refused' in n) { unsure.set(l.id, n); continue; }
       if (signOf(n.qty) > 0) free.set(l.id, [...(free.get(l.id) ?? []), { qty: n.qty, uom: l.uom }]);
     }
     const sample = Array.isArray(nf?.sample) ? nf!.sample : typeof nf?.sample === 'string' ? nf.sample.replace(/^\{|\}$/g, '').split(',').filter(Boolean) : [];
+    const uncounted: MaterialFacts['notTotalled'] = [];
     const stock: StockFact[] = rows.flatMap((r) => {
       const parts = free.get(r.id) ?? [];
       const uom = parts[0]?.uom ?? r.need?.[0]?.uom ?? r.used?.[0]?.uom ?? null;
       const available = netQty(parts, [], uom), used = netQty(r.used ?? [], [], uom), gap = netQty(r.need ?? [], parts, uom);
-      if (unsure.has(r.id) || 'refused' in available || 'refused' in used || 'refused' in gap) return [];
+      const bad = unsure.get(r.id) ?? [available, used, gap].find((n): n is Refused => 'refused' in n);
+      if (bad) { uncounted.push({ materialId: r.id, code: r.material_code, name: r.material_name, reason: notTotalled(bad) }); return []; }
+      if ('refused' in available || 'refused' in used || 'refused' in gap) return [];
       return [{
         materialId: r.id, code: r.material_code, name: r.material_name, available: num(available.qty), uom: uom ?? null,
         dailyUse: num(used.qty) / window, shortForPlannedRuns: signOf(gap.qty) > 0, issueDays: num(r.days),
       }];
     });
 
-    return { noFloorCode: { count: num(nf?.n), sample: sample.map((x) => x.replace(/^"|"$/g, '')) }, stock };
+    return { noFloorCode: { count: num(nf?.n), sample: sample.map((x) => x.replace(/^"|"$/g, '')) }, stock, notTotalled: uncounted };
   }
 
   /* ── the bridge and Ruh's own queue ─────────────────────────────────────────────────── */

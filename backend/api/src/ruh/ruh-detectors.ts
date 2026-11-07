@@ -93,6 +93,8 @@ export interface StockFact {
 export interface MaterialFacts {
   noFloorCode: { count: number; sample: string[] };
   stock: StockFact[];
+  /** STOCK3-5: materials in use whose stock does not add up to one figure, and why. */
+  notTotalled: Array<{ materialId: string; code: string | null; name: string | null; reason: string }>;
 }
 
 export interface BridgeFacts {
@@ -110,7 +112,7 @@ export const DETECTOR_KINDS = {
   setup: ['setup.incomplete'],
   vault: ['vault.recipes_awaiting_approval', 'vault.recipes_needed', 'vault.compliance_warnings', 'vault.formula_needed', 'vault.ruh_grant_pending'],
   shelf: ['shelf.tasks_overdue', 'shelf.bin_full', 'inventory.quarantine', 'shelf.pick_light_parked'],
-  materials: ['masterdata.no_floor_code', 'inventory.low_stock'],
+  materials: ['masterdata.no_floor_code', 'inventory.low_stock', 'inventory.not_totalled'],
   bridge: ['bridge.failing', 'bridge.not_connected', 'bridge.catalogue_stale', 'ruh.signals_stuck'],
 } as const;
 export type DetectorGroup = keyof typeof DETECTOR_KINDS;
@@ -454,6 +456,16 @@ export function detectMaterials(f: MaterialFacts, s: RuhSettings, now: Date): In
         : `${label} runs out in about ${Math.max(0, Math.round(daysLeft))} day(s)`,
       body: `${round1(m.available)} ${m.uom ?? ''} available${runOut ? `; at recent use it lasts until about ${ymd(runOut)}` : ''}. Raise a purchase request or check open purchase orders.`.replace(/\s+/g, ' '),
       deepLink: `#/go/reorder|stock|materials`, prediction, dedupeKey: `inventory.low_stock:${m.materialId}`, mirror: true,
+    });
+  }
+  // STOCK3-5: not mirrored: this is a housekeeping note for the factory, with no figure for ALEMBIC to use.
+  for (const m of f.notTotalled) {
+    out.push({
+      kind: 'inventory.not_totalled', severity: 'warn', audienceRoles: ['procurement', 'warehouse'], console: 'factory',
+      subject: { type: 'material', id: m.materialId, code: m.code },
+      title: `${m.code ?? m.name ?? 'A raw material'}: stock cannot be totalled`,
+      body: `${m.reason} So no run-out warning or shortage check can be given for it. Put its lots in units that add, or check it by hand.`,
+      deepLink: '#/go/reorder|stock|materials', prediction: null, dedupeKey: `inventory.not_totalled:${m.materialId}`, mirror: false,
     });
   }
   return out;

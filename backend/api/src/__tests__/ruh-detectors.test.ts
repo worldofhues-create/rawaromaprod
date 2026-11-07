@@ -166,6 +166,7 @@ test('shelves: overdue tasks by kind, bins near/over the batch limit, quarantine
 
 test('materials: run-out prediction from on-hand ÷ recent daily issue; short for planned runs is urgent and quantity-free', () => {
   const out = detectMaterials({
+    notTotalled: [],
     noFloorCode: { count: 2, sample: ['RM-A', 'RM-B'] },
     stock: [
       { materialId: 'm1', code: 'RM-1', name: 'Linalool', available: 30, dailyUse: 10, shortForPlannedRuns: false, uom: 'kg', issueDays: 12 },
