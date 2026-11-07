@@ -129,7 +129,7 @@ test('Pick -> Verify -> Mix by three people: FEFO and wrong-scan refusals, toler
   await page.locator('#fl-vdone').click();
   await (await vpop).close();
   await expect.poll(() => sql(`select stage from production.floor_job where floor_job_id='${j.floorJobId}'`)).toBe('MIX');
-  expect(sql(`select string_agg(status, ',' order by w.created_dt) from production.weighing_record w join production.floor_job f on f.mixing_session_id = w.secure_mixing_session_id where f.floor_job_id='${j.floorJobId}'`)).toBe('OUT_OF_TOLERANCE,ACCEPTED');
+  expect(sql(`select string_agg(status, ',' order by w.created_dt) from production.weighing_record w join production.floor_job f on f.mixing_session_id = w.secure_mixing_session_id where f.floor_job_id='${j.floorJobId}'`)).toBe('OUT_OF_TOLERANCE,OVER_PICK,ACCEPTED');
 
   // 3 Mixer
   await signIn(page, 'factory', 'mixer');
