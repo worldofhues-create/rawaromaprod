@@ -247,7 +247,7 @@
     var d = data(res), open = d.lines.filter(function (l) { return !l.picked; }), next = open[0];
     var head = '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(d.jobNo) + '<span>' + esc(d.orderRef || '') + '</span><span style="margin-left:auto">' + (d.lines.length - open.length) + ' of ' + d.lines.length + ' picked</span></div>';
     var list = d.lines.map(function (l) {
-      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)"><b>' + l.seq + '</b>' + code(l.floorCode) + swatch(l) +
+      return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap"><b>' + l.seq + '</b>' + code(l.floorCode) + swatch(l) +
         '<span style="margin-left:auto">' + (l.picked ? chip('g', 'Picked' + (l.offFefoReason ? ' (reason: ' + l.offFefoReason + ')' : '')) : l.waiting ? chip('a', l.waiting) : chip('n', 'Open')) + '</span></div>';
     }).join('');
     var body;

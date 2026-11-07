@@ -151,6 +151,13 @@ async function cardsClear(page: Page, where: string) {
     return parseFloat(getComputedStyle(c).paddingLeft) >= 12 ? [] : [(c.id || c.textContent || '').slice(0, 40)];
   }));
   expect(bad, where).toEqual([]);
+  // Nothing may run past its card's edge either: the page does not scroll sideways for a clipped chip.
+  const out = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('#ra-view .card')].flatMap((c) => {
+    if (c.querySelector(':scope > table') || getComputedStyle(c).overflowX === 'auto') return [];
+    const r = c.getBoundingClientRect();
+    return [...c.querySelectorAll<HTMLElement>('*')].filter((e) => !e.closest('table') && e.offsetWidth && (e.getBoundingClientRect().right > r.right + 1 || e.getBoundingClientRect().left < r.left - 1)).map((e) => (e.textContent || e.tagName).slice(0, 30));
+  }));
+  expect(out, where).toEqual([]);
   expect(await noSideScroll(page), where).toBe(true);
 }
 const atPick = (page: Page, id: string) => page.locator(`[data-job="${id}"]`).click();
