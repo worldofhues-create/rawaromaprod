@@ -59,8 +59,8 @@ test('SCAN-11 finished flow: job ticket, MIXED reprint, batch label, maceration 
   // F1 a job ticket on every floor-queue row (its job number is what the verifier/mixer find field takes)
   assert.match(fl, /SB\('fl-jt-' \+ j\.floorJobId, \{ labelKind: 'floor_job', subjectRef: j\.jobNo, code: j\.jobNo/);
   // F4 MIXED reprint once the job is done (PICKED and VERIFIED already reprint at the next station)
-  assert.match(fl, /data-rpm="/);
-  assert.match(fl, /reprint\(b\.getAttribute\('data-rpm'\), 'MIXED'\)/);
+  assert.match(fl, /id="fl-rpm-ref" data-scan/);
+  assert.match(fl, /reprint\(data\(r\)\.floorJobId, 'MIXED'\)/);
   // F4 batch label + F5 maceration start and complete tags, on each run
   const mac = near(fo, 'async function viewMaceration(', 5000);
   assert.match(mac, /labelKind: 'oil_batch'/);

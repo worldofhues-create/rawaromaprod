@@ -233,7 +233,23 @@
   }
 
   /* ── 3 Mixer ────────────────────────────────────────────────────────────────────────── */
-  function viewMix(item, V) { return pickJob(V, 'MIX', 'Mix', function (id) { mixJobView(V, id); }); }
+  // SCAN-13: once mixed the job leaves the queue, so MIXED is reprinted from here: scan the MIXED label
+  // (its batch number), the tote or the job number, give a reason; it says REPRINT.
+  async function viewMix(item, V) {
+    await pickJob(V, 'MIX', 'Mix', function (id) { mixJobView(V, id); });
+    var host = V.firstElementChild; if (!host || !document.getElementById('fl-find')) return;
+    var f = document.createElement('form');
+    f.id = 'fl-rpm-form'; f.className = 'card'; f.style.cssText = 'display:flex;gap:10px;flex-wrap:wrap;align-items:center';
+    f.innerHTML = '<label style="flex:1;min-width:200px">Reprint a MIXED label: scan it, the tote or the job<input id="fl-rpm-ref" data-scan class="fld" autocomplete="off" placeholder="B-2611-0001" style="min-height:52px;font-size:18px"></label>' + btn('fl-rpm-go', 'Reprint MIXED', '', big(' type="submit"'));
+    host.appendChild(f);
+    f.onsubmit = async function (e) {
+      e.preventDefault();
+      var r = await call('/v1/floor/find?ref=' + encodeURIComponent($('fl-rpm-ref').value.trim()));
+      if (r.status >= 400) { toast(err(r, 'Nothing answers to that.'), 'bad'); return; }
+      if (data(r).stage !== 'DONE') { toast('That job is not mixed yet: there is no MIXED label to reprint.', 'warn'); return; }
+      reprint(data(r).floorJobId, 'MIXED');
+    };
+  }
   async function mixJobView(V, id) {
     var res = await call('/v1/floor/jobs/' + id + '/mix');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'This job cannot be opened.')); return; }
@@ -283,14 +299,13 @@
         var p = j.prediction;
         var fin = !p ? '' : p.atRisk ? chip('r', 'Late by ' + p.lateByDays + 'd') + ' ' + esc(p.explain) : esc(p.explain);
         return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin +
-          // SCAN-11: the job ticket (its job number is what the next station's find field takes); MIXED reprint once done.
+          // SCAN-11: the job ticket (its job number is what the next station's find field takes).
           '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + SB('fl-jt-' + j.floorJobId, { labelKind: 'floor_job', subjectRef: j.jobNo, code: j.jobNo, title: 'FLOOR JOB', defaultStation: 'Floor', lines: [['Order', j.orderRef], ['Stage', ({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage]] }) +
-          (j.stage === 'DONE' ? btn('fl-rpm-' + j.floorJobId, 'Reprint MIXED', 'sm', ' data-rpm="' + esc(j.floorJobId) + '"') : '') + '</div></td></tr>';
+          '</div></td></tr>';
       }).join('') : '<tr><td colspan="6">Nothing on the floor.</td></tr>') + '</tbody></table></div>' +
       ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
         return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Choose it as the stock-cover suggestion when you put a run on the floor.</span></p>';
       }).join('') + '</div>' : '');
-    V.querySelectorAll('[data-rpm]').forEach(function (b) { b.onclick = function () { reprint(b.getAttribute('data-rpm'), 'MIXED'); }; });
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();

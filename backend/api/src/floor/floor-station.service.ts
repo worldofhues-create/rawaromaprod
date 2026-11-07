@@ -237,12 +237,13 @@ export class FloorStationService {
     return j;
   }
 
-  /** Find a job by its tote (the verifier scans the tote) or job number. */
+  /** Find a job by its tote (the verifier scans the tote), job number, or (SCAN-13) the batch number
+   *  the MIXED label carries, so a MIXED label can be scanned to reprint it. */
   async findJob(ref: string) {
     const r = scanCode(ref); // SCAN-3
     if (!r) throw new BadRequestException('Scan or type a tote or job number.');
     const [j] = await this.sql<{ floor_job_id: string; job_no: string; stage: string }[]>`
-      select floor_job_id, job_no, stage from production.floor_job where upper(tote) = upper(${r}) or upper(job_no) = upper(${r})
+      select floor_job_id, job_no, stage from production.floor_job where upper(tote) = upper(${r}) or upper(job_no) = upper(${r}) or upper(batch_no) = upper(${r})
        order by created_dt desc limit 1`;
     if (!j) throw new NotFoundException(`Nothing on the floor answers to ${r}.`);
     return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage };

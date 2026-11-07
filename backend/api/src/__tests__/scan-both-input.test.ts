@@ -90,3 +90,10 @@ test('SCAN-8: the kiosk lock gives the shell one column, so hiding the rail cann
   const src = readFileSync(new URL('../../../../web/ws-floor-ops.js', import.meta.url), 'utf8');
   assert.match(src, /html\.ra-kiosk body \.app\{grid-template-columns:minmax\(0,1fr\)!important\}/); // outranks body.rail-off .app
 });
+
+test('SCAN-13: in a form with several scan fields, a scanner suffix moves to the next empty one; only the last submits', () => {
+  const src = readFileSync(new URL('../../../../web/scan-input.js', import.meta.url), 'utf8');
+  const kd = src.slice(src.indexOf("input.addEventListener('keydown'"), src.indexOf("input.addEventListener('change'"));
+  assert.ok(kd.indexOf('nextScanField(input)') > 0 && kd.indexOf('nextScanField(input)') < kd.indexOf("submit(input, n.code"), 'advance is decided before submit');
+  assert.match(src, /function nextScanField\(input\)/);
+});

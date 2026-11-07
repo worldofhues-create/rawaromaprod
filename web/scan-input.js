@@ -65,6 +65,12 @@
     return null;
   }
 
+  function nextScanField(input) {
+    if (!input.form) return null;
+    var all = [].slice.call(input.form.querySelectorAll('input[data-scan]')), i = all.indexOf(input);
+    for (var k = i + 1; k < all.length; k++) if (!String(all[k].value || '').trim() && !all[k].disabled && all[k].offsetParent !== null) return all[k];
+    return null;
+  }
   function submit(input, code, source) {
     input.value = code;
     input.setAttribute('data-scan-source', source);
@@ -95,6 +101,11 @@
         input.value = n.code;
         input.setAttribute('data-scan-source', wasScanner ? 'wedge' : 'typed');
         if (n.symbology) input.setAttribute('data-scan-symbology', n.symbology);
+        // SCAN-13: a form with several scan fields (bin, then lot) is filled in order: the suffix moves
+        // to the next empty scan field, and only the last one submits. Submitting on the bin's suffix
+        // sent the line with no lot, and the picker had to scan the bin again.
+        var nextEmpty = nextScanField(input);
+        if (nextEmpty) { e.preventDefault(); nextEmpty.focus(); return; }
         if (e.key === 'Tab' || input.__raScanCb) { e.preventDefault(); submit(input, n.code, wasScanner ? 'wedge' : 'typed'); }
         return;
       }

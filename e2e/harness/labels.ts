@@ -7,9 +7,10 @@ import { sql } from './walk';
 type El = { t: string; d?: string; s?: string };
 
 /** The newest print job of this kind for this code: printed (browser fallback), both codes on it. */
-export async function printedJob(kind: string, code: string, opts: { reprint?: boolean } = {}) {
+export async function printedJob(kind: string, subject: string, opts: { reprint?: boolean; code?: string } = {}) {
+  const code = opts.code ?? subject;
   const q = `select status || '|' || (reprint_of is not null) || '|' || coalesce(reprint_reason, '') || '|' || template::text from platform.print_job
-              where label_kind = '${kind}' and subject_ref = '${code.replace(/'/g, "''")}' order by created_at desc limit 1`;
+              where label_kind = '${kind}' and subject_ref = '${subject.replace(/'/g, "''")}' order by created_at desc limit 1`;
   await expect.poll(() => sql(q).split('|')[0], { message: `${kind} ${code} printed` }).toBe('printed');
   const [status, isReprint, reason, ...rest] = sql(q).split('|');
   const t = JSON.parse(rest.join('|')) as { elements: El[]; codes?: { code128: boolean }; reprint: boolean };

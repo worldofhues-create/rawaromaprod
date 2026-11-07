@@ -287,6 +287,8 @@ test('mixer: cannot mix what they verified; steps in order; MIXED creates the oi
   assert.match(done.batchNo, /^B-\d{4}-\d{4,}$/);
   assert.equal(done.label.kind, 'MIXED');
   assert.equal(done.label.batchNo, done.batchNo);
+  // SCAN-13: the MIXED label carries the batch number; scanning it finds the job, so MIXED can be reprinted.
+  assert.equal((await stations.findJob(`]C0${done.batchNo}\r`)).floorJobId, s.job.floorJobId);
   const [ob] = await sql()`select produced_qty::text from production.oil_batch_master where oil_batch_id = ${done.oilBatchId}`;
   assert.equal(Number(ob!.produced_qty), 127.75);
   const cons = await sql()`select consumed_for_document_id::text as lot from production.oil_batch_consumption where oil_batch_id = ${done.oilBatchId}`;
