@@ -92,7 +92,7 @@ test('stock view: a reservation in g comes off a kg lot in kg', async () => {
   const m = await material('kg');
   const ib = await lot(m, '1.0000', 'kg');
   await reserve(ib, '250.0000', 'g');
-  const r = (await new InventoryViewService(sql() as never).availability({ materialId: m })).items[0]!;
+  const r = (await new InventoryViewService(sql() as never).availability({ materialId: m })).items[0]! as Record<string, unknown>;
   assert.deepEqual([r.onHand, r.reserved, r.available, r.uom], [1, 0.25, 0.75, 'kg']);
 });
 
@@ -100,7 +100,7 @@ test('stock view: a reservation that cannot convert leaves free stock blank, wit
   const m = await material('kg');
   const ib = await lot(m, '1.0000', 'kg');
   await reserve(ib, '1.0000', 'L');
-  const r = (await new InventoryViewService(sql() as never).availability({ materialId: m })).items[0]!;
+  const r = (await new InventoryViewService(sql() as never).availability({ materialId: m })).items[0]! as Record<string, unknown>;
   assert.equal(r.available, null);
   assert.match(String(r.unitNote), /kg and L/);
 });

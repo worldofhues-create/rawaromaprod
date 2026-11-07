@@ -187,6 +187,19 @@ test('STOCK2-1 a re-weigh at or under the pick clears a held reading without a s
   await assert.rejects(() => stations.approveOverPick(line, { reason: 'late' }, supervisor), /no reading/i);
 });
 
+test('STOCK2-1 a second reading over the pick replaces the figure the supervisor reads and approves', async () => {
+  const s = await floorJob();
+  const line = await picked(s);
+  await apply(await issueOf(s.o.orderId));
+  await reading(s, line, 125_700);
+  await reading(s, line, 125_600);
+  const open = (await openAlerts(sql())).filter((a) => a.subjectId === line);
+  assert.equal(open.length, 1);
+  assert.match(String(open[0]!.body), /125\.6 g against/);
+  await stations.approveOverPick(line, { reason: 'Re-weighed' }, supervisor);
+  assert.equal(await onHand(s.l.id), '874.4000');
+});
+
 test('STOCK2-1 outside tolerance stays refused, over or under, and a supervisor cannot wave it through', async () => {
   const s = await floorJob();
   const line = await picked(s);

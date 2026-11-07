@@ -435,6 +435,7 @@ export class FloorStationService {
       }
       if (over) {
         await tx`update production.floor_line set over_mg = ${actual}, over_source = ${source}, over_read_by = ${principal.userId} where floor_line_id = ${lineId}`;
+        await clearAlert(tx as unknown as Sql, `stock_over_pick:${lineId}`, new Date()); // a later reading replaces the figure a supervisor will read
         await raiseAlert(tx as unknown as Sql, {
           kind: 'STOCK_OVER_PICK', station: 'Floor', subjectType: 'FLOOR_LINE', subjectId: lineId,
           title: `${j.job_no} line ${l.seq} weighed over the pick`,
