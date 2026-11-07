@@ -267,6 +267,11 @@
     'Amend': 'Make a changed copy. The copy needs approval again.',
     'Cancel': 'Cancel this order. The supplier is told why.',
     'QR label': 'Print a QR label to stick on it.',
+    // SCAN-10/11: every flow step's label, Code 128 + QR of the record's own number.
+    'Print label': 'Print its label: a barcode and a QR of its number, for the next step to scan.',
+    'Reprint label': 'Print it again. You give a reason; the label says REPRINT and the reprint is logged with your name.',
+    'Print FG lot label': 'Print the finished lot\'s label: a barcode and a QR of the lot number.',
+    'Reprint FG lot label': 'Print the lot label again. You give a reason; it says REPRINT and is logged with your name.',
     'Release to stock': 'Make this batch available to use (after QC).',
     'Replacement PO': 'Raise a new purchase order for the rejected goods.',
     'Send to vendors': 'Send this quote request to the suppliers on it.',
