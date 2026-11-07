@@ -54,6 +54,31 @@ fi
 die() { echo "FATAL: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
 
+# ONE LOCK FOR THE HOST, shared with alembic ops/deploy/deploy-sha.sh. On 2026-11-07 this
+# script's build and Alembic's ran together on a 3.8 GB no-swap box, the kernel killed Alembic's
+# next-build, and the storefront was down for ten minutes. flock, so a killed deploy frees it.
+HOST_LOCK="${RAWPROD_HOST_LOCK:-/run/lock/raw-host-deploy.lock}"
+MEMINFO="${RAWPROD_MEMINFO:-/proc/meminfo}"
+# This build held about 1450 MB RSS in that OOM table; a quiet host has about 1990 available.
+# Main host only. The vault box is a t4g.small with about 1400 available and nothing else building
+# on it, so 1800 would refuse every vault deploy; set RAWPROD_MIN_BUILD_MEM_MB there to give it one.
+MIN_BUILD_MEM_MB="${RAWPROD_MIN_BUILD_MEM_MB:-$([ "$ROLE" = vault ] && echo 0 || echo 1800)}"
+
+take_host_lock() {
+  command -v flock >/dev/null 2>&1 || die "no flock on this host, so another deploy cannot be excluded"
+  exec 9>>"$HOST_LOCK" || die "cannot open $HOST_LOCK"
+  flock -n 9 || die "another deploy holds the host lock: $(tail -1 "$HOST_LOCK" 2>/dev/null)"
+  printf 'rawprod pid %s since %s\n' "$$" "$(date -u +%FT%TZ)" >&9
+}
+
+require_build_memory() {
+  local kb mb
+  kb=$(awk '/^MemAvailable:/ {print $2}' "$MEMINFO" 2>/dev/null || true)
+  [ -n "$kb" ] || die "cannot read available memory from $MEMINFO"
+  mb=$((kb / 1024))
+  [ "$mb" -ge "$MIN_BUILD_MEM_MB" ] || die "not enough memory to build: ${mb}MB available, ${MIN_BUILD_MEM_MB}MB required"
+}
+
 status() {
   echo "role     : $ROLE"
   echo "deployed : $(cat "$STATE" 2>/dev/null || echo '(unrecorded)')"
@@ -179,6 +204,8 @@ EOM
     say "yes — nothing in the ledger is ahead of $full"
   fi
 
+  require_build_memory
+
   local current
   current=$(sudo -u rawprod git -C "$APP" rev-parse HEAD)
   [ "$full" = "$current" ] && say "already at $full; continuing so a partial deploy self-heals"
@@ -235,11 +262,12 @@ case "${1:-}" in
   --version)  version ;;
   --status)   status ;;
   --rollback)
+    take_host_lock
     [ -s "$PREV" ] || die "no previous SHA recorded"
     say "rolling back to $(cat "$PREV")"
     deploy "$(cat "$PREV")" yes
     ;;
   "")         die "usage: $0 <sha> | --rollback | --status | --version   (RAWPROD_ROLE=main|vault)" ;;
   -*)         die "unknown option $1" ;;
-  *)          deploy "$1" no ;;
+  *)          take_host_lock; deploy "$1" no ;;
 esac

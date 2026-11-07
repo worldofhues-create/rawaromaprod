@@ -195,6 +195,12 @@ build` (a no-op for the API — it runs from source via the swc loader per `DEPL
 for any workspace package that does compile), restarts the migrate unit before the api unit,
 health-checks `/health` (+ both static roots on `main`), writes `/srv/rawprod/DEPLOYED_SHA`.
 
+A deploy or a rollback first takes `flock` on `/run/lock/raw-host-deploy.lock`, the lock Alembic's
+`ops/deploy/deploy-sha.sh` takes, and refuses if the other is running. On `main` it then refuses to
+build with under 1800 MB available (`RAWPROD_MIN_BUILD_MEM_MB`; no floor on `vault` unless that is
+set). Both live in the script in the checkout, so the deploy that first brings them in runs the old
+script and takes neither: check by hand that nothing else is building for that one.
+
 ## 8. `scripts/migrate/` — PB-02 migration tooling
 
 - `neon-dump.sh <main|formula>` — a consistent (`--serializable-deferrable`), directory-format,
