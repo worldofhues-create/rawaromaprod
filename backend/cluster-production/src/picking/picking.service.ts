@@ -16,10 +16,11 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, getTableColumns, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
-import { convertQty, uuidv7 } from '@core/data-kernel';
+import { convertQty, netQty, signOf, uuidv7, type QtyPart } from '@core/data-kernel';
 import { VAULT_PORT, type CodedInstruction, type VaultPort } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
+import { drizzleTag, settleIssued } from './issued-amount.js';
 import { paginate, type Page } from '../_helpers.js';
 import type { CreateIssue, GeneratePickList, ListQuery } from '../production.dtos.js';
 
@@ -261,8 +262,8 @@ export class PickingService {
 
   /**
    * POST /v1/material-issues — issue picked materials against the order. Inserts a
-   * material_issue + one material_issue_item per item (issued_qty = true), flips each issued
-   * material's production_order_ingredients.issued_qty to true, and emits
+   * material_issue + one material_issue_item per item (issued_qty = true), settles each issued
+   * material's production_order_ingredients quantity (issued-amount.ts), and emits
    * production.materials.issued. All in one transaction.
    */
   /** The lots a pick list line can be issued from: its own material's stock on hand. By line, because the
@@ -319,6 +320,8 @@ export class PickingService {
       // each. Naming only the material still works while one line carries it, and is refused when
       // two do: picking one for the caller would be a guess about which quantity left the shelf.
       const taken = new Set<string>();
+      const lotTakes = new Map<string, QtyPart[]>();
+      const issuedMaterials = new Set<string>();
       for (const item of body.items) {
         let materialId = item.materialId ?? null;
         let pickLineId = item.materialPickListItemId ?? null;
@@ -352,15 +355,26 @@ export class PickingService {
           if (held.length) throw new ConflictException('That lot is on hold and cannot be issued. Choose another lot.');
           // STOCK-UNITS: the debit converts this line to the lot's unit. If it cannot, say so here,
           // to the person issuing, rather than leave an issue the consumer will only refuse later.
-          const units = (await tx.execute(sql`select i.picked_qty::text as qty, pu.uom_code as pick_uom, lu.uom_code as lot_uom
+          const units = (await tx.execute(sql`select i.picked_qty::text as qty, pu.uom_code as pick_uom, lu.uom_code as lot_uom,
+              ib.quantity_on_hand::text as on_hand, rb.batch_number
             from production.material_pick_list_items i
             join inventory.inventory_batch ib on ib.inventory_batch_id = ${item.inventoryBatchId}::uuid
             left join platform.uom_master pu on pu.uom_id = i.uom_id
             left join platform.uom_master lu on lu.uom_id = ib.uom_id
-            where i.material_pick_list_item_id = ${pickLineId}::uuid and i.picked_qty > 0`)) as unknown as Array<{ qty: string; pick_uom: string | null; lot_uom: string | null }>;
+            left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
+            where i.material_pick_list_item_id = ${pickLineId}::uuid and i.picked_qty > 0`)) as unknown as Array<{ qty: string; pick_uom: string | null; lot_uom: string | null; on_hand: string | null; batch_number: string | null }>;
           for (const u of units) {
             const moved = convertQty(u.qty, u.pick_uom, u.lot_uom);
             if ('refused' in moved) throw new ConflictException(`That lot cannot be issued for this line. ${moved.refused}`);
+            // STOCK3-1: on what the issue takes from this lot in all, said here while the person can
+            // still choose another lot. The debit holds the same line, for stock that goes after this.
+            const parts = [...(lotTakes.get(item.inventoryBatchId) ?? []), { qty: moved.qty, uom: u.lot_uom }];
+            lotTakes.set(item.inventoryBatchId, parts);
+            const left = netQty([{ qty: u.on_hand ?? '0', uom: u.lot_uom }], parts, u.lot_uom);
+            if (!('refused' in left) && signOf(left.qty) < 0) {
+              const all = netQty(parts, [], u.lot_uom) as { qty: string };
+              throw new ConflictException(`Lot ${u.batch_number ?? 'on this line'} holds ${u.on_hand ?? '0'} ${u.lot_uom}, and this issue takes ${all.qty} ${u.lot_uom}. Nothing was issued. Choose another lot, or count this one.`);
+            }
           }
         }
         await tx.insert(materialIssueItem).values({
@@ -376,16 +390,11 @@ export class PickingService {
           updatedBy: principal.userId,
         });
 
-        await tx
-          .update(productionOrderIngredients)
-          .set({ issuedQty: true, updatedBy: principal.userId })
-          .where(
-            and(
-              eq(productionOrderIngredients.productionOrderId, body.productionOrderId),
-              eq(productionOrderIngredients.materialId, materialId!),
-            ),
-          );
+        issuedMaterials.add(materialId!);
       }
+
+      // STOCK3-2: flipped by material, a partial issue read as the whole line issued.
+      for (const m of issuedMaterials) await settleIssued(drizzleTag(tx), body.productionOrderId, m, principal.userId);
 
       await recordOutbox(
         tx,

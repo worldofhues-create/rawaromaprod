@@ -74,7 +74,8 @@ export const productionOrderIngredients = production.table(
     ),
     materialId: uuid("material_id"), // soft ref → masterdata.material
     requiredQty: numeric("required_qty", { precision: 18, scale: 4 }),
-    issuedQty: boolean("issued_qty"),
+    issuedQty: boolean("issued_qty"), // STOCK3-2: true once the line is covered, not once anything was issued
+    issuedAmount: numeric("issued_amount", { precision: 28, scale: 10 }), // STOCK3-2: what really left, in this line's unit; null on an old row nobody can work out
     uomId: uuid("uom_id"), // soft ref → platform.uom_master
     ...metaColumns(),
   },

@@ -420,6 +420,7 @@ create table if not exists production.material_issue_item (
   updated_by varchar(255)
 );
 alter table production.material_issue_item add column if not exists material_pick_list_item_id uuid;
+alter table production.production_order_ingredients add column if not exists issued_amount numeric(28,10);
 
 create table if not exists production.secure_mixing_session (
   secure_mixing_session_id uuid primary key,
@@ -3003,6 +3004,11 @@ alter table platform.device_master add constraint device_master_kind_check
 -- FLOOR-GAPS (2026-11-07): the stock ledger table exactly as scripts/migrations/0006_inventory.sql creates it
 -- (a lot split writes one row per side; gen_random_uuid for uuidv7, as everywhere here), then scripts/migrations/2026-11-07-floor-gaps.sql mirrored here
 -- (body after @target; the app-role grant block is left out).
+CREATE TABLE IF NOT EXISTS "inventory"."inventory_transaction_type_master" (
+	"inventory_transaction_type_id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+	"type_code" varchar(50),
+	"type_name" varchar(200)
+);
 CREATE TABLE IF NOT EXISTS "inventory"."inventory_transaction" (
 	"inventory_transaction_id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"inventory_batch_id" uuid,

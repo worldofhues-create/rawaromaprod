@@ -30,6 +30,10 @@
  * are locked before actual_mg is read and verifyLine writes actual_mg before reading debited_mg, so
  * whichever transaction commits second sees the other: the weight lands exactly once.
  *
+ * STOCK3-1: a lot never goes below zero here. The issue is refused to the person when it is raised
+ * (PickingService.issueMaterials), and stock can still go between that and this, so a debit that does
+ * not fit refuses the whole issue the same way a unit does: nothing moves, the issue stays open.
+ *
  * STOCK2-4: a refusal is also an open floor alert with the next action, closed by the first drain
  * after the issue is settled either way (debited, or voided by an abort).
  *
@@ -50,9 +54,12 @@ import { convertQty, mgToQty } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { raiseAlert } from '../floor-ops/floor-alerts.js';
 
-/** A line of the issue does not convert to its lot's unit: rolls the whole debit back. */
+const FIX_UNIT = 'a supervisor corrects the unit on the pick line or the lot. The debit then runs by itself and this alert closes. Until then the lot shows more than the shelf holds.';
+const FIX_COUNT = 'count the lot and post a stock adjustment, or abort the run. The debit then runs by itself and this alert closes. Until then the lot\'s figure cannot be trusted.';
+
+/** A line of the issue cannot be taken off its lot: rolls the whole debit back. */
 class UnitRefused extends Error {
-  constructor(readonly batchId: string, message: string) { super(message); }
+  constructor(readonly batchId: string, message: string, readonly next = FIX_UNIT) { super(message); }
 }
 
 @Injectable()
@@ -112,12 +119,12 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
         select ${err.batchId}, 'PRODUCTION_ISSUE_REFUSED', now(), ${issueId}, 'MATERIAL_ISSUE', ${err.message}, 'ACTIVE'
          where not exists (select 1 from inventory.inventory_event_history
                             where reference_document_id = ${issueId} and event_type = 'PRODUCTION_ISSUE_REFUSED')`;
-      await this.alertRefusal(issueId, err.message);
+      await this.alertRefusal(issueId, err.message, err.next);
     }
   }
 
   /** STOCK2-4: every station reads these, so codes and units only: never a material name. */
-  private async alertRefusal(issueId: string, reason: string): Promise<void> {
+  private async alertRefusal(issueId: string, reason: string, next: string): Promise<void> {
     const [o] = (await this.sql`
       select po.order_number, j.job_no from production.material_issue mi
         left join production.production_order po on po.production_order_id = mi.production_order_id
@@ -127,7 +134,7 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
     await raiseAlert(this.sql, {
       kind: 'STOCK_DEBIT_REFUSED', station: 'Floor', subjectType: 'MATERIAL_ISSUE', subjectId: issueId,
       title: `${what} has not been taken off stock`,
-      body: `${reason} Next: a supervisor corrects the unit on the pick line or the lot. The debit then runs by itself and this alert closes. Until then the lot shows more than the shelf holds.`,
+      body: `${reason} Next: ${next}`,
       dedupeKey: `stock_debit_refused:${issueId}`,
     }, new Date());
   }
@@ -189,10 +196,18 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
         if ('refused' in moved) throw new UnitRefused(l.inv_batch, moved.refused);
         const qty = moved.qty; // exact text in the lot's unit: never through a float
         if (fl) await tx`update production.floor_line set debited_mg = ${fl.actual_mg ?? fl.target_mg} where material_pick_list_item_id = ${l.line_id}`;
-        await tx`
+        // STOCK3-1: one statement, so two debits racing for a lot cannot both read enough.
+        const took = await tx`
           update inventory.inventory_batch
-             set quantity_on_hand = coalesce(quantity_on_hand, 0) - ${qty}::numeric, updated_dt = now()
-           where inventory_batch_id = ${l.inv_batch}`;
+             set quantity_on_hand = quantity_on_hand - ${qty}::numeric, updated_dt = now()
+           where inventory_batch_id = ${l.inv_batch} and quantity_on_hand >= ${qty}::numeric
+           returning inventory_batch_id`;
+        if (!took.length) {
+          const [lot] = await tx`
+            select coalesce(ib.quantity_on_hand, 0)::text as held, rb.batch_number from inventory.inventory_batch ib
+              left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id where ib.inventory_batch_id = ${l.inv_batch}`;
+          throw new UnitRefused(l.inv_batch, `Lot ${lot?.batch_number ?? 'on this issue'} holds ${lot?.held ?? '0'} ${l.lot_uom}, and this issue takes ${qty} ${l.lot_uom}, so nothing was taken off.`, FIX_COUNT);
+        }
         await tx`
           insert into inventory.inventory_event_history
             (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, remarks, status)

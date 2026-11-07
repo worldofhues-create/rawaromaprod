@@ -317,8 +317,8 @@ export class PlanningService {
     // Portal-audit WS4: enrich the masked "Worksheets" list with the material's RM alias so its
     // primary column shows the alias (NEVER the real material name — masking is preserved; the
     // interceptor still masks material_id). A correlated subquery picks one alias deterministically.
-    // issued_qty stays a BOOLEAN flag (dictionary-locked) — it is an issued/not-issued indicator,
-    // not a quantity.
+    // issued_qty stays a BOOLEAN flag (dictionary-locked): is the line covered. issued_amount is the
+    // quantity (STOCK3-2).
     const rows = (await this.db.execute(sql`
       select p.production_order_ingredient_id as "productionOrderIngredientId",
              p.production_order_id as "productionOrderId",
@@ -327,6 +327,7 @@ export class PlanningService {
                 where a.material_id = p.material_id order by a.rm_alias_id limit 1) as "aliasName",
              p.required_qty as "requiredQty",
              p.issued_qty as "issuedQty",
+             p.issued_amount as "issuedAmount",
              p.uom_id as "uomId",
              p.status as "status"
         from production.production_order_ingredients p
@@ -345,6 +346,7 @@ export class PlanningService {
         materialId: productionOrderIngredients.materialId,
         requiredQty: productionOrderIngredients.requiredQty,
         issuedQty: productionOrderIngredients.issuedQty,
+        issuedAmount: productionOrderIngredients.issuedAmount,
         uomId: productionOrderIngredients.uomId,
       })
       .from(productionOrderIngredients)

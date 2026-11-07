@@ -137,6 +137,28 @@ export function signOf(qty: string): -1 | 0 | 1 {
   return qty.startsWith('-') ? -1 : /[1-9]/.test(qty) ? 1 : 0;
 }
 
+/**
+ * STOCK3-2: what was issued for one material, over that material's lines on the order, first line
+ * first. `picked` says whether a line is covered: a verified weight inside tolerance closes its line
+ * though it reads under the pick, so the flag must not follow the scale. `real` is what left, so the
+ * amount does: the last line takes anything over. A line these cannot be read against gets no amount
+ * and stays open: it does not read as issued on a figure nobody could work out.
+ */
+export function spreadIssued<T extends { qty: string; uom: string | null }>(lines: T[], picked: QtyPart[], real: QtyPart[]): Array<{ line: T; full: boolean; amount: string | null }> {
+  const usedPick: QtyPart[] = [], usedReal: QtyPart[] = [];
+  return lines.map((line, i) => {
+    const need = { qty: line.qty, uom: line.uom };
+    const pickLeft = netQty(picked, usedPick, line.uom), realLeft = netQty(real, usedReal, line.uom);
+    const over = netQty([{ qty: 'refused' in realLeft ? '0' : realLeft.qty, uom: line.uom }], [need], line.uom);
+    const short = netQty([{ qty: 'refused' in pickLeft ? '0' : pickLeft.qty, uom: line.uom }], [need], line.uom);
+    if ('refused' in pickLeft || 'refused' in realLeft || 'refused' in over || 'refused' in short) return { line, full: false, amount: null };
+    const amount = i === lines.length - 1 || signOf(over.qty) < 0 ? realLeft.qty : line.qty;
+    usedPick.push(signOf(short.qty) < 0 ? { qty: pickLeft.qty, uom: line.uom } : need);
+    usedReal.push({ qty: amount, uom: line.uom });
+    return { line, full: signOf(pickLeft.qty) > 0 && signOf(short.qty) >= 0, amount };
+  });
+}
+
 /** "kg and L: not totalled. They do not convert…": what a screen prints in place of a figure. */
 export function notTotalled(n: { refused: string; units: string[] }): string {
   return `${n.units.join(' and ') || 'No unit'}: not totalled. ${n.refused}`;

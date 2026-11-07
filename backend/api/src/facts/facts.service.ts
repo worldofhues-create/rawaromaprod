@@ -258,8 +258,9 @@ export class FactsService {
          and upper(coalesce(pr.status, '')) in ('DRAFT','SUBMITTED','APPROVED')
        order by pr.pr_number limit 5`) as Array<{ pr_number: string | null; status: string | null }>;
     // STOCK2-3: a line counts as on the shelf only when it is, exactly, in the line's own unit.
+    // STOCK3-2: what the line still needs, not all it ever needed.
     const open = (await this.sql`
-      select poi.material_id::text, poi.required_qty::text as qty, u.uom_code as uom
+      select poi.material_id::text, greatest(poi.required_qty - coalesce(poi.issued_amount, 0), 0)::text as qty, u.uom_code as uom
         from production.production_order_ingredients poi left join platform.uom_master u on u.uom_id = poi.uom_id
        where poi.production_order_id = ${productionOrderId} and coalesce(poi.issued_qty, false) = false and poi.material_id is not null`) as Array<{ material_id: string; qty: string | null; uom: string | null }>;
     const shelf = await stockPosition(this.sql, open.map((l) => l.material_id));

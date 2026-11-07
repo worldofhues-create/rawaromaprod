@@ -54,6 +54,7 @@ import { ConflictException, Inject, Injectable, NotFoundException } from '@nestj
 import { and, desc, eq, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
+import { drizzleTag, settleIssued } from '../picking/issued-amount.js';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { unweighedLineCount } from '../weighing/weighing.service.js';
@@ -66,7 +67,7 @@ import type {
   LogStep,
 } from '../production.dtos.js';
 
-const { secureMixingSession, mixingStepLog, productionOrderIngredients, outbox } = productionSchema;
+const { secureMixingSession, mixingStepLog, outbox } = productionSchema;
 
 @Injectable()
 export class MixingService {
@@ -361,15 +362,7 @@ export class MixingService {
         }
 
         for (const materialId of reversedMaterialIds) {
-          await tx
-            .update(productionOrderIngredients)
-            .set({ issuedQty: false, updatedBy: principal.userId })
-            .where(
-              and(
-                eq(productionOrderIngredients.productionOrderId, productionOrderId),
-                eq(productionOrderIngredients.materialId, materialId),
-              ),
-            );
+          await settleIssued(drizzleTag(tx), productionOrderId, materialId, principal.userId); // STOCK3-2
           reversedIngredients += 1;
         }
 

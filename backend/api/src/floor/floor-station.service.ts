@@ -33,7 +33,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
-import { BatchService, MixingService, PickingService } from '@ra/cluster-production';
+import { BatchService, MixingService, PickingService, settleIssued, type IssuedSql } from '@ra/cluster-production';
 import { massFactorMg, mgToQty, qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg, codeText } from './floor-code.service.js';
 import { clearAlert, raiseAlert } from '../floor-ops/floor-alerts.js';
@@ -466,6 +466,9 @@ export class FloorStationService {
         over_reason = ${over?.reason ?? null}, over_by = ${over?.by ?? null}, over_dt = ${over ? new Date().toISOString() : null}::timestamptz
       where floor_line_id = ${l.floor_line_id}`;
     await clearAlert(tx as unknown as Sql, `stock_over_pick:${l.floor_line_id}`, new Date());
+    // STOCK3-2: the order's issued quantity is this weight now, debited or not.
+    const [ord] = await tx<{ production_order_id: string }[]>`select production_order_id::text from production.floor_job j join production.floor_line fl on fl.floor_job_id = j.floor_job_id where fl.floor_line_id = ${l.floor_line_id}`;
+    if (ord) await settleIssued(tx as unknown as IssuedSql, ord.production_order_id, l.material_id, verifiedBy);
     const [d] = await tx<{ debited_mg: string | null; issue_id: string | null; uom_code: string | null }[]>`
       select fl.debited_mg::text, mii.material_issue_id::text as issue_id, u.uom_code
         from production.floor_line fl
