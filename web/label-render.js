@@ -90,7 +90,7 @@
 
   /* SCAN-1 (owner: "we need both QR and barcode"). Every label carries a Code 128 AND a QR with the
    * SAME payload, which is only the opaque id (L-7Q3K9XA, a bin code, a carton code): never a name, a
-   * CAS number or a percentage, so build() refuses anything that is not upper-case letters, digits
+   * CAS number or a percentage, so build() refuses anything that is not letters, digits
    * and hyphens. Module sizes are whole printer dots at 203 dpi (0.125 mm), the coarsest head sold:
    *   Code 128 narrow bar 0.5 / 0.375 / 0.25 mm (0.25 = 2 dots is the floor), bars >= 5 mm tall,
    *            10-module quiet zone each side (ISO/IEC 15417);
@@ -100,7 +100,7 @@
    * floors (38 x 25 mm: the Code 128 alone is wider than the label), the label prints the QR plus the
    * code as text, and the template's `codes.note` says why, so nobody has to rediscover it. */
   var BAR_X = [0.5, 0.375, 0.25], QR_X = [0.5, 0.375], BAR_MIN_H = 5, GAP = 1.5, CODE_TEXT_H = 2;
-  var OPAQUE_RE = /^[A-Z0-9][A-Z0-9-]{0,39}$/;
+  var OPAQUE_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,63}$/; // shipment numbers carry the SO's own case
   function qrLib() {
     if (typeof qrcode === 'function') return qrcode; // eslint-disable-line no-undef
     if (typeof require === 'function') { try { return require('./qrcode.js'); } catch (e) { /* below */ } }
@@ -123,7 +123,7 @@
     if (!S) throw new Error('Unknown label size "' + size + '". Sizes: ' + Object.keys(SIZES).join(', '));
     var c = content || {};
     var code = c.code === undefined || c.code === null || c.code === '' ? null : String(c.code);
-    if (code !== null && !OPAQUE_RE.test(code)) throw new Error('A label code must be the opaque id only (upper-case letters, digits, hyphens), not "' + code + '".');
+    if (code !== null && !OPAQUE_RE.test(code)) throw new Error('A label code must be the opaque id only (letters, digits, hyphens; no spaces or symbols), not "' + code + '".');
     var lines = (c.lines || []).filter(function (l) { return l && l[1] !== undefined && l[1] !== null && String(l[1]) !== ''; });
     var W = S.w, m = W <= 50 ? 1.2 : W <= 75 ? 2 : 3;
     var units = (c.reprint ? 1.2 : 0) + (c.brand ? 0.9 : 0) + (c.title ? 1.4 : 0) + lines.length + (c.footer ? 0.8 : 0);
@@ -398,7 +398,7 @@
    */
   function codesHtml(code, opts) {
     var o = opts || {}, d = String(code == null ? '' : code);
-    if (!OPAQUE_RE.test(d)) throw new Error('A label code must be the opaque id only (upper-case letters, digits, hyphens), not "' + d + '".');
+    if (!OPAQUE_RE.test(d)) throw new Error('A label code must be the opaque id only (letters, digits, hyphens; no spaces or symbols), not "' + d + '".');
     var maxW = o.maxWidthMm || 90, bars = code128Bars(d), M = qrMatrix(d), n = M.length, pick = null;
     for (var bi = 0; bi < BAR_X.length && !pick; bi++) for (var qi = 0; qi < QR_X.length && !pick; qi++) {
       var bx = BAR_X[bi], qx = QR_X[qi], w = 10 * bx + bars.modules * bx + Math.max(10 * bx, 4 * qx) + n * qx + 4 * qx;
