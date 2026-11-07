@@ -237,6 +237,9 @@ export const ROLES: RoleDef[] = [
       // PROD-A (plan §10, §12.0, §12.2): the admin runs the Rules screen (publish, override one
       // record) and the ingredient family -> colour table. Floor codes are read coded, never named.
       oneOf('platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_family:write', 'masterdata:floor_code:read'),
+      // FLOOR-2 (F7, owner: the FG rack "color coded and initial based"): the admin sets each FG zone's
+      // colour, colour name and initials (warehouse holds it through location:*).
+      oneOf('location:fg_zone:write'),
     ),
     sampleEmail: 'admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_ADMIN_PASSWORD',
@@ -360,6 +363,8 @@ export const ROLES: RoleDef[] = [
         // PROD-A: warehouse mints the opaque lot barcode at put-away and scans lots like the floor.
         'inventory:lot_barcode:write',
         'inventory:lot_barcode:resolve',
+        // FLOOR-1 (R8): split a lot across two bins (a child lot with its own L- code).
+        'inventory:lot_split:write',
       ),
       startsWith('location:'),
       (p) => p.startsWith('masterdata:') && isRead(p),

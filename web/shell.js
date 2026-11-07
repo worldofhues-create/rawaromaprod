@@ -1243,6 +1243,11 @@
       { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('grn', r); } },
       { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('grn', r, true); } }
     ],
+    // FLOOR-1 (R8, plan §13): a lot splits across two bins, from Stock. The child gets its own L- code
+    // and label (ws-floor.js RA.splitStockRow); a row with nothing on hand has nothing to split.
+    '/v1/inventory-availability': [
+      { label: 'Split lot', perm: 'inventory:lot_split:write', tone: 'accent', when: function (r) { return Number(r.onHand || 0) > 0 && !!r.inventoryBatchId; }, run: function (r) { if (window.RA && window.RA.splitStockRow) window.RA.splitStockRow(r.inventoryBatchId); else toast('The floor screens did not load. Reload the page.', 'bad'); } }
+    ],
     '/v1/rm-batches': [
       // SCAN-10: was a QR-only label of 'RA-BATCH:<no>:<uuid>' (not opaque, not what any scan field reads).
       { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('rm_lot', r); } },

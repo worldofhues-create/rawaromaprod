@@ -2979,3 +2979,66 @@ create table if not exists location.storage_location_master (
 alter table platform.device_master drop constraint if exists device_master_kind_check;
 alter table platform.device_master add constraint device_master_kind_check
   check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner'));
+
+-- FLOOR-GAPS (2026-11-07): the stock ledger table exactly as scripts/migrations/0006_inventory.sql creates it
+-- (a lot split writes one row per side), then scripts/migrations/2026-11-07-floor-gaps.sql mirrored here
+-- (body after @target; the app-role grant block is left out).
+CREATE TABLE IF NOT EXISTS "inventory"."inventory_transaction" (
+	"inventory_transaction_id" uuid PRIMARY KEY DEFAULT uuidv7() NOT NULL,
+	"inventory_batch_id" uuid,
+	"inventory_transaction_type_id" uuid,
+	"transaction_qty" numeric(18, 4),
+	"uom_id" uuid,
+	"from_location_id" uuid,
+	"to_location_id" uuid,
+	"transaction_dt" timestamp with time zone,
+	"reference_document_id" uuid,
+	"status" varchar(30),
+	"created_dt" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_dt" timestamp with time zone DEFAULT now() NOT NULL,
+	"created_by" varchar(255),
+	"updated_by" varchar(255)
+);
+create table if not exists inventory.lot_split (
+  lot_split_id              uuid primary key default gen_random_uuid(),
+  kind                      varchar(10) not null check (kind in ('SPLIT', 'RETURN')),
+  parent_inventory_batch_id uuid not null,
+  child_inventory_batch_id  uuid not null unique,
+  rm_batch_id               uuid not null,
+  qty_mg                    bigint not null check (qty_mg > 0),
+  parent_before_mg          bigint not null check (parent_before_mg >= qty_mg),
+  from_location_id          uuid,
+  to_location_id            uuid not null,
+  floor_job_id              uuid,
+  reason                    text,
+  created_by                varchar(255) not null,
+  created_dt                timestamptz not null default now(),
+  check (parent_inventory_batch_id <> child_inventory_batch_id),
+  -- a return from the verifier always names the job it came back from
+  check (kind <> 'RETURN' or floor_job_id is not null)
+);
+create index if not exists lot_split_parent_idx on inventory.lot_split (parent_inventory_batch_id);
+
+create table if not exists inventory.lot_label (
+  lot_label_id       uuid primary key default gen_random_uuid(),
+  inventory_batch_id uuid not null,
+  barcode            varchar(12) not null,
+  reprint            boolean not null default false,
+  reason             text,
+  printed_by         varchar(255) not null,
+  printed_dt         timestamptz not null default now(),
+  check (not reprint or (reason is not null and btrim(reason) <> ''))
+);
+create index if not exists lot_label_batch_idx on inventory.lot_label (inventory_batch_id);
+
+create table if not exists location.fg_zone_style (
+  zone_id      uuid primary key,
+  colour_name  varchar(30) not null check (colour_name ~ '^[A-Za-z]+$'),
+  colour_hex   varchar(7)  not null check (colour_hex ~ '^#[0-9A-F]{6}$'),
+  initials     varchar(3)  not null check (initials ~ '^[A-Z]{1,3}$'),
+  updated_by   varchar(255) not null,
+  updated_dt   timestamptz not null default now()
+);
+create unique index if not exists fg_zone_style_colour_uq on location.fg_zone_style (upper(colour_name));
+create unique index if not exists fg_zone_style_initials_uq on location.fg_zone_style (initials);
+

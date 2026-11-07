@@ -113,6 +113,73 @@
       } });
   }
 
+  /* ── FLOOR-1 (R8): child lots — a split across two bins, or the verifier's leftover ─────────
+   * The child has its own L- code, so it gets its own label: both codes, the colour NAME and the
+   * initial (never the colour alone), the lot it came from, and the parent's lot number and expiry. */
+  function printLotLabel(l) {
+    if (!l) return;
+    var w = window.open('', '_blank', 'width=520,height=360');
+    if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
+    var row = function (k, v) { return v ? '<tr><td>' + esc(k) + '</td><td><b>' + esc(v) + '</b></td></tr>' : ''; };
+    w.document.write('<!doctype html><meta charset="utf-8"><title>Lot ' + esc(l.barcode) + '</title>' +
+      '<style>@page{size:100mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:96mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;gap:2mm}.t{flex:1;min-width:0}.cd{width:44mm;display:flex;align-items:flex-end}' +
+      'h1{margin:0 0 .5mm;font-size:14px;letter-spacing:.04em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:4px;font-size:11px}td{padding:0 4px 0 0;vertical-align:top}.sw{display:inline-block;width:9px;height:9px;border:1px solid #000;vertical-align:middle;margin-right:3px}</style>' +
+      '<div class="l"><div class="t"><h1>' + (l.kind === 'RETURN' ? 'RAW LOT · RETURNED' : 'RAW LOT · SPLIT') + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><table>' +
+      row('Code', l.floorCode) + (l.colourName ? '<tr><td>Colour</td><td><span class="sw" style="background:' + esc(l.colourHex) + '"></span><b>' + esc(l.colourName) + ' (' + esc(l.initial) + ')</b></td></tr>' : '') +
+      row('Lot', l.lot) + row('From', l.splitFrom) + row('Job', l.jobNo) + row('Qty', l.qtyMg != null ? W.formatWeight(l.qtyMg) : null) + row('Bin', l.bin) + row('Expiry', l.expiry || 'Not on file') +
+      '<tr><td colspan="2">' + esc(l.hazard) + '</td></tr>' + row('By', l.person) + row('Time', localTime(l.printedDt)) + '</table></div>' +
+      '<div class="cd">' + scanCodes(l.barcode, 44, { barHeightMm: 7, textMm: 2.2 }) + '</div></div>' +
+      '<script>window.onload=function(){window.print()}<\/script>');
+    w.document.close();
+  }
+  /** Reprint a child lot's label: through the job (the verifier) or from Stock. Asks why. */
+  function reprintLot(barcode, jobId) {
+    askForm({ title: 'Reprint lot ' + barcode, submit: 'Reprint', intro: 'A duplicate lot label is a recall risk, so the reprint says REPRINT and is logged with your name.',
+      fields: [{ n: 'reason', l: 'Why reprint?', req: true }],
+      onSubmit: async function (v, fail, close) {
+        var res = jobId
+          ? await call('/v1/floor/jobs/' + jobId + '/leftover/label', { method: 'POST', body: { lot: barcode, reason: v.reason } })
+          : await call('/v1/floor/lots/' + encodeURIComponent(barcode) + '/label', { method: 'POST', body: { reason: v.reason } });
+        if (res.status >= 400) { fail(err(res, 'The label was not reprinted.')); return; }
+        close(); printLotLabel(data(res));
+      } });
+  }
+  /** Split a lot across two bins (Stock, Scan a lot). `then` runs after the child label prints. */
+  function splitLot(barcode, then) {
+    askForm({ title: 'Split lot ' + barcode, submit: 'Split and print', intro: 'Part of this lot goes to another bin as a new lot with its own code and label. It keeps this lot\'s number, QC release and expiry.',
+      fields: [{ n: 'qty', l: 'How much goes to the new bin (g)', req: true, help: 'Weigh it. Up to the mg, e.g. 250.5' }, { n: 'bin', l: 'Scan the new bin', req: true }, { n: 'reason', l: 'Why (optional)' }],
+      onSubmit: async function (v, fail, close) {
+        var mg = W.parseToMg(v.qty, 'g');
+        if (mg === null || mg <= 0) { fail('Type the weight as a number of grams, e.g. 250.5.'); return; }
+        var res = await call('/v1/floor/lots/' + encodeURIComponent(barcode) + '/split', { method: 'POST', body: { qtyMg: mg, bin: v.bin, reason: v.reason || undefined } });
+        if (res.status >= 400) { fail(err(res, 'The lot was not split.')); return; }
+        var d = data(res);
+        close(); toast('Split: ' + d.child.barcode + ' (' + W.formatWeight(d.child.qtyMg) + ') in ' + d.child.bin + '. ' + barcode + ' keeps ' + W.formatWeight(d.parent.qtyMg) + '.', 'good');
+        printLotLabel(d.label); if (then) then(d);
+      } });
+  }
+  /** Stock (FEFO) row action: the row is a stock row, so its L- code is minted (or read) first. */
+  async function splitStockRow(inventoryBatchId) {
+    var r = await call('/v1/floor/lots/' + encodeURIComponent(inventoryBatchId) + '/barcode', { method: 'POST' });
+    if (r.status >= 400) { toast(err(r, 'This lot has no label code yet.'), 'bad'); return; }
+    splitLot(data(r).barcode, function () { if (typeof loadView === 'function') loadView(); });
+  }
+  function genealogyHtml(g) {
+    if (!g) return '';
+    var kindWord = function (k) { return k === 'RETURN' ? 'returned from the verifier' : 'split'; };
+    var up = (g.ancestors || []).map(function (a, i) {
+      return '<li>' + (i === 0 ? 'Cut from ' : 'which was cut from ') + code(a.barcode || '—') + ' · ' + esc(kindWord(a.kind)) + ' · ' + esc(W.formatWeight(a.qtyMg)) + (a.jobNo ? ' · job ' + esc(a.jobNo) : '') + ' · ' + esc(a.by) + ' · ' + esc(localTime(a.at)) + '</li>';
+    }).join('');
+    var down = (g.children || []).map(function (c) {
+      return '<li>' + code(c.barcode || '—') + ' · ' + esc(kindWord(c.kind)) + ' · ' + esc(W.formatWeight(c.qtyMg)) + ' in ' + esc(c.bin || '—') + (c.jobNo ? ' · job ' + esc(c.jobNo) : '') + ' · ' + esc(c.by) + ' · ' + esc(localTime(c.at)) + '</li>';
+    }).join('');
+    return '<div class="card" id="fl-gen"><b>Genealogy</b>' +
+      (up ? '<ul style="margin:6px 0 0;padding-left:18px">' + up + '</ul>' : '<div style="color:var(--ink-3)">An original lot: not cut from another.</div>') +
+      (down ? '<div style="margin-top:8px"><b>Child lots</b><ul style="margin:6px 0 0;padding-left:18px">' + down + '</ul></div>' : '<div style="color:var(--ink-3);margin-top:6px">No child lots.</div>') + '</div>';
+  }
+  window.RA = window.RA || {};
+  window.RA.splitStockRow = splitStockRow;
+
   // WALK2-RP-33: the station card read 'New  New: taken in turn…': the chip already says New / Delayed Nd.
   /* ── job picker shared by the three stations ────────────────────────────────────────── */
   var FS = { jobs: {} };
@@ -211,8 +278,40 @@
       body = '<div class="card" style="display:flex;flex-direction:column;gap:12px"><div style="font-size:18px">Every line is weighed inside tolerance.</div><div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-vdone', 'Finish and print VERIFIED', 'p', big()) + '</div>';
     }
     V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:880px"><div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(d.jobNo) + '<span>tote ' + esc(d.tote || '—') + '</span>' +
-      btn('fl-rp', 'Reprint PICKED', 'sm') + '</div>' + body + '<div class="card">' + rows + '</div></div>';
+      btn('fl-rp', 'Reprint PICKED', 'sm') + '</div>' + body + '<div class="card">' + rows + '</div>' +
+      // FLOOR-1 (R8): plan §6 "Leftover goes back to stock as a partial lot with a new label".
+      '<form id="fl-lo" class="card" style="display:flex;flex-direction:column;gap:10px"><b>Leftover back to stock</b>' +
+      '<div style="color:var(--ink-3)">What is left in a picked lot goes back as a new lot with its own code and label. It keeps the lot\'s number, QC release and expiry.</div>' +
+      '<label>Scan the lot the leftover is in<input id="fl-lo-lot" data-scan class="fld" autocomplete="off" placeholder="L-…" style="min-height:52px;font-size:18px"></label>' +
+      '<label>Leftover weight (g)<input id="fl-lo-wt" class="fld" inputmode="decimal" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
+      '<label>Scan the bin it goes back to<input id="fl-lo-bin" data-scan class="fld" autocomplete="off" style="min-height:52px;font-size:18px"></label>' +
+      '<div id="fl-lo-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-lo-go', 'Return and print the lot label', '', big(' type="submit"')) +
+      '<div id="fl-lo-list"></div></form></div>';
     $('fl-rp').onclick = function () { reprint(id, 'PICKED'); };
+    var listReturns = async function () {
+      var lr = await call('/v1/floor/jobs/' + id + '/leftover'), box = $('fl-lo-list');
+      if (!box || lr.status >= 400) return;
+      var items = data(lr) || [];
+      box.innerHTML = items.length ? '<div style="display:flex;flex-direction:column;gap:6px">' + items.map(function (x, i) {
+        return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(x.barcode) + '<span>' + esc(W.formatWeight(x.qtyMg)) + ' in ' + esc(x.bin || '—') + '</span>' +
+          btn('fl-lo-rp-' + i, 'Reprint', 'sm', ' data-lo-rp="' + esc(x.barcode) + '"') + '</div>';
+      }).join('') + '</div>' : '';
+      box.querySelectorAll('[data-lo-rp]').forEach(function (b) { b.onclick = function () { reprintLot(b.getAttribute('data-lo-rp'), id); }; });
+    };
+    listReturns();
+    $('fl-lo').onsubmit = async function (e) {
+      e.preventDefault();
+      var mg = W.parseToMg($('fl-lo-wt').value, 'g');
+      if (!$('fl-lo-lot').value.trim()) { $('fl-lo-err').textContent = 'Scan the lot label first.'; return; }
+      if (mg === null || mg <= 0) { $('fl-lo-err').textContent = 'Type the leftover weight in grams, e.g. 874.5.'; return; }
+      var r = await call('/v1/floor/jobs/' + id + '/leftover', { method: 'POST', body: { lot: $('fl-lo-lot').value.trim(), qtyMg: mg, bin: $('fl-lo-bin').value.trim() } });
+      if (r.status >= 400) { $('fl-lo-err').textContent = err(r, 'The leftover was not returned.'); return; }
+      var d = data(r);
+      toast('Back to stock: ' + d.child.barcode + ' (' + W.formatWeight(d.child.qtyMg) + ') in ' + d.child.bin + '.', 'good');
+      printLotLabel(d.label);
+      $('fl-lo-lot').value = ''; $('fl-lo-wt').value = ''; $('fl-lo-bin').value = ''; $('fl-lo-err').textContent = '';
+      listReturns();
+    };
     var f = $('fl-w');
     if (f) { $('fl-wt').focus(); f.onsubmit = async function (e) {
       e.preventDefault();
@@ -330,7 +429,15 @@
       $('fl-sco').innerHTML = '<div class="card"><table>' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
-        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) + '</table></div>';
+        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +
+        (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') + '</table>' +
+        // FLOOR-1 (R8): split this lot across two bins; a child lot's own label reprints with a reason.
+        (can('inventory:lot_split:write') ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fl-split', 'Split this lot', '', big()) +
+          (x.splitFrom ? btn('fl-lotrp', 'Reprint lot label', '', big()) : '') + '</div>' : '') + '</div><div id="fl-geno" style="margin-top:14px"></div>';
+      var sp = $('fl-split'); if (sp) sp.onclick = function () { splitLot(x.barcode, function () { $('fl-sc').requestSubmit(); }); };
+      var rp = $('fl-lotrp'); if (rp) rp.onclick = function () { reprintLot(x.barcode, null); };
+      var g = await call('/v1/floor/lots/' + encodeURIComponent(x.barcode) + '/genealogy');
+      if (g.status < 400 && $('fl-geno')) $('fl-geno').innerHTML = genealogyHtml(data(g));
     };
   }
 

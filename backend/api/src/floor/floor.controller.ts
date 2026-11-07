@@ -9,6 +9,7 @@ import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kern
 import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService, type LabelKind } from './floor-station.service.js';
 import { FloorQueueService } from './floor-queue.service.js';
+import { LotSplitService } from './lot-split.service.js';
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -18,6 +19,7 @@ export class FloorController {
     private readonly codes: FloorCodeService,
     private readonly stations: FloorStationService,
     private readonly queue: FloorQueueService,
+    private readonly splits: LotSplitService,
   ) {}
 
   /* ── colour table and floor codes ───────────────────────────────────────────────────── */
@@ -61,6 +63,26 @@ export class FloorController {
   @Get('v1/floor/scan')
   scan(@Query('code') code: string, @CurrentUser() p: AuthPrincipal) {
     return this.codes.resolve(code, p);
+  }
+
+  /* ── FLOOR-1 (R8): split a lot across two bins; the child's label; the genealogy ─────── */
+
+  @Permissions('inventory:lot_split:write')
+  @Post('v1/floor/lots/:code/split')
+  split(@Param('code') code: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.splits.split(code, { qtyMg: b?.qtyMg, bin: b?.bin, reason: b?.reason }, p);
+  }
+
+  @Permissions('inventory:lot_split:write')
+  @Post('v1/floor/lots/:code/label')
+  splitLabel(@Param('code') code: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.splits.printLabel(code, b?.reason ? s(b.reason) : null, p);
+  }
+
+  @Permissions('inventory:lot_barcode:resolve')
+  @Get('v1/floor/lots/:code/genealogy')
+  genealogy(@Param('code') code: string) {
+    return this.splits.genealogy(code);
   }
 
   /* ── queue and jobs ─────────────────────────────────────────────────────────────────── */
@@ -126,6 +148,25 @@ export class FloorController {
   @Post('v1/floor/jobs/:id/verify/complete')
   completeVerify(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() p: AuthPrincipal) {
     return this.stations.completeVerify(id, p);
+  }
+
+  // FLOOR-1 (R8): the verifier's leftover goes back to stock as a child lot tied to this job.
+  @Permissions('production:floor_verify:write')
+  @Get('v1/floor/jobs/:id/leftover')
+  leftovers(@Param('id', ParseUUIDPipe) id: string) {
+    return this.splits.jobReturns(id);
+  }
+
+  @Permissions('production:floor_verify:write')
+  @Post('v1/floor/jobs/:id/leftover')
+  leftover(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.splits.returnLeftover(id, { lot: b?.lot, qtyMg: b?.qtyMg, bin: b?.bin }, p);
+  }
+
+  @Permissions('production:floor_verify:write')
+  @Post('v1/floor/jobs/:id/leftover/label')
+  leftoverLabel(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.splits.printJobLabel(id, b?.lot, b?.reason ? s(b.reason) : null, p);
   }
 
   @Permissions('production:floor_mix:write')

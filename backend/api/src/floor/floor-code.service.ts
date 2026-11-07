@@ -212,6 +212,13 @@ export class FloorCodeService {
       status: expired ? 'EXPIRED' : released ? 'RELEASED' : 'QUARANTINE',
       hazard: HAZARD_PENDING,
     };
+    // FLOOR-1 (R8): a child lot names the lot it was split from (or came back from the verifier as).
+    const [split] = await this.sql<{ parent: string | null; kind: string }[]>`
+      select plb.barcode as parent, ls.kind from inventory.lot_split ls
+        left join inventory.lot_barcode plb on plb.inventory_batch_id = ls.parent_inventory_batch_id
+       where ls.child_inventory_batch_id = ${r.inventory_batch_id}`;
+    out.splitFrom = split?.parent ?? null;
+    out.splitKind = split?.kind ?? null;
     if ((principal.permissions ?? []).includes(REVEAL)) {
       out.materialId = r.material_id;
       out.materialName = r.material_name;
