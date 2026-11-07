@@ -11,6 +11,7 @@ import { bridge as bridgeContracts } from '@core/contracts';
 import { ShelfLayoutService } from './shelf-layout.service.js';
 import { ShelfTaskService } from './shelf-task.service.js';
 import { PickLightConfigError, PickLightService } from './pick-light.service.js';
+import { FgZoneService } from './fg-zone.service.js';
 
 const str = (v: unknown) => (typeof v === 'string' ? v : v === undefined || v === null ? null : String(v));
 
@@ -20,7 +21,28 @@ export class ShelfController {
     private readonly layout: ShelfLayoutService,
     private readonly tasks: ShelfTaskService,
     private readonly lights: PickLightService,
+    private readonly zones: FgZoneService,
   ) {}
+
+  /* ── FLOOR-2 (F7): FG rack zones, colour coded and initial based ─────────────────────── */
+
+  @Permissions('location:bin_master:read')
+  @Get('v1/shelf/fg-zones')
+  fgZones() {
+    return this.zones.list();
+  }
+
+  @Permissions('location:fg_zone:write')
+  @Put('v1/shelf/fg-zones/:code')
+  setFgZone(@Param('code') code: string, @Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
+    return this.zones.set(code, { colourName: body?.colourName, colourHex: body?.colourHex, initials: body?.initials }, principal);
+  }
+
+  @Permissions('location:shelf_task:read')
+  @Get('v1/shelf/fg-batches/:id/zone')
+  fgBatchZone(@Param('id', new ParseUUIDPipe()) id: string) {
+    return this.zones.forFgBatch(id);
+  }
 
   /* ── the location master (racks entered in the app) ─────────────────────────────────── */
 
@@ -86,10 +108,10 @@ export class ShelfController {
 
   @Permissions('location:shelf_task:write')
   @Post('v1/shelf/putaway')
-  putaway(@Body() body: { finishedGoodBatchId?: unknown; binCode?: unknown }, @CurrentUser() principal: AuthPrincipal) {
+  putaway(@Body() body: { finishedGoodBatchId?: unknown; binCode?: unknown; zoneCode?: unknown }, @CurrentUser() principal: AuthPrincipal) {
     const id = String(body?.finishedGoodBatchId ?? '');
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('finishedGoodBatchId is required.');
-    return this.tasks.ensurePutaway(id, principal, { binCode: str(body?.binCode) });
+    return this.tasks.ensurePutaway(id, principal, { binCode: str(body?.binCode), zoneCode: str(body?.zoneCode) });
   }
 
   @Permissions('location:shelf_task:write')

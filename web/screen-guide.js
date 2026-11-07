@@ -37,6 +37,7 @@
     __produce__: 'Sales orders in the order to make them. Plan a run, then follow it to QC and the shelf.',
     __shelftasks__: 'Batches to put on a shelf and orders to pick. Scan or tap a task to finish it.',
     __racklayout__: 'Your racks, shelves and bins, and what sits in each bin.',
+    __fgzones__: 'Each finished-goods zone: its colour, the colour name and the initials printed on every label.',
     __shelfdisplay__: 'A live board for the floor: what to put away and what to pick, bin by bin.',
     __factorysetup__: 'The checklist that gets the factory ready. Approve Ruh\'s drafts one row at a time or together.',
     __formulasetup__: 'Which formula each product is made from. The recipe itself stays in the Vault.',
@@ -270,6 +271,7 @@
     // SCAN-10/11: every flow step's label, Code 128 + QR of the record's own number.
     'Print label': 'Print its label: a barcode and a QR of its number, for the next step to scan.',
     'Reprint label': 'Print it again. You give a reason; the label says REPRINT and the reprint is logged with your name.',
+    'Split lot': 'Move part of this lot to another bin as a new lot with its own code and label. It keeps this lot\'s number, QC release and expiry.',
     'Print FG lot label': 'Print the finished lot\'s label: a barcode and a QR of the lot number.',
     'Reprint FG lot label': 'Print the lot label again. You give a reason; it says REPRINT and is logged with your name.',
     'Release to stock': 'Make this batch available to use (after QC).',

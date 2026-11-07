@@ -197,7 +197,7 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 304 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 306 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
@@ -207,7 +207,8 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
   //      (scripts/pfc-grants.ts). The owner holds every one of them, release_early included.
   // 304: + lane pf-d's 6 order-intelligence and QC review permissions (scripts/pfd-grants.ts),
   //      both review signatures included (the owner is still one person: confirm needs another).
-  assert.equal(ownerGrant.length, 304);
+  // 306: + lane floor-gaps' inventory:lot_split:write (R8) and location:fg_zone:write (F7).
+  assert.equal(ownerGrant.length, 306);
   // Named, so a different 29 cannot stand in for these: each must be the owner's.
   for (const p of ['platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_code:read',
     'masterdata:floor_code:write', 'masterdata:floor_family:write', 'inventory:lot_barcode:resolve', 'inventory:lot_barcode:write',
@@ -218,7 +219,7 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
     'production:maceration:read', 'production:maceration:release_early', 'production:maceration:write',
     'production:maceration_setting:write', 'sales:logistics:write', 'sales:shipment:read',
     'production:cover_plan:read', 'production:cover_plan:write', 'production:qc_review:read', 'production:qc_review:perfumer',
-    'production:qc_review:approve', 'production:qc_review_setup:write']) assert.ok(ownerGrant.includes(p), `owner holds ${p}`);
+    'production:qc_review:approve', 'production:qc_review_setup:write', 'inventory:lot_split:write', 'location:fg_zone:write']) assert.ok(ownerGrant.includes(p), `owner holds ${p}`);
   const { roleId, roleCode } = await makeRole('owner', ownerGrant);
   const email = `owner-${sid()}@rawaroma.local`;
   const userId = uuidv7();

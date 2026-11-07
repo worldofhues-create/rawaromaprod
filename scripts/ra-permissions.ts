@@ -316,6 +316,10 @@ export const RA_PERMISSIONS: string[] = [
   'production:floor_verify:write',
   'production:floor_mix:write',
   'production:floor_label:write',
+  // Lane floor-gaps (2026-11-07): R8 lot split / partial return (backend/api/src/floor/lot-split.service.ts)
+  // and F7 FG rack zone colours + initials (backend/api/src/shelf/fg-zone.service.ts).
+  'inventory:lot_split:write',
+  'location:fg_zone:write',
   // Lane pf-c (production floor P3/P4): scripts/pfc-grants.ts.
   ...PFC_PERMISSIONS,
   // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.

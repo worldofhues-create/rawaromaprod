@@ -11,6 +11,7 @@ import { ShelfController } from './shelf.controller.js';
 import { ShelfLayoutService } from './shelf-layout.service.js';
 import { ShelfTaskService } from './shelf-task.service.js';
 import { PickLightService } from './pick-light.service.js';
+import { FgZoneService } from './fg-zone.service.js';
 import { SHELF_DB, shelfDb } from './shelf.tokens.js';
 
 @Module({
@@ -20,7 +21,8 @@ import { SHELF_DB, shelfDb } from './shelf.tokens.js';
     ShelfLayoutService,
     ShelfTaskService,
     PickLightService,
+    FgZoneService,
   ],
-  exports: [SHELF_DB, ShelfLayoutService, ShelfTaskService, PickLightService],
+  exports: [SHELF_DB, ShelfLayoutService, ShelfTaskService, PickLightService, FgZoneService],
 })
 export class ShelfModule {}

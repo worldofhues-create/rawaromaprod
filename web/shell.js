@@ -1167,6 +1167,14 @@
     var o = STEP_LABEL[kind](r);
     if (!o.code) { toast('This record has no number to print yet.', 'warn'); return; }
     o.subjectRef = o.code;
+    // FLOOR-2 (F7): the FG lot label carries its zone, the colour NAME and the initials (a thermal
+    // label prints no colour, so the words are the signal). A lot not put away yet says so.
+    if (kind === 'fg_lot' && r.finishedGoodBatchId) {
+      return tunnel('/v1/shelf/fg-batches/' + r.finishedGoodBatchId + '/zone').then(function (res) { return res.status < 400 && res.json ? res.json.data : null; }).catch(function () { return null; }).then(function (z) {
+        o.lines = o.lines.concat(z ? [['Zone', z.code], ['Colour', z.colourName ? z.colourName + ' (' + z.initials + ')' : 'No colour set']] : [['Zone', 'Not put away yet']]);
+        return again ? window.RA.stepReprint(o) : window.RA.stepPrint(o);
+      });
+    }
     return again ? window.RA.stepReprint(o) : window.RA.stepPrint(o);
   }
 
@@ -1242,6 +1250,11 @@
     '/v1/grns': [
       { label: 'Print label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('grn', r); } },
       { label: 'Reprint label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('grn', r, true); } }
+    ],
+    // FLOOR-1 (R8, plan §13): a lot splits across two bins, from Stock. The child gets its own L- code
+    // and label (ws-floor.js RA.splitStockRow); a row with nothing on hand has nothing to split.
+    '/v1/inventory-availability': [
+      { label: 'Split lot', perm: 'inventory:lot_split:write', tone: 'accent', when: function (r) { return Number(r.onHand || 0) > 0 && !!r.inventoryBatchId; }, run: function (r) { if (window.RA && window.RA.splitStockRow) window.RA.splitStockRow(r.inventoryBatchId); else toast('The floor screens did not load. Reload the page.', 'bad'); } }
     ],
     '/v1/rm-batches': [
       // SCAN-10: was a QR-only label of 'RA-BATCH:<no>:<uuid>' (not opaque, not what any scan field reads).

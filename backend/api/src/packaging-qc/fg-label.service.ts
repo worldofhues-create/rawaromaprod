@@ -24,6 +24,7 @@ import { shelfDb } from '../shelf/shelf.tokens.js';
 import { ShelfTaskService, qcRefusal, type FgBatchInfo } from '../shelf/shelf-task.service.js';
 import { ShelfLayoutService } from '../shelf/shelf-layout.service.js';
 import { PickLightService } from '../shelf/pick-light.service.js';
+import { zoneOfFgBatch, type FgZoneLabel } from '../shelf/fg-zone.service.js';
 
 export interface DgBlock {
   unNumber: string | null;
@@ -51,6 +52,8 @@ export interface LabelContent {
   rack: string | null;
   /** true while the rack is the assigned target (not yet confirmed at the shelf). */
   rackAssigned: boolean;
+  /** FLOOR-2 (F7): the FG zone with its colour NAME and initials (never the colour alone); null with no bin yet. */
+  zone: FgZoneLabel | null;
 }
 
 const COLS = `fg_label_record_id as "fgLabelRecordId", finished_good_batch_id as "finishedGoodBatchId",
@@ -160,6 +163,7 @@ export class FgLabelService {
         : null,
       rack: where.label,
       rackAssigned: where.assigned,
+      zone: await zoneOfFgBatch(this.sql, fg.id),
     };
     assertLabelFields(fg);
     return content;

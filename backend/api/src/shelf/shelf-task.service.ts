@@ -187,17 +187,39 @@ export class ShelfTaskService {
   /* ── put-away ────────────────────────────────────────────────────────────────────────── */
 
   /** Ensures an OPEN put-away task (with a target bin when one can be found). Inside `tx` if given. */
-  async ensurePutaway(fgBatchId: string, principal: AuthPrincipal, opts: { binCode?: string | null } = {}, tx?: ShelfTx) {
+  async ensurePutaway(fgBatchId: string, principal: AuthPrincipal, opts: { binCode?: string | null; zoneCode?: string | null } = {}, tx?: ShelfTx) {
     const run = async (t: ShelfTx) => {
       const fg = await this.fgBatch(fgBatchId, t);
       if (fg.qc !== 'RELEASED') throw new ConflictException(qcRefusal(fg, 'put away'));
+      // FLOOR-2 (F7): put away to an FG zone (colour + initials): a bin in that zone, never another.
+      const zoneCode = String(opts.zoneCode ?? '').trim();
+      const zone = zoneCode ? ((await t.execute(sql`
+        select zone_id::text as id, zone_code as code from location.zone_master where lower(zone_code) = lower(${zoneCode}) limit 1
+      `)) as unknown as Array<{ id: string; code: string }>)[0] : undefined;
+      if (zoneCode && !zone) throw new NotFoundException(`No zone ${zoneCode}. Choose a zone from Rack layout.`);
       const open = ((await t.execute(sql`
         select shelf_task_id::text as id, to_bin_id::text as to_bin, qty::float as qty from location.shelf_task
          where finished_good_batch_id = ${fgBatchId}::uuid and kind = 'PUTAWAY' and status = 'OPEN'
          order by created_dt limit 1 for update
       `)) as unknown as Array<{ id: string; to_bin: string | null; qty: number }>)[0];
       const target = opts.binCode ? await this.layout.resolve(opts.binCode, t) : null;
+      if (zone && target && String(target.zoneCode ?? '').toLowerCase() !== zone.code.toLowerCase()) {
+        throw new ConflictException(`Bin ${target.binCode} is not in zone ${zone.code} (it is in ${target.zoneCode ?? 'no zone'}). Scan a bin in ${zone.code}.`);
+      }
       if (open) {
+        // An open put-away aimed outside the chosen zone is re-aimed at a free bin inside it.
+        const inZone = zone && !target && open.to_bin
+          ? ((await t.execute(sql`select 1 from location.bin_master bn join location.shelf_master sh on sh.shelf_id = bn.shelf_id
+                                    join location.rack_master rk on rk.rack_id = sh.rack_id where bn.bin_id = ${open.to_bin}::uuid and rk.zone_id = ${zone.id}::uuid`)) as unknown as unknown[]).length > 0
+          : true;
+        if (zone && !target && !inZone) {
+          const binId = await this.suggestBin(t, fg.productSkuId, zone.id);
+          if (!binId) throw new ConflictException(`No free bin in zone ${zone.code}: add bins to it on Rack layout, or choose another zone.`);
+          if (open.to_bin) await this.light(t, open.id, open.to_bin, 0, 'off');
+          await t.execute(sql`update location.shelf_task set to_bin_id = ${binId}::uuid, updated_dt = now(), updated_by = ${principal.userId} where shelf_task_id = ${open.id}::uuid`);
+          await this.light(t, open.id, binId, open.qty, colourFor('PUTAWAY'));
+          return this.task(open.id, t);
+        }
         if (target && target.binId !== open.to_bin) {
           if (open.to_bin) await this.light(t, open.id, open.to_bin, 0, 'off');
           await t.execute(sql`update location.shelf_task set to_bin_id = ${target.binId}::uuid, updated_dt = now(), updated_by = ${principal.userId}
@@ -208,7 +230,8 @@ export class ShelfTaskService {
       }
       const remaining = round4(fg.producedQty - fg.stocked);
       if (!(remaining > 0)) throw new ConflictException(`Batch ${fg.batchNumber ?? fgBatchId} is already on the shelves.`);
-      const binId = target?.binId ?? (await this.suggestBin(t, fg.productSkuId));
+      const binId = target?.binId ?? (await this.suggestBin(t, fg.productSkuId, zone?.id ?? null));
+      if (zone && !binId) throw new ConflictException(`No free bin in zone ${zone.code}: add bins to it on Rack layout, or choose another zone.`);
       const created = ((await t.execute(sql`
         insert into location.shelf_task (kind, finished_good_batch_id, product_sku_id, qty, uom_id, to_bin_id, status, created_by, updated_by)
         values ('PUTAWAY', ${fgBatchId}::uuid, ${fg.productSkuId}::uuid, ${remaining}, ${fg.uomId}::uuid, ${binId}::uuid, 'OPEN', ${principal.userId}, ${principal.userId})
@@ -221,7 +244,7 @@ export class ShelfTaskService {
   }
 
   /** Same SKU's bin first (keep a SKU together), else the first empty bin in walking order. */
-  private async suggestBin(tx: ShelfTx, productSkuId: string | null): Promise<string | null> {
+  private async suggestBin(tx: ShelfTx, productSkuId: string | null, zoneId: string | null = null): Promise<string | null> {
     if (productSkuId) {
       const same = ((await tx.execute(sql`
         select bn.bin_id::text as id
@@ -232,6 +255,7 @@ export class ShelfTaskService {
           left join location.rack_master rk on rk.rack_id = sh.rack_id
           left join location.rack_walk_order wo on wo.rack_id = rk.rack_id
          where f.product_sku_id = ${productSkuId}::uuid and st.qty > 0 and (bn.status is null or bn.status = 'ACTIVE')
+           and (${zoneId}::uuid is null or rk.zone_id = ${zoneId}::uuid)
          order by ${WALK_ORDER_SQL} limit 1
       `)) as unknown as Array<{ id: string }>)[0];
       if (same) return same.id;
@@ -243,6 +267,7 @@ export class ShelfTaskService {
         left join location.rack_master rk on rk.rack_id = sh.rack_id
         left join location.rack_walk_order wo on wo.rack_id = rk.rack_id
        where (bn.status is null or bn.status = 'ACTIVE')
+         and (${zoneId}::uuid is null or rk.zone_id = ${zoneId}::uuid)
          and not exists (select 1 from location.fg_bin_stock st where st.bin_id = bn.bin_id and st.qty > 0)
          and not exists (select 1 from location.shelf_task t where t.to_bin_id = bn.bin_id and t.status = 'OPEN')
        order by ${WALK_ORDER_SQL} limit 1
