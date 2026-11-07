@@ -23,13 +23,26 @@ import { clearAlert, openAlerts, raiseAlert } from './floor-alerts.js';
 import { FLOOR_CLOCK } from './floor.tokens.js';
 import { iso, newDeviceToken, sha256, sixDigitCode, systemClock, text, type Clock } from './floor-util.js';
 
-export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale'] as const;
+export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale', 'scanner'] as const;
+/** SCAN-4: what a scanner can be recorded as reading (the BarcodeDetector names, so one vocabulary). */
+export const SYMBOLOGIES = ['qr_code', 'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'data_matrix', 'pdf417', 'aztec'] as const;
+/** A wedge / Bluetooth scanner types into the station's screen: nothing to pair, no heartbeat. */
+const UNPAIRED: readonly string[] = ['scanner'];
+function scannerConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const s = config.symbologies;
+  if (!Array.isArray(s) || !s.length) throw new BadRequestException(`A scanner needs its symbologies: one or more of ${SYMBOLOGIES.join(', ')}.`);
+  const bad = s.filter((x) => !(SYMBOLOGIES as readonly string[]).includes(String(x)));
+  if (bad.length) throw new BadRequestException(`Unknown symbology ${bad.join(', ')}. Use ${SYMBOLOGIES.join(', ')}.`);
+  return { ...config, symbologies: [...new Set(s.map(String))] };
+}
 export type DeviceKind = (typeof DEVICE_KINDS)[number];
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
 /** Heartbeat is every 60 s; two missed beats make a device offline. */
 export const OFFLINE_AFTER_MS = 2 * 60 * 1000;
 /** Wrong codes allowed per minute, across all callers, before pairing pauses for the minute. */
 export const PAIR_FAILS_PER_MINUTE = 20;
+
+export interface PairingCode { code: string; expiresAt: string; validMinutes: number }
 
 export interface PairedDevice {
   deviceId: string;
@@ -39,7 +52,7 @@ export interface PairedDevice {
   config: Record<string, unknown>;
 }
 
-const KIND_WORD: Record<DeviceKind, string> = { label_printer: 'Printer', display: 'Display', kiosk: 'Kiosk', scale: 'Scale' };
+const KIND_WORD: Record<DeviceKind, string> = { label_printer: 'Printer', display: 'Display', kiosk: 'Kiosk', scale: 'Scale', scanner: 'Scanner' };
 
 @Injectable()
 export class DevicesService {
@@ -54,34 +67,40 @@ export class DevicesService {
   }
   private readonly clock: Clock;
 
-  async create(body: Record<string, unknown>, principal: AuthPrincipal) {
+  /** A scanner (SCAN-4) is recorded, not paired: pairing is null. Every other kind gets a code. */
+  async create(body: { kind: 'scanner' } & Record<string, unknown>, principal: AuthPrincipal): Promise<{ device: ReturnType<DevicesService['shape']>; pairing: null }>;
+  async create(body: Record<string, unknown>, principal: AuthPrincipal): Promise<{ device: ReturnType<DevicesService['shape']>; pairing: PairingCode }>;
+  async create(body: Record<string, unknown>, principal: AuthPrincipal): Promise<{ device: ReturnType<DevicesService['shape']>; pairing: PairingCode | null }> {
     const kind = String(body.kind ?? '') as DeviceKind;
     if (!DEVICE_KINDS.includes(kind)) throw new BadRequestException(`kind must be one of ${DEVICE_KINDS.join(', ')}.`);
     const station = text(body, 'station', 80)!;
     const name = text(body, 'name', 120)!;
     const site = text(body, 'site', 80, false);
-    const config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : {};
+    let config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : {};
+    if (kind === 'scanner') config = scannerConfig(config);
     if (JSON.stringify(config).length > 4000) throw new BadRequestException('config is too large.');
     const deviceId = uuidv7();
+    const unpaired = UNPAIRED.includes(kind);
     const now = this.clock();
     const [row] = await this.sql`
       insert into platform.device_master (device_id, kind, station, site, name, status, config, created_by, created_at, updated_at)
-      values (${deviceId}::uuid, ${kind}, ${station}, ${site}, ${name}, 'pending', ${JSON.stringify(config)}::text::jsonb, ${principal.userId}::uuid,
+      values (${deviceId}::uuid, ${kind}, ${station}, ${site}, ${name}, ${unpaired ? 'active' : 'pending'}, ${JSON.stringify(config)}::text::jsonb, ${principal.userId}::uuid,
               ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)
       returning *`;
-    const pairing = await this.issueCode(deviceId, principal);
+    const pairing = unpaired ? null : await this.issueCode(deviceId, principal);
     return { device: this.shape(row!), pairing };
   }
 
   /** A fresh code for a device (re-pair, or the first code expired). Older open codes stop working. */
   async newPairingCode(deviceId: string, principal: AuthPrincipal) {
-    const [dev] = await this.sql`select status from platform.device_master where device_id = ${deviceId}::uuid`;
+    const [dev] = await this.sql`select status, kind from platform.device_master where device_id = ${deviceId}::uuid`;
     if (!dev) throw new NotFoundException('That device was not found.');
+    if (UNPAIRED.includes(String(dev.kind))) throw new ConflictException('A scanner is not paired: it types into the station screen it is plugged into.');
     if (dev.status === 'revoked') throw new ConflictException('That device was revoked. Add it again to pair it.');
     return this.issueCode(deviceId, principal);
   }
 
-  private async issueCode(deviceId: string, principal: AuthPrincipal) {
+  private async issueCode(deviceId: string, principal: AuthPrincipal): Promise<PairingCode> {
     const now = this.clock();
     const expiresAt = new Date(now.getTime() + PAIRING_TTL_MS);
     await this.sql`update platform.device_pairing set used_at = ${now.toISOString()}::timestamptz where device_id = ${deviceId}::uuid and used_at is null`;
@@ -165,7 +184,7 @@ export class DevicesService {
     const gone = await this.sql`
       update platform.device_master
          set status = 'offline', updated_at = ${now.toISOString()}::timestamptz
-       where status = 'active' and coalesce(last_seen_at, paired_at) < ${cutoff}::timestamptz
+       where status = 'active' and kind <> all(${UNPAIRED as string[]}::text[]) and coalesce(last_seen_at, paired_at) < ${cutoff}::timestamptz
        returning device_id, kind, station, name`;
     const stillOff = await this.sql`select device_id, kind, station, name from platform.device_master where status = 'offline'`;
     for (const d of stillOff) {
@@ -201,7 +220,11 @@ export class DevicesService {
   async update(deviceId: string, body: Record<string, unknown>) {
     const name = text(body, 'name', 120, false);
     const station = text(body, 'station', 80, false);
-    const config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : null;
+    let config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : null;
+    if (config) {
+      const [k] = await this.sql`select kind from platform.device_master where device_id = ${deviceId}::uuid`;
+      if (k?.kind === 'scanner') config = scannerConfig(config);
+    }
     const [dev] = await this.sql`
       update platform.device_master
          set name = coalesce(${name}, name), station = coalesce(${station}, station),
@@ -224,9 +247,10 @@ export class DevicesService {
     return openAlerts(this.sql, station);
   }
 
-  private shape(r: Record<string, unknown>) {
+  shape(r: Record<string, unknown>) {
     const lastSeen = iso(r.last_seen_at);
-    const online = r.status === 'active' && !!lastSeen && this.clock().getTime() - new Date(lastSeen).getTime() <= OFFLINE_AFTER_MS;
+    const online = UNPAIRED.includes(String(r.kind)) ? r.status === 'active'
+      : r.status === 'active' && !!lastSeen && this.clock().getTime() - new Date(lastSeen).getTime() <= OFFLINE_AFTER_MS;
     return {
       deviceId: String(r.device_id),
       kind: r.kind as DeviceKind,

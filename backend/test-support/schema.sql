@@ -2974,3 +2974,8 @@ create table if not exists location.storage_location_master (
   created_dt timestamptz default now() not null, updated_dt timestamptz default now() not null,
   created_by varchar(255), updated_by varchar(255)
 );
+
+-- SCAN-4 (2026-11-07): scripts/migrations/2026-11-07-scan-scanner-kind.sql mirrored here.
+alter table platform.device_master drop constraint if exists device_master_kind_check;
+alter table platform.device_master add constraint device_master_kind_check
+  check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner'));

@@ -130,7 +130,10 @@
   });
 
   /* ── Devices ─────────────────────────────────────────────────────────────────────────────── */
-  var KINDS = [['label_printer', 'Label printer'], ['display', 'TV display'], ['kiosk', 'Kiosk tablet'], ['scale', 'Scale']];
+  var KINDS = [['label_printer', 'Label printer'], ['display', 'TV display'], ['kiosk', 'Kiosk tablet'], ['scale', 'Scale'], ['scanner', 'Barcode scanner']];
+  // SCAN-4: what a scanner reads, recorded per station. Names match BarcodeDetector's, one vocabulary.
+  var SYMS = [['qr_code', 'QR'], ['code_128', 'Code 128'], ['code_39', 'Code 39'], ['ean_13', 'EAN-13'], ['ean_8', 'EAN-8'], ['upc_a', 'UPC-A'], ['data_matrix', 'Data Matrix'], ['pdf417', 'PDF417']];
+  function symWords(a) { return (a || []).map(function (k) { return (SYMS.filter(function (s) { return s[0] === k; })[0] || [0, k])[1]; }).join(', '); }
   function pairBlock(dev, p) {
     var url = location.origin + '/pair.html#code=' + p.code;
     var qr = ''; try { var q = qrcode(0, 'M'); q.addData(url); q.make(); qr = q.createSvgTag(4, 2); } catch (e) { /* the code still works */ }
@@ -146,26 +149,32 @@
     var alerts = (await call('/v1/floor/alerts')) || { items: [] };
     var rows = (d.items || []).map(function (x) {
       var tone = x.status === 'revoked' ? 'neutral' : x.online ? 'ok' : x.status === 'pending' ? 'warn' : 'bad';
-      var word = x.status === 'revoked' ? 'Revoked' : x.online ? 'Online' : x.status === 'pending' ? 'Not paired' : 'Offline';
+      var word = x.status === 'revoked' ? 'Revoked' : x.kind === 'scanner' ? 'Recorded' : x.online ? 'Online' : x.status === 'pending' ? 'Not paired' : 'Offline';
       var cfg = x.config || {};
       return '<tr><td>' + escHtml(x.name) + '</td><td>' + escHtml((KINDS.filter(function (k) { return k[0] === x.kind; })[0] || [0, x.kind])[1]) + '</td><td>' + escHtml(x.station) + '</td><td>' + chip(tone, word) + '</td>' +
-        '<td class="t-cap">' + escHtml([cfg.language, cfg.size, cfg.screen, cfg.resolutionMg ? cfg.resolutionMg + ' mg' : ''].filter(Boolean).join(' · ')) + '</td><td>' + escHtml(when(x.lastSeenAt)) + '</td>' +
-        '<td style="white-space:nowrap">' + (canWrite && x.status !== 'revoked' ? btn('', 'New code', 'sm', ' data-code="' + x.deviceId + '"') + ' ' + btn('', 'Revoke', 'sm', ' data-revoke="' + x.deviceId + '"') : '') + '</td></tr>';
+        '<td class="t-cap">' + escHtml([cfg.language, cfg.size, cfg.screen, cfg.resolutionMg ? cfg.resolutionMg + ' mg' : '', x.kind === 'scanner' ? symWords(cfg.symbologies) : '', cfg.connection === 'usb_wedge' ? 'USB keyboard' : cfg.connection === 'bluetooth' ? 'Bluetooth' : cfg.connection === 'camera' ? 'Camera' : ''].filter(Boolean).join(' · ')) + '</td><td>' + escHtml(when(x.lastSeenAt)) + '</td>' +
+        '<td style="white-space:nowrap">' + (canWrite && x.status !== 'revoked' ? (x.kind === 'scanner' ? '' : btn('', 'New code', 'sm', ' data-code="' + x.deviceId + '"') + ' ') + btn('', 'Revoke', 'sm', ' data-revoke="' + x.deviceId + '"') : '') + '</td></tr>';
     });
     var form = canWrite ? card('Add a device', 'one station per device', '<form id="fo-add">' + grid([
       sel('fo-kind', 'Kind', KINDS, FV.kind || 'label_printer'), fld('fo-station', 'Station', 'placeholder="Packing 1" required'), fld('fo-name', 'Name', 'placeholder="Zebra ZD421" required'),
       sel('fo-lang', 'Printer language', [['zpl', 'ZPL (Zebra…)'], ['tspl', 'TSPL (TSC…)'], ['epl', 'EPL'], ['escpos', 'ESC/POS (receipt)'], ['pdf', 'PDF (office)']], 'zpl'),
       sel('fo-size', 'Label size', Object.keys((window.RaLabel || { SIZES: {} }).SIZES).map(function (k) { return [k, RaLabel.SIZES[k].name]; }), '100x50'),
       sel('fo-screen', 'Kiosk screen', [['packing', 'Packing station'], ['logistics', 'Logistics station'], ['maceration', 'Maceration'], ['printq', 'Print queue'], ['floorboard', 'Floor board']], 'packing'),
-      fld('fo-res', 'Scale resolution (mg)', 'type="number" min="1" placeholder="10"'), btn('', 'Add device', 'p', ' type="submit"')]) + '</form><div id="fo-pair" style="margin-top:12px">' + (FV.pair || '') + '</div>') : '';
+      fld('fo-res', 'Scale resolution (mg)', 'type="number" min="1" placeholder="10"'),
+      sel('fo-conn', 'Scanner connection', [['usb_wedge', 'USB keyboard (wedge)'], ['bluetooth', 'Bluetooth'], ['camera', 'Tablet / phone camera']], 'usb_wedge'),
+      '<fieldset id="fo-syms" style="border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:4px 12px;grid-column:1/-1"><legend class="t-cap">Scanner reads (for a scanner)</legend>' +
+        SYMS.map(function (s, i) { return '<label style="display:flex;gap:6px;align-items:center;min-height:44px"><input type="checkbox" name="fo-sym" value="' + s[0] + '"' + (i < 2 ? ' checked' : '') + '> ' + escHtml(s[1]) + '</label>'; }).join('') + '</fieldset>',
+      btn('', 'Add device', 'p', ' type="submit"')]) + '</form><div id="fo-pair" style="margin-top:12px">' + (FV.pair || '') + '</div>') : '';
     var al = (alerts.items || []).map(function (a) { return '<tr><td>' + chip('bad', (function (k) { k = String(k || '').replace(/_/g, ' ').toLowerCase(); return k.charAt(0).toUpperCase() + k.slice(1); })(a.kind)) + '</td><td>' + escHtml(a.station || '') + '</td><td>' + escHtml(a.title) + '<div class="t-cap">' + escHtml(a.body || '') + '</div></td><td>' + escHtml(when(a.raisedAt)) + '</td></tr>'; });
     V.innerHTML = form + card('Devices', (d.items || []).length + ' registered', table(['Name', 'Kind', 'Station', 'Status', 'Set-up', 'Last seen', ''], rows)) + card('Station alerts', al.length + ' open', table(['Alert', 'Station', 'What', 'Since'], al));
     on('fo-add', 'submit', async function (e) {
       e.preventDefault();
       var kind = val('fo-kind'); FV.kind = kind;
-      var config = kind === 'label_printer' ? { language: val('fo-lang'), size: val('fo-size') } : kind === 'kiosk' ? { screen: val('fo-screen') } : kind === 'scale' && val('fo-res') ? { resolutionMg: Number(val('fo-res')) } : {};
+      var config = kind === 'label_printer' ? { language: val('fo-lang'), size: val('fo-size') } : kind === 'kiosk' ? { screen: val('fo-screen') } : kind === 'scale' && val('fo-res') ? { resolutionMg: Number(val('fo-res')) } :
+        kind === 'scanner' ? { connection: val('fo-conn'), symbologies: [].map.call(document.querySelectorAll('input[name="fo-sym"]:checked'), function (c) { return c.value; }) } : {};
       var r = await call('/v1/devices', 'POST', { kind: kind, station: val('fo-station'), name: val('fo-name'), config: config });
       if (!r) return;
+      if (!r.pairing) { FV.pair = ''; toast('Scanner recorded for ' + r.device.station + ': ' + symWords(r.device.config.symbologies) + '.', 'good'); viewDevices(item, V); return; }
       FV.pair = pairBlock(r.device, r.pairing); viewDevices(item, V);
     });
     V.querySelectorAll('[data-code]').forEach(function (b) {

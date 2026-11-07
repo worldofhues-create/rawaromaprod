@@ -126,3 +126,33 @@ test('list never returns a token or code hash', async () => {
   const text = JSON.stringify(items);
   assert.ok(!/token_hash|tokenHash|code_hash|codeHash/.test(text));
 });
+
+// SCAN-4: a scanner is recorded per station with the symbologies it reads, for the Devices screen.
+// A wedge or Bluetooth scanner types into the station's own screen: it has no token to pair with and
+// no heartbeat, so it is active at once and never swept offline.
+test('scanner: recorded per station with its symbologies; no pairing code; never swept offline', async () => {
+  const st = station();
+  const r = await svc.create({ kind: 'scanner', station: st, name: 'Honeywell 1472g', config: { symbologies: ['qr_code', 'code_128'], connection: 'usb_wedge', aimPrefix: true, suffix: 'enter' } }, admin);
+  assert.equal(r.device.kind, 'scanner');
+  assert.equal(r.device.status, 'active');
+  assert.equal(r.pairing, null);
+  assert.deepEqual(r.device.config.symbologies, ['qr_code', 'code_128']);
+  const codes = await testClient()`select 1 from platform.device_pairing where device_id = ${r.device.deviceId}`;
+  assert.equal(codes.length, 0);
+  now = new Date(now.getTime() + OFFLINE_AFTER_MS * 10);
+  const sw = await svc.sweepOffline();
+  assert.ok(!sw.offline.includes(r.device.deviceId));
+  const listed = (await svc.list()).find((d) => d.deviceId === r.device.deviceId)!;
+  assert.equal(listed.status, 'active');
+  await assert.rejects(() => svc.newPairingCode(r.device.deviceId, admin), /scanner/i);
+  const upd = await svc.update(r.device.deviceId, { config: { symbologies: ['qr_code'] } });
+  assert.deepEqual(upd.config.symbologies, ['qr_code']);
+});
+
+test('scanner: symbologies are required and must be ones the floor uses', async () => {
+  await assert.rejects(() => svc.create({ kind: 'scanner', station: station(), name: 'S1' }, admin), /symbolog/i);
+  await assert.rejects(() => svc.create({ kind: 'scanner', station: station(), name: 'S1', config: { symbologies: [] } }, admin), /symbolog/i);
+  await assert.rejects(() => svc.create({ kind: 'scanner', station: station(), name: 'S1', config: { symbologies: ['qr_code', 'telepathy'] } }, admin), /telepathy/);
+  const r = await svc.create({ kind: 'scanner', station: station(), name: 'S1', config: { symbologies: ['code_128'] } }, admin);
+  await assert.rejects(() => svc.update(r.device.deviceId, { config: { symbologies: ['nope'] } }), /nope/);
+});
