@@ -20,6 +20,7 @@ import { Inject, Injectable } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { PG_CLIENT } from '@core/backend-kernel';
 import { PolicyService, PolicyUnresolved } from '../policy/policy.service.js';
+import { mgToQty } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg } from './floor-code.service.js';
 import { stationMedians, predictLate, groupByFormula, type PipelineJob, type Prediction } from './pipeline.js';
 
@@ -165,7 +166,7 @@ export class FloorQueueService {
               join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
              where ib.material_id = ${l.material_id} and ib.quantity_on_hand > 0 and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS')
                and (rb.expiry_date is null or rb.expiry_date >= current_date)`;
-          const enough = lots.some((x) => (qtyToMg(x.qty, x.uom_code) ?? -1) >= Number(l.target_mg));
+          const enough = lots.some((x) => (qtyToMg(x.qty, x.uom_code) ?? -1) >= Number(l.target_mg) && mgToQty(Number(l.target_mg), x.uom_code) !== null);
           if (!enough) waitingOn.push((await this.codes.codeFor(l.material_id))?.code ?? 'an uncoded line');
         }
       }

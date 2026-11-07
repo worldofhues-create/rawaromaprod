@@ -16,7 +16,7 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, getTableColumns, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { convertQty, uuidv7 } from '@core/data-kernel';
 import { VAULT_PORT, type CodedInstruction, type VaultPort } from '@ra/cluster-formula';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -335,6 +335,19 @@ export class PickingService {
             on h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null
             where ib.inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as unknown[];
           if (held.length) throw new ConflictException('That lot is on hold and cannot be issued. Choose another lot.');
+          // STOCK-UNITS: the debit converts this line to the lot's unit. If it cannot, say so here,
+          // to the person issuing, rather than leave an issue the consumer will only refuse later.
+          const units = (await tx.execute(sql`select i.picked_qty::text as qty, pu.uom_code as pick_uom, lu.uom_code as lot_uom
+            from production.material_pick_list_items i
+            join inventory.inventory_batch ib on ib.inventory_batch_id = ${item.inventoryBatchId}::uuid
+            left join platform.uom_master pu on pu.uom_id = i.uom_id
+            left join platform.uom_master lu on lu.uom_id = ib.uom_id
+            where i.material_pick_list_id = ${body.materialPickListId}::uuid and i.material_id = ${materialId}::uuid
+              and i.picked_qty > 0`)) as unknown as Array<{ qty: string; pick_uom: string | null; lot_uom: string | null }>;
+          for (const u of units) {
+            const moved = convertQty(u.qty, u.pick_uom, u.lot_uom);
+            if ('refused' in moved) throw new ConflictException(`That lot cannot be issued for this line. ${moved.refused}`);
+          }
         }
         await tx.insert(materialIssueItem).values({
           materialIssueItemId: uuidv7(),

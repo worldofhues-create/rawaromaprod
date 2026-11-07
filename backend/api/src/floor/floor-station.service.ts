@@ -29,8 +29,8 @@
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
 import { BatchService, MixingService, PickingService } from '@ra/cluster-production';
+import { mgToQty, qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg, codeText } from './floor-code.service.js';
 import { scanCode } from './scan-code.js';
 
@@ -169,6 +169,8 @@ export class FloorStationService {
       const mg = qtyToMg(it.qty, it.uom_code);
       if (mg === null) throw new ConflictException(`Line ${i + 1} (${fc.code}) has no mass unit (kg, g or mg), so it cannot be weighed.`);
       if (!(mg > 0)) throw new ConflictException(`Line ${i + 1} (${fc.code}) has no quantity.`);
+      // STOCK-UNITS: target_mg is an integer. Truncating 0.1235 g would weigh one figure and debit another.
+      if (qtyToMgExact(it.qty, it.uom_code) === null) throw new ConflictException(`Line ${i + 1} (${fc.code}) is a part of a mg, which the floor cannot weigh. Correct the pick list.`);
       lines.push({ id: it.id, materialId: it.material_id, mg, code: fc.code });
     }
     // Promise date and order reference from the ALEMBIC requirement(s) this order serves.
@@ -269,7 +271,7 @@ export class FloorStationService {
         floorLineId: l.floor_line_id, seq: l.seq, floorCode: fc?.code ?? null, colourName: fc?.colourName ?? null, colourHex: fc?.colourHex ?? null, initial: fc?.initial ?? null,
         picked: !!l.picked_batch_id, offFefoReason: l.pick_off_fefo_reason,
         takeLot: lot ? { barcode: lot.barcode, lot: lot.batchNumber, bin: lot.bin, expiry: lot.expiry } : null,
-        waiting: !l.picked_batch_id && !lot ? `No released lot of ${fc?.code ?? 'this code'} is large enough` : null,
+        waiting: !l.picked_batch_id && !lot ? `No released lot of ${fc?.code ?? 'this code'} is large enough, or kept finely enough, for this line` : null,
       });
     }
     return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, lines: out };
@@ -280,7 +282,8 @@ export class FloorStationService {
     const need = Number(l.target_mg);
     for (const lot of await PICKABLE_LOTS(sql, l.material_id)) {
       const mg = qtyToMg(lot.qty, lot.uom_code);
-      if (mg !== null && mg >= need) {
+      // STOCK-UNITS: a lot that cannot hold the line exactly in its own unit would be refused at the debit.
+      if (mg !== null && mg >= need && mgToQty(need, lot.uom_code) !== null) {
         return { inventoryBatchId: lot.inventory_batch_id, batchNumber: lot.batch_number, bin: lot.bin_code, binId: lot.bin_id, expiry: lot.expiry_date, barcode: await this.codes.lotBarcode(lot.inventory_batch_id, null) };
       }
     }
@@ -311,6 +314,7 @@ export class FloorStationService {
       if (!scanned) throw new BadRequestException('That lot cannot be picked: it is not released by QC, has expired, or is empty.');
       const mg = qtyToMg(scanned.qty, scanned.uom_code);
       if (mg === null || mg < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line. Take the lot the screen names.');
+      if (mgToQty(Number(l.target_mg), scanned.uom_code) === null) throw new BadRequestException(`A lot kept in ${scanned.uom_code} cannot hold this line's weight exactly, so it cannot be debited. Take a lot kept in g, or ask the supervisor.`);
       if (scanned.bin_code && bin.toUpperCase() !== scanned.bin_code.toUpperCase()) {
         throw new BadRequestException(bin ? `Wrong bin: that lot is in ${scanned.bin_code}, you scanned ${bin}.` : `Scan the bin first: that lot is in ${scanned.bin_code}.`);
       }

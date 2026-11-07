@@ -328,18 +328,19 @@ export class MixingService {
             }>;
 
             for (const row of applied) {
-              const qty = Number(row.qty);
-              if (!row.inventory_batch_id || !(qty > 0)) continue;
+              // STOCK-UNITS: event_qty is already in the lot's unit; the text goes back as it stands.
+              const qty = row.qty;
+              if (!row.inventory_batch_id || !(Number(qty) > 0)) continue;
               await tx.execute(sql`
                 update inventory.inventory_batch
-                   set quantity_on_hand = coalesce(quantity_on_hand, 0) + ${qty}
+                   set quantity_on_hand = coalesce(quantity_on_hand, 0) + ${qty}::numeric
                  where inventory_batch_id = ${row.inventory_batch_id}`);
               await tx.execute(sql`
                 insert into inventory.inventory_event_history
                   (inventory_batch_id, event_type, event_dt, reference_document_id,
                    reference_document_type, event_qty, performed_by, remarks, status)
                 values (${row.inventory_batch_id}, 'PRODUCTION_ISSUE_REVERSAL', now(), ${issueId},
-                        'MATERIAL_ISSUE', ${qty}, ${principal.userId},
+                        'MATERIAL_ISSUE', ${qty}::numeric, ${principal.userId},
                         'mixing session abort credit', 'ACTIVE')`);
             }
 

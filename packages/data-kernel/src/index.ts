@@ -27,6 +27,9 @@ export { auditTable } from "./audit.js";
 // UUIDv7
 export { uuidv7, UUIDV7_SQL } from "./uuid.js";
 
+// STOCK-UNITS: exact unit conversion for stock quantities
+export { massFactorMg, qtyToMgExact, mgToQty, convertQty, type Converted } from "./quantity.js";
+
 // Migration + seed runners
 export {
   runMigrations,

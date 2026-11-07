@@ -21,6 +21,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { randomBytes, randomInt } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { massFactorMg } from '@core/data-kernel';
 import { scanCode } from './scan-code.js';
 
 export const REVEAL = 'masterdata:material:reveal';
@@ -50,10 +51,7 @@ export interface FloorCode {
 /** Stored quantity → integer mg, when its unit is a mass unit we know. null otherwise (never a guess). */
 export function qtyToMg(qty: string | number | null, uomCode: string | null): number | null {
   if (qty === null || qty === undefined || qty === '') return null;
-  const u = String(uomCode ?? '').trim().toLowerCase();
-  const factor = ['kg', 'kgs', 'kilogram', 'kilograms'].includes(u) ? 1_000_000
-    : ['g', 'gm', 'gms', 'gram', 'grams'].includes(u) ? 1_000
-      : ['mg', 'milligram', 'milligrams'].includes(u) ? 1 : null;
+  const factor = massFactorMg(uomCode);
   if (factor === null) return null;
   // numeric(18,4) text: exact decimal → mg without float drift.
   const m = /^(-?)(\d+)(?:\.(\d+))?$/.exec(String(qty).trim());

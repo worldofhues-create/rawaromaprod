@@ -17,16 +17,18 @@ test('the issue consumes its own order\'s reservation on the issued batch, and o
   const sql = testClient();
   const orderId = crypto.randomUUID(), otherDoc = crypto.randomUUID();
   const materialId = crypto.randomUUID(), batchId = crypto.randomUUID();
+  await sql`insert into platform.uom_master (uom_id, uom_code, uom_name, status) values (${crypto.randomUUID()}, 'g', 'g', 'ACTIVE') on conflict do nothing`;
+  const g = (await sql`select uom_id::text from platform.uom_master where uom_code = 'g'`)[0]!.uom_id as string;
   await sql`insert into production.production_order (production_order_id, order_qty, status) values (${orderId}, 10, 'INPROGRESS')`;
-  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
-            values (${batchId}, ${materialId}, 100, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, uom_id, status)
+            values (${batchId}, ${materialId}, 100, ${g}, 'ACTIVE')`;
   const mine = crypto.randomUUID(), theirs = crypto.randomUUID();
   await sql`insert into inventory.stock_reservation (stock_reservation_id, inventory_batch_id, reserved_qty, reserved_for_document_id, status)
             values (${mine}, ${batchId}, 15, ${orderId}, 'ACTIVE'), (${theirs}, ${batchId}, 5, ${otherDoc}, 'ACTIVE')`;
   const pickListId = crypto.randomUUID(), issueId = crypto.randomUUID();
   await sql`insert into production.material_pick_list (material_pick_list_id, production_order_id, status) values (${pickListId}, ${orderId}, 'ACTIVE')`;
-  await sql`insert into production.material_pick_list_items (material_pick_list_item_id, material_pick_list_id, material_id, picked_qty, status)
-            values (${crypto.randomUUID()}, ${pickListId}, ${materialId}, 15, 'ACTIVE')`;
+  await sql`insert into production.material_pick_list_items (material_pick_list_item_id, material_pick_list_id, material_id, picked_qty, uom_id, status)
+            values (${crypto.randomUUID()}, ${pickListId}, ${materialId}, 15, ${g}, 'ACTIVE')`;
   await sql`insert into production.material_issue (material_issue_id, production_order_id, material_pick_list_id, status)
             values (${issueId}, ${orderId}, ${pickListId}, 'ACTIVE')`;
   await sql`insert into production.material_issue_item (material_issue_item_id, material_issue_id, material_id, inventory_batch_id, issued_qty, status)

@@ -8,6 +8,14 @@
  * issue is applied exactly once). The migration backfills existing issues, so only issues raised
  * after go-live are consumed — history is never retroactively decremented.
  *
+ * STOCK-UNITS: the pick line and the lot each name their own unit, and on-hand is kept in the lot's.
+ * The old debit subtracted the pick number as it stood, so 125.5 g off a kg lot took 125.5 kg. Each
+ * line now converts exactly (convertQty) and event_qty is written in the lot's unit, which is what
+ * lets an abort credit it back unchanged. A line that does not convert refuses the WHOLE issue:
+ * nothing is debited and nothing is claimed, so the issue stays open and debits once the unit is put
+ * right. PickingService.issueMaterials refuses first; this is the last guard, for an issue already
+ * raised. The refusal goes on the lot's history once, as PRODUCTION_ISSUE_REFUSED.
+ *
  * Quantity source: material_issue_item.issued_qty is a BOOLEAN (dictionary-locked), so the real
  * quantity comes from the linked material_pick_list_items.picked_qty; the batch to decrement is the
  * issue line's inventory_batch_id (what was actually taken).
@@ -25,7 +33,13 @@
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
+import { convertQty } from '@core/data-kernel';
 import type { Sql } from 'postgres';
+
+/** A line of the issue does not convert to its lot's unit: rolls the whole debit back. */
+class UnitRefused extends Error {
+  constructor(readonly batchId: string, message: string) { super(message); }
+}
 
 @Injectable()
 export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
@@ -57,7 +71,10 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
           and not exists (
             select 1 from inventory.material_issue_applied a where a.material_issue_id = o.aggregate_id
           )
-        order by o.occurred_at asc
+        order by exists (
+            select 1 from inventory.inventory_event_history h
+             where h.reference_document_id = o.aggregate_id and h.event_type = 'PRODUCTION_ISSUE_REFUSED'
+          ), o.occurred_at asc
         limit 50`) as Array<{ issue_id: string }>;
       for (const e of events) await this.applyIssue(e.issue_id);
     } catch (err) {
@@ -69,6 +86,21 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
 
   /** Decrement RM on-hand for one material issue, exactly once (ledger-guarded, atomic). */
   private async applyIssue(issueId: string): Promise<void> {
+    try {
+      await this.debit(issueId);
+    } catch (err) {
+      if (!(err instanceof UnitRefused)) throw err;
+      this.logger.warn(`consumption: issue ${issueId.slice(0, 8)} refused: ${err.message}`);
+      await this.sql`
+        insert into inventory.inventory_event_history
+          (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, remarks, status)
+        select ${err.batchId}, 'PRODUCTION_ISSUE_REFUSED', now(), ${issueId}, 'MATERIAL_ISSUE', ${err.message}, 'ACTIVE'
+         where not exists (select 1 from inventory.inventory_event_history
+                            where reference_document_id = ${issueId} and event_type = 'PRODUCTION_ISSUE_REFUSED')`;
+    }
+  }
+
+  private async debit(issueId: string): Promise<void> {
     await this.sql.begin(async (tx) => {
       // Claim the issue — this row is the single-applier lock; a prior run already handled it.
       const claim = await tx`
@@ -81,25 +113,30 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
       // Issued lines: the batch actually taken + the planned quantity (from the pick list).
       const lines = (await tx`
         select mii.inventory_batch_id::text as inv_batch, mpli.picked_qty::text as qty,
-               mi.production_order_id::text as order_id
+               mi.production_order_id::text as order_id, pu.uom_code as pick_uom, lu.uom_code as lot_uom
         from production.material_issue mi
         join production.material_issue_item mii on mii.material_issue_id = mi.material_issue_id
         left join production.material_pick_list_items mpli
           on mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id
-        where mi.material_issue_id = ${issueId}`) as Array<{ inv_batch: string | null; qty: string | null; order_id: string | null }>;
+        left join platform.uom_master pu on pu.uom_id = mpli.uom_id
+        left join inventory.inventory_batch ib on ib.inventory_batch_id = mii.inventory_batch_id
+        left join platform.uom_master lu on lu.uom_id = ib.uom_id
+        where mi.material_issue_id = ${issueId}`) as Array<{ inv_batch: string | null; qty: string | null; order_id: string | null; pick_uom: string | null; lot_uom: string | null }>;
 
       let applied = 0;
       for (const l of lines) {
-        const qty = Number(l.qty);
-        if (!l.inv_batch || !(qty > 0)) continue; // need a known batch AND a known qty to decrement
+        if (!l.inv_batch || !(Number(l.qty) > 0)) continue; // need a known batch AND a known qty to decrement
+        const moved = convertQty(l.qty, l.pick_uom, l.lot_uom);
+        if ('refused' in moved) throw new UnitRefused(l.inv_batch, moved.refused);
+        const qty = moved.qty; // exact text in the lot's unit: never through a float
         await tx`
           update inventory.inventory_batch
-             set quantity_on_hand = coalesce(quantity_on_hand, 0) - ${qty}, updated_dt = now()
+             set quantity_on_hand = coalesce(quantity_on_hand, 0) - ${qty}::numeric, updated_dt = now()
            where inventory_batch_id = ${l.inv_batch}`;
         await tx`
           insert into inventory.inventory_event_history
             (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, remarks, status)
-          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} to production`}, 'ACTIVE')`;
+          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} ${l.lot_uom} to production (${l.qty} ${l.pick_uom} on the pick list)`}, 'ACTIVE')`;
         // OPS-GREEN Act L (lane ops-factory): reserve -> pick -> issue. The RM reservation the
         // planner held on THIS batch for THIS production order is consumed by the issue, in the
         // same transaction as the debit — otherwise it outlives the stock it reserved and every

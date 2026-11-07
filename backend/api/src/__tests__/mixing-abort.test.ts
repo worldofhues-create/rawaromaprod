@@ -45,6 +45,13 @@ function applyIssue(issueId: string): Promise<void> {
   return (consumption as unknown as { applyIssue(id: string): Promise<void> }).applyIssue(issueId);
 }
 
+/** STOCK-UNITS: the debit refuses a side with no unit, so both sides of these fixtures name one. */
+async function gramUom(): Promise<string> {
+  const sql = testClient();
+  await sql`insert into platform.uom_master (uom_id, uom_code, uom_name, status) values (${crypto.randomUUID()}, 'g', 'g', 'ACTIVE') on conflict do nothing`;
+  return (await sql`select uom_id::text from platform.uom_master where uom_code = 'g'`)[0]!.uom_id as string;
+}
+
 async function freshOrder(materialQty: number, batchOnHand: number) {
   const sql = testClient();
   const orderId = crypto.randomUUID();
@@ -56,8 +63,8 @@ async function freshOrder(materialQty: number, batchOnHand: number) {
   await sql`insert into production.production_order_ingredients
     (production_order_ingredient_id, production_order_id, material_id, required_qty, issued_qty, status)
     values (${crypto.randomUUID()}, ${orderId}, ${materialId}, ${materialQty}, true, 'ACTIVE')`;
-  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
-    values (${inventoryBatchId}, ${materialId}, ${batchOnHand}, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, uom_id, status)
+    values (${inventoryBatchId}, ${materialId}, ${batchOnHand}, ${await gramUom()}, 'ACTIVE')`;
 
   return { orderId, materialId, inventoryBatchId };
 }
@@ -89,8 +96,8 @@ async function issueWithPickList(
   await sql`insert into production.material_pick_list (material_pick_list_id, production_order_id, status)
     values (${pickListId}, ${orderId}, 'ACTIVE')`;
   await sql`insert into production.material_pick_list_items
-    (material_pick_list_item_id, material_pick_list_id, material_id, picked_qty, status)
-    values (${crypto.randomUUID()}, ${pickListId}, ${materialId}, ${pickedQty}, 'ACTIVE')`;
+    (material_pick_list_item_id, material_pick_list_id, material_id, picked_qty, uom_id, status)
+    values (${crypto.randomUUID()}, ${pickListId}, ${materialId}, ${pickedQty}, ${await gramUom()}, 'ACTIVE')`;
 
   const issueId = crypto.randomUUID();
   await sql`insert into production.material_issue (material_issue_id, production_order_id, material_pick_list_id, status)
@@ -293,8 +300,8 @@ test('mixing session abort: two issues on the same order — one voided (no pick
   await sql`insert into production.production_order_ingredients
     (production_order_ingredient_id, production_order_id, material_id, required_qty, issued_qty, status)
     values (${crypto.randomUUID()}, ${orderId}, ${materialB}, 20, true, 'ACTIVE')`;
-  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
-    values (${batchB}, ${materialB}, 50, 'ACTIVE')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, uom_id, status)
+    values (${batchB}, ${materialB}, 50, ${await gramUom()}, 'ACTIVE')`;
 
   const voidIssueId = await issueWithoutPickList(orderId, materialA, batchA);
   const { issueId: creditedIssueId } = await issueWithPickList(orderId, materialB, batchB, 20);
