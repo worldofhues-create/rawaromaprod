@@ -217,7 +217,20 @@ EOM
   sudo -u rawprod env COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$PNPM" -C "$APP" install --frozen-lockfile >/dev/null
 
   say "build"
-  sudo -u rawprod "$PNPM" -C "$APP" -r build >/dev/null 2>&1 || say "  (no-op or non-fatal: this codebase runs the API from source via the swc loader — see DEPLOY.md §3)"
+  # Required: a failed or OOM-killed build stops here, before migrations and the restart. The API
+  # runs from source, so this compiles only the packages that emit a dist; output stays visible.
+  # The exclusions are here as well as in the tree because --rollback runs this against older
+  # commits, which still have web/admin (nothing serves it, and it cannot build) and @core/api's
+  # `nest build` (nothing runs its output, and it writes compiled files beside the sources).
+  # Serial because the vault box has about 970 MB available: this peaks at 810 MB one package at a
+  # time and 1321 MB at pnpm's default concurrency.
+  local build_rc=0
+  sudo -u rawprod "$PNPM" -C "$APP" -r --workspace-concurrency=1 \
+    --filter '!@core/admin-shell' --filter '!@core/api' build || build_rc=$?
+  if [ "$build_rc" -ne 0 ]; then
+    [ "$build_rc" -eq 137 ] && echo "exit 137 is SIGKILL: most likely out of memory, see dmesg" >&2
+    die "build failed (exit $build_rc). No migration ran and $API_UNIT was not restarted, so it is still running $current, but $APP is now at $full: deploy again, or deploy $current"
+  fi
 
   # Migrations BEFORE the API restarts — same ordering rule as ALEMBIC's deploy-sha.sh and the
   # same reason: an API that started against last week's schema is worse than one that refused

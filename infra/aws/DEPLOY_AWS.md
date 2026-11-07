@@ -190,9 +190,9 @@ infra/aws/deploy.sh --status
 infra/aws/deploy.sh --rollback   # refuses if the ledger has outrun the previous SHA — see script
 ```
 
-Exact-SHA only (git fetch + checkout --detach), `pnpm install --frozen-lockfile`, `pnpm -r
-build` (a no-op for the API — it runs from source via the swc loader per `DEPLOY.md` §3 — real
-for any workspace package that does compile), restarts the migrate unit before the api unit,
+Exact-SHA only (git fetch + checkout --detach), `pnpm install --frozen-lockfile`, a serial `pnpm -r
+build` of the packages that compile (the API runs from source via the swc loader per `DEPLOY.md` §3,
+so `@core/api` is left out; a failed or OOM-killed build stops the deploy before migrations), restarts the migrate unit before the api unit,
 health-checks `/health` (+ both static roots on `main`), writes `/srv/rawprod/DEPLOYED_SHA`.
 
 A deploy or a rollback first takes `flock` on `/run/lock/raw-host-deploy.lock`, the lock Alembic's
@@ -200,6 +200,18 @@ A deploy or a rollback first takes `flock` on `/run/lock/raw-host-deploy.lock`, 
 build with under 1800 MB available (`RAWPROD_MIN_BUILD_MEM_MB`; no floor on `vault` unless that is
 set). Both live in the script in the checkout, so the deploy that first brings them in runs the old
 script and takes neither: check by hand that nothing else is building for that one.
+
+`web/admin` was a template shell that no unit, vhost or process served, and it is removed. Failed
+builds left all 38 of its tracked `.next` files modified on both boxes, and `git checkout` refuses to
+delete a modified file, so before the first deploy of the commit that removes it, on each box:
+`sudo -u rawprod git -C /srv/rawprod/app checkout -- web/admin/.next`. The ignored leftovers stay
+under `web/admin/` and are harmless.
+
+That first deploy on `vault` must not use the old script in the checkout: its parallel `pnpm -r build`
+now runs to the end instead of dying on `web/admin`, about 1420 MB against the 970 MB available there,
+and it hides the result. Run the target's own script:
+`git -C /srv/rawprod/app show <sha>:infra/aws/deploy.sh > /tmp/rawprod-deploy.sh`, then
+`RAWPROD_ROLE=vault bash /tmp/rawprod-deploy.sh <sha>`.
 
 ## 8. `scripts/migrate/` — PB-02 migration tooling
 
