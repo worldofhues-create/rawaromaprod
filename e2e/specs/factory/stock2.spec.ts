@@ -140,3 +140,68 @@ test('STOCK2-5: Scan a lot keeps its padding at 375, and Exit focus mode leaves 
   console.log('pill over a card', hit);
   expect(hit).toBe(false);
 });
+
+/* STOCK2-5: .card brings no padding; .card-hd and .card-bd do. A card with plain content inside had its
+ * text on the edge, clipped by the corner, on every station. Measured, on the rail and on a locked kiosk. */
+async function cardsClear(page: Page, where: string) {
+  await expect(page.locator('#ra-view .loading')).toHaveCount(0);
+  await expect(page.locator('#ra-view .card').first()).toBeVisible();
+  const bad = await page.evaluate(() => [...document.querySelectorAll<HTMLElement>('#ra-view .card')].flatMap((c) => {
+    if (c.querySelector(':scope > .card-hd, :scope > .card-bd, :scope > table') || !c.offsetHeight) return [];
+    return parseFloat(getComputedStyle(c).paddingLeft) >= 12 ? [] : [(c.id || c.textContent || '').slice(0, 40)];
+  }));
+  expect(bad, where).toEqual([]);
+  expect(await noSideScroll(page), where).toBe(true);
+}
+const atPick = (page: Page, id: string) => page.locator(`[data-job="${id}"]`).click();
+async function staged(info: TestInfo) {
+  const pickJ = await job(info), verifyJ = await job(info), mixJ = await job(info);
+  await pick(verifyJ);
+  await pick(mixJ);
+  const vv = (await must('verifier', 'GET', `/v1/floor/jobs/${mixJ.floorJobId}/verify`)) as { lines: Array<{ floorLineId: string; targetMg: number }> };
+  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${mixJ.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, source: 'typed' });
+  await must('verifier', 'POST', `/v1/floor/jobs/${mixJ.floorJobId}/verify/complete`, {});
+  return { pickJ, verifyJ, mixJ };
+}
+
+test('STOCK2-5: every floor station keeps its card padding on the rail', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  const { pickJ, verifyJ, mixJ } = await staged(info);
+  for (const [role, nav, id] of [['picker', 'Pick', pickJ], ['verifier', 'Verify', verifyJ], ['mixer', 'Mix', mixJ]] as const) {
+    await signIn(page, 'factory', role);
+    await openNav(page, nav);
+    await cardsClear(page, `${nav} list`);
+    await atPick(page, id.floorJobId);
+    await expect(page.locator('#fl-find')).toHaveCount(0); // the list has gone: the job is open
+    await cardsClear(page, `${nav} job`);
+    await page.screenshot({ path: info.outputPath(`rail-${role}.png`), fullPage: true });
+    await openNav(page, 'Scan a lot');
+    await cardsClear(page, `Scan a lot as ${role}`);
+  }
+  await signIn(page, 'factory', 'production');
+  await openNav(page, 'Floor queue');
+  await cardsClear(page, 'Floor queue');
+  for (const [role, nav] of [['packing', 'Packing station'], ['logistics', 'Logistics station']] as const) {
+    await signIn(page, 'factory', role);
+    await openNav(page, nav);
+    await cardsClear(page, nav);
+  }
+});
+
+for (const [role, screen, station] of [['picker', 'floorpick', 'Pick 1'], ['verifier', 'floorverify', 'Verify 1'], ['mixer', 'floormix', 'Mix 1'], ['packing', 'packing', 'Packing 1'], ['logistics', 'logistics', 'Logistics 1']] as const) {
+  test(`STOCK2-5: a kiosk locked to ${screen} keeps its card padding`, async ({ page }, info) => {
+    test.setTimeout(120_000);
+    const { pickJ, verifyJ, mixJ } = await staged(info);
+    await page.addInitScript((k) => { try { localStorage.setItem('ra.kiosk', JSON.stringify(k)); } catch (e) { /* about:blank */ } }, { station, screen, deviceId: 'walk' });
+    await signIn(page, 'factory', role);
+    await expect(page.locator('html')).toHaveClass(/ra-kiosk/);
+    await cardsClear(page, `${screen} kiosk`);
+    const id = { floorpick: pickJ.floorJobId, floorverify: verifyJ.floorJobId, floormix: mixJ.floorJobId }[screen as string];
+    if (id) {
+      await atPick(page, id);
+      await expect(page.locator('#fl-find')).toHaveCount(0);
+      await cardsClear(page, `${screen} kiosk job`);
+    }
+    await page.screenshot({ path: info.outputPath(`kiosk-${screen}.png`), fullPage: true });
+  });
+}

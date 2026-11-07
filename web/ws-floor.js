@@ -49,7 +49,7 @@
     var canAnswer = can('production:floor_job:write');
     var box = document.createElement('div');
     box.id = 'fl-stock-alerts'; box.className = 'card'; box.setAttribute('role', 'alert');
-    box.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:10px;max-width:880px;margin-bottom:14px;border-color:var(--red)';
+    box.style.cssText = 'display:flex;flex-direction:column;gap:10px;max-width:880px;margin-bottom:14px;border-color:var(--red)';
     box.innerHTML = items.map(function (a, i) {
       return '<div style="display:flex;flex-direction:column;gap:6px">' + '<b>' + esc(a.title) + '</b><div>' + esc(a.body || '') + '</div>' +
         (a.kind === 'STOCK_OVER_PICK' && canAnswer ? '<div>' + btn('fl-over-' + i, 'Record why', 'p', big(' data-over="' + i + '"')) + '</div>' : '') + '</div>';
@@ -203,7 +203,7 @@
     var down = (g.children || []).map(function (c) {
       return '<li>' + code(c.barcode || '—') + ' · ' + esc(kindWord(c.kind)) + ' · ' + esc(W.formatWeight(c.qtyMg)) + ' in ' + esc(c.bin || '—') + (c.jobNo ? ' · job ' + esc(c.jobNo) : '') + ' · ' + esc(c.by) + ' · ' + esc(localTime(c.at)) + '</li>';
     }).join('');
-    return '<div class="card" id="fl-gen" style="padding:16px"><b>Genealogy</b>' +
+    return '<div class="card" id="fl-gen"><b>Genealogy</b>' +
       (up ? '<ul style="margin:6px 0 0;padding-left:18px">' + up + '</ul>' : '<div style="color:var(--ink-3)">An original lot: not cut from another.</div>') +
       (down ? '<div style="margin-top:8px"><b>Child lots</b><ul style="margin:6px 0 0;padding-left:18px">' + down + '</ul></div>' : '<div style="color:var(--ink-3);margin-top:6px">No child lots.</div>') + '</div>';
   }
@@ -472,7 +472,7 @@
     var o = data(r), jobs = o.jobs || [], stageWord = { VERIFY: 'at Verify', MIX: 'at Mix', DONE: 'finished' };
     var rp = o.returnedFromJobId && !can('inventory:lot_split:write') ? btn('fl-left-rp', 'Reprint lot label', '', big()) : '';
     if (!jobs.length && !rp) { box.innerHTML = ''; return; }
-    box.innerHTML = '<div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px">' + (jobs.length ? '<b>Leftover back to stock</b>' +
+    box.innerHTML = '<div class="card" style="display:flex;flex-direction:column;gap:10px">' + (jobs.length ? '<b>Leftover back to stock</b>' +
       '<div style="color:var(--ink-3)">' + (o.returnableMg > 0 ? 'At most ' + esc(W.formatWeight(o.returnableMg)) + ' can come back from this lot.' : 'Nothing on this lot can come back: what it holds is still to be issued.') + '</div>' +
       jobs.map(function (j, i) {
         return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(j.jobNo) + '<span>' + esc(stageWord[j.stage] || j.stage) + '</span>' +
@@ -496,7 +496,7 @@
       } });
   }
   function viewScan(item, V) {
-    V.innerHTML = '<form id="fl-sc" class="card" style="padding:16px;display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
+    V.innerHTML = '<form id="fl-sc" class="card" style="display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
     $('fl-sci').focus();
     $('fl-sc').onsubmit = async function (e) {
       e.preventDefault();
@@ -505,8 +505,7 @@
       var x = data(r);
       var row = function (k, v) { return '<div style="display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 0;border-bottom:1px solid var(--line)"><b style="min-width:110px">' + k + '</b><span style="flex:1;min-width:0;overflow-wrap:anywhere">' + v + '</span></div>'; };
       // FLOOR-5: a table here clipped long values at 375 px, hazard line included: stacked rows wrap instead.
-      // STOCK2-5: .card has no padding of its own (its .card-hd and .card-bd bring it), so plain content sat on the edge.
-      $('fl-sco').innerHTML = '<div class="card" style="padding:16px">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
+      $('fl-sco').innerHTML = '<div class="card">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
         row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +

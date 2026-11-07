@@ -240,3 +240,7 @@ body .content,body .main > .content{padding-bottom:var(--dock-runway) !important
 .ri-pin:focus-visible{outline:2px solid var(--accent-line);outline-offset:1px;opacity:1}
 .ri-reset{margin-top:8px}
 @media (pointer:coarse){ .ri-pin{opacity:1;width:40px;height:40px} .ri-row > .ri{padding-right:48px} }
+
+/* STOCK2-5: .card brings no padding of its own: its .card-hd and .card-bd do. A card holding plain content
+   had its text on the edge, clipped by the corner, on every floor station. An inline padding still wins. */
+#ra-view .card:not(.empty):not(.notbuilt):not(:has(> .card-hd, > .card-bd, > .card-ft, > table)){padding:16px}
