@@ -234,7 +234,7 @@
     finishedGoodBatchId: 'Finished batch', reservedForDocumentId: 'Reserved for', available: 'Free to use', onHand: 'On hand', reserved: 'Reserved',
     daysToExpiry: 'Days to expiry', isPreferred: 'Preferred', leadTimeDays: 'Lead time (days)', minOrderQty: 'Minimum order', isActive: 'Active',
     mobileNumber: 'Mobile', when: 'When', who: 'Who', how: 'How', ip: 'IP address', aliasName: 'Code name', aliasType: 'Kind',
-    requiredQty: 'Required', issuedQty: 'Issued', replacementOfPo: 'Replaces PO', varianceType: 'Difference', orderQty: 'Quantity',
+    requiredQty: 'Required', issuedAmount: 'Issued qty', issuedQty: 'Fully issued', replacementOfPo: 'Replaces PO', varianceType: 'Difference', orderQty: 'Quantity',
     unitNote: 'Units', producedQty: 'Made', dispatchedQty: 'Dispatched', reservedQty: 'Reserved', availableQty: 'Free to sell', packSize: 'Pack size',
     skuCode: 'Pack size (SKU)', grnNumber: 'Receipt no.', grnDate: 'Received on', poNumber: 'PO no.', prNumber: 'Request no.', soNumber: 'Order no.',
     rfqNumber: 'Quote request no.', quotationNumber: 'Quote no.', batchNumber: 'Batch', expiryDate: 'Expires', manufacturingDate: 'Made on',

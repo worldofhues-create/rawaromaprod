@@ -289,7 +289,7 @@
     '/v1/roles': ['roleCode', 'roleName', 'status'],
     '/v1/permissions': ['permissionCode', 'moduleName', 'permissionName', 'status'],
     '/v1/production-orders': ['orderNumber', 'orderQty', 'actualStartDt', 'status'],
-    '/v1/production-order-ingredients': ['aliasName', 'requiredQty', 'issuedQty', 'status'],
+    '/v1/production-order-ingredients': ['aliasName', 'requiredQty', 'issuedAmount', 'issuedQty', 'status'],
     '/v1/formula-event-hist': ['eventType', 'eventDt', 'formulaId', 'remarks'],
     '/v1/materials': ['materialCode', 'materialName', 'reorderLevel', 'qcRequired', 'status'],
     '/v1/rm-aliases': ['aliasName', 'aliasType', 'status'],
@@ -2497,6 +2497,20 @@
       if (st.search) { si.focus(); si.setSelectionRange(si.value.length, si.value.length); }
     }
   }
+  // STOCK3-4: a row with no total said why in a column past the right edge of a phone, so the figures
+  // read as blank and the reason was never seen. It is said above the table, where it cannot be missed.
+  function unitNotes(rows) {
+    var bad = rows.filter(function (r) { return r.unitNote; });
+    if (!bad.length) return '';
+    var list = bad.slice(0, 6).map(function (r) {
+      return '<li style="overflow-wrap:anywhere"><b>' + escHtml(r.materialCode || r.batchNumber || r.materialName || '') + '</b> ' + escHtml(r.unitNote) + '</li>';
+    }).join('');
+    return '<div id="ra-unit-notes" role="status" class="card" style="margin-bottom:var(--s-snug);border-left:4px solid var(--amber)"><b>' +
+      (bad.length === 1 ? '1 line is' : bad.length + ' lines are') + ' not totalled, so no figure is shown</b>' +
+      '<ul style="margin:6px 0 0;padding-left:18px">' + list + '</ul>' +
+      (bad.length > 6 ? '<div class="t-cap">and ' + (bad.length - 6) + ' more in the list below.</div>' : '') + '</div>';
+  }
+
   // Repaint ONLY the results table + count (never the search input) — client-filters the loaded page,
   // or the whole-table server matches when we have them for the current query.
   function paintResults() {
@@ -2540,7 +2554,7 @@
     // WS1: "Load more" pages past the first 100 rows (cursor lives on the view). Hidden while a
     // search term is active — search runs its own whole-table server pass (searchServer).
     var more = (v.cursor && !q) ? '<div class="tfoot" style="justify-content:center"><button id="ra-more" class="btn sm">Load more</button></div>' : '';
-    el.innerHTML = '<div style="overflow-x:auto"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
+    el.innerHTML = unitNotes(shown) + '<div style="overflow-x:auto"><table><thead><tr>' + head + '</tr></thead><tbody>' + body + '</tbody></table></div>' + more;
     wireActions();
     if (clickable) [].forEach.call(el.querySelectorAll('.ra-drow'), function (tr) {
       function activate(e) { if (e.target.closest('.ra-act')) return; var a = _acts[tr.getAttribute('data-k')]; if (a && a.detail) toggleRowDetail(tr, item[3], a.r); }
