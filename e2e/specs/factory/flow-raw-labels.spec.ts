@@ -282,3 +282,87 @@ test('R8: a lot splits across two bins from Stock, and the verifier\'s leftover 
   expect(sql(`select string_agg(relationship_type, ',' order by created_dt) from inventory.batch_genealogy_history where rm_batch_id = '${j.rb}'`)).toBe('LOT_SPLIT,LOT_RETURN');
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
 });
+
+/* LEFTOVER-AFTER-FINISH: the job is DONE and the verify form has gone. The lot's own scan brings the
+ * return back, with the same rules. The kiosk walk reaches it from a tablet locked to Verify. */
+async function finishedJob(info: Parameters<Parameters<typeof test>[1]>[1]) {
+  const j = await stagedJob(info);
+  const pv = (await must('picker', 'GET', `/v1/floor/jobs/${j.floorJobId}/pick`)) as { lines: Array<{ floorLineId: string; takeLot: { barcode: string; bin: string } }> };
+  const take = pv.lines[0]!.takeLot;
+  await must('picker', 'POST', `/v1/floor/jobs/${j.floorJobId}/pick/lines/${pv.lines[0]!.floorLineId}`, { bin: take.bin, barcode: take.barcode });
+  await must('picker', 'POST', `/v1/floor/jobs/${j.floorJobId}/pick/complete`, { tote: ('T-' + letters()).toUpperCase() });
+  const vv = (await must('verifier', 'GET', `/v1/floor/jobs/${j.floorJobId}/verify`)) as { lines: Array<{ floorLineId: string; targetMg: number }> };
+  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${j.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, source: 'typed' });
+  await must('verifier', 'POST', `/v1/floor/jobs/${j.floorJobId}/verify/complete`, {});
+  const mv = (await must('mixer', 'GET', `/v1/floor/jobs/${j.floorJobId}/mix`)) as { steps: Array<{ seq: number }> };
+  for (const st of mv.steps) await must('mixer', 'POST', `/v1/floor/jobs/${j.floorJobId}/mix/steps/${st.seq}`, {});
+  await must('mixer', 'POST', `/v1/floor/jobs/${j.floorJobId}/mix/complete`, {});
+  await expect.poll(() => onHandOf(j.lotCode), { timeout: 20_000 }).toBe('874.5000');
+  return j;
+}
+
+async function returnFromScan(page: import('@playwright/test').Page, j: Awaited<ReturnType<typeof finishedJob>>, windows: string[], info: Parameters<Parameters<typeof test>[1]>[1], shot: string) {
+  await wedge(page, '#fl-sci', j.lotCode, ']Q1', 'Enter');
+  await expect(page.locator('#fl-left')).toContainText('At most 874.5 g');
+  await expect(page.locator('#fl-left')).toContainText(j.jobNo);
+  await expect(page.locator('#fl-left')).toContainText('finished');
+  await page.screenshot({ path: info.outputPath(`${shot}-offer.png`), fullPage: true });
+  // over the cap: refused, with the reason on the sheet, and nothing moved
+  const binD = j.bin();
+  await page.locator('[data-left]').first().click();
+  await page.locator('[data-ask="qty"]').fill('874.501');
+  await page.locator('[data-ask="bin"]').fill(binD);
+  await page.getByRole('button', { name: 'Return and print', exact: true }).click();
+  await expect(page.getByText('At most 874.5 g can come back').first()).toBeVisible();
+  expect(onHandOf(j.lotCode)).toBe('874.5000');
+  await page.locator('[data-ask="qty"]').fill('800');
+  await page.screenshot({ path: info.outputPath(`${shot}-sheet.png`) });
+  const n = windows.length;
+  await page.getByRole('button', { name: 'Return and print', exact: true }).click();
+  await expect.poll(() => windows.length).toBeGreaterThan(n);
+  const back = windows[windows.length - 1]!;
+  const child = childOf(j.ib, 'RETURN');
+  expect(child).toMatch(L);
+  expect(back).toContain('RAW LOT · RETURNED');
+  expect(back).toContain(j.jobNo);
+  expect(back).toContain(EXPIRY);
+  await windowDecodes(page, back, child);
+  expect(onHandOf(child)).toBe('800.0000');
+  expect(onHandOf(j.lotCode)).toBe('74.5000');
+  expect(ledgerSum(child)).toBe('0.0000');
+  // the scan reloads: the cap has come down and the genealogy names the child
+  await expect(page.locator('#fl-left')).toContainText('At most 74.5 g');
+  await expect(page.locator('#fl-geno')).toContainText(child);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true);
+  return child;
+}
+
+test('leftover after Finish: Scan a lot returns it as a child lot; the picker cannot; the child reprints', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  const windows = labelWindows(page);
+  const j = await finishedJob(info);
+  await signIn(page, 'factory', 'picker');
+  await openNav(page, 'Scan a lot');
+  await wedge(page, '#fl-sci', j.lotCode, ']Q1', 'Enter');
+  await expect(page.locator('#fl-geno')).toContainText('An original lot');
+  await expect(page.locator('[data-left]')).toHaveCount(0); // the picker holds no verify permission: no offer at all
+  await signIn(page, 'factory', 'verifier');
+  await openNav(page, 'Scan a lot');
+  const child = await returnFromScan(page, j, windows, info, 'rail');
+  await wedge(page, '#fl-sci', child, ']C0', 'Enter');
+  await reprintWithReason(page, '#fl-left-rp', 'Label wet at the bin');
+  await expect.poll(() => sql(`select count(*) from inventory.lot_label where barcode = '${child}' and reprint`)).toBe('1');
+});
+
+test('leftover after Finish: a tablet locked to Verify reaches it without leaving the kiosk', async ({ page }, info) => {
+  test.setTimeout(180_000);
+  const windows = labelWindows(page);
+  const j = await finishedJob(info);
+  await page.addInitScript(() => { try { localStorage.setItem('ra.kiosk', JSON.stringify({ station: 'Verify 1', screen: 'floorverify', deviceId: 'walk' })); } catch (e) { /* about:blank */ } });
+  await signIn(page, 'factory', 'verifier');
+  await expect(page.locator('html')).toHaveClass(/ra-kiosk/);
+  await page.locator('#fl-left-scan').click();
+  await returnFromScan(page, j, windows, info, 'kiosk');
+  const small = await page.locator('[data-left], #fl-scgo').evaluateAll((els) => els.filter((e) => (e as HTMLElement).offsetHeight < 56).length);
+  expect(small).toBe(0); // gloved hands: the 56 px floor
+});

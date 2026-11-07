@@ -257,7 +257,17 @@
   }
 
   /* ── 2 Verifier ─────────────────────────────────────────────────────────────────────── */
-  function viewVerify(item, V) { return pickJob(V, 'VERIFY', 'Verify', function (id) { verifyJobView(V, id); }); }
+  // LEFTOVER-AFTER-FINISH: a kiosk locked to this screen cannot reach Scan a lot from a rail it does
+  // not have, so the scan opens in this view, not by navTo, and the lock stays as it is.
+  async function viewVerify(item, V) {
+    await pickJob(V, 'VERIFY', 'Verify', function (id) { verifyJobView(V, id); });
+    if (!V.firstChild || !can('inventory:lot_barcode:resolve')) return;
+    var row = document.createElement('div');
+    row.className = 'card'; row.style.cssText = 'display:flex;gap:10px;align-items:center;flex-wrap:wrap;max-width:880px;margin-bottom:14px';
+    row.innerHTML = '<span style="flex:1;min-width:200px">Leftover from a job that has moved on? Scan its lot.</span>' + btn('fl-left-scan', 'Return leftover', '', big());
+    V.insertBefore(row, V.firstChild);
+    $('fl-left-scan').onclick = function () { viewScan(item, V); };
+  }
   async function verifyJobView(V, id) {
     var res = await call('/v1/floor/jobs/' + id + '/verify');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'This job cannot be opened.')); return; }
@@ -420,6 +430,38 @@
   }
 
   /* ── Scan a lot ─────────────────────────────────────────────────────────────────────── */
+  /* LEFTOVER-AFTER-FINISH: the verify screen's form goes when the job moves on, so the lot's own scan
+   * offers the return for every job that picked it. The server keeps every rule; this shows the cap. */
+  async function leftoverCard(barcode) {
+    var box = $('fl-left'); if (!box) return;
+    var r = await call('/v1/floor/lots/' + encodeURIComponent(barcode) + '/leftover');
+    if (r.status >= 400 || !$('fl-left')) return;
+    var o = data(r), jobs = o.jobs || [], stageWord = { VERIFY: 'at Verify', MIX: 'at Mix', DONE: 'finished' };
+    var rp = o.returnedFromJobId && !can('inventory:lot_split:write') ? btn('fl-left-rp', 'Reprint lot label', '', big()) : '';
+    if (!jobs.length && !rp) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="card" style="display:flex;flex-direction:column;gap:10px">' + (jobs.length ? '<b>Leftover back to stock</b>' +
+      '<div style="color:var(--ink-3)">' + (o.returnableMg > 0 ? 'At most ' + esc(W.formatWeight(o.returnableMg)) + ' can come back from this lot.' : 'Nothing on this lot can come back: what it holds is still to be issued.') + '</div>' +
+      jobs.map(function (j, i) {
+        return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(j.jobNo) + '<span>' + esc(stageWord[j.stage] || j.stage) + '</span>' +
+          (j.pickedByYou ? '<span style="color:var(--ink-3)">You picked this job, so someone else takes the leftover back.</span>'
+            : o.returnableMg > 0 ? btn('fl-left-' + i, 'Return leftover', '', big(' data-left="' + i + '"')) : '') + '</div>';
+      }).join('') : '') + rp + '</div>';
+    box.querySelectorAll('[data-left]').forEach(function (b) { b.onclick = function () { returnFromScan(barcode, jobs[+b.getAttribute('data-left')], o.returnableMg); }; });
+    var lp = $('fl-left-rp'); if (lp) lp.onclick = function () { reprintLot(barcode, o.returnedFromJobId); };
+  }
+  function returnFromScan(barcode, job, capMg) {
+    askForm({ title: 'Return leftover from ' + job.jobNo, submit: 'Return and print', intro: 'The leftover goes back as a new lot with its own code and label. It keeps this lot\'s number, QC release and expiry. At most ' + W.formatWeight(capMg) + '.',
+      fields: [{ n: 'qty', l: 'Leftover weight (g)', req: true, help: 'Weigh it. Up to the mg, e.g. 874.5' }, { n: 'bin', l: 'Scan the bin it goes back to', req: true }],
+      onSubmit: async function (v, fail, close) {
+        var mg = W.parseToMg(v.qty, 'g');
+        if (mg === null || mg <= 0) { fail('Type the leftover weight in grams, e.g. 874.5.'); return; }
+        var res = await call('/v1/floor/jobs/' + job.floorJobId + '/leftover', { method: 'POST', body: { lot: barcode, qtyMg: mg, bin: v.bin } });
+        if (res.status >= 400) { fail(err(res, 'The leftover was not returned.')); return; }
+        var d = data(res);
+        close(); toast('Back to stock: ' + d.child.barcode + ' (' + W.formatWeight(d.child.qtyMg) + ') in ' + d.child.bin + '.', 'good');
+        printLotLabel(d.label); $('fl-sc').requestSubmit();
+      } });
+  }
   function viewScan(item, V) {
     V.innerHTML = '<form id="fl-sc" class="card" style="display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
     $('fl-sci').focus();
@@ -437,11 +479,12 @@
         (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') +
         // FLOOR-1 (R8): split this lot across two bins; a child lot's own label reprints with a reason.
         (can('inventory:lot_split:write') ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fl-split', 'Split this lot', '', big()) +
-          (x.splitFrom ? btn('fl-lotrp', 'Reprint lot label', '', big()) : '') + '</div>' : '') + '</div><div id="fl-geno" style="margin-top:14px"></div>';
+          (x.splitFrom ? btn('fl-lotrp', 'Reprint lot label', '', big()) : '') + '</div>' : '') + '</div><div id="fl-left" style="margin-top:14px"></div><div id="fl-geno" style="margin-top:14px"></div>';
       var sp = $('fl-split'); if (sp) sp.onclick = function () { splitLot(x.barcode, function () { $('fl-sc').requestSubmit(); }); };
       var rp = $('fl-lotrp'); if (rp) rp.onclick = function () { reprintLot(x.barcode, null); };
       var g = await call('/v1/floor/lots/' + encodeURIComponent(x.barcode) + '/genealogy');
       if (g.status < 400 && $('fl-geno')) $('fl-geno').innerHTML = genealogyHtml(data(g));
+      if (can('production:floor_verify:write')) leftoverCard(x.barcode);
     };
   }
 

@@ -24,31 +24,15 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { randomBytes } from 'node:crypto';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { massFactorMg, mgToQty, uuidv7 } from '@core/data-kernel';
 import { FloorCodeService, HAZARD_PENDING, LOT_BARCODE_RE, qtyToMg } from './floor-code.service.js';
 import { scanCode } from './scan-code.js';
 
+export { mgToQty };
 export type SplitKind = 'SPLIT' | 'RETURN';
 type Q = Sql | TransactionSql;
 
 const CROCKFORD = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
-
-function unitFactor(uomCode: string | null): number | null {
-  const u = String(uomCode ?? '').trim().toLowerCase();
-  return ['kg', 'kgs', 'kilogram', 'kilograms'].includes(u) ? 1_000_000
-    : ['g', 'gm', 'gms', 'gram', 'grams'].includes(u) ? 1_000
-      : ['mg', 'milligram', 'milligrams'].includes(u) ? 1 : null;
-}
-
-/** Integer mg -> the exact numeric(18,4) text in the lot's own unit, or null when that unit cannot hold it exactly. */
-export function mgToQty(mg: number, uomCode: string | null): string | null {
-  const f = unitFactor(uomCode);
-  if (f === null || !Number.isSafeInteger(mg) || mg < 0) return null;
-  const scaled = BigInt(mg) * 10000n;
-  if (scaled % BigInt(f) !== 0n) return null;
-  const t = scaled / BigInt(f);
-  return `${t / 10000n}.${String(t % 10000n).padStart(4, '0')}`;
-}
 
 /** mg as grams for a message: trailing zeros trimmed ("874.5 g"). */
 export function gramsText(mg: number): string {
@@ -128,6 +112,12 @@ export class LotSplitService {
        where mii.inventory_batch_id = ${inventoryBatchId}
          and not exists (select 1 from inventory.material_issue_applied a where a.material_issue_id = mi.material_issue_id)`;
     let mg = 0;
+    // A line picked on a job still at PICK has left the shelf, but its issue is raised only when the
+    // pick completes. With a return now open long after Finish, that window is worth closing.
+    const [open] = await q<{ mg: string }[]>`
+      select coalesce(sum(l.target_mg), 0)::text as mg from production.floor_line l join production.floor_job j on j.floor_job_id = l.floor_job_id
+       where l.picked_batch_id = ${inventoryBatchId} and j.stage = 'PICK'`;
+    mg += Number(open?.mg ?? 0);
     for (const r of rows) {
       const v = qtyToMg(r.qty, r.uom_code);
       if (v === null) throw new ConflictException('An issue against this lot is in a unit that is not a weight, so what is left cannot be worked out. Ask the supervisor.');
@@ -177,6 +167,31 @@ export class LotSplitService {
     });
   }
 
+  /**
+   * LEFTOVER-AFTER-FINISH: what a scanned lot can still give back, and the jobs it can come back from.
+   * The verify screen goes away when the job leaves VERIFY, so Scan a lot is the way in after that.
+   * Same rules as the station: returnLeftover is the only write, this only shows the cap and the
+   * jobs. A return child answers with its own job, so its label can still be reprinted.
+   */
+  async leftoverOptions(rawCode: unknown, principal: AuthPrincipal) {
+    const barcode = this.code(rawCode);
+    const lot = await this.lotByCode(this.sql, barcode, false);
+    const bookMg = qtyToMg(lot.qty, lot.uom_code);
+    const returnableMg = bookMg === null ? null : Math.max(bookMg - await this.pendingMg(this.sql, lot.inventory_batch_id), 0);
+    const jobs = await this.sql<{ floor_job_id: string; job_no: string; stage: string; job_picker: string | null; line_pickers: Array<string | null> }[]>`
+      select j.floor_job_id::text, j.job_no, j.stage, j.picked_by as job_picker,
+             (select array_agg(x.picked_by) from production.floor_line x where x.floor_job_id = j.floor_job_id) as line_pickers
+        from production.floor_job j
+       where j.stage <> 'PICK' and exists (select 1 from production.floor_line l where l.floor_job_id = j.floor_job_id and l.picked_batch_id = ${lot.inventory_batch_id})
+       order by j.picked_dt desc nulls last limit 5`;
+    const [own] = await this.sql<{ floor_job_id: string }[]>`
+      select floor_job_id::text from inventory.lot_split where child_inventory_batch_id = ${lot.inventory_batch_id} and kind = 'RETURN' and floor_job_id is not null`;
+    return {
+      barcode, returnableMg, returnedFromJobId: own?.floor_job_id ?? null,
+      jobs: jobs.map((j) => ({ floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, pickedByYou: j.job_picker === principal.userId || j.line_pickers.includes(principal.userId) })),
+    };
+  }
+
   private async cut(tx: TransactionSql, kind: SplitKind, barcode: string, body: { qtyMg?: unknown; bin?: unknown; reason?: unknown }, jobId: string | null, jobNo: string | null, principal: AuthPrincipal) {
     const qtyMg = Number(body.qtyMg);
     if (!Number.isSafeInteger(qtyMg) || qtyMg <= 0) throw new BadRequestException('Say how much goes into the new lot (a weight above zero, to the mg).');
@@ -186,7 +201,7 @@ export class LotSplitService {
     if (held) throw new ConflictException('This lot is on hold: it is not split or moved until QC lifts the hold.');
     const bookMg = qtyToMg(p.qty, p.uom_code);
     if (bookMg === null) throw new ConflictException('This lot is not kept in a weight unit (g, kg, mg), so it cannot be split by weight.');
-    const f = unitFactor(p.uom_code)!;
+    const f = massFactorMg(p.uom_code)!;
     if (mgToQty(qtyMg, p.uom_code) === null) {
       const step = f / 10000;
       throw new BadRequestException(`This lot is kept in ${p.uom_code} to ${gramsText(step)}: enter a multiple of ${gramsText(step)}.`);
@@ -197,7 +212,7 @@ export class LotSplitService {
       if (qtyMg > free) throw new ConflictException(`That lot holds only ${gramsText(Math.max(free, 0))}${pending ? ` free (${gramsText(pending)} is still to be issued)` : ''}.`);
       if (qtyMg === free) throw new ConflictException('That is the whole lot: move it to the other bin instead of splitting it.');
     } else if (qtyMg > free) {
-      throw new ConflictException(`At most ${gramsText(Math.max(free, 0))} can come back: the lot holds ${gramsText(bookMg)} and the job's issue still takes ${gramsText(pending)}. Weigh the leftover again.`);
+      throw new ConflictException(`At most ${gramsText(Math.max(free, 0))} can come back: the lot holds ${gramsText(bookMg)}${pending ? ` and ${gramsText(pending)} of it is still to be issued` : ''}. Weigh the leftover again.`);
     }
     const to = await this.binByCode(tx, body.bin);
     if (to.id === p.storage_location_id) throw new BadRequestException(`The lot is already in ${to.code}: scan the bin the new part goes to.`);

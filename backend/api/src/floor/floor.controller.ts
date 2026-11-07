@@ -163,6 +163,13 @@ export class FloorController {
     return this.splits.returnLeftover(id, { lot: b?.lot, qtyMg: b?.qtyMg, bin: b?.bin }, p);
   }
 
+  // LEFTOVER-AFTER-FINISH: Scan a lot asks what can still come back; the write stays the route above.
+  @Permissions('production:floor_verify:write')
+  @Get('v1/floor/lots/:code/leftover')
+  leftoverOptions(@Param('code') code: string, @CurrentUser() p: AuthPrincipal) {
+    return this.splits.leftoverOptions(code, p);
+  }
+
   @Permissions('production:floor_verify:write')
   @Post('v1/floor/jobs/:id/leftover/label')
   leftoverLabel(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
