@@ -504,6 +504,46 @@
     tick();
   }
 
+  /* ── SCAN-9: one Print / Reprint for every step of both flows ─────────────────────────────
+   * Owner: every step prints its label, every label carries both codes, a reprint needs a reason and
+   * says REPRINT. Each step's label is a print job (one template, rendered by the station printer's
+   * agent, or in the browser when none is paired), so Print queue shows its history and a reprint is
+   * logged with the person and the reason. spec: { labelKind, subjectRef, code, title, lines, size?,
+   * station?, defaultStation? }. The code is the opaque id the NEXT step scans. */
+  var STEP = {}, stepSeq = 0;
+  function stepStation(o) { var k = kiosk(); return o.station || (k && k.station) || o.defaultStation || 'Office'; }
+  async function stepPrint(o) {
+    var job = await call('/v1/print-jobs', 'POST', { station: stepStation(o), labelKind: o.labelKind, subjectRef: o.subjectRef || o.code, size: o.size || '100x50',
+      content: { brand: 'RAW AROMA CHEM', title: o.title, lines: o.lines || [], code: o.code, footer: o.footer } });
+    if (!job) return null;
+    await handleJobs([job]);
+    return job;
+  }
+  async function stepReprint(o) {
+    var list = await call('/v1/print-jobs?subjectRef=' + encodeURIComponent(o.subjectRef || o.code)); if (!list) return null;
+    var last = (list.items || []).filter(function (j) { return j.labelKind === o.labelKind; })[0];
+    if (!last) { toast('Nothing printed yet for ' + (o.subjectRef || o.code) + '. Press Print first.', 'warn'); return null; }
+    var v = await ask('Reprint ' + o.title, 'A duplicate label is a recall risk, so the reprint says REPRINT and is logged with your name.', [{ n: 'reason', l: 'Why reprint?', req: true }], 'Reprint');
+    if (!v) return null;
+    var job = await call('/v1/print-jobs/' + last.printJobId + '/reprint', 'POST', { reason: v.reason });
+    if (!job) return null;
+    await handleJobs([job]);
+    return job;
+  }
+  /** Print + Reprint buttons as HTML, for any view; `id` names them (id-print, id-reprint). */
+  function stepButtons(id, o) {
+    var key = 's' + (++stepSeq); STEP[key] = o;
+    return '<span class="ra-step-print" style="display:inline-flex;gap:6px;flex-wrap:wrap">' +
+      btn(id + '-print', 'Print ' + escHtml(o.title), 'sm', ' data-step-print="' + key + '"') + btn(id + '-reprint', 'Reprint', 'sm', ' data-step-reprint="' + key + '"') + '</span>';
+  }
+  document.addEventListener('click', function (e) {
+    var t = e.target && e.target.closest && e.target.closest('[data-step-print],[data-step-reprint]'); if (!t) return;
+    var o = STEP[t.getAttribute('data-step-print') || t.getAttribute('data-step-reprint')]; if (!o) return;
+    e.preventDefault();
+    (t.hasAttribute('data-step-print') ? stepPrint : stepReprint)(o);
+  });
+  window.RA.stepPrint = stepPrint; window.RA.stepReprint = stepReprint; window.RA.stepButtons = stepButtons;
+
   window.RA.registerViews({
     __devices__: viewDevices, __printq__: viewPrintQueue, __maceration__: viewMaceration, __packing__: viewPacking,
     __logistics__: viewLogistics, __couriers__: viewCouriers, __floorboard__: viewBoard

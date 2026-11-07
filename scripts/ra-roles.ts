@@ -247,6 +247,7 @@ export const ROLES: RoleDef[] = [
     name: 'Procurement',
     view: 'procurement',
     select: anyOf(
+      pfcGrant('procurement'), // SCAN-9: print the PO label
       pfdGrant('procurement'),
       startsWith('procurement:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -266,6 +267,7 @@ export const ROLES: RoleDef[] = [
     name: 'Receiving',
     view: 'receiving',
     select: anyOf(
+      pfcGrant('receiving'), // SCAN-9: print the gate-entry, receiving and GRN labels
       oneOf(
         'inventory:gate_entry_master:read',
         'inventory:gate_entry_master:write',

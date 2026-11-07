@@ -28,7 +28,12 @@ const GRANTS: Record<string, readonly string[]> = {
     'sales:shipment:read',
   ],
   production: ['platform:device:read', 'platform:print_job:read', 'platform:print_job:write', 'production:maceration:read', 'production:maceration:write'],
-  qc: ['production:maceration:read'],
+  qc: ['production:maceration:read', 'platform:print_job:read', 'platform:print_job:write'],
+  // SCAN-9 (owner: every step of both flows prints its label): the raw-flow steps belong to these
+  // roles (PO, gate entry, receiving audit, GRN, incoming QC). Print rights only: a label carries the
+  // opaque id the next step scans, never a name, CAS or percentage (the renderer refuses those).
+  procurement: ['platform:print_job:read', 'platform:print_job:write'],
+  receiving: ['platform:print_job:read', 'platform:print_job:write'],
   warehouse: ['platform:print_job:read', 'platform:print_job:write'],
   packaging: ['platform:print_job:read', 'platform:print_job:write', 'sales:shipment:read', 'production:maceration:read'],
   sales: ['platform:print_job:read', 'platform:print_job:write', 'sales:shipment:read', 'sales:logistics:write', 'platform:courier_connector:read'],
