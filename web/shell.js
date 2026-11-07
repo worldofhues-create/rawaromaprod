@@ -1159,6 +1159,7 @@
     grn: function (r) { return { labelKind: 'grn', code: r.grnNumber, title: 'GOODS RECEIPT', lines: [['Date', r.grnDate], ['Status', r.status]], defaultStation: 'Receiving 1' }; },
     qc_tag: function (r) { var x = UP(r.overallResult); return { labelKind: 'qc_tag', code: r.batchNumber, title: x === 'ACCEPT' ? 'QC RELEASED' : x === 'REJECT' ? 'QC REJECTED' : x === 'HOLD' ? 'QC HOLD' : x === 'REWORK' ? 'QC REWORK' : 'QUARANTINE', lines: [['Inspected', r.inspectionDt ? String(r.inspectionDt).slice(0, 10) : null]], defaultStation: 'QC lab' }; },
     rm_lot: function (r) { return { labelKind: 'rm_lot', code: r.batchNumber, title: 'RAW LOT', lines: [['Expiry', r.expiryDate], ['Status', r.status]], defaultStation: 'Stores' }; },
+    fg_lot: function (r) { return { labelKind: 'fg_lot', code: r.batchNumber, title: 'FG LOT', lines: [['Qty', r.producedQty], ['Status', r.status]], defaultStation: 'FG store' }; },
     container: function (r) { return { labelKind: 'container', code: r.containerCode, title: 'CONTAINER', lines: [], defaultStation: 'Receiving 1' }; }
   };
   function stepLabel(kind, r, again) {
@@ -1297,6 +1298,8 @@
       { label: 'Assign role', perm: 'iam:user_role_mapping:write', when: function () { return true; }, run: function (r) { openAssignRole(r); } }
     ],
     '/v1/finished-good-batches': [
+      { label: 'Print FG lot label', perm: 'platform:print_job:write', tone: 'accent', when: function () { return true; }, run: function (r) { stepLabel('fg_lot', r); } },
+      { label: 'Reprint FG lot label', perm: 'platform:print_job:write', when: function () { return true; }, run: function (r) { stepLabel('fg_lot', r, true); } },
       // §109.7: the backend trace route (v1/trace/finished-good/:id) self-masks — it no
       // longer requires formula:actual:read (that would 403 every factory role, owner
       // included, since only formulator/vault_approver hold it now). Gate the button on

@@ -243,7 +243,12 @@
       return '<tr><td class="mono">' + escHtml(r.batchNumber || 'No batch number yet') + '</td><td><b>' + escHtml(r.label) + '</b><div style="height:6px;background:var(--panel-2);border-radius:3px;margin-top:4px"><div style="height:6px;width:' + pct + '%;background:var(--accent,#c60);border-radius:3px"></div></div><div class="t-cap">ends ' + escHtml(when(r.endsAt)) + ' · max ' + r.maxDays + ' days' + (r.restartCount ? ' · restarted ' + r.restartCount + '×' : '') + '</div></td>' +
         '<td>' + state + (r.releasedEarlyAt ? '<div class="t-cap">Released early: ' + escHtml(r.earlyReleaseReason || '') + ' — QC 2 still required</div>' : '') + '</td>' +
         '<td>' + (r.freezeRequired ? (r.freezeDoneAt ? chip('ok', 'Freeze done') : canWrite ? btn('', 'Freeze done', 'sm', ' data-fz="' + i + '"') : chip('warn', 'Freeze due')) : '<span class="t-cap">none</span>') + '</td>' +
-        '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canEarly && !r.releasedEarlyAt && !r.minReached ? btn('', 'Release early', 'sm', ' data-early="' + i + '"') : '') + '</td></tr>';
+        '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canEarly && !r.releasedEarlyAt && !r.minReached ? btn('', 'Release early', 'sm', ' data-early="' + i + '"') : '') +
+          // SCAN-11: the oil batch's own label, the maceration start tag, and the done tag once QC 2 may start.
+          (r.batchNumber ? '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">' +
+            stepButtons('fo-mc-b-' + i, { labelKind: 'oil_batch', subjectRef: r.batchNumber, code: r.batchNumber, title: 'BATCH', defaultStation: 'Maceration', lines: [['Product', r.label]] }) +
+            stepButtons('fo-mc-s-' + i, { labelKind: 'maceration_start', subjectRef: r.batchNumber, code: r.batchNumber, title: 'MACERATING', defaultStation: 'Maceration', lines: [['Started', when(r.startedAt)], ['Ends', when(r.endsAt)], ['Max days', r.maxDays]] }) +
+            (r.readyForQc2 || r.releasedEarlyAt ? stepButtons('fo-mc-d-' + i, { labelKind: 'maceration_done', subjectRef: r.batchNumber, code: r.batchNumber, title: 'MACERATION DONE', defaultStation: 'Maceration', lines: [['Next', 'QC 2'], ['Early release', r.releasedEarlyAt ? r.earlyReleaseReason : null]] }) : '') + '</div>' : '') + '</td></tr>';
     });
     var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid(['<label style="display:flex;flex-direction:column;gap:5px;min-width:0"><span class="t-cap">Formula</span><select id="fo-ms-f" class="fld" required' + (fr.error ? ' aria-invalid="true"' : '') + '><option value="">' + escHtml(fr.error || (fr.rows.length ? 'Choose a product…' : 'No product has a formula linked yet')) + '</option>' +
         (fr.rows || []).map(function (f) { return '<option value="' + escHtml(f.formulaId) + '">' + escHtml(FN[f.formulaId] || f.formulaId) + '</option>'; }).join('') + '</select>' + (fr.error ? '<span role="alert" class="t-cap" style="color:var(--bad,#b3261e)">' + escHtml(fr.error) + '</span>' : '') + '</label>',
@@ -393,7 +398,7 @@
         '<form id="fo-lg-ho" style="margin-top:10px">' + grid([fld('fo-lg-to', 'Handed to (courier person)', ''), btn('', 'Handed over', 'p', ' type="submit" data-net')]) + '</form>' +
         '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('', 'Courier did not come', 'sm', ' data-ex="COURIER_NO_SHOW" data-net') + btn('', 'Carton damaged', 'sm', ' data-ex="CARTON_DAMAGED" data-net') + btn('', 'Address does not match', 'sm', ' data-ex="ADDRESS_MISMATCH" data-net') + (cur.status === 'HOLD' ? btn('', 'Release hold', 'sm', ' data-ex="RELEASE_HOLD" data-net') : '') + '</div>');
     }
-    V.innerHTML = card('Logistics station', 'oldest order first', grid([fld('fo-lg-st', 'Station', 'value="' + escHtml(station('logistics', 'Logistics 1')) + '"' + (kiosk() ? ' disabled' : ''))])) + work + card('Waiting to ship', list.length + '', table(['Shipment', 'Order', 'Status', 'Cartons', 'AWB', ''], rows));
+    V.innerHTML = (FV.shipped ? card('Shipped', FV.shipped.code, stepButtons('fo-lg-shp', FV.shipped)) : '') + card('Logistics station', 'oldest order first', grid([fld('fo-lg-st', 'Station', 'value="' + escHtml(station('logistics', 'Logistics 1')) + '"' + (kiosk() ? ' disabled' : ''))])) + work + card('Waiting to ship', list.length + '', table(['Shipment', 'Order', 'Status', 'Cartons', 'AWB', ''], rows));
     on('fo-lg-st', 'change', function () { setStation('logistics', val('fo-lg-st')); });
     V.querySelectorAll('[data-lg]').forEach(function (b) { b.addEventListener('click', function () { FV.lgId = b.getAttribute('data-lg'); viewLogistics(item, V); }); });
     if (!cur) return;
@@ -413,7 +418,14 @@
     on('fo-lg-ho', 'submit', async function (e) {
       e.preventDefault();
       var r = await call('/v1/logistics/shipments/' + cur.shipmentId + '/handover', 'POST', { handedTo: val('fo-lg-to') });
-      if (r) { toast('Handed over. Tracking goes to ALEMBIC with the AWB.', 'good'); FV.lgId = null; viewLogistics(item, V); }
+      if (r) {
+        toast('Handed over. Tracking goes to ALEMBIC with the AWB.', 'good');
+        // SCAN-11: the SHIPPED label, printed at handover; reprintable from the card that stays on screen.
+        FV.shipped = { labelKind: 'shipped', subjectRef: cur.awb || cur.shipmentNo, code: cur.awb || cur.shipmentNo, title: 'SHIPPED', station: stn(),
+          lines: [['Order', cur.soNumber], ['Shipment', cur.shipmentNo], ['AWB', cur.awb], ['Cartons', cur.cartonCount], ['Handed to', val('fo-lg-to')]] };
+        await stepPrint(FV.shipped);
+        FV.lgId = null; viewLogistics(item, V);
+      }
     });
     V.querySelectorAll('[data-ex]').forEach(function (b) {
       b.addEventListener('click', async function () {

@@ -101,6 +101,8 @@
       '<script>window.onload=function(){window.print()}<\/script>');
     w.document.close();
   }
+  // SCAN-10/11: Print / Reprint for a step's label (ws-floor-ops.js RA.stepButtons), or nothing if it failed to load.
+  function SB(id, o) { return window.RA && window.RA.stepButtons ? window.RA.stepButtons(id, o) : ''; }
   function reprint(jobId, kind) {
     askForm({ title: 'Reprint ' + kind, submit: 'Reprint', intro: 'A duplicate label is a recall risk, so the reprint says REPRINT and is logged with your name.',
       fields: [{ n: 'reason', l: 'Why reprint?', req: true }],
@@ -280,11 +282,15 @@
       (d.items.length ? d.items.map(function (j) {
         var p = j.prediction;
         var fin = !p ? '' : p.atRisk ? chip('r', 'Late by ' + p.lateByDays + 'd') + ' ' + esc(p.explain) : esc(p.explain);
-        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin + '</td></tr>';
+        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin +
+          // SCAN-11: the job ticket (its job number is what the next station's find field takes); MIXED reprint once done.
+          '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + SB('fl-jt-' + j.floorJobId, { labelKind: 'floor_job', subjectRef: j.jobNo, code: j.jobNo, title: 'FLOOR JOB', defaultStation: 'Floor', lines: [['Order', j.orderRef], ['Stage', ({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage]] }) +
+          (j.stage === 'DONE' ? btn('fl-rpm-' + j.floorJobId, 'Reprint MIXED', 'sm', ' data-rpm="' + esc(j.floorJobId) + '"') : '') + '</div></td></tr>';
       }).join('') : '<tr><td colspan="6">Nothing on the floor.</td></tr>') + '</tbody></table></div>' +
       ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
         return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Choose it as the stock-cover suggestion when you put a run on the floor.</span></p>';
       }).join('') + '</div>' : '');
+    V.querySelectorAll('[data-rpm]').forEach(function (b) { b.onclick = function () { reprint(b.getAttribute('data-rpm'), 'MIXED'); }; });
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();

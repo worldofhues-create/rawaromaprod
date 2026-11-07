@@ -43,6 +43,21 @@
   /** One reason, asked in the console's own sheet (never the browser's prompt). */
   // SCAN-10: Print / Reprint for a step's label (ws-floor-ops.js RA.stepButtons), or nothing if it failed to load.
   function SB(id, o) { return window.RA && window.RA.stepButtons ? window.RA.stepButtons(id, o) : ''; }
+  /* SCAN-12: the label printed at one step scans at the next. Where that step chooses from a list (the
+   * PO and gate entry at receiving, the oil batch at Batch QC), a scan field sits under it: the scanned
+   * number picks the matching row. The list is the one the server already gave this person. */
+  function scanPick(selectId) {
+    return '<input id="' + selectId + '-scan" data-scan class="fld" autocomplete="off" placeholder="or scan its label" aria-label="Scan the label" style="margin-top:6px;min-width:0;width:min(280px,100%)">';
+  }
+  function bindScanPick(selectId) {
+    var inp = $(selectId + '-scan'), sel = $(selectId); if (!inp || !sel || !window.RaScan) return;
+    window.RaScan.onScan(inp, function (code) {
+      var want = String(code).toUpperCase();
+      var hit = [].filter.call(sel.options, function (o) { return o.value && String(o.textContent).toUpperCase().split(/[\s·,()]+/).indexOf(want) >= 0; })[0];
+      if (!hit) { toast('Nothing in this list answers to ' + code + '.', 'bad'); return; }
+      sel.value = hit.value; sel.dispatchEvent(new Event('change', { bubbles: true })); inp.value = '';
+    });
+  }
   function askReason(title, label, submit, send) {
     askForm({ title: title, submit: submit, fields: [{ n: 'reason', l: label, t: 'textarea', req: true }],
       onSubmit: function (v, fail, close) {
@@ -131,9 +146,10 @@
     var openPo = function (p) { return /APPROVED|ISSUED|ACKNOWLEDGED|PARTIALLY_RECEIVED/i.test(p.status || ''); }, poText = function (p) { return (p.poNumber || 'PO without a number') + ' · ' + word(p.status); };
     var lpo = firstThenRest('/v1/purchase-orders?limit=100'), first = await lpo.first, pos = first.filter(openPo); pos.failed = first.failed;
     if (stale('recvaudit')) return;
-    V.innerHTML = '<div class="grid">' + card('Which delivery?', row(field('Purchase order', pick('fb-po', pos, 'purchaseOrderId', poText, 'Choose an open PO…'))) +
+    V.innerHTML = '<div class="grid">' + card('Which delivery?', row(field('Purchase order', pick('fb-po', pos, 'purchaseOrderId', poText, 'Choose an open PO…') + scanPick('fb-po'))) +
       '<p class="t-cap" style="margin-top:8px;color:var(--ink-3)">A truck with no PO, a closed PO or the wrong vendor is held at the gate and cannot be audited until purchase resolves it.</p>') +
       '<div id="fb-recv" class="c12"></div></div>';
+    bindScanPick('fb-po');
     $('fb-po').onchange = function () { if (this.value) loadPo(this.value); else $('fb-recv').innerHTML = ''; };
     if (first.more) fillLater('fb-po', lpo.rest, openPo, 'purchaseOrderId', poText);
   }
@@ -164,7 +180,7 @@
     host.innerHTML = card('Rule for ' + esc(d.purchaseOrder.poNumber || ''), '<p>' + ruleText + '</p><p class="t-cap">Deliveries so far: ' + d.deliveriesSoFar + '</p>' +
       (held.length ? '<div style="margin-top:8px">' + held.map(function (g) { return chip('r', (g.gateEntryNumber || 'Gate entry') + ' held: ' + (g.holdReason || '')); }).join(' ') + '</div>' : '')) +
       (open.length ? card('Audit the delivery', '<form id="fb-rform" style="display:flex;flex-direction:column;gap:var(--s-base)">' +
-        row(field('Gate entry', pick('fb-gate', open, 'gateEntryId', function (g) { return g.gateEntryNumber || g.gateEntryId; }, 'Choose the truck…')) +
+        row(field('Gate entry', pick('fb-gate', open, 'gateEntryId', function (g) { return g.gateEntryNumber || g.gateEntryId; }, 'Choose the truck…') + scanPick('fb-gate')) +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fb-final"> Last delivery: close the PO and judge shortness now</label>') +
         lines + '<div id="fb-rerr" role="alert" style="color:var(--red);min-height:16px"></div>' +
         '<button type="submit" class="btn p" id="fb-rsave">Submit audit</button></form>') : card('Audit the delivery', '<p>No truck waiting for audit on this PO. Make a gate entry first.</p>'));
@@ -172,6 +188,7 @@
     [].forEach.call(host.querySelectorAll('[data-ck]'), function (cb) {
       cb.onchange = function () { var w = host.querySelector('[data-why="' + cb.getAttribute('data-ck') + '"]'); w.style.display = cb.checked ? 'none' : ''; };
     });
+    bindScanPick('fb-gate');
     $('fb-rform').onsubmit = function (e) {
       e.preventDefault(); var errEl = $('fb-rerr'); errEl.textContent = '';
       var gate = $('fb-gate').value; if (!gate) { errEl.textContent = 'Choose the gate entry.'; return; }
@@ -330,7 +347,8 @@
     var btext = function (b) { return (b.batchNumber || 'Batch without a number') + ' · ' + word(b.status); };
     var lb = firstThenRest('/v1/oil-batches?limit=100'), batches = await lb.first;
     if (stale('qcgate')) return;
-    V.innerHTML = '<div class="grid">' + card('Batch', row(field('Oil batch', pick('fb-qb', batches, 'oilBatchId', btext, 'Choose a batch…')))) + '<div id="fb-qc" class="c12"></div></div>';
+    V.innerHTML = '<div class="grid">' + card('Batch', row(field('Oil batch', pick('fb-qb', batches, 'oilBatchId', btext, 'Choose a batch…') + scanPick('fb-qb')))) + '<div id="fb-qc" class="c12"></div></div>';
+    bindScanPick('fb-qb');
     $('fb-qb').onchange = function () { if (this.value) loadQc(this.value); };
     if (batches.more) fillLater('fb-qb', lb.rest, function () { return true; }, 'oilBatchId', btext);
   }
@@ -362,7 +380,9 @@
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fb-qdoubt"> Instrument doubt</label>') +
         '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div><button type="submit" class="btn p">Record QC round</button></form>';
     }
-    host.innerHTML = card('Batch ' + esc(d.batch.batchNumber || '') + (d.hold ? ' · ON HOLD' : ''), hist, d.hold ? esc(d.hold.reason) : '') + card(needRework ? 'Rework' : 'QC round', form, 'Every round tests every checkpoint, after a rework too.');
+    // SCAN-11: the QC-approved mark (QC 1 or QC 2), once the last round approves.
+    var qa = last && last.decision === 'APPROVE' ? '<p>' + SB('fb-qa', { labelKind: 'qc_approved', subjectRef: d.batch.batchNumber, code: d.batch.batchNumber, title: 'QC APPROVED', defaultStation: 'QC lab', lines: [['Round', last.roundNo], ['Spec', 'v' + last.specVersion]] }) + '</p>' : '';
+    host.innerHTML = card('Batch ' + esc(d.batch.batchNumber || '') + (d.hold ? ' · ON HOLD' : ''), hist + qa, d.hold ? esc(d.hold.reason) : '') + card(needRework ? 'Rework' : 'QC round', form, 'Every round tests every checkpoint, after a rework too.');
     var sel = $('fb-qprod');
     if (sel) sel.onchange = async function () {
       var r = await tunnel('/v1/prodfloor/qc/checkpoints/' + sel.value); var c = r.status < 400 ? data(r).checkpoints : [];

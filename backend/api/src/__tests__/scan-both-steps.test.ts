@@ -53,3 +53,35 @@ test('SCAN-10 raw flow: every step offers Print + Reprint with both codes', () =
   // R9 hold tag on every held lot
   assert.match(near(fb, 'async function viewRecall(', 3000), /SB\('fb-ht-' \+ i, \{ labelKind: 'hold_tag'/);
 });
+
+test('SCAN-11 finished flow: job ticket, MIXED reprint, batch label, maceration tags, QC-approved mark, FG lot, SHIPPED', () => {
+  const fl = read('web/ws-floor.js'), fo = read('web/ws-floor-ops.js'), fb = read('web/ws-floorb.js'), shell = read('web/shell.js');
+  // F1 a job ticket on every floor-queue row (its job number is what the verifier/mixer find field takes)
+  assert.match(fl, /SB\('fl-jt-' \+ j\.floorJobId, \{ labelKind: 'floor_job', subjectRef: j\.jobNo, code: j\.jobNo/);
+  // F4 MIXED reprint once the job is done (PICKED and VERIFIED already reprint at the next station)
+  assert.match(fl, /data-rpm="/);
+  assert.match(fl, /reprint\(b\.getAttribute\('data-rpm'\), 'MIXED'\)/);
+  // F4 batch label + F5 maceration start and complete tags, on each run
+  const mac = near(fo, 'async function viewMaceration(', 5000);
+  assert.match(mac, /labelKind: 'oil_batch'/);
+  assert.match(mac, /labelKind: 'maceration_start'[^}]*title: 'MACERATING'/);
+  assert.match(mac, /labelKind: 'maceration_done'[^}]*title: 'MACERATION DONE'/);
+  // F6 QC-approved mark once the last round approves
+  assert.match(fb, /last && last\.decision === 'APPROVE' \? '<p>' \+ SB\('fb-qa', \{ labelKind: 'qc_approved'/);
+  // F7 the FG lot label from the finished-goods screen
+  assert.match(near(shell, "'/v1/finished-good-batches': [\n", 6000), /stepLabel\('fg_lot', r\)/);
+  // F10 SHIPPED printed at handover, and reprintable
+  assert.match(fo, /labelKind: 'shipped'[^}]*title: 'SHIPPED'/);
+  assert.match(fo, /stepButtons\('fo-lg-shp', FV\.shipped\)/);
+});
+
+test('SCAN-12: where the next step chose from a list, it now also scans the label: PO, gate entry, oil batch', () => {
+  const fb = read('web/ws-floorb.js');
+  for (const id of ['fb-po', 'fb-gate', 'fb-qb']) {
+    assert.match(fb, new RegExp(`scanPick\\('${id}'\\)`), `${id} has a scan field`);
+  }
+  const fn = near(fb, 'function scanPick(', 1500);
+  assert.match(fn, /data-scan/);
+  assert.match(fn, /RaScan\.onScan\(/);
+  assert.match(fn, /dispatchEvent\(new Event\('change'/);
+});
