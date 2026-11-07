@@ -37,6 +37,9 @@ async function floorJob(info: Parameters<Parameters<typeof test>[1]>[1], grams =
   return { ...job, order, lotCode, bin: binCode, ib };
 }
 
+const staged: string[] = [];
+test.afterEach(() => { while (staged.length) sql(staged.shift()!); });
+
 test('finished flow: every step prints both codes, reprints with a reason, and its label scans at the next step', async ({ page }, info) => {
   test.setTimeout(240_000);
   const windows = labelWindows(page);
@@ -113,6 +116,7 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   // F5 maceration: the batch label, the start tag, and the done tag once QC 2 may start.
   sql(`insert into production.maceration_run (oil_batch_id, status, started_at, min_days, max_days, qc1_production_qc_id)
        values ('${oil}', 'MACERATING', now() - interval '40 days', 30, 120, '${randomUUID()}')`);
+  staged.push(`delete from production.maceration_run where oil_batch_id = '${oil}'`);
   await openNav(page, 'Maceration');
   const runRow = page.locator('tr', { hasText: batch }).first();
   await runRow.locator('[id^="fo-mc-b-"][id$="-print"]').click();
@@ -127,6 +131,9 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   sql(`insert into quality.qc_checkpoint_set (qc_checkpoint_set_id, product_id, version, reason) values ('${set}', '${randomUUID()}', 1, 'flow walk')`);
   sql(`insert into quality.batch_qc_round (oil_batch_id, round_no, qc_checkpoint_set_id, inspector_id, results, decision, reasons, policy_version)
        values ('${oil}', 1, '${set}', 'qc-walk', '[]', 'APPROVE', '[]', 1)`);
+  // Staging, not a measurement: stock cover (pfd-floor) measures QC days across the factory, and a
+  // round approved seconds after mixing reads as "QC takes 0 days". Removed at the end of this walk.
+  staged.push(`delete from quality.batch_qc_round where oil_batch_id = '${oil}'`, `delete from quality.qc_checkpoint_set where qc_checkpoint_set_id = '${set}'`);
   await signIn(page, 'factory', 'qc');
   await openNav(page, 'Batch QC');
   await wedge(page, '#fb-qb-scan', batch, ']Q1', 'Enter');
