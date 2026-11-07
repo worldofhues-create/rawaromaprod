@@ -38,6 +38,35 @@
     try { return await tunnel(path, opts); } catch (e) { return { status: 503, json: { error: { message: 'Can\'t connect. Nothing was saved; try again.' } } }; }
   }
 
+  /* STOCK2-4: a debit the ledger refused, or a reading held over the pick, is on every floor screen until
+   * it is settled: what happened, what to do, and for whoever can answer it, the way to answer it. */
+  async function stockAlerts(V) {
+    var r = await call('/v1/floor/alerts');
+    if (r.status >= 400 || !V.isConnected) return;
+    var items = ((data(r) || {}).items || []).filter(function (a) { return /^STOCK_/.test(a.kind); });
+    var old = V.querySelector('#fl-stock-alerts'); if (old) old.remove();
+    if (!items.length) return;
+    var canAnswer = can('production:floor_job:write');
+    var box = document.createElement('div');
+    box.id = 'fl-stock-alerts'; box.className = 'card'; box.setAttribute('role', 'alert');
+    box.style.cssText = 'padding:16px;display:flex;flex-direction:column;gap:10px;max-width:880px;margin-bottom:14px;border-color:var(--red)';
+    box.innerHTML = items.map(function (a, i) {
+      return '<div style="display:flex;flex-direction:column;gap:6px">' + '<b>' + esc(a.title) + '</b><div>' + esc(a.body || '') + '</div>' +
+        (a.kind === 'STOCK_OVER_PICK' && canAnswer ? '<div>' + btn('fl-over-' + i, 'Record why', 'p', big(' data-over="' + i + '"')) + '</div>' : '') + '</div>';
+    }).join('');
+    V.insertBefore(box, V.firstChild);
+    box.querySelectorAll('[data-over]').forEach(function (b) { b.onclick = function () {
+      var a = items[+b.getAttribute('data-over')];
+      askForm({ title: a.title, submit: 'Record and accept the reading', intro: a.body,
+        fields: [{ n: 'reason', l: 'Why was more than the pick used?', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var res = await call('/v1/floor/lines/' + a.subjectId + '/over-pick', { method: 'POST', body: { reason: v.reason } });
+          if (res.status >= 400) { fail(err(res, 'The reason was not recorded.')); return; }
+          close(); toast('Recorded. The reading stands and the lot is corrected.', 'good'); loadView();
+        } });
+    }; });
+  }
+
   /* ── nav: new floor roles and who sees which screen ─────────────────────────────────── */
   var NAV = {
     floorqueue: ['floorqueue', 'Floor queue', 'activity', '__floorqueue__'],
@@ -174,7 +203,7 @@
     var down = (g.children || []).map(function (c) {
       return '<li>' + code(c.barcode || '—') + ' · ' + esc(kindWord(c.kind)) + ' · ' + esc(W.formatWeight(c.qtyMg)) + ' in ' + esc(c.bin || '—') + (c.jobNo ? ' · job ' + esc(c.jobNo) : '') + ' · ' + esc(c.by) + ' · ' + esc(localTime(c.at)) + '</li>';
     }).join('');
-    return '<div class="card" id="fl-gen"><b>Genealogy</b>' +
+    return '<div class="card" id="fl-gen" style="padding:16px"><b>Genealogy</b>' +
       (up ? '<ul style="margin:6px 0 0;padding-left:18px">' + up + '</ul>' : '<div style="color:var(--ink-3)">An original lot: not cut from another.</div>') +
       (down ? '<div style="margin-top:8px"><b>Child lots</b><ul style="margin:6px 0 0;padding-left:18px">' + down + '</ul></div>' : '<div style="color:var(--ink-3);margin-top:6px">No child lots.</div>') + '</div>';
   }
@@ -211,7 +240,7 @@
   }
 
   /* ── 1 Picker ───────────────────────────────────────────────────────────────────────── */
-  function viewPick(item, V) { return pickJob(V, 'PICK', 'Start picking', function (id) { pickJobView(V, id); }); }
+  async function viewPick(item, V) { await pickJob(V, 'PICK', 'Start picking', function (id) { pickJobView(V, id); }); await stockAlerts(V); }
   async function pickJobView(V, id) {
     var res = await call('/v1/floor/jobs/' + id + '/pick');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'This job cannot be opened.')); return; }
@@ -267,6 +296,7 @@
     row.innerHTML = '<span style="flex:1;min-width:200px">Leftover from a job that has moved on? Scan its lot.</span>' + btn('fl-left-scan', 'Return leftover', '', big());
     V.insertBefore(row, V.firstChild);
     $('fl-left-scan').onclick = function () { viewScan(item, V); };
+    await stockAlerts(V);
   }
   async function verifyJobView(V, id) {
     var res = await call('/v1/floor/jobs/' + id + '/verify');
@@ -276,7 +306,7 @@
       var u = W.lineUnit(l.targetMg, 'g');
       return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap"><b>' + l.seq + '</b>' + code(l.floorCode) + swatch(l) +
         '<span>' + esc(W.formatTolerance(l.targetMg, l.toleranceMg, u)) + '</span><span style="margin-left:auto">' +
-        (l.verified ? chip('g', W.formatIn(l.actualMg, u) + (l.source === 'typed' ? ' typed' : '')) : chip('n', 'Open')) + '</span></div>';
+        (l.verified ? chip('g', W.formatIn(l.actualMg, u) + (l.source === 'typed' ? ' typed' : '')) : l.heldOverMg ? chip('r', W.formatIn(l.heldOverMg, u) + ' held for a supervisor') : chip('n', 'Open')) + '</span></div>';
     }).join('');
     var body;
     if (next) {
@@ -333,7 +363,8 @@
       var r = await call('/v1/floor/jobs/' + id + '/verify/lines/' + next.floorLineId, { method: 'POST', body: { actualMg: mg, source: 'typed' } });
       if (r.status >= 400) { $('fl-err').textContent = err(r, 'That weight was not recorded.'); return; }
       var x = data(r);
-      if (!x.verified) { $('fl-err').textContent = W.formatIn(x.actualMg, u2) + ' is outside ' + W.formatTolerance(x.targetMg, x.toleranceMg, u2) + '. ' + x.message; $('fl-wt').select(); return; }
+      if (x.overPick) { verifyJobView(V, id); return; } // STOCK2-1: the row and the alert carry it from here
+      if (!x.verified) { $('fl-err').textContent = x.withinTolerance ? x.message : W.formatIn(x.actualMg, u2) + ' is outside ' + W.formatTolerance(x.targetMg, x.toleranceMg, u2) + '. ' + x.message; $('fl-wt').select(); return; }
       verifyJobView(V, id);
     }; }
     var dn = $('fl-vdone');
@@ -342,6 +373,7 @@
       if (r.status >= 400) { $('fl-err').textContent = err(r, 'Verification was not finished.'); return; }
       toast('Verified. The tote goes to the mixer.', 'good'); printLabel(data(r).label); loadView();
     };
+    stockAlerts(V);
   }
 
   /* ── 3 Mixer ────────────────────────────────────────────────────────────────────────── */
@@ -418,6 +450,7 @@
       ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
         return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Choose it as the stock-cover suggestion when you put a run on the floor.</span></p>';
       }).join('') + '</div>' : '');
+    stockAlerts(V);
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();
@@ -439,7 +472,7 @@
     var o = data(r), jobs = o.jobs || [], stageWord = { VERIFY: 'at Verify', MIX: 'at Mix', DONE: 'finished' };
     var rp = o.returnedFromJobId && !can('inventory:lot_split:write') ? btn('fl-left-rp', 'Reprint lot label', '', big()) : '';
     if (!jobs.length && !rp) { box.innerHTML = ''; return; }
-    box.innerHTML = '<div class="card" style="display:flex;flex-direction:column;gap:10px">' + (jobs.length ? '<b>Leftover back to stock</b>' +
+    box.innerHTML = '<div class="card" style="padding:16px;display:flex;flex-direction:column;gap:10px">' + (jobs.length ? '<b>Leftover back to stock</b>' +
       '<div style="color:var(--ink-3)">' + (o.returnableMg > 0 ? 'At most ' + esc(W.formatWeight(o.returnableMg)) + ' can come back from this lot.' : 'Nothing on this lot can come back: what it holds is still to be issued.') + '</div>' +
       jobs.map(function (j, i) {
         return '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(j.jobNo) + '<span>' + esc(stageWord[j.stage] || j.stage) + '</span>' +
@@ -463,7 +496,7 @@
       } });
   }
   function viewScan(item, V) {
-    V.innerHTML = '<form id="fl-sc" class="card" style="display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
+    V.innerHTML = '<form id="fl-sc" class="card" style="padding:16px;display:flex;gap:10px;flex-wrap:wrap;max-width:880px"><label style="flex:1;min-width:220px">Scan or type a lot label<input id="fl-sci" data-scan class="fld" placeholder="L-…" autocomplete="off" style="min-height:52px;font-size:18px"></label>' + btn('fl-scgo', 'Look up', 'p', big(' type="submit"')) + '</form><div id="fl-sco" style="max-width:880px;margin-top:14px"></div>';
     $('fl-sci').focus();
     $('fl-sc').onsubmit = async function (e) {
       e.preventDefault();
@@ -472,7 +505,8 @@
       var x = data(r);
       var row = function (k, v) { return '<div style="display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 0;border-bottom:1px solid var(--line)"><b style="min-width:110px">' + k + '</b><span style="flex:1;min-width:0;overflow-wrap:anywhere">' + v + '</span></div>'; };
       // FLOOR-5: a table here clipped long values at 375 px, hazard line included: stacked rows wrap instead.
-      $('fl-sco').innerHTML = '<div class="card">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
+      // STOCK2-5: .card has no padding of its own (its .card-hd and .card-bd bring it), so plain content sat on the edge.
+      $('fl-sco').innerHTML = '<div class="card" style="padding:16px">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
         row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +

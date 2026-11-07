@@ -205,6 +205,8 @@
       // On a phone the top of the screen is the sheet's title: the pill sits above the dock instead.
       '@media (max-width:720px){.ra-focus-exit{top:auto;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translate(-50%,240px)}',
       '.ra-focus-exit.show,.ra-focus-exit:focus-visible{transform:translate(-50%,0)}}',
+      // STOCK2-5: fixed, it sat on whatever card was under it, so on a phone it takes its own row above the view.
+      '@media (max-width:720px){.ra-focus-exit.ra-in-flow{position:static;display:flex;width:max-content;margin:0 auto 10px;transform:none}}',
       '.ra-focus-exit[hidden],.ra-focus-note[hidden]{display:none}',
       '.ra-focus-note{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:9001;max-width:min(440px,calc(100vw - 32px));',
       'padding:10px 14px;border-radius:12px;background:rgba(18,19,17,.94);color:#F2F4EA;font:400 12.5px/1.45 var(--font-ui,var(--ui,system-ui,sans-serif));',
@@ -261,6 +263,14 @@
     d.body.appendChild(exitBtn);
     return exitBtn;
   }
+  /* STOCK2-5: the view is drawn after this button is made and redrawn on navigation, so it is placed
+   * each time it shows. A console with no #ra-view keeps the fixed pill. */
+  function placeExit() {
+    var b = ensureExitBtn(), view = d.getElementById('ra-view');
+    if (!b || !view || !view.parentNode || b.nextSibling === view) return;
+    b.classList.add('ra-in-flow');
+    view.parentNode.insertBefore(b, view);
+  }
   function peekExit(ms) {
     var b = ensureExitBtn();
     if (!b || b.hidden) return;
@@ -273,6 +283,7 @@
     var b = ensureExitBtn();
     if (fsElement()) {
       if (b) b.hidden = false;
+      placeExit();
       peekExit(4000);
     } else {
       if (b) { b.hidden = true; b.classList.remove('show'); }

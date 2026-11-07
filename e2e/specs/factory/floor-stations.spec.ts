@@ -117,9 +117,13 @@ test('Pick -> Verify -> Mix by three people: FEFO and wrong-scan refusals, toler
   await page.locator('#fl-wt').fill('127');
   await page.locator('#fl-wtick').click();
   await expect(page.locator('#fl-err')).toContainText('outside');
+  // STOCK2-1: over the pick is held for a supervisor; at or under it the verifier ticks alone.
   await page.locator('#fl-wt').fill('125.6');
   await page.locator('#fl-wtick').click();
-  await expect(page.locator('#ra-view')).toContainText('125.6 g typed');
+  await expect(page.locator('#ra-view')).toContainText('held for a supervisor');
+  await page.locator('#fl-wt').fill('125.4');
+  await page.locator('#fl-wtick').click();
+  await expect(page.locator('#ra-view')).toContainText('125.4 g typed');
   await noHorizontalScroll(page);
   const vpop = page.waitForEvent('popup');
   await page.locator('#fl-vdone').click();
