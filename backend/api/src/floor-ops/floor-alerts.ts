@@ -8,6 +8,9 @@ import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { iso } from './floor-util.js';
 
+/** STOCK3-3: an alert for the whole floor. Every station's screens and TV carry these as well as their own. */
+export const GENERAL_STATION = 'Floor';
+
 export interface AlertDraft {
   kind: string;
   station: string | null;
@@ -36,7 +39,7 @@ export async function openAlerts(sql: Sql, station?: string | null) {
   const rows = await sql`
     select floor_alert_id, kind, station, subject_type, subject_id, title, body, raised_at, acked_at
       from platform.floor_alert
-     where cleared_at is null ${station ? sql`and station = ${station}` : sql``}
+     where cleared_at is null ${station ? sql`and (station = ${station} or station = ${GENERAL_STATION} or station is null)` : sql``}
      order by raised_at desc
      limit 200`;
   return rows.map((r) => ({
