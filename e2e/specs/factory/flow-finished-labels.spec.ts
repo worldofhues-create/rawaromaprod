@@ -250,17 +250,17 @@ test('F7: FG zone colour and initials, put-away to the zone, on the FG lot label
        insert into packaging.finished_good_batch_master (finished_good_batch_id, package_order_id, product_sku_id, batch_number, produced_qty, manufacturing_date, expiry_date, status)
          values ('${fg}', '${po}', '${sku}', '${fgNo}', 4, current_date, current_date + 700, 'ACTIVE')`);
 
-  // put away to the zone (Finished batches -> Put away -> the zone, shown by colour name and initials)
-  await signIn(page, 'factory', 'owner');
-  await openNav(page, 'Finished batches');
-  const fgRow = page.locator('tr', { hasText: fgNo }).first();
-  await fgRow.getByRole('button', { name: 'Put away', exact: true }).click();
+  // put away to the zone: Put-away & pick -> Assign -> the zone, shown by colour name and initials
+  await signIn(page, 'factory', 'warehouse');
+  await openNav(page, 'Put-away & pick');
+  await page.locator(`[data-assign="${fg}"]`).click();
   await page.locator('#pv-azone').selectOption({ label: `${zone} · ${colour} (${ini})` });
   await page.locator('#pv-assign').getByRole('button', { name: 'Assign', exact: true }).click();
   await expect.poll(() => sql(`select z.zone_code from location.shelf_task t join location.bin_master b on b.bin_id = t.to_bin_id join location.shelf_master sh on sh.shelf_id = b.shelf_id
     join location.rack_master r on r.rack_id = sh.rack_id join location.zone_master z on z.zone_id = r.zone_id where t.finished_good_batch_id = '${fg}' and t.kind = 'PUTAWAY'`)).toBe(zone);
 
   // the FG lot label: both codes of the lot, and the zone, colour name and initials as words
+  await signIn(page, 'factory', 'packaging');
   await openNav(page, 'Finished batches');
   await page.locator('tr', { hasText: fgNo }).first().getByRole('button', { name: 'Print FG lot label', exact: true }).click();
   const job = await printedJob('fg_lot', fgNo);
@@ -274,6 +274,7 @@ test('F7: FG zone colour and initials, put-away to the zone, on the FG lot label
   expect(JSON.stringify((await printedJob('fg_lot', fgNo, { reprint: true })).template.elements)).toContain(`${colour} (${ini})`);
 
   // the floor board, and its TV mode: the lot with its zone, colour name and initials
+  await signIn(page, 'factory', 'owner');
   await openNav(page, 'Floor board');
   const board = page.locator('#fo-fgrack');
   await expect(board).toContainText(fgNo);

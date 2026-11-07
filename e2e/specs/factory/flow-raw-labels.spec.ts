@@ -191,10 +191,10 @@ test('R8: a lot splits across two bins from Stock, and the verifier\'s leftover 
   const lastWindow = async (n: number) => { await expect.poll(() => windows.length).toBeGreaterThan(n); return windows[windows.length - 1]; };
   const j = await stagedJob(info);
 
-  // S1 Stock (FEFO): warehouse splits 100 g of the lot into another bin. The child prints its own label.
+  // S1 Stock on hand (FEFO): warehouse splits 100 g of the lot into another bin. The child prints its own label.
   const binB = j.bin();
   await signIn(page, 'factory', 'warehouse');
-  await openNav(page, 'Stock (FEFO)');
+  await openNav(page, 'Stock on hand');
   await rowAction(page, j.lotNo, 'Split lot');
   await page.locator('[data-ask="qty"]').fill('100');
   await page.locator('[data-ask="bin"]').fill(binB);

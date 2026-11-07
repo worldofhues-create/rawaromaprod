@@ -51,7 +51,7 @@
     shelftasks: ['shelftasks', 'Put-away & pick', 'boxIn', '__shelftasks__'],
     racklayout: ['racklayout', 'Rack layout', 'layout', '__racklayout__'],
     shelfdisplay: ['shelfdisplay', 'Shelf display', 'monitor', '__shelfdisplay__'],
-    fgzones: ['fgzones', 'FG zones', 'tag', '__fgzones__']
+    fgzones: ['fgzones', 'FG zones', 'bulb', '__fgzones__']
   };
   var BY_ROLE = {
     superadmin: ['produce', 'shelftasks', 'racklayout', 'shelfdisplay', 'fgzones'],
@@ -483,13 +483,6 @@
   // FLOOR-3 (R7): the sheet was printed with no record, so a second sheet of the same bins (two labels
   // on a bin) left no trace. It is logged like a single label: the first sheet is a print job naming
   // the person, the same bins again is a REPRINT that asks why, and the sheet says REPRINT.
-  function binSheetHtml(bins, reprint) {
-    var cells = bins.map(function (b) {
-      return '<div class="lb">' + (reprint ? '<div class="rp">REPRINT</div>' : '') + '<div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
-    }).join('');
-    return '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid;position:relative}.c{font:700 18px Arial}.z{font-size:10px;color:#444}.rp{position:absolute;top:1mm;right:1.5mm;font:700 9px Arial;border:1.5px solid #000;padding:0 2px}@media print{.noprint{display:none}}</style>' +
-      '<div class="grid">' + cells + '</div>';
-  }
   async function sheetJob(bins, reason) {
     var res;
     try { res = await tunnel('/v1/print-jobs/bin-sheet', { method: 'POST', body: { binCodes: bins.map(function (b) { return b.binCode; }), station: 'Office', reason: reason || undefined } }); }
@@ -497,6 +490,18 @@
     return res;
   }
   async function printBinLabels(bins) {
+    function binSheetHtml(bins, reprint) {
+      var cells = bins.map(function (b) {
+        return '<div class="lb">' + (reprint ? '<div class="rp">REPRINT</div>' : '') + '<div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
+      }).join('');
+      return '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid;position:relative}.c{font:700 18px Arial}.z{font-size:10px;color:#444}.rp{position:absolute;top:1mm;right:1.5mm;font:700 9px Arial;border:1.5px solid #000;padding:0 2px}@media print{.noprint{display:none}}</style>' +
+        '<div class="grid">' + cells + '</div>';
+    }
+    function openSheet2(bins, d) {
+      var w = openPrint((d && d.reprint ? 'REPRINT ' : '') + 'Bin labels', binSheetHtml(bins, !!(d && d.reprint)));
+      if (w && d && d.job) tunnel('/v1/print-jobs/' + d.job.printJobId + '/browser-printed', { method: 'POST', body: {} }).catch(function () { /* the job stays "browser" in Print queue */ });
+      if (d) toast((d.reprint ? 'Reprint logged: ' : 'Logged: ') + d.bins + ' bin label(s).', 'good');
+    }
     if (!bins || !bins.length) { toast('No bins to print yet. Add a rack first.', 'warn'); return; }
     var res = await sheetJob(bins, null);
     if (!res) return;
@@ -514,12 +519,6 @@
     if (res.status >= 400) { toast(err(res, 'The sheet was not printed.'), 'bad'); return; }
     openSheet2(bins, data(res));
   }
-  function openSheet2(bins, d) {
-    var w = openPrint((d && d.reprint ? 'REPRINT ' : '') + 'Bin labels', binSheetHtml(bins, !!(d && d.reprint)));
-    if (w && d && d.job) tunnel('/v1/print-jobs/' + d.job.printJobId + '/browser-printed', { method: 'POST', body: {} }).catch(function () { /* the job stays "browser" in Print queue */ });
-    if (d) toast((d.reprint ? 'Reprint logged: ' : 'Logged: ') + d.bins + ' bin label(s).', 'good');
-  }
-
   /* ── Shelf display (TV / tablet at the shelves) ─────────────────────────────────────── */
   // Strong, fixed colours so a TV across the aisle reads put-away (blue) vs pick (green) the same
   // way the pick-to-light bins do; the console palette's muted tones do not carry that far.

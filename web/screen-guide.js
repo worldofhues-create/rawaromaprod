@@ -271,6 +271,7 @@
     // SCAN-10/11: every flow step's label, Code 128 + QR of the record's own number.
     'Print label': 'Print its label: a barcode and a QR of its number, for the next step to scan.',
     'Reprint label': 'Print it again. You give a reason; the label says REPRINT and the reprint is logged with your name.',
+    'Split lot': 'Move part of this lot to another bin as a new lot with its own code and label. It keeps this lot\'s number, QC release and expiry.',
     'Print FG lot label': 'Print the finished lot\'s label: a barcode and a QR of the lot number.',
     'Reprint FG lot label': 'Print the lot label again. You give a reason; it says REPRINT and is logged with your name.',
     'Release to stock': 'Make this batch available to use (after QC).',

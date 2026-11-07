@@ -120,15 +120,16 @@
     if (!l) return;
     var w = window.open('', '_blank', 'width=520,height=360');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
-    var row = function (k, v) { return v ? '<tr><td>' + esc(k) + '</td><td><b>' + esc(v) + '</b></td></tr>' : ''; };
+    var row = function (k, v) { return v ? '<div>' + esc(k) + ' <b>' + esc(v) + '</b></div>' : ''; };
     w.document.write('<!doctype html><meta charset="utf-8"><title>Lot ' + esc(l.barcode) + '</title>' +
-      '<style>@page{size:100mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:96mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;gap:2mm}.t{flex:1;min-width:0}.cd{width:44mm;display:flex;align-items:flex-end}' +
+      '<style>@page{size:100mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:96mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.t{min-width:0}.g{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm;font-size:8px}.g div{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.g .w{grid-column:1/-1}.cd{margin-top:auto}' +
       'h1{margin:0 0 .5mm;font-size:14px;letter-spacing:.04em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:4px;font-size:11px}td{padding:0 4px 0 0;vertical-align:top}.sw{display:inline-block;width:9px;height:9px;border:1px solid #000;vertical-align:middle;margin-right:3px}</style>' +
-      '<div class="l"><div class="t"><h1>' + (l.kind === 'RETURN' ? 'RAW LOT · RETURNED' : 'RAW LOT · SPLIT') + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><table>' +
-      row('Code', l.floorCode) + (l.colourName ? '<tr><td>Colour</td><td><span class="sw" style="background:' + esc(l.colourHex) + '"></span><b>' + esc(l.colourName) + ' (' + esc(l.initial) + ')</b></td></tr>' : '') +
+      '<div class="l"><div class="t"><h1>' + (l.kind === 'RETURN' ? 'RAW LOT · RETURNED' : 'RAW LOT · SPLIT') + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><div class="g">' +
+      row('Code', l.floorCode) + (l.colourName ? '<div>Colour <span class="sw" style="background:' + esc(l.colourHex) + '"></span><b>' + esc(l.colourName) + ' (' + esc(l.initial) + ')</b></div>' : '') +
       row('Lot', l.lot) + row('From', l.splitFrom) + row('Job', l.jobNo) + row('Qty', l.qtyMg != null ? W.formatWeight(l.qtyMg) : null) + row('Bin', l.bin) + row('Expiry', l.expiry || 'Not on file') +
-      '<tr><td colspan="2">' + esc(l.hazard) + '</td></tr>' + row('By', l.person) + row('Time', localTime(l.printedDt)) + '</table></div>' +
-      '<div class="cd">' + scanCodes(l.barcode, 44, { barHeightMm: 7, textMm: 2.2 }) + '</div></div>' +
+      row('By', l.person) + row('Time', localTime(l.printedDt)) + '<div class="w">' + esc(l.hazard) + '</div></div></div>' +
+      // Code 128 of an L- id needs ~60 mm at the minimum bar: the codes run the full width under the text.
+      '<div class="cd">' + scanCodes(l.barcode, 90, { barHeightMm: 6, textMm: 2 }) + '</div></div>' +
       '<script>window.onload=function(){window.print()}<\/script>');
     w.document.close();
   }
@@ -427,12 +428,13 @@
       var r = await call('/v1/floor/scan?code=' + encodeURIComponent($('fl-sci').value.trim()));
       if (r.status >= 400) { $('fl-sco').innerHTML = errBox(err(r, 'That label is not known.')); return; }
       var x = data(r);
-      var row = function (k, v) { return '<tr><th style="text-align:left;padding-right:14px">' + k + '</th><td>' + v + '</td></tr>'; };
-      $('fl-sco').innerHTML = '<div class="card"><table>' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
+      var row = function (k, v) { return '<div style="display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 0;border-bottom:1px solid var(--line)"><b style="min-width:110px">' + k + '</b><span style="flex:1;min-width:0;overflow-wrap:anywhere">' + v + '</span></div>'; };
+      // FLOOR-5: a table here clipped long values at 375 px, hazard line included: stacked rows wrap instead.
+      $('fl-sco').innerHTML = '<div class="card">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
         row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +
-        (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') + '</table>' +
+        (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') +
         // FLOOR-1 (R8): split this lot across two bins; a child lot's own label reprints with a reason.
         (can('inventory:lot_split:write') ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fl-split', 'Split this lot', '', big()) +
           (x.splitFrom ? btn('fl-lotrp', 'Reprint lot label', '', big()) : '') + '</div>' : '') + '</div><div id="fl-geno" style="margin-top:14px"></div>';
