@@ -25,6 +25,7 @@ import { CourierService } from './courier.service.js';
 import { raiseAlert } from './floor-alerts.js';
 import { PackingService, BRAND } from './packing.service.js';
 import { PrintService } from './print.service.js';
+import { scanCode } from '../floor/scan-code.js';
 
 /** E-way bill rule (plan 9.2: "the threshold and rules are settings"). Unset: not determined. */
 export const EWAY_THRESHOLD = Symbol('EWAY_THRESHOLD');
@@ -72,7 +73,7 @@ export class LogisticsService {
   }
 
   async checkCarton(shipmentId: string, cartonCode: unknown, principal: AuthPrincipal) {
-    const code = typeof cartonCode === 'string' ? cartonCode.trim() : '';
+    const code = typeof cartonCode === 'string' ? scanCode(cartonCode) : ''; // SCAN-3
     if (!code) throw new BadRequestException('Scan the carton label.');
     return this.sql.begin(async (tx) => {
       await this.locked(tx as unknown as Sql, shipmentId, ['PACKED', 'DOCS_READY', 'AWB_ASSIGNED']);

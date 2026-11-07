@@ -15,6 +15,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { scanCode } from '../floor/scan-code.js';
+import { LOT_BARCODE_RE } from '../floor/floor-code.service.js';
 
 type Row = Record<string, unknown>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -33,9 +35,13 @@ export async function isLotHeld(run: (q: string, p: unknown[]) => Promise<Row[]>
 
 /** A raw lot by its id or by its lot number (any case): WALK2-RP-11. Batch QC uses it too (RP-13). */
 export async function resolveRmLot(sql: Sql, ref: unknown): Promise<string> {
-  const v = String(ref ?? '').trim();
+  const v = scanCode(ref); // SCAN-3
   if (!v) throw new BadRequestException('Scan or type the raw lot number.');
-  const rows = UUID.test(v)
+  // SCAN-5: the raw-lot label's code is the opaque L- id; it names the RM lot through its stock row.
+  const rows = LOT_BARCODE_RE.test(v.toUpperCase())
+    ? await sql`select ib.rm_batch_id::text as id from inventory.lot_barcode lb join inventory.inventory_batch ib on ib.inventory_batch_id = lb.inventory_batch_id
+                 where lb.barcode = ${v.toUpperCase()} and ib.rm_batch_id is not null`
+    : UUID.test(v)
     ? await sql`select rm_batch_id::text as id from inventory.rm_batch_master where rm_batch_id = ${v}::uuid`
     : await sql`select rm_batch_id::text as id from inventory.rm_batch_master where upper(batch_number) = upper(${v}) limit 2`;
   if (!rows.length) throw new NotFoundException(`No raw lot ${v} on file.`);
@@ -52,7 +58,7 @@ export class LotTraceService {
    *  found by its id or by its lot number; the bin by its id or its code. */
   private rmLotId(ref: string): Promise<string> { return resolveRmLot(this.sql, ref); }
   private async binRef(ref: unknown): Promise<{ id: string; code: string | null } | null> {
-    const v = typeof ref === 'string' ? ref.trim() : '';
+    const v = typeof ref === 'string' ? scanCode(ref) : ''; // SCAN-3
     if (!v) return null;
     const [r] = UUID.test(v)
       ? await this.sql`select storage_location_id::text as id, storage_location_code as code from location.storage_location_master where storage_location_id = ${v}::uuid`

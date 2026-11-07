@@ -22,6 +22,7 @@ import type { Sql } from 'postgres';
 import { drizzleExec, iso, UUID_RE } from './floor-util.js';
 import { PrintService } from './print.service.js';
 import { ScaleService } from './scale.service.js';
+import { scanCode } from '../floor/scan-code.js';
 
 export const BRAND = 'RAW AROMA CHEM';
 /** Carton weight above its contents allowed by default (box, filler, ice packs): 1 kg. */
@@ -193,7 +194,7 @@ export class PackingService {
   }
 
   async scanUnit(cartonId: string, unitCode: unknown, _principal: AuthPrincipal) {
-    const code = typeof unitCode === 'string' ? unitCode.trim() : '';
+    const code = typeof unitCode === 'string' ? scanCode(unitCode) : ''; // SCAN-3
     if (!code) throw new BadRequestException('Scan the unit label.');
     return this.sql.begin(async (tx) => {
       const [c] = await tx`

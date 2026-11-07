@@ -32,6 +32,7 @@ import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { BatchService, MixingService, PickingService } from '@ra/cluster-production';
 import { FloorCodeService, qtyToMg, codeText } from './floor-code.service.js';
+import { scanCode } from './scan-code.js';
 
 export type LabelKind = 'PICKED' | 'VERIFIED' | 'MIXED';
 
@@ -238,7 +239,7 @@ export class FloorStationService {
 
   /** Find a job by its tote (the verifier scans the tote) or job number. */
   async findJob(ref: string) {
-    const r = String(ref ?? '').trim();
+    const r = scanCode(ref); // SCAN-3
     if (!r) throw new BadRequestException('Scan or type a tote or job number.');
     const [j] = await this.sql<{ floor_job_id: string; job_no: string; stage: string }[]>`
       select floor_job_id, job_no, stage from production.floor_job where upper(tote) = upper(${r}) or upper(job_no) = upper(${r})
@@ -286,8 +287,8 @@ export class FloorStationService {
   }
 
   async pickLine(jobId: string, lineId: string, body: { bin?: string; barcode?: string; reason?: string }, principal: AuthPrincipal) {
-    const barcode = String(body.barcode ?? '').trim().toUpperCase();
-    const bin = String(body.bin ?? '').trim();
+    const barcode = scanCode(body.barcode).toUpperCase(); // SCAN-3
+    const bin = scanCode(body.bin);
     if (!barcode) throw new BadRequestException('Scan the lot label.');
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);

@@ -329,3 +329,23 @@ test('WALK2-RP-12: job candidates are the runs with a pick list not yet on the f
   ids = (await stations.jobCandidates()).items.map((r) => r.productionOrderId);
   assert.ok(!ids.includes(waiting), 'on the floor, not offered again');
 });
+
+// SCAN-3: a QR scan and a Code 128 scan of the same label resolve to the same lot, under the
+// scanner's own permissions, whatever AIM prefix or suffix the wedge scanner was set to send.
+test('scan-resolve: ]Q1 (QR) and ]C0 (Code 128) wedge scans resolve the same lot; the floor still never sees the material', async () => {
+  const { resolveRmLot } = await import('../prodfloor/lot-trace.service.js');
+  const fam = await family();
+  const m = await material(fam);
+  const l = await lot(m.id, 250);
+  const qr = await codes.resolve(`]Q1${l.barcode}\r`, picker);
+  const bar = await codes.resolve(`]C0${l.barcode}\t`, picker);
+  assert.equal(qr.inventoryBatchId, l.inventoryBatchId);
+  assert.equal(bar.inventoryBatchId, l.inventoryBatchId);
+  assert.equal(qr.barcode, l.barcode);
+  assert.equal(qr.materialName, undefined);
+  assert.equal((await codes.resolve(`]Q1${l.barcode}`, proc)).materialName, 'Bergamot oil');
+  // the lot hold / recall field takes the same label: L- code or the RM batch number
+  const [rb] = await sql()`select rm_batch_id::text as id from inventory.inventory_batch where inventory_batch_id = ${l.inventoryBatchId}`;
+  assert.equal(await resolveRmLot(sql(), `]Q1${l.barcode}`), rb!.id);
+  assert.equal(await resolveRmLot(sql(), `]C0${l.batchNo}\r`), rb!.id);
+});

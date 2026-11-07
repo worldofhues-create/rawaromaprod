@@ -21,6 +21,7 @@ import { BadRequestException, ConflictException, Inject, Injectable, NotFoundExc
 import { randomBytes, randomInt } from 'node:crypto';
 import type { Sql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { scanCode } from './scan-code.js';
 
 export const REVEAL = 'masterdata:material:reveal';
 export const HAZARD_PENDING = 'Classification pending: handle as hazardous';
@@ -172,7 +173,7 @@ export class FloorCodeService {
 
   /** Scan a lot label. Answered under the scanner's permissions. */
   async resolve(raw: string, principal: AuthPrincipal) {
-    const barcode = String(raw ?? '').trim().toUpperCase();
+    const barcode = scanCode(raw).toUpperCase(); // SCAN-3: ]Q1 / ]C0 prefixes and suffixes off
     if (!LOT_BARCODE_RE.test(barcode)) throw new BadRequestException('That is not a lot label. Lot labels read L- and seven characters.');
     const [r] = await this.sql<{
       inventory_batch_id: string; material_id: string | null; qty: string | null; uom_code: string | null; batch_number: string | null;

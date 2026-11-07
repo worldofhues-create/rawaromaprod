@@ -18,6 +18,7 @@ import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { NoBridgeKek, openSecret, sealSecret } from '../bridge/secret-box.js';
 import { iso } from './floor-util.js';
+import { scanCode } from '../floor/scan-code.js';
 
 export const COURIER_ADAPTERS = Symbol('COURIER_ADAPTERS');
 export interface CourierAdapter {
@@ -156,7 +157,7 @@ export class CourierService {
 
   /** AWB checks: non-empty, a sane shape, and the courier's own format where we know it. */
   async validateAwb(courierCode: string, awb: unknown): Promise<string> {
-    const a = typeof awb === 'string' ? awb.trim().toUpperCase() : '';
+    const a = typeof awb === 'string' ? scanCode(awb).toUpperCase() : ''; // SCAN-3
     if (!a) throw new BadRequestException('Scan or type the AWB.');
     if (!AWB_RE.test(a)) throw new BadRequestException('An AWB is 6 to 40 letters, digits or hyphens.');
     const [c] = await this.sql`select display_name, awb_pattern from sales.courier_connector where provider = ${courierCode}`;
