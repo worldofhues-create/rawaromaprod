@@ -13,6 +13,8 @@
  * no permissions and gets FORBIDDEN from the controller, which is the correct, honest,
  * fail-closed state rather than a guess dressed up as an answer.
  */
+import { netQty, notTotalled, signOf, type Netted } from '@core/data-kernel';
+import { availableIn, stockPosition, unitOf } from '../inventory-view/stock-position.js';
 import { Inject, Injectable } from "@nestjs/common";
 import { PO_OVERDUE_HOURS } from "../automation/automation.constants.js";
 import type { Sql } from "postgres";
@@ -255,13 +257,16 @@ export class FactsService {
        where pri.material_id in (${unissued})
          and upper(coalesce(pr.status, '')) in ('DRAFT','SUBMITTED','APPROVED')
        order by pr.pr_number limit 5`) as Array<{ pr_number: string | null; status: string | null }>;
-    const [onShelf] = (await this.sql`
-      select count(*)::int c from production.production_order_ingredients poi
-       where poi.production_order_id = ${productionOrderId}
-         and coalesce(poi.issued_qty, false) = false
-         and coalesce(poi.required_qty, 0) <= (
-           select coalesce(sum(ib.quantity_on_hand), 0) from inventory.inventory_batch ib
-            where ib.material_id = poi.material_id)`) as Array<{ c: number }>;
+    // STOCK2-3: a line counts as on the shelf only when it is, exactly, in the line's own unit.
+    const open = (await this.sql`
+      select poi.material_id::text, poi.required_qty::text as qty, u.uom_code as uom
+        from production.production_order_ingredients poi left join platform.uom_master u on u.uom_id = poi.uom_id
+       where poi.production_order_id = ${productionOrderId} and coalesce(poi.issued_qty, false) = false and poi.material_id is not null`) as Array<{ material_id: string; qty: string | null; uom: string | null }>;
+    const shelf = await stockPosition(this.sql, open.map((l) => l.material_id));
+    const onShelf = { c: open.filter((l) => {
+      const left = netQty(shelf.get(l.material_id)?.onHand ?? [], [{ qty: l.qty ?? '0', uom: l.uom }], l.uom);
+      return !('refused' in left) && signOf(left.qty) >= 0;
+    }).length };
 
     const parts: string[] = [];
     if ((onShelf?.c ?? 0) > 0) parts.push(`${onShelf!.c} line(s) in stock, awaiting pick/issue`);
@@ -281,24 +286,22 @@ export class FactsService {
     const q = materialQuery.toLowerCase().trim();
     if (!q) return [];
     const rows = (await this.sql`
-      select m.material_id as "materialId", m.material_code as "materialCode",
-             m.material_name as "materialName",
-             coalesce(sum(ib.quantity_on_hand), 0)::float8 as "onHandQty",
-             coalesce((
-               select sum(sr.reserved_qty) from inventory.stock_reservation sr
-                 join inventory.inventory_batch ib2 on ib2.inventory_batch_id = sr.inventory_batch_id
-                where ib2.material_id = m.material_id and sr.released_dt is null
-             ), 0)::float8 as "reservedQty"
-        from masterdata.material m
-        left join inventory.inventory_batch ib on ib.material_id = m.material_id
+      select m.material_id::text as "materialId", m.material_code as "materialCode",
+             m.material_name as "materialName", mu.uom_code as uom
+        from masterdata.material m left join platform.uom_master mu on mu.uom_id = m.uom_id
        where lower(m.material_code) = ${q} or lower(m.material_name) like ${`${q}%`}
-       group by m.material_id, m.material_code, m.material_name
        order by m.material_name asc
-       limit 5`) as Array<Record<string, unknown>>;
-    return rows.map((r) => ({
-      ...r,
-      availableQty: Number(r.onHandQty) - Number(r.reservedQty),
-    }));
+       limit 5`) as Array<{ materialId: string; materialCode: string | null; materialName: string | null; uom: string | null }>;
+    // STOCK2-3: netted in the material's unit. No total can be given for stock that does not convert,
+    // so the figures are null and unitNote says why: never a sum of kilograms and litres.
+    const positions = await stockPosition(this.sql, rows.map((r) => r.materialId));
+    return rows.map((r) => {
+      const p = positions.get(r.materialId), uom = r.uom ?? unitOf(p);
+      const onHand = netQty(p?.onHand ?? [], [], uom), reserved = netQty(p?.reserved ?? [], [], uom), free = availableIn(p, uom);
+      const bad = [onHand, reserved, free].find((n) => 'refused' in n) as { refused: string; units: string[] } | undefined;
+      const fig = (n: Netted) => (bad || 'refused' in n ? null : Number(n.qty));
+      return { ...r, uom, onHandQty: fig(onHand), reservedQty: fig(reserved), availableQty: fig(free), unitNote: bad ? notTotalled(bad) : null };
+    });
   }
 
   private async poStatus(poNumber: string): Promise<Record<string, unknown> | null> {

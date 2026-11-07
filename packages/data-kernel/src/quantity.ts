@@ -82,3 +82,62 @@ export function convertQty(qty: string | number | null | undefined, from: string
   const out = fromBase(base, b[1]);
   return out === null ? { refused: `A lot kept in ${to} cannot hold ${String(qty)} ${from} exactly (four places).` } : { qty: out };
 }
+
+/* ── STOCK2-3: adding and comparing across units ─────────────────────────────────────────── */
+
+export interface QtyPart { qty: string | number | null | undefined; uom: string | null | undefined }
+export type Netted = { qty: string; uom: string } | { refused: string; units: string[] };
+
+/** Ten places under the base unit: any numeric(18,4) in any unit above lands on a whole number here. */
+const FINE = 10;
+
+function fine(p: { n: bigint; scale: number }, factor: number): bigint | null {
+  return p.scale > FINE ? null : p.n * BigInt(factor) * 10n ** BigInt(FINE - p.scale);
+}
+
+/** Exact plain decimal of a fine value in a unit worth `factor`, trailing zeros off. */
+function fineText(v: bigint, factor: number): string {
+  const places = FINE + String(factor).length - 1; // every factor is a power of ten
+  const neg = v < 0n, a = (neg ? -v : v).toString().padStart(places + 1, '0');
+  const frac = a.slice(a.length - places).replace(/0+$/, '');
+  return `${neg ? '-' : ''}${a.slice(0, a.length - places)}${frac ? `.${frac}` : ''}`;
+}
+
+/**
+ * plus − minus, exactly, in `uom`. Mass adds to mass and volume to volume; a unit nothing knows adds
+ * only to itself. Anything else is not a total: the answer names the units and why, and the caller
+ * shows that instead of a figure. A nil or zero quantity carries no unit worth refusing over. The
+ * result is not bound to four places: it is for reading and comparing, and storing it is the
+ * caller's own decision.
+ */
+export function netQty(plus: QtyPart[], minus: QtyPart[], uom: string | null | undefined): Netted {
+  const target = norm(uom), t = UNITS[target];
+  const seen = new Map<string, string>([[target, String(uom ?? '')]]);
+  let total = 0n, bad: string | null = null;
+  for (const [sign, parts] of [[1n, plus], [-1n, minus]] as const) {
+    for (const part of parts) {
+      const p = parse(part.qty);
+      if (part.qty == null || (p && p.n === 0n)) continue;
+      if (!p) { bad = `${String(part.qty)} is not a quantity.`; continue; }
+      const u = norm(part.uom), a = UNITS[u];
+      if (!seen.has(u)) seen.set(u, String(part.uom ?? ''));
+      const sameKind = u === target || (a && t && a[0] === t[0]);
+      if (!sameKind) { bad ??= !u || !target ? 'Part of this has no unit on file.' : a && t ? 'They do not convert without a density, and none is on file.' : 'They do not convert.'; continue; }
+      const v = fine(p, a?.[1] ?? 1);
+      if (v === null) { bad = `${String(part.qty)} is finer than this can add exactly.`; continue; }
+      total += sign * v;
+    }
+  }
+  if (bad) return { refused: bad, units: [...seen.values()].filter(Boolean) };
+  return { qty: fineText(total, t?.[1] ?? 1), uom: String(uom ?? '') };
+}
+
+/** The sign of a − b, once they are in one unit. */
+export function signOf(qty: string): -1 | 0 | 1 {
+  return qty.startsWith('-') ? -1 : /[1-9]/.test(qty) ? 1 : 0;
+}
+
+/** "kg and L: not totalled. They do not convert…": what a screen prints in place of a figure. */
+export function notTotalled(n: { refused: string; units: string[] }): string {
+  return `${n.units.join(' and ') || 'No unit'}: not totalled. ${n.refused}`;
+}

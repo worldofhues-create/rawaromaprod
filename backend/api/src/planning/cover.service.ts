@@ -25,7 +25,8 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { netQty, notTotalled, uuidv7 } from '@core/data-kernel';
+import { availableIn, stockPosition } from '../inventory-view/stock-position.js';
 import { PolicyService, PolicyUnresolved } from '../policy/policy.service.js';
 import { parseCoverRule, suggestCover, WEEKS, type CoverRule, type CoverSuggestion, type DemandOrder } from './cover-model.js';
 import { stationMedians } from '../floor/pipeline.js';
@@ -33,7 +34,7 @@ import { stationMedians } from '../floor/pipeline.js';
 const DAY = 86_400_000;
 type Row = Record<string, unknown>;
 
-export interface RawLine { materialId: string; code: string; needQty: number; availableQty: number; shortQty: number; uomId: string | null; leadDays: number | null }
+export interface RawLine { materialId: string; code: string; needQty: number; availableQty: number | null; shortQty: number | null; uomId: string | null; leadDays: number | null; unitNote?: string }
 
 export interface CoverItem extends CoverSuggestion {
   productSkuId: string | null;
@@ -183,10 +184,13 @@ export class CoverService {
         s = s2;
         short = await this.rawShort(q, bom, s.qty);
       }
-      raw = { checked: true, short, note: short.length
-        ? `Raw stock short for ${short.map((l) => l.code).join(', ')}: approving raises a draft purchase request.`
-        : 'Raw stock covers it (bill of materials from the last production order of this SKU).' };
-      if (short.length) s.why = s.why.replace(/\.$/, '') + `; raw short: ${short.map((l) => l.code).join(', ')}.`;
+      const counted = short.filter((l) => l.shortQty !== null), unsure = short.filter((l) => l.shortQty === null);
+      const notes = [
+        counted.length ? `Raw stock short for ${counted.map((l) => l.code).join(', ')}: approving raises a draft purchase request.` : '',
+        ...unsure.map((l) => `${l.code} could not be checked. ${l.unitNote} No purchase request is raised for it.`),
+      ].filter(Boolean);
+      raw = { checked: true, short, note: notes.join(' ') || 'Raw stock covers it (bill of materials from the last production order of this SKU).' };
+      if (counted.length) s.why = s.why.replace(/\.$/, '') + `; raw short: ${counted.map((l) => l.code).join(', ')}.`;
     }
     return { ...s, productSkuId: skuId, productId, productName: ps?.product_name ?? null, raw, policy: { ruleId: pol.ruleId, version: pol.version, explain: pol.explain } };
   }
@@ -198,10 +202,11 @@ export class CoverService {
         join production.production_order po on po.production_order_id = r.production_order_id
        where r.mapped_sku = ${sku} and po.order_qty > 0 order by po.created_dt desc limit 1`)[0];
     if (!po) return [];
-    const ing = await q<{ material_id: string; required_qty: string; uom_id: string | null }[]>`
-      select material_id::text, required_qty::text, uom_id::text from production.production_order_ingredients
-       where production_order_id = ${po.production_order_id} and material_id is not null and required_qty > 0`;
-    return ing.map((i) => ({ materialId: i.material_id, perUnit: Number(i.required_qty) / Number(po.order_qty), uomId: i.uom_id }));
+    const ing = await q<{ material_id: string; required_qty: string; uom_id: string | null; uom_code: string | null }[]>`
+      select i.material_id::text, i.required_qty::text, i.uom_id::text, u.uom_code from production.production_order_ingredients i
+        left join platform.uom_master u on u.uom_id = i.uom_id
+       where i.production_order_id = ${po.production_order_id} and i.material_id is not null and i.required_qty > 0`;
+    return ing.map((i) => ({ materialId: i.material_id, perUnit: Number(i.required_qty) / Number(po.order_qty), uomId: i.uom_id, uomCode: i.uom_code }));
   }
 
   private async code(q: Sql | TransactionSql, materialId: string): Promise<string> {
@@ -209,18 +214,22 @@ export class CoverService {
     return r ? codeText(r.colour_name, r.number) : 'an uncoded material';
   }
 
-  private async rawShort(q: Sql | TransactionSql, bom: Array<{ materialId: string; perUnit: number; uomId: string | null }>, units: number): Promise<RawLine[]> {
+  private async rawShort(q: Sql | TransactionSql, bom: Array<{ materialId: string; perUnit: number; uomId: string | null; uomCode: string | null }>, units: number): Promise<RawLine[]> {
     const out: RawLine[] = [];
+    const positions = await stockPosition(q, bom.map((b) => b.materialId));
     for (const b of bom) {
-      const need = b.perUnit * units;
-      const avail = Number((await q<{ a: string }[]>`
-        select (coalesce((select sum(quantity_on_hand) from inventory.inventory_batch where material_id = ${b.materialId}), 0)
-              - coalesce((select sum(sr.reserved_qty) from inventory.stock_reservation sr join inventory.inventory_batch ib on ib.inventory_batch_id = sr.inventory_batch_id
-                           where ib.material_id = ${b.materialId} and sr.released_dt is null), 0))::text as a`)[0]!.a);
-      if (need - avail <= 0.0001) continue;
+      const need = Math.round(b.perUnit * units * 10000) / 10000;
+      // STOCK2-3: netted exactly in the BOM's unit. A line that cannot be is shown, with no figure,
+      // and raises no purchase request: an order for a number nobody could work out is worse than none.
+      const p = positions.get(b.materialId);
+      const avail = availableIn(p, b.uomCode);
+      const gap = netQty([{ qty: need.toFixed(4), uom: b.uomCode }, ...(p?.reserved ?? [])], p?.onHand ?? [], b.uomCode);
+      const bad = 'refused' in avail ? avail : 'refused' in gap ? gap : null;
+      if (!bad && Number((gap as { qty: string }).qty) <= 0.0001) continue;
       const lead = (await q<{ d: number | null }[]>`select lead_time_days as d from procurement.vendor_rm_mapping where material_id = ${b.materialId} order by is_preferred desc nulls last, created_dt limit 1`)[0];
-      out.push({ materialId: b.materialId, code: await this.code(q, b.materialId), needQty: Math.round(need * 10000) / 10000, availableQty: avail,
-        shortQty: Math.round((need - avail) * 10000) / 10000, uomId: b.uomId, leadDays: lead?.d ?? null });
+      const line = { materialId: b.materialId, code: await this.code(q, b.materialId), needQty: need, uomId: b.uomId, leadDays: lead?.d ?? null };
+      if (bad) out.push({ ...line, availableQty: null, shortQty: null, unitNote: notTotalled(bad as { refused: string; units: string[] }) });
+      else out.push({ ...line, availableQty: Number((avail as { qty: string }).qty), shortQty: Math.round(Number((gap as { qty: string }).qty) * 10000) / 10000 });
     }
     return out;
   }
@@ -244,6 +253,7 @@ export class CoverService {
       const prIds: string[] = [];
       const short = qty === it.qty ? it.raw.short : it.raw.checked ? await this.rawShort(tx, await this.bomPerUnit(tx, sku), qty) : [];
       for (const l of short) {
+        if (l.shortQty === null) continue; // STOCK2-3: not a figure, so not an order
         const srId = uuidv7(), prId = uuidv7();
         await tx`insert into procurement.stock_requirement (stock_requirement_id, material_id, required_qty, uom_id, requirement_source, priority, status, created_by, updated_by)
                  values (${srId}, ${l.materialId}, ${l.shortQty}, ${l.uomId}, ${'COVER_SUGGESTION:' + sku}, 'NORMAL', 'OPEN', ${principal.userId}, ${principal.userId})`;

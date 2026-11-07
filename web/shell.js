@@ -338,9 +338,9 @@
     '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
     '/v1/qc-parameters': ['parameterCode', 'parameterName', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
-    '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'expiryDate', 'daysToExpiry'],
+    '/v1/inventory-availability': ['batchNumber', 'available', 'onHand', 'reserved', 'uom', 'unitNote', 'expiryDate', 'daysToExpiry'],
     '/v1/document-registry': ['title', 'documentType', 'entityType', 'expiryDate', 'daysToExpiry', 'version', 'status'],
-    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'shortage', 'suggestedVendor'],
+    '/v1/reorder-suggestions': ['materialCode', 'materialName', 'available', 'reorderLevel', 'shortage', 'uom', 'unitNote', 'suggestedVendor'],
     '/v1/login-history': ['when', 'who', 'how', 'result', 'ip'],
     '/v1/contacts': ['contactName', 'email', 'mobileNumber', 'status'],
     '/v1/countries': ['countryCode', 'countryName', 'status'],
@@ -1057,7 +1057,7 @@
     // 06:00/12:00/18:00 axis — no hourly data exists behind it — so it is gone; the floor summary
     // (real counts) now spans the row.
     var floorSummary = gCard({ title: 'Floor summary', span: 'c12', top: true, body: '<div>' +
-      [['SKUs stored', p.counts.skusStored], ['Units on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Racks', p.counts.racks]].map(function (r) {
+      [['SKUs stored', p.counts.skusStored], ['Lots on hand', p.counts.invOnHand], ['Storage zones', p.counts.zones], ['Racks', p.counts.racks]].map(function (r) {
         return '<div class="kv"><span class="k">' + r[0] + '</span><span class="v">' + r[1] + '</span></div>';
       }).join('') + '</div>' });
     return '<div class="gwrap">' + zones + '</div><div class="gwrap">' + floorSummary + '</div>';
@@ -1069,9 +1069,9 @@
       superadmin: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['pkg', c.unitsPacked.toLocaleString('en-IN'), 'Units packed'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       admin: [['users', c.usersTotal, 'Total users'], ['shield', c.usersActive, 'Active'], ['lock', c.roles, 'Roles defined'], ['bell', c.usersTotal - c.usersActive, 'Pending']],
       procurement: [['clipboard', c.posOpen, 'Open POs'], ['bell', c.posPending, 'Pending approvals'], ['truck', c.vendors, 'Suppliers'], ['box', c.materials, 'Materials']],
-      receiving: [['truck', c.grns, 'Goods receipts'], ['layers', c.rmBatches, 'RM batches'], ['box', c.invOnHand, 'Units on hand'], ['flask', c.qcQueue, 'Awaiting QC']],
+      receiving: [['truck', c.grns, 'Goods receipts'], ['layers', c.rmBatches, 'RM batches'], ['box', c.invOnHand, 'Lots on hand'], ['flask', c.qcQueue, 'Awaiting QC']],
       qc: [['flask', c.qcQueue, 'In queue'], ['activity', c.qcPass, 'Passed'], ['alert', c.qcFail, 'Failed'], ['shield', c.qcPassRate + '%', 'Pass rate']],
-      warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Units on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg == null ? '—' : c.zoneCapAvg + '%', 'Bins in use']],
+      warehouse: [['box', c.skusStored, 'SKUs stored'], ['layers', c.invOnHand, 'Lots on hand'], ['shelf', c.racks, 'Racks'], ['grid', c.zoneCapAvg == null ? '—' : c.zoneCapAvg + '%', 'Bins in use']],
       production: [['layers', c.runsActive, 'Active runs'], ['flask', c.qcQueue, 'Batches in QC'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       compounding: [['beaker', c.mixing, 'Mixing sessions'], ['layers', c.runsActive, 'Active runs'], ['droplet', c.oilBatches, 'Oil batches'], ['activity', p.planActual.pct + '%', 'Plan attainment']],
       filling: [['droplet', c.fillSessions, 'Fill sessions'], ['activity', c.unitsFilled.toLocaleString('en-IN'), 'Units filled'], ['layers', c.oilBatches, 'Bulk lots'], ['box', c.packageOrders, 'Pack orders']],

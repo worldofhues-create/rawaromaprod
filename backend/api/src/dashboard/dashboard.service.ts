@@ -266,7 +266,8 @@ export class DashboardService {
       },
       storage: {
         count: num(invAgg[0]?.c),
-        codes: [{ code: Math.round(num(invAgg[0]?.q)) + ' units', sub: num(invAgg[0]?.c) + ' batches · zoned' }],
+        // STOCK2-3: this added every lot's number across kg, g, L and pieces and called it units.
+        codes: [{ code: num(invAgg[0]?.c) + ' batches', sub: 'zoned' }],
       },
       formula: {
         count: formulaCodes.length,
@@ -361,7 +362,7 @@ export class DashboardService {
         posTotal: Object.values(po).reduce((a, b) => a + b, 0),
         vendors: num(vendorCount[0]?.c), materials: num(materialCount[0]?.c),
         grns: num(grnCount[0]?.c), rmBatches: rmBatches.length,
-        invOnHand: Math.round(num(invAgg[0]?.q)), skusStored: num(invAgg[0]?.c),
+        invOnHand: num(invAgg[0]?.c) /* STOCK2-3: lots, not a sum across kg, g, L and pieces */, skusStored: num(invAgg[0]?.c),
         zones: zones.length, racks: zoneRacks.reduce((a, z) => a + num(z.racks), 0),
         mixing: num(mix['INPROGRESS']) || num(mixByStatus[0]?.c), oilBatches: num(oilAgg[0]?.c),
         fillSessions: num(fillCount[0]?.c),

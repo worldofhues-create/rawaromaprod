@@ -20,7 +20,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { netQty, notTotalled, signOf, uuidv7, type QtyPart } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
 import { num, paginate, type Page } from '../_helpers.js';
@@ -227,56 +227,74 @@ export class OrdersService {
       // Lock every candidate batch for every material this order needs, in ONE deterministically
       // ordered pass, before computing any availability (closes the TOCTOU).
       const lockedBatches = (await tx.execute(sql`
-        select inventory_batch_id, material_id, quantity_on_hand
-          from inventory.inventory_batch
-         where material_id in (${sql.join(materialIds.map((id) => sql`${id}`), sql`, `)})
-         order by inventory_batch_id
-         for update`
+        select ib.inventory_batch_id, ib.material_id, ib.quantity_on_hand::text as quantity_on_hand,
+               (select uom_code from platform.uom_master u where u.uom_id = ib.uom_id) as uom_code
+          from inventory.inventory_batch ib
+         where ib.material_id in (${sql.join(materialIds.map((id) => sql`${id}`), sql`, `)})
+         order by ib.inventory_batch_id
+         for update of ib`
       )) as unknown as Array<{
         inventory_batch_id: string;
         material_id: string | null;
         quantity_on_hand: string | null;
+        uom_code: string | null;
       }>;
 
       const batchIds = lockedBatches.map((b) => b.inventory_batch_id);
-      const reservedByBatch = new Map<string, number>();
+      // STOCK2-3: held and available stay in each batch's own unit, as exact text, and each line takes
+      // from them through netQty in the line's unit.
+      const reservedByBatch = new Map<string, QtyPart[]>();
       if (batchIds.length > 0) {
         const reservedRows = (await tx.execute(sql`
-          select inventory_batch_id, coalesce(sum(reserved_qty), 0) as reserved
-            from inventory.stock_reservation
-           where inventory_batch_id in (${sql.join(batchIds.map((id) => sql`${id}`), sql`, `)}) and released_dt is null
-           group by inventory_batch_id`
-        )) as unknown as Array<{ inventory_batch_id: string; reserved: string }>;
-        for (const r of reservedRows) reservedByBatch.set(r.inventory_batch_id, Number(r.reserved));
+          select r.inventory_batch_id, coalesce(ru.uom_code, lu.uom_code) as uom, sum(r.reserved_qty)::text as reserved
+            from inventory.stock_reservation r
+            join inventory.inventory_batch ib on ib.inventory_batch_id = r.inventory_batch_id
+            left join platform.uom_master ru on ru.uom_id = r.uom_id
+            left join platform.uom_master lu on lu.uom_id = ib.uom_id
+           where r.inventory_batch_id in (${sql.join(batchIds.map((id) => sql`${id}`), sql`, `)}) and r.released_dt is null
+           group by 1, 2`
+        )) as unknown as Array<{ inventory_batch_id: string; uom: string | null; reserved: string }>;
+        for (const r of reservedRows) reservedByBatch.set(r.inventory_batch_id, [...(reservedByBatch.get(r.inventory_batch_id) ?? []), { qty: r.reserved, uom: r.uom }]);
       }
 
       // Post-lock available-qty pool per material (mutated as items are allocated below).
-      const poolByMaterial = new Map<string, Array<{ id: string; available: number }>>();
+      const poolByMaterial = new Map<string, Array<{ id: string; available: string; uom: string | null }>>();
+      const shortages: string[] = [];
       for (const b of lockedBatches) {
         if (!b.material_id) continue;
-        const available = Number(b.quantity_on_hand ?? 0) - (reservedByBatch.get(b.inventory_batch_id) ?? 0);
+        const net = netQty([{ qty: b.quantity_on_hand, uom: b.uom_code }], reservedByBatch.get(b.inventory_batch_id) ?? [], b.uom_code);
+        if ('refused' in net) { shortages.push(`material ${b.material_id}: ${notTotalled(net)}`); continue; }
         const list = poolByMaterial.get(b.material_id) ?? [];
-        list.push({ id: b.inventory_batch_id, available });
+        list.push({ id: b.inventory_batch_id, available: net.qty, uom: b.uom_code });
         poolByMaterial.set(b.material_id, list);
       }
 
-      const shortages: string[] = [];
+      const uomIds = [...new Set(items.map((i) => i.uomId).filter((v): v is string => !!v))];
+      const uomById = new Map(uomIds.length
+        ? ((await tx.execute(sql`select uom_id::text as id, uom_code from platform.uom_master where uom_id in (${sql.join(uomIds.map((id) => sql`${id}`), sql`, `)})`)) as unknown as Array<{ id: string; uom_code: string | null }>).map((u) => [u.id, u.uom_code])
+        : []);
       const allocations: Array<{ packageOrderItemId: string; uomId: string | null; batchId: string; qty: number }> = [];
       for (const item of items) {
         if (!item.packagingMaterialId || item.requiredQty == null) continue;
         let remaining = Number(item.requiredQty);
         const pool = poolByMaterial.get(item.packagingMaterialId) ?? [];
+        const lineUom = item.uomId ? uomById.get(item.uomId) ?? null : null;
+        let totalAvailable = 0, notConverted: string | null = null;
         for (const b of pool) {
-          if (remaining <= 1e-9) break;
-          if (b.available <= 0) continue;
-          const take = Math.min(remaining, b.available);
-          allocations.push({ packageOrderItemId: item.packageOrderItemId, uomId: item.uomId, batchId: b.id, qty: take });
-          b.available -= take;
+          if (signOf(b.available) <= 0) continue;
+          const unit = lineUom ?? b.uom; // a line with no unit draws in the batch's
+          const inLine = netQty([{ qty: b.available, uom: b.uom }], [], unit);
+          if ('refused' in inLine) { notConverted = notTotalled(inLine); continue; }
+          totalAvailable += Number(inLine.qty);
+          if (remaining <= 1e-9) continue;
+          const take = Math.min(remaining, Number(inLine.qty));
+          allocations.push({ packageOrderItemId: item.packageOrderItemId, uomId: item.uomId ?? null, batchId: b.id, qty: take });
+          const left = netQty([{ qty: b.available, uom: b.uom }], [{ qty: String(take), uom: unit }], b.uom);
+          b.available = 'refused' in left ? '0' : left.qty;
           remaining -= take;
         }
         if (remaining > 1e-9) {
-          const totalAvailable = (pool ?? []).reduce((sum, b) => sum + Math.max(b.available, 0), 0);
-          shortages.push(`material ${item.packagingMaterialId}: required ${item.requiredQty}, available ${totalAvailable}`);
+          shortages.push(`material ${item.packagingMaterialId}: required ${item.requiredQty}, available ${totalAvailable}${notConverted ? `. ${notConverted}` : ''}`);
         }
       }
       if (shortages.length > 0) {

@@ -33,6 +33,8 @@
  * DRAFT), `procurement.rfq_master` (+ items, + vendor mapping when a vendor is known). Never
  * `procurement.purchase_order` — award/PO approval remains a human/policy decision (§19).
  */
+import { netQty, notTotalled } from '@core/data-kernel';
+import { stockPosition } from '../inventory-view/stock-position.js';
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -45,11 +47,8 @@ const EVENT_TYPE = 'production.order.created';
 interface IngredientRow {
   material_id: string;
   required_qty: string;
+  uom_code: string | null;
   uom_id: string | null;
-}
-interface AvailabilityRow {
-  material_id: string;
-  available: string;
 }
 interface PreferredVendorRow {
   material_id: string;
@@ -112,44 +111,31 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
 
   private async evaluate(tx: TransactionSql, productionOrderId: string) {
     const ingredients = (await tx`
-      select material_id, required_qty, uom_id
-        from production.production_order_ingredients
-       where production_order_id = ${productionOrderId} and material_id is not null
+      select i.material_id, i.required_qty, i.uom_id, u.uom_code
+        from production.production_order_ingredients i left join platform.uom_master u on u.uom_id = i.uom_id
+       where i.production_order_id = ${productionOrderId} and i.material_id is not null
     `) as unknown as IngredientRow[];
 
     if (ingredients.length === 0) {
       return { decision: 'NOOP' as const, reason: 'production order has no resolved material ingredients' };
     }
 
-    const materialIds = [...new Set(ingredients.map((i) => i.material_id))];
-    const availability = (await tx`
-      select ib.material_id,
-             coalesce(sum(ib.quantity_on_hand), 0)
-               - coalesce((
-                   select sum(sr.reserved_qty) from inventory.stock_reservation sr
-                    where sr.inventory_batch_id in (
-                      select inventory_batch_id from inventory.inventory_batch b2 where b2.material_id = ib.material_id
-                    )
-                      and sr.released_dt is null
-                 ), 0) as available
-        from inventory.inventory_batch ib
-       where ib.material_id = any(${materialIds}::uuid[])
-       group by ib.material_id
-    `) as unknown as AvailabilityRow[];
-    const availableByMaterial = new Map(availability.map((a) => [a.material_id, Number(a.available)]));
-
-    const short = ingredients
-      .map((i) => ({
-        materialId: i.material_id,
-        uomId: i.uom_id,
-        requiredQty: Number(i.required_qty ?? 0),
-        available: availableByMaterial.get(i.material_id) ?? 0,
-      }))
-      .map((i) => ({ ...i, shortQty: i.requiredQty - i.available }))
-      .filter((i) => i.shortQty > 0.0001);
+    // STOCK2-3: a line in g against lots in kg was compared as raw numbers, so 500 g read as short of
+    // 2 kg and a purchase request went out for stock on the shelf. Netted exactly in the line's unit.
+    // A line that cannot be compared raises no figure: it is named in the decision instead.
+    const positions = await stockPosition(tx, [...new Set(ingredients.map((i) => i.material_id))]);
+    const notCompared: string[] = [];
+    const short = ingredients.flatMap((i) => {
+      const p = positions.get(i.material_id);
+      const gap = netQty([{ qty: String(i.required_qty ?? 0), uom: i.uom_code }, ...(p?.reserved ?? [])], p?.onHand ?? [], i.uom_code);
+      if ('refused' in gap) { notCompared.push(`${i.material_id.slice(0, 8)} (${notTotalled(gap)})`); return []; }
+      const shortQty = Number(gap.qty);
+      return shortQty > 0.0001 ? [{ materialId: i.material_id, uomId: i.uom_id, requiredQty: Number(i.required_qty ?? 0), shortQty }] : [];
+    });
+    const unsure = notCompared.length ? `; ${notCompared.length} line(s) could not be compared: ${notCompared.join(', ')}` : '';
 
     if (short.length === 0) {
-      return { decision: 'NOOP' as const, reason: 'sufficient unreserved stock for every resolved material' };
+      return { decision: 'NOOP' as const, reason: `sufficient unreserved stock for every resolved material${unsure}` };
     }
 
     // One stock_requirement per short material.
@@ -227,7 +213,7 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
 
     return {
       decision: 'FIRED' as const,
-      reason: `${short.length} material(s) short across ${groups.size} vendor group(s); drafted ${prIds.length} purchase request(s)${AUTO_RFQ_ENABLED ? ` + ${rfqIds.length} RFQ draft(s)` : ''}`,
+      reason: `${short.length} material(s) short across ${groups.size} vendor group(s); drafted ${prIds.length} purchase request(s)${AUTO_RFQ_ENABLED ? ` + ${rfqIds.length} RFQ draft(s)` : ''}${unsure}`,
       outputs: { shortMaterialCount: short.length, purchaseRequestIds: prIds, rfqIds },
     };
   }

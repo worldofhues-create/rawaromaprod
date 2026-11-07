@@ -7,6 +7,7 @@
  * Every loader is independent: when one fails (the Vault does not answer, a table is busy), only
  * that group's insights are left as they were this tick.
  */
+import { netQty, signOf, type QtyPart } from '@core/data-kernel';
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import type { Sql } from 'postgres';
 import { bridge as bridgeContracts } from '@core/contracts';
@@ -192,48 +193,75 @@ export class RuhFactsService {
     const window = s['stock.consumptionWindowDays'];
     const since = new Date(Date.now() - window * 86_400_000).toISOString();
     const rows = (await this.sql`
-      with avail as (
-        select ib.material_id, sum(greatest(coalesce(ib.quantity_on_hand, 0) - coalesce(r.reserved, 0), 0))::float as available,
-               min(um.uom_code) as uom
-          from inventory.inventory_batch ib
-          left join platform.uom_master um on um.uom_id = ib.uom_id
-          left join (select inventory_batch_id, sum(reserved_qty) reserved from inventory.stock_reservation
-                      where released_dt is null and coalesce(status, 'ACTIVE') <> 'RELEASED' group by inventory_batch_id) r
-                 on r.inventory_batch_id = ib.inventory_batch_id
-          left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
-         where ib.material_id is not null and coalesce(rb.status, '') <> 'QUARANTINE'
-         group by ib.material_id),
-      used as (
-        select ib.material_id, sum(abs(t.transaction_qty))::float as qty,
-               count(distinct date_trunc('day', t.transaction_dt))::int as days
+      with used_u as (
+        select ib.material_id, u.uom_code as uom, sum(abs(t.transaction_qty))::text as qty
+          from inventory.inventory_transaction t
+          join inventory.inventory_batch ib on ib.inventory_batch_id = t.inventory_batch_id
+          left join platform.uom_master u on u.uom_id = coalesce(t.uom_id, ib.uom_id)
+          left join inventory.inventory_transaction_type_master tt on tt.inventory_transaction_type_id = t.inventory_transaction_type_id
+         where t.transaction_dt >= ${since}::timestamptz
+           and upper(coalesce(tt.type_code, '')) ~ '(ISSUE|CONSUME|OUT|PICK)'
+         group by 1, 2),
+      used as (select material_id, json_agg(json_build_object('qty', qty, 'uom', uom)) as parts from used_u group by 1),
+      days as (
+        select ib.material_id, count(distinct date_trunc('day', t.transaction_dt))::int as days
           from inventory.inventory_transaction t
           join inventory.inventory_batch ib on ib.inventory_batch_id = t.inventory_batch_id
           left join inventory.inventory_transaction_type_master tt on tt.inventory_transaction_type_id = t.inventory_transaction_type_id
          where t.transaction_dt >= ${since}::timestamptz
            and upper(coalesce(tt.type_code, '')) ~ '(ISSUE|CONSUME|OUT|PICK)'
-         group by ib.material_id),
-      planned as (
-        select i.material_id, sum(coalesce(i.required_qty, 0))::float as need
+         group by 1),
+      planned_u as (
+        select i.material_id, u.uom_code as uom, sum(coalesce(i.required_qty, 0))::text as qty
           from production.production_order_ingredients i
           join production.production_order o on o.production_order_id = i.production_order_id
+          left join platform.uom_master u on u.uom_id = i.uom_id
          where coalesce(i.issued_qty, false) = false and i.material_id is not null
            and upper(coalesce(o.status, '')) in ('PLANNING', 'INPROGRESS')
-         group by i.material_id)
+         group by 1, 2),
+      planned as (select material_id, json_agg(json_build_object('qty', qty, 'uom', uom)) as parts from planned_u group by 1)
       select m.material_id::text as id, m.material_code, m.material_name,
-             coalesce(a.available, 0)::float as available, a.uom,
-             coalesce(us.qty, 0)::float as used, coalesce(us.days, 0)::int as days,
-             (coalesce(p.need, 0) > coalesce(a.available, 0)) as short
+             us.parts as used, p.parts as need, coalesce(d.days, 0)::int as days
         from masterdata.material m
-        left join avail a on a.material_id = m.material_id
         left join used us on us.material_id = m.material_id
+        left join days d on d.material_id = m.material_id
         left join planned p on p.material_id = m.material_id
-       where (us.qty > 0 or p.need > 0)
-       limit 2000`) as unknown as Array<{ id: string; material_code: string | null; material_name: string | null; available: number; uom: string | null; used: number; days: number; short: boolean }>;
+       where (us.material_id is not null or p.material_id is not null)
+       limit 2000`) as unknown as Array<{ id: string; material_code: string | null; material_name: string | null; used: QtyPart[] | null; need: QtyPart[] | null; days: number }>;
+    // STOCK2-3: per lot, what is free of its own reservations and not under quarantine, in the lot's
+    // unit; then per material in one unit. A material that cannot be totalled gets no stock fact: a
+    // days-left warning off a sum of kilograms and litres would be a number nobody could stand behind.
+    const lots = (await this.sql`
+      select ib.material_id::text as id, coalesce(ib.quantity_on_hand, 0)::text as qty, um.uom_code as uom, coalesce(r.parts, '[]'::json) as held
+        from inventory.inventory_batch ib
+        left join platform.uom_master um on um.uom_id = ib.uom_id
+        left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
+        left join lateral (
+          select json_agg(json_build_object('qty', x.qty, 'uom', x.uom)) as parts
+            from (select sum(sr.reserved_qty)::text as qty, coalesce(ru.uom_code, um.uom_code) as uom
+                    from inventory.stock_reservation sr left join platform.uom_master ru on ru.uom_id = sr.uom_id
+                   where sr.inventory_batch_id = ib.inventory_batch_id and sr.released_dt is null and coalesce(sr.status, 'ACTIVE') <> 'RELEASED'
+                   group by 2) x) r on true
+       where ib.material_id is not null and coalesce(rb.status, '') <> 'QUARANTINE'`) as unknown as Array<{ id: string; qty: string; uom: string | null; held: QtyPart[] }>;
+    const free = new Map<string, QtyPart[]>();
+    const unsure = new Set<string>();
+    for (const l of lots) {
+      const n = netQty([{ qty: l.qty, uom: l.uom }], l.held, l.uom);
+      if ('refused' in n) { unsure.add(l.id); continue; }
+      if (signOf(n.qty) > 0) free.set(l.id, [...(free.get(l.id) ?? []), { qty: n.qty, uom: l.uom }]);
+    }
     const sample = Array.isArray(nf?.sample) ? nf!.sample : typeof nf?.sample === 'string' ? nf.sample.replace(/^\{|\}$/g, '').split(',').filter(Boolean) : [];
-    const stock: StockFact[] = rows.map((r) => ({
-      materialId: r.id, code: r.material_code, name: r.material_name, available: num(r.available), uom: r.uom,
-      dailyUse: num(r.used) / window, shortForPlannedRuns: !!r.short, issueDays: num(r.days),
-    }));
+    const stock: StockFact[] = rows.flatMap((r) => {
+      const parts = free.get(r.id) ?? [];
+      const uom = parts[0]?.uom ?? r.need?.[0]?.uom ?? r.used?.[0]?.uom ?? null;
+      const available = netQty(parts, [], uom), used = netQty(r.used ?? [], [], uom), gap = netQty(r.need ?? [], parts, uom);
+      if (unsure.has(r.id) || 'refused' in available || 'refused' in used || 'refused' in gap) return [];
+      return [{
+        materialId: r.id, code: r.material_code, name: r.material_name, available: num(available.qty), uom: uom ?? null,
+        dailyUse: num(used.qty) / window, shortForPlannedRuns: signOf(gap.qty) > 0, issueDays: num(r.days),
+      }];
+    });
+
     return { noFloorCode: { count: num(nf?.n), sample: sample.map((x) => x.replace(/^"|"$/g, '')) }, stock };
   }
 

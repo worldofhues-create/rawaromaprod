@@ -235,7 +235,7 @@
     daysToExpiry: 'Days to expiry', isPreferred: 'Preferred', leadTimeDays: 'Lead time (days)', minOrderQty: 'Minimum order', isActive: 'Active',
     mobileNumber: 'Mobile', when: 'When', who: 'Who', how: 'How', ip: 'IP address', aliasName: 'Code name', aliasType: 'Kind',
     requiredQty: 'Required', issuedQty: 'Issued', replacementOfPo: 'Replaces PO', varianceType: 'Difference', orderQty: 'Quantity',
-    producedQty: 'Made', dispatchedQty: 'Dispatched', reservedQty: 'Reserved', availableQty: 'Free to sell', packSize: 'Pack size',
+    unitNote: 'Units', producedQty: 'Made', dispatchedQty: 'Dispatched', reservedQty: 'Reserved', availableQty: 'Free to sell', packSize: 'Pack size',
     skuCode: 'Pack size (SKU)', grnNumber: 'Receipt no.', grnDate: 'Received on', poNumber: 'PO no.', prNumber: 'Request no.', soNumber: 'Order no.',
     rfqNumber: 'Quote request no.', quotationNumber: 'Quote no.', batchNumber: 'Batch', expiryDate: 'Expires', manufacturingDate: 'Made on',
     observedValue: 'Reading', observedText: 'Notes', parameterName: 'Test', containerQty: 'Quantity', containerCode: 'Container',

@@ -7,7 +7,7 @@
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, isNull, lt, sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { netQty, notTotalled, signOf, uuidv7 } from '@core/data-kernel';
 import {
   INVENTORY_DB,
   inventorySchema,
@@ -258,9 +258,11 @@ export class StockService {
       if (!(Number(body.reservedQty) > 0)) throw new ConflictException('Reserved quantity must be positive.');
       return this.db.transaction(async (tx) => {
         const locked = (await tx.execute(sql`
-          select quantity_on_hand, rm_batch_id from inventory.inventory_batch
-           where inventory_batch_id = ${inventoryBatchId}
-           for update`)) as unknown as Array<{ quantity_on_hand: string | null; rm_batch_id: string | null }>;
+          select ib.quantity_on_hand::text as quantity_on_hand, ib.rm_batch_id,
+                 (select uom_code from platform.uom_master u where u.uom_id = ib.uom_id) as uom_code
+            from inventory.inventory_batch ib
+           where ib.inventory_batch_id = ${inventoryBatchId}
+           for update`)) as unknown as Array<{ quantity_on_hand: string | null; rm_batch_id: string | null; uom_code: string | null }>;
         const batch = locked[0];
         if (!batch) throw new NotFoundException(`inventory_batch not found: ${inventoryBatchId}`);
 
@@ -280,15 +282,23 @@ export class StockService {
           }
         }
 
-        const reserved = (
-          await tx
-            .select({ total: sql<string>`coalesce(sum(${stockReservation.reservedQty}), 0)::text` })
-            .from(stockReservation)
-            .where(and(eq(stockReservation.inventoryBatchId, inventoryBatchId), isNull(stockReservation.releasedDt)))
-        )[0];
-        const available = Number(batch.quantity_on_hand ?? 0) - Number(reserved?.total ?? 0);
-        if (Number(body.reservedQty) > available) {
-          throw new ConflictException(`Cannot reserve ${body.reservedQty}: only ${available} available on this batch (on-hand − active reservations).`);
+        // STOCK2-3: the batch, what it already holds for others and this request can each name their
+        // own unit. Compared exactly in the batch's; a reservation with no unit is in the batch's.
+        const lotUom = batch.uom_code;
+        const held = (await tx.execute(sql`
+          select coalesce(u.uom_code, ${lotUom}) as uom, sum(r.reserved_qty)::text as qty
+            from inventory.stock_reservation r left join platform.uom_master u on u.uom_id = r.uom_id
+           where r.inventory_batch_id = ${inventoryBatchId} and r.released_dt is null
+           group by 1`)) as unknown as Array<{ uom: string | null; qty: string }>;
+        const asked = body.uomId
+          ? ((await tx.execute(sql`select uom_code from platform.uom_master where uom_id = ${body.uomId}`)) as unknown as Array<{ uom_code: string | null }>)[0]?.uom_code ?? null
+          : lotUom;
+        const free = netQty([{ qty: batch.quantity_on_hand, uom: lotUom }], held, lotUom);
+        const after = netQty([{ qty: batch.quantity_on_hand, uom: lotUom }], [...held, { qty: String(body.reservedQty), uom: asked }], lotUom);
+        const refused = 'refused' in free ? free : 'refused' in after ? after : null;
+        if (refused) throw new ConflictException(`Cannot reserve from this batch. ${notTotalled(refused as { refused: string; units: string[] })}`);
+        if (signOf((after as { qty: string }).qty) < 0) {
+          throw new ConflictException(`Cannot reserve ${body.reservedQty}${asked ? ` ${asked}` : ''}: only ${(free as { qty: string }).qty}${lotUom ? ` ${lotUom}` : ''} available on this batch (on-hand − active reservations).`);
         }
 
         return ensure(
