@@ -39,16 +39,19 @@ function arg(name: string): string | undefined {
 async function loadAt(ref: string): Promise<{ codes: string[]; roles: RolesModule['ROLES'] }> {
   const dir = mkdtempSync(join(tmpdir(), 'ra-grants-'));
   try {
-    for (const f of ['ra-permissions.ts', 'ra-roles.ts']) {
-      writeFileSync(join(dir, f), execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8' }));
-    }
-    // Both files import lane pf-c's ./pfc-grants.js from the first ref that has it on. Without the copy
-    // the import fails, so a --since at or after that ref could not load the old catalogue at all.
-    // A ref before it never imports it, and has no file to copy.
-    for (const f of ['pfc-grants.ts']) {
-      let src: string | null = null;
-      try { src = execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { src = null; }
-      if (src !== null) writeFileSync(join(dir, f), src);
+    // Copy the two catalogue files and, transitively, every sibling module they import ('./x.js' ->
+    // scripts/x.ts at the ref). Lane pf-c added ./pfc-grants.js and lane pf-d ./pfd-grants.js; a fixed
+    // list of helpers broke on the first --since that had pfd-grants (PROD-REL4-1), and would break
+    // again on the next lane's file. A ref that does not import a helper never asks for it.
+    const pending = ['ra-permissions.ts', 'ra-roles.ts'];
+    const copied = new Set<string>();
+    while (pending.length) {
+      const f = pending.shift()!;
+      if (copied.has(f)) continue;
+      copied.add(f);
+      const src = execFileSync('git', ['show', `${ref}:scripts/${f}`], { cwd: ROOT, encoding: 'utf8' });
+      writeFileSync(join(dir, f), src);
+      for (const m of src.matchAll(/from\s+'\.\/([A-Za-z0-9_-]+)\.js'/g)) pending.push(`${m[1]}.ts`);
     }
     const perms = (await import(pathToFileURL(join(dir, 'ra-permissions.ts')).href)) as { RA_PERMISSIONS: string[] };
     const roles = (await import(pathToFileURL(join(dir, 'ra-roles.ts')).href)) as Partial<RolesModule>;
