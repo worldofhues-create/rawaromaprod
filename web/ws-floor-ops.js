@@ -550,7 +550,11 @@
     document.documentElement.classList.add('ra-kiosk');
     var css = document.createElement('style');
     // Kiosk: one station's screen, big touch targets for gloved hands, no rail and no way out.
-    css.textContent = '.ra-kiosk .rail,.ra-kiosk nav.rail,.ra-kiosk .dock,.ra-kiosk [data-dock],.ra-kiosk #ra-dock-toggle{display:none!important}';
+    // SCAN-8: display:none takes the rail out of the grid, and at >= 1024 px the shell's grid is
+    // `0 1fr` (rail folded), so main fell into the 0 px track and a 1024+ tablet showed a blank page.
+    // A kiosk has no rail at all: one column. html.ra-kiosk body outranks body.rail-off (both !important).
+    css.textContent = '.ra-kiosk .rail,.ra-kiosk nav.rail,.ra-kiosk .dock,.ra-kiosk [data-dock],.ra-kiosk #ra-dock-toggle{display:none!important}' +
+      'html.ra-kiosk body .app{grid-template-columns:minmax(0,1fr)!important}html.ra-kiosk body .main{margin-left:0!important}';
     document.head.appendChild(css);
     var lockTries = 0;
     var lockT = setInterval(function () {

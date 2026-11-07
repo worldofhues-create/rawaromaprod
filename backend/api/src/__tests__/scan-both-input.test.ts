@@ -85,3 +85,8 @@ test('the Factory console is never served with camera=() (kiosk camera scanning 
   const pp = /add_header\s+Permissions-Policy\s+"([^"]*)"/.exec(conf)?.[1];
   if (pp !== undefined) assert.doesNotMatch(pp, /camera=\(\)/);
 });
+
+test('SCAN-8: the kiosk lock gives the shell one column, so hiding the rail cannot leave main in a 0 px track', () => {
+  const src = readFileSync(new URL('../../../../web/ws-floor-ops.js', import.meta.url), 'utf8');
+  assert.match(src, /html\.ra-kiosk body \.app\{grid-template-columns:minmax\(0,1fr\)!important\}/); // outranks body.rail-off .app
+});
