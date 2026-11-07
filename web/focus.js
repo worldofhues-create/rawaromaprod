@@ -139,7 +139,7 @@
   var script = d.currentScript;
   var APP = (script && script.getAttribute('data-app')) || d.title || 'this console';
   var nav = g.navigator || {};
-  var selfExit = false, lastUserExitAt = null, deferredPrompt = null, card = null, exitBtn = null, hideTimer = 0;
+  var selfExit = false, lastUserExitAt = null, deferredPrompt = null, card = null, exitBtn = null, hideTimer = 0, keeper = null;
 
   function get(store, k) { try { return g[store].getItem(k); } catch (e) { return null; } }
   function set(store, k, v) { try { if (v == null) g[store].removeItem(k); else g[store].setItem(k, v); } catch (e) { /* storage off */ } }
@@ -284,8 +284,12 @@
     if (fsElement()) {
       if (b) b.hidden = false;
       placeExit();
+      // The shell rebuilds the view's parent on a redraw, which took the button with it and left a
+      // phone in full screen with no way out, so it is put back for as long as full screen lasts.
+      if (!keeper && g.MutationObserver) { keeper = new g.MutationObserver(placeExit); keeper.observe(d.body, { childList: true, subtree: true }); }
       peekExit(4000);
     } else {
+      if (keeper) { keeper.disconnect(); keeper = null; }
       if (b) { b.hidden = true; b.classList.remove('show'); }
       if (!selfExit) lastUserExitAt = Date.now();
       selfExit = false;
