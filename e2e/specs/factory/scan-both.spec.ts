@@ -71,7 +71,11 @@ test('every generated label decodes back to its opaque payload: QR and Code 128,
       // 38x25: a Code 128 at the 0.25 mm floor fits only payloads of 8 characters or fewer
       // (11*(n+3)+2 modules + quiet zones <= 38 mm); a lot's L- code (9) gets QR + text, recorded.
       if (size === '38x25' && payload === lot.barcode) expect(r.codes.code128, 'a lot code is too long for Code 128 at 38x25').toBe(false);
-      if (size !== '38x25') expect(r.codes.code128, `${size} ${payload} carries both`).toBe(true);
+      if (size !== '38x25' && payload === lot.barcode) expect(r.codes.code128, `${size} lot code carries both`).toBe(true);
+      // Only the vial sizes may drop the Code 128, and only for a payload too long for it at 0.25 mm
+      // (38x25: over 8 characters; 50x25: over 13; 62 mm continuous: over 17, a bar cannot wrap).
+      // 75 mm wide and up carries both for anything the floor prints (75x50: up to 22 characters).
+      if (!r.codes.code128) expect(['38x25', '50x25', '62mm'], `${size} ${payload} dropped Code 128`).toContain(size);
       if (!r.codes.code128) {
         expect(bar, '38x25 has no Code 128 for a long payload').toBeUndefined();
         expect(r.codes.code128).toBe(false);
