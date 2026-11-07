@@ -5,6 +5,7 @@
  *   { v: 1, size, w, h, reprint, elements: [
  *       { t: 'text',    x, y, w, h, s, b }      h = cap height in mm, b = bold
  *       { t: 'code128', x, y, w, h, d }         Code 128 (set B)
+ *       { t: 'qr',      x, y, w, h, m, d }      QR (model 2, ECC M), m = module mm (SCAN-1)
  *       { t: 'line',    x, y, w, h }            a filled rule
  *   ] }
  * and rendered to the printer's own language:
@@ -87,6 +88,32 @@
     return s.length > max ? s.slice(0, max - 1) + '…' : s;
   }
 
+  /* SCAN-1 (owner: "we need both QR and barcode"). Every label carries a Code 128 AND a QR with the
+   * SAME payload, which is only the opaque id (L-7Q3K9XA, a bin code, a carton code): never a name, a
+   * CAS number or a percentage, so build() refuses anything that is not upper-case letters, digits
+   * and hyphens. Module sizes are whole printer dots at 203 dpi (0.125 mm), the coarsest head sold:
+   *   Code 128 narrow bar 0.5 / 0.375 / 0.25 mm (0.25 = 2 dots is the floor), bars >= 5 mm tall,
+   *            10-module quiet zone each side (ISO/IEC 15417);
+   *   QR       module 0.5 / 0.375 mm (0.375 = 3 dots is the floor for a phone camera), ECC M,
+   *            4-module quiet zone.
+   * The label edge counts as quiet zone (the stock is white to the edge). If both cannot fit at those
+   * floors (38 x 25 mm: the Code 128 alone is wider than the label), the label prints the QR plus the
+   * code as text, and the template's `codes.note` says why, so nobody has to rediscover it. */
+  var BAR_X = [0.5, 0.375, 0.25], QR_X = [0.5, 0.375], BAR_MIN_H = 5, GAP = 1.5, CODE_TEXT_H = 2;
+  var OPAQUE_RE = /^[A-Z0-9][A-Z0-9-]{0,39}$/;
+  function qrLib() {
+    if (typeof qrcode === 'function') return qrcode; // eslint-disable-line no-undef
+    if (typeof require === 'function') { try { return require('./qrcode.js'); } catch (e) { /* below */ } }
+    throw new Error('qrcode.js must load before label-render.js.');
+  }
+  /** The QR module matrix (rows of booleans), ECC M, smallest version that holds the data. */
+  function qrMatrix(data) {
+    var q = qrLib()(0, 'M'); q.addData(String(data)); q.make();
+    var n = q.getModuleCount(), rows = [];
+    for (var r = 0; r < n; r++) { var row = []; for (var c = 0; c < n; c++) row.push(q.isDark(r, c)); rows.push(row); }
+    return rows;
+  }
+
   /**
    * content: { brand?, title, lines: [[label, value]...], code?, footer?, reprint? }
    * Returns the template. Nothing in it is invented: it carries only what the caller passed.
@@ -95,14 +122,58 @@
     var S = SIZES[size];
     if (!S) throw new Error('Unknown label size "' + size + '". Sizes: ' + Object.keys(SIZES).join(', '));
     var c = content || {};
+    var code = c.code === undefined || c.code === null || c.code === '' ? null : String(c.code);
+    if (code !== null && !OPAQUE_RE.test(code)) throw new Error('A label code must be the opaque id only (upper-case letters, digits, hyphens), not "' + code + '".');
     var lines = (c.lines || []).filter(function (l) { return l && l[1] !== undefined && l[1] !== null && String(l[1]) !== ''; });
     var W = S.w, m = W <= 50 ? 1.2 : W <= 75 ? 2 : 3;
-    var units = (c.reprint ? 1.2 : 0) + (c.brand ? 0.9 : 0) + (c.title ? 1.4 : 0) + lines.length + (c.footer ? 0.8 : 0) + (c.code ? 2.6 : 0);
-    var pitchK = 1.25;
-    var fh = S.continuous ? 3.2 : clamp((S.h - 2 * m) / Math.max(units, 1) / pitchK, 1.4, 7);
-    var tw = W - 2 * m, y = m, els = [];
-    function text(s, h, bold) {
-      els.push({ t: 'text', x: m, y: r2(y), w: r2(tw), h: r2(h), s: fit(s, tw, h), b: !!bold });
+    var units = (c.reprint ? 1.2 : 0) + (c.brand ? 0.9 : 0) + (c.title ? 1.4 : 0) + lines.length + (c.footer ? 0.8 : 0);
+    var pitchK = 1.25, MIN_FH = 1.4;
+    var minText = Math.max(units, 0) * MIN_FH * pitchK;
+    var els = [], codes = code === null ? null : { code128: true, qr: true, note: null };
+
+    // ── choose where the codes go (heights are only bounded on fixed-size labels) ──
+    var L = null;
+    if (code !== null) {
+      var bars = code128Bars(code).modules, qn = qrMatrix(code).length, HU = S.continuous ? Infinity : S.h - 2 * m;
+      for (var li = 0; li < 2 && !L; li++) {
+        for (var bi = 0; bi < BAR_X.length && !L; bi++) {
+          for (var qi = 0; qi < QR_X.length && !L; qi++) {
+            var bx = BAR_X[bi], qx = QR_X[qi], bw = bars * bx, qw = qn * qx;
+            var bq = Math.max(m, 10 * bx), qq = Math.max(m, 4 * qx);
+            if (li === 0) { // row: text above, then [Code 128 | QR] side by side
+              var gap = Math.max(10 * bx, 4 * qx);
+              if (bq + bw + gap + qw + qq > W + 1e-9) continue;
+              var band = Math.max(qw, BAR_MIN_H);
+              if (band + CODE_TEXT_H * pitchK + minText > HU + 1e-9) continue;
+              L = { kind: 'row', bx: bx, qx: qx, bw: bw, qw: qw, bq: bq, gap: gap, band: band };
+            } else { // corner: QR top right beside the text, Code 128 full width underneath
+              if (bq + bw + bq > W + 1e-9) continue;
+              if (qw + GAP + BAR_MIN_H + CODE_TEXT_H * pitchK > HU + 1e-9) continue;
+              if (minText > HU - BAR_MIN_H - GAP - CODE_TEXT_H * pitchK + 1e-9) continue;
+              L = { kind: 'corner', bx: bx, qx: qx, bw: bw, qw: qw, bq: bq, qq: qq };
+            }
+          }
+        }
+      }
+      if (!L) { // QR plus the code as text
+        var qx0 = QR_X[QR_X.length - 1], qw0 = qn * qx0, need = 2 * Math.max(m, 10 * BAR_X[BAR_X.length - 1]) + bars * BAR_X[BAR_X.length - 1];
+        L = { kind: 'qr', qx: qx0, qw: qw0, qq: Math.max(m, 4 * qx0) };
+        codes = { code128: false, qr: true, note: 'Code 128 for ' + code + ' needs ' + r2(need) + ' mm at the ' + BAR_X[BAR_X.length - 1] +
+          ' mm minimum bar (quiet zones included); this label is ' + W + ' mm wide. Printed: QR plus the code as text.' };
+      }
+    }
+
+    // ── the text block ──
+    var tw = W - 2 * m, textH;
+    if (!L) textH = S.continuous ? Infinity : S.h - 2 * m;
+    else if (L.kind === 'row') { textH = S.continuous ? Infinity : S.h - 2 * m - L.band - CODE_TEXT_H * pitchK - 0.5; }
+    else if (L.kind === 'corner') { tw = W - m - L.qw - L.qq - GAP; textH = S.continuous ? Infinity : S.h - 2 * m - BAR_MIN_H - GAP - CODE_TEXT_H * pitchK; }
+    else { tw = W - m - L.qw - L.qq - GAP; textH = S.continuous ? Infinity : S.h - 2 * m; }
+    var tUnits = units + (L && L.kind === 'qr' ? 1.2 : 0);
+    var fh = S.continuous ? 3.2 : clamp(textH / Math.max(tUnits, 1) / pitchK, MIN_FH, 7);
+    var y = m;
+    function text(s, h, bold, x, w) {
+      els.push({ t: 'text', x: r2(x === undefined ? m : x), y: r2(y), w: r2(w === undefined ? tw : w), h: r2(h), s: fit(s, w === undefined ? tw : w, h), b: !!bold });
       y += h * pitchK;
     }
     if (c.reprint) text('REPRINT', fh * 1.2, true);
@@ -110,14 +181,36 @@
     if (c.title) text(c.title, fh * 1.4, true);
     lines.forEach(function (l) { text(l[0] + ': ' + l[1], fh, false); });
     if (c.footer) text(c.footer, fh * 0.8, false);
-    if (c.code) {
-      var bh = fh * 2.2;
-      if (!S.continuous) bh = Math.max(1, Math.min(bh, S.h - m - y));
-      els.push({ t: 'code128', x: m, y: r2(y), w: r2(tw), h: r2(bh), d: String(c.code) });
-      y += bh;
-    }
-    var H = S.continuous ? r2(y + m) : S.h;
-    return { v: 1, size: size, w: W, h: H, reprint: !!c.reprint, elements: els };
+    if (L && L.kind === 'qr') text(code, Math.min(fh * 1.2, 3), true);
+
+    // ── the codes ──
+    var H = S.h;
+    if (L) {
+      var ch = CODE_TEXT_H;
+      if (L.kind === 'row') {
+        var top = S.continuous ? y + 0.5 : S.h - m - ch * pitchK - L.band;
+        var bh = L.band;
+        els.push({ t: 'code128', x: r2(L.bq), y: r2(top), w: r2(L.bw), h: r2(bh), m: L.bx, d: code });
+        els.push({ t: 'qr', x: r2(L.bq + L.bw + L.gap), y: r2(top), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
+        y = top + bh + 0.3;
+        text(code, ch, false, L.bq, L.bw);
+      } else if (L.kind === 'corner') {
+        els.push({ t: 'qr', x: r2(W - L.qq - L.qw), y: r2(m), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
+        var top2 = S.continuous ? Math.max(y, m + L.qw) + GAP : S.h - m - ch * pitchK - BAR_MIN_H;
+        var bh2 = S.continuous ? BAR_MIN_H : Math.max(BAR_MIN_H, top2 - Math.max(y, m + L.qw + GAP) + BAR_MIN_H);
+        top2 = S.continuous ? top2 : S.h - m - ch * pitchK - bh2;
+        els.push({ t: 'code128', x: r2(L.bq), y: r2(top2), w: r2(L.bw), h: r2(bh2), m: L.bx, d: code });
+        y = top2 + bh2 + 0.3;
+        text(code, ch, false, L.bq, L.bw);
+      } else {
+        els.push({ t: 'qr', x: r2(W - L.qq - L.qw), y: r2(m), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
+        y = Math.max(y, m + L.qw);
+      }
+      if (S.continuous) H = r2(y + m);
+    } else if (S.continuous) H = r2(y + m);
+    var out = { v: 1, size: size, w: W, h: H, reprint: !!c.reprint, elements: els };
+    if (codes) out.codes = codes;
+    return out;
   }
 
   /** A reprint always says so, even if a stored template lost its banner. */
@@ -133,14 +226,20 @@
   function zplSafe(s) { return String(s).replace(/[\^~\\]/g, ' '); }
   function quoteSafe(s, esc) { return String(s).replace(/[\r\n]/g, ' ').replace(/"/g, esc); }
 
+  /** Module width in dots: floor, so a 300 dpi head never prints wider than the layout reserved. */
+  function dots(mm, dpmm, max) { return clamp(Math.floor(mm * dpmm + 1e-9), 1, max); }
+  function barDots(e, d, dpmm) { return e.m ? dots(e.m, dpmm, 10) : clamp(Math.floor(d(e.w) / code128Bars(e.d).modules), 1, 10); }
+
   function zpl(t, o) {
     var dpmm = Math.round((o.dpi || 203) / 25.4), d = function (v) { return Math.round(v * dpmm); };
     var out = ['^XA', '^CI28', '^PW' + d(t.w), '^LL' + d(t.h), '^LH0,0'];
     withReprint(t).forEach(function (e) {
       if (e.t === 'text') out.push('^FO' + d(e.x) + ',' + d(e.y) + '^A0N,' + d(e.h * 1.35) + ',' + d(e.h * (e.b ? 1.3 : 1.15)) + '^FD' + zplSafe(e.s) + '^FS');
       else if (e.t === 'code128') {
-        var mw = clamp(Math.floor(d(e.w) / code128Bars(e.d).modules), 1, 10);
-        out.push('^FO' + d(e.x) + ',' + d(e.y) + '^BY' + mw + '^BCN,' + d(e.h) + ',N,N,N^FD' + zplSafe(e.d) + '^FS');
+        out.push('^FO' + d(e.x) + ',' + d(e.y) + '^BY' + barDots(e, d, dpmm) + '^BCN,' + d(e.h) + ',N,N,N^FD' + zplSafe(e.d) + '^FS');
+      } else if (e.t === 'qr') {
+        // ^BQ model 2, magnification = dots per module; MA = ECC M, automatic data mode.
+        out.push('^FO' + d(e.x) + ',' + d(e.y) + '^BQN,2,' + dots(e.m, dpmm, 10) + '^FDMA,' + zplSafe(e.d) + '^FS');
       } else if (e.t === 'line') out.push('^FO' + d(e.x) + ',' + d(e.y) + '^GB' + d(e.w) + ',' + Math.max(1, d(e.h)) + ',' + Math.max(1, d(e.h)) + '^FS');
     });
     out.push('^PQ' + (o.copies || 1), '^XZ');
@@ -155,8 +254,10 @@
         var mul = clamp(Math.round((e.h * dpmm) / 20), 1, 10);
         out.push('TEXT ' + d(e.x) + ',' + d(e.y) + ',"3",0,' + mul + ',' + mul + ',"' + quoteSafe(e.s, '\\["]') + '"');
       } else if (e.t === 'code128') {
-        var mw = clamp(Math.floor(d(e.w) / code128Bars(e.d).modules), 1, 10);
+        var mw = barDots(e, d, dpmm);
         out.push('BARCODE ' + d(e.x) + ',' + d(e.y) + ',"128",' + d(e.h) + ',0,0,' + mw + ',' + mw + ',"' + quoteSafe(e.d, '\\["]') + '"');
+      } else if (e.t === 'qr') {
+        out.push('QRCODE ' + d(e.x) + ',' + d(e.y) + ',M,' + dots(e.m, dpmm, 10) + ',A,0,"' + quoteSafe(e.d, '\\["]') + '"');
       } else if (e.t === 'line') out.push('BAR ' + d(e.x) + ',' + d(e.y) + ',' + d(e.w) + ',' + Math.max(1, d(e.h)));
     });
     out.push('PRINT ' + (o.copies || 1) + ',1');
@@ -171,8 +272,20 @@
         var font = e.h * dpmm >= 40 ? 5 : e.h * dpmm >= 24 ? 4 : e.h * dpmm >= 16 ? 3 : 2;
         out.push('A' + d(e.x) + ',' + d(e.y) + ',0,' + font + ',1,1,N,"' + quoteSafe(e.s, '\\"') + '"');
       } else if (e.t === 'code128') {
-        var mw = clamp(Math.floor(d(e.w) / code128Bars(e.d).modules), 1, 10);
+        var mw = barDots(e, d, dpmm);
         out.push('B' + d(e.x) + ',' + d(e.y) + ',0,1,' + mw + ',' + mw + ',' + d(e.h) + ',N,"' + quoteSafe(e.d, '\\"') + '"');
+      } else if (e.t === 'qr') {
+        // EPL2 has no QR command on the Eltron/LP 2844 firmware most EPL printers run, so the symbol
+        // is drawn as black boxes, one per horizontal run of dark modules: works on every EPL2 model.
+        var q = dots(e.m, dpmm, 20), x0 = d(e.x), y0 = d(e.y);
+        qrMatrix(e.d).forEach(function (row, r) {
+          for (var cI = 0; cI < row.length; cI++) {
+            if (!row[cI]) continue;
+            var run = 1; while (row[cI + run]) run++;
+            out.push('LO' + (x0 + cI * q) + ',' + (y0 + r * q) + ',' + run * q + ',' + q);
+            cI += run - 1;
+          }
+        });
       } else if (e.t === 'line') out.push('LO' + d(e.x) + ',' + d(e.y) + ',' + d(e.w) + ',' + Math.max(1, d(e.h)));
     });
     out.push('P' + (o.copies || 1), '');
@@ -204,6 +317,15 @@
           var data = latin1Bytes('{B' + String(e.d).replace(/[^\x20-\x7e]/g, '?'));
           b.push(0x1d, 0x68, clamp(Math.round(e.h * 8), 24, 255), 0x1d, 0x77, 2, 0x1d, 0x48, 0x02, 0x1d, 0x6b, 0x49, data.length);
           b = b.concat(data, [0x0a]);
+        } else if (e.t === 'qr') {
+          // GS ( k: model 2, module size, ECC M, store the data, print it.
+          var qd = latin1Bytes(String(e.d).replace(/[^\x20-\x7e]/g, '?')), n = qd.length + 3;
+          b.push(0x1b, 0x61, 0x01);
+          b.push(0x1d, 0x28, 0x6b, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00);
+          b.push(0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x43, clamp(Math.round(e.m * 8), 1, 16));
+          b.push(0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x45, 0x31);
+          b = b.concat([0x1d, 0x28, 0x6b, n & 0xff, (n >> 8) & 0xff, 0x31, 0x50, 0x30], qd);
+          b.push(0x1d, 0x28, 0x6b, 0x03, 0x00, 0x31, 0x51, 0x30, 0x0a, 0x1b, 0x61, 0x00);
         } else if (e.t === 'line') b = b.concat(latin1Bytes('--------------------------------'), [0x0a]);
       });
       b.push(0x0a, 0x0a, 0x0a, 0x1d, 0x56, 0x42, 0x00);
@@ -222,6 +344,12 @@
         var cb = code128Bars(e.d), mod = e.w / cb.modules;
         cb.bars.forEach(function (bar) {
           ops.push(((e.x + bar[0] * mod) * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + (bar[1] * mod * k).toFixed(2) + ' ' + (e.h * k).toFixed(2) + ' re f');
+        });
+      } else if (e.t === 'qr') {
+        qrMatrix(e.d).forEach(function (row, r) {
+          row.forEach(function (dk, cI) {
+            if (dk) ops.push(((e.x + cI * e.m) * k).toFixed(2) + ' ' + Y(e.y + (r + 1) * e.m).toFixed(2) + ' ' + (e.m * k).toFixed(2) + ' ' + (e.m * k).toFixed(2) + ' re f');
+          });
         });
       } else if (e.t === 'line') ops.push((e.x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + (e.w * k).toFixed(2) + ' ' + (e.h * k).toFixed(2) + ' re f');
     });
@@ -251,7 +379,11 @@
       if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + '">' + esc(e.s) + '</div>');
       else if (e.t === 'code128') {
         var cb = code128Bars(e.d), rects = cb.bars.map(function (b) { return '<rect x="' + b[0] + '" y="0" width="' + b[1] + '" height="10"/>'; }).join('');
-        parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + cb.modules + ' 10" preserveAspectRatio="none" aria-label="' + esc(e.d) + '">' + rects + '</svg>');
+        parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + cb.modules + ' 10" preserveAspectRatio="none" shape-rendering="crispEdges" data-code128="' + esc(e.d) + '" aria-label="Code 128 ' + esc(e.d) + '">' + rects + '</svg>');
+      } else if (e.t === 'qr') {
+        var M = qrMatrix(e.d), cells = [];
+        M.forEach(function (row, r) { row.forEach(function (dk, cI) { if (dk) cells.push('<rect x="' + cI + '" y="' + r + '" width="1" height="1"/>'); }); });
+        parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + M.length + ' ' + M.length + '" shape-rendering="crispEdges" data-qr="' + esc(e.d) + '" aria-label="QR ' + esc(e.d) + '">' + cells.join('') + '</svg>');
       } else if (e.t === 'line') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm;background:#000"></div>');
     });
     parts.push('</div>');
@@ -271,5 +403,5 @@
     return { language: language, encoding: 'utf8', body: html(t) };
   }
 
-  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, build: build, render: render };
+  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, build: build, render: render };
 });

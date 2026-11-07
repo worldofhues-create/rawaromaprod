@@ -7,8 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
-export interface LabelElement { t: 'text' | 'code128' | 'line'; x: number; y: number; w?: number; h?: number; s?: string; b?: boolean; d?: string }
-export interface LabelTemplate { v: 1; size: string; w: number; h: number; reprint: boolean; elements: LabelElement[]; src?: LabelContent }
+export interface LabelElement { t: 'text' | 'code128' | 'qr' | 'line'; x: number; y: number; w?: number; h?: number; s?: string; b?: boolean; d?: string; m?: number }
+export interface LabelTemplate { v: 1; size: string; w: number; h: number; reprint: boolean; elements: LabelElement[]; src?: LabelContent; codes?: { code128: boolean; qr: boolean; note: string | null } }
 export interface LabelContent { brand?: string; title?: string; lines?: Array<[string, string | number | null]>; code?: string; footer?: string; reprint?: boolean }
 interface RaLabel {
   SIZES: Record<string, { w: number; h: number | null; continuous?: boolean; name: string }>;
@@ -21,6 +21,8 @@ let loaded: RaLabel | undefined;
 export function label(): RaLabel {
   if (!loaded) {
     const sandbox: Record<string, unknown> = { Buffer };
+    // SCAN-1: the QR encoder first, exactly as the page loads it (qrcode.js before label-render.js).
+    runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox);
     runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
     loaded = sandbox.RaLabel as RaLabel;
   }

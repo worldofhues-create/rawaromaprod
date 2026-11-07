@@ -34,6 +34,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 /** The shared renderer, loaded as the page loads it. */
 export function loadRenderer(path = join(here, '..', '..', 'web', 'label-render.js')) {
   const sandbox = { Buffer };
+  // SCAN-1: the QR encoder sits next to the renderer and loads first, as on the page.
+  runInNewContext(readFileSync(join(dirname(path), 'qrcode.js'), 'utf8'), sandbox);
   runInNewContext(readFileSync(path, 'utf8'), sandbox);
   return sandbox.RaLabel;
 }

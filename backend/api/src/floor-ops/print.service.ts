@@ -37,6 +37,12 @@ export interface EnqueueRequest {
   deviceId?: string | null;
 }
 
+/** SCAN-1: a label code that is not an opaque id (a name, a CAS number, a percentage) is the caller's
+ *  mistake, so it answers 400 with the renderer's reason rather than a 500. */
+function buildOr400(content: LabelContent, size: string) {
+  try { return label().build(content, size); } catch (e) { throw new BadRequestException((e as Error).message); }
+}
+
 @Injectable()
 export class PrintService {
   private readonly clock: Clock;
@@ -61,7 +67,7 @@ export class PrintService {
     const cfg = (typeof raw === 'string' ? JSON.parse(raw) : raw) as Record<string, unknown>;
     const size = req.size ?? (typeof cfg.size === 'string' ? cfg.size : DEFAULT_SIZE);
     if (!label().SIZES[size]) throw new BadRequestException(`Unknown label size ${size}.`);
-    const template = { ...label().build(req.content, size), src: req.content } as LabelTemplate;
+    const template = { ...buildOr400(req.content, size), src: req.content } as LabelTemplate;
     return this.insert({
       deviceId: printer ? String(printer.device_id) : null,
       station: req.station,
@@ -195,7 +201,7 @@ export class PrintService {
     const orig = await this.get(id);
     const src = { ...(orig.template.src ?? {}), reprint: true };
     const template = orig.template.src
-      ? ({ ...label().build(src, orig.template.size), src } as LabelTemplate)
+      ? ({ ...buildOr400(src, orig.template.size), src } as LabelTemplate)
       : ({ ...orig.template, reprint: true } as LabelTemplate);
     const [dev] = orig.deviceId
       ? await this.sql`select device_id from platform.device_master where device_id = ${orig.deviceId}::uuid and status in ('active', 'offline')`

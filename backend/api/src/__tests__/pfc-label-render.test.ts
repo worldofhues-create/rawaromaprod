@@ -10,6 +10,7 @@ import { runInNewContext } from 'node:vm';
 
 // Loaded as the page loads it (a classic script), in a vm with Buffer for the binary languages.
 const sandbox: Record<string, unknown> = { Buffer };
+runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox); // SCAN-1
 runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const L = sandbox.RaLabel as any;
@@ -43,7 +44,13 @@ test('build: every element sits inside the label at every size', () => {
       assert.ok(e.x + (e.w ?? 0) <= t.w + 0.01, `${s} width ${JSON.stringify(e)}`);
       assert.ok(e.y + (e.h ?? 0) <= t.h + 0.01, `${s} height ${JSON.stringify(e)}`);
     }
-    assert.ok(t.elements.some((e: { t: string; d?: string }) => e.t === 'code128' && e.d === 'CTN-SO1234-1'), s);
+    // SCAN-1: every size carries the QR; every size but 38x25 also carries the Code 128. 38x25 is too
+    // narrow for a scannable Code 128, so it prints the code as text and says why (t.codes.note).
+    assert.ok(t.elements.some((e: { t: string; d?: string }) => e.t === 'qr' && e.d === 'CTN-SO1234-1'), s);
+    if (s === '38x25') {
+      assert.equal(t.codes.code128, false);
+      assert.ok(t.elements.some((e: { t: string; s?: string }) => e.t === 'text' && e.s === 'CTN-SO1234-1'), s);
+    } else assert.ok(t.elements.some((e: { t: string; d?: string }) => e.t === 'code128' && e.d === 'CTN-SO1234-1'), s);
   }
 });
 
