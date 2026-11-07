@@ -2,6 +2,7 @@
  *  PROD-D-5 the QC review decision. */
 import { Module } from '@nestjs/common';
 import { PolicyModule } from '../policy/policy.module.js';
+import { FloorModule } from '../floor/floor.module.js';
 import { ProdfloorController } from './prodfloor.controller.js';
 import { ReceivingService } from './receiving.service.js';
 import { PaymentReleaseService } from './payment-release.service.js';
@@ -11,7 +12,7 @@ import { QcReviewController } from './qc-review.controller.js';
 import { QcReviewService } from './qc-review.service.js';
 
 @Module({
-  imports: [PolicyModule],
+  imports: [PolicyModule, FloorModule], // SCAN-5: FloorCodeService mints the raw-lot label's L- code
   controllers: [ProdfloorController, QcReviewController],
   providers: [ReceivingService, PaymentReleaseService, QcFloorService, LotTraceService, QcReviewService],
 })

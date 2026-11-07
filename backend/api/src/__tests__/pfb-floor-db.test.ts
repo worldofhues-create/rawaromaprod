@@ -12,7 +12,8 @@ import { PolicyService } from '../policy/policy.service.js';
 import { ReceivingService } from '../prodfloor/receiving.service.js';
 import { PaymentReleaseService } from '../prodfloor/payment-release.service.js';
 import { QcFloorService } from '../prodfloor/qc-floor.service.js';
-import { LotTraceService } from '../prodfloor/lot-trace.service.js';
+import { LotTraceService, resolveRmLot } from '../prodfloor/lot-trace.service.js';
+import { FloorCodeService } from '../floor/floor-code.service.js';
 
 const sql = () => testClient();
 let gate: GateService, recv: ReceivingService, pay: PaymentReleaseService, qc: QcFloorService, lots: LotTraceService;
@@ -35,7 +36,7 @@ before(async () => {
   recv = new ReceivingService(s, policy);
   pay = new PaymentReleaseService(s, policy);
   qc = new QcFloorService(s, policy);
-  lots = new LotTraceService(s);
+  lots = new LotTraceService(s, new FloorCodeService(s)); // SCAN-5: the label mints the lot's opaque code
 });
 after(async () => { await closeTestClient(); });
 
@@ -215,6 +216,11 @@ test('lot hold: a faulty raw lot is frozen, recall lists its batches and shipped
   assert.equal(label.binCode, binCode);
   assert.equal(label.hazard, 'Classification pending: handle as hazardous');
   assert.equal(label.reprint, false);
+  // SCAN-5: the raw-lot label carries the opaque L- code the picker scans, the same one scan-resolve
+  // and pick know, and the hold / recall field resolves it back to this lot.
+  assert.match(String(label.barcode), /^L-[0-9A-HJKMNP-TV-Z]{7}$/);
+  assert.equal((await sql()`select inventory_batch_id::text as id from inventory.lot_barcode where barcode = ${label.barcode}`)[0]!.id, ib);
+  assert.equal(await resolveRmLot(sql(), String(label.barcode)), rm);
   assert.equal((await lots.putawayLabel(rm, {}, principal())).reprint, true);
 
   await lots.hold({ subjectType: 'RM_LOT', subjectId: rm, reason: 'Batch failed, cause traced to this lot' }, principal());

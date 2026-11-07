@@ -12,11 +12,11 @@
  *             it says "Classification pending: handle as hazardous". The first print is logged, every
  *             later one is marked REPRINT.
  */
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { scanCode } from '../floor/scan-code.js';
-import { LOT_BARCODE_RE } from '../floor/floor-code.service.js';
+import { FloorCodeService, LOT_BARCODE_RE } from '../floor/floor-code.service.js';
 
 type Row = Record<string, unknown>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,7 +51,7 @@ export async function resolveRmLot(sql: Sql, ref: unknown): Promise<string> {
 
 @Injectable()
 export class LotTraceService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql) {}
+  constructor(@Inject(PG_CLIENT) private readonly sql: Sql, @Optional() private readonly codes?: FloorCodeService) {}
 
   /** WALK2-RP-11: Lot hold & recall asked for a typed rm_batch_id uuid, and anything else (the lot number
    *  on the label in someone's hand) reached Postgres as a uuid and failed as a server error. A raw lot is
@@ -158,8 +158,12 @@ export class LotTraceService {
       if (!loc) throw new BadRequestException('Scan the bin first: the label carries where the lot sits.');
       const binCode = bin?.code ?? ((await tx`select storage_location_code as code from location.storage_location_master where storage_location_id = ${loc}::uuid`)[0]?.code as string | undefined) ?? null;
       const prev = Number((await tx`select count(*)::int as n from inventory.raw_lot_label where rm_batch_id = ${rmBatchId}`)[0]!.n);
+      // SCAN-5: the label's scan code is the lot's opaque L- id (what pick and scan-resolve read), minted
+      // once per stock row. A lot with no stock row yet keeps its RM batch number as the code.
+      const [ib] = await tx`select inventory_batch_id::text as id from inventory.inventory_batch where rm_batch_id = ${rmBatchId} order by created_dt nulls last limit 1`;
+      const barcode = ib && this.codes ? await this.codes.lotBarcode(String(ib.id), principal) : null;
       const payload = {
-        lotId: String(b.batch_number), floorCode: (b.floor_code as string) ?? null, qty: b.qty, uom: b.uom_code ?? null, expiry: b.expiry ?? null,
+        lotId: String(b.batch_number), barcode, floorCode: (b.floor_code as string) ?? null, qty: b.qty, uom: b.uom_code ?? null, expiry: b.expiry ?? null,
         received: b.received, storageLocationId: loc, binCode, hazard: HAZARD_PENDING, reprint: prev > 0,
       };
       await tx`insert into inventory.raw_lot_label (rm_batch_id, storage_location_id, payload, reprint, printed_by) values (${rmBatchId}, ${loc}, ${JSON.stringify(payload)}::jsonb, ${prev > 0}, ${principal.userId})`;

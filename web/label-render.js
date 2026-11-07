@@ -390,6 +390,34 @@
     return parts.join('');
   }
 
+  /**
+   * SCAN-5: both codes as inline HTML, for a browser label that lays itself out (hand-off, raw lot,
+   * bin, FG lot). Same floors as build(): bar 0.25 mm and QR 0.375 mm minimum, quiet zones as
+   * padding. If the Code 128 cannot fit in maxWidthMm next to the QR, it is QR plus the code as text.
+   * -> { html, code128, widthMm }
+   */
+  function codesHtml(code, opts) {
+    var o = opts || {}, d = String(code == null ? '' : code);
+    if (!OPAQUE_RE.test(d)) throw new Error('A label code must be the opaque id only (upper-case letters, digits, hyphens), not "' + d + '".');
+    var maxW = o.maxWidthMm || 90, bars = code128Bars(d), M = qrMatrix(d), n = M.length, pick = null;
+    for (var bi = 0; bi < BAR_X.length && !pick; bi++) for (var qi = 0; qi < QR_X.length && !pick; qi++) {
+      var bx = BAR_X[bi], qx = QR_X[qi], w = 10 * bx + bars.modules * bx + Math.max(10 * bx, 4 * qx) + n * qx + 4 * qx;
+      if (w <= maxW + 1e-9) pick = { bx: bx, qx: qx, w: w };
+    }
+    var qx0 = pick ? pick.qx : QR_X[QR_X.length - 1], qw = r2(n * qx0);
+    var cells = [];
+    M.forEach(function (row, r) { row.forEach(function (dk, c) { if (dk) cells.push('<rect x="' + c + '" y="' + r + '" width="1" height="1"/>'); }); });
+    var qr = '<svg data-qr="' + esc(d) + '" aria-label="QR ' + esc(d) + '" viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" style="display:block;width:' + qw + 'mm;height:' + qw + 'mm;margin:' + r2(4 * qx0) + 'mm;flex:none">' + cells.join('') + '</svg>';
+    var txt = '<span style="font:700 ' + (o.textMm || 2.6) + 'mm/1.1 ui-monospace,Menlo,monospace;letter-spacing:.04em">' + esc(d) + '</span>';
+    if (!pick) {
+      return { code128: false, widthMm: r2(qw + 8 * qx0), html: '<span class="ra-codes" style="display:inline-flex;align-items:center;gap:1mm;background:#fff;color:#000">' + qr + txt + '</span>' };
+    }
+    var bw = r2(bars.modules * pick.bx), bh = r2(Math.max(BAR_MIN_H, Math.min(o.barHeightMm || qw, 15)));
+    var rects = bars.bars.map(function (b) { return '<rect x="' + b[0] + '" y="0" width="' + b[1] + '" height="10"/>'; }).join('');
+    var bar = '<span style="display:inline-flex;flex-direction:column;align-items:flex-start;gap:.6mm;padding:0 ' + r2(10 * pick.bx) + 'mm;flex:none"><svg data-code128="' + esc(d) + '" aria-label="Code 128 ' + esc(d) + '" viewBox="0 0 ' + bars.modules + ' 10" preserveAspectRatio="none" shape-rendering="crispEdges" style="display:block;width:' + bw + 'mm;height:' + bh + 'mm">' + rects + '</svg>' + txt + '</span>';
+    return { code128: true, widthMm: r2(pick.w), html: '<span class="ra-codes" style="display:inline-flex;align-items:center;background:#fff;color:#000">' + bar + qr + '</span>' };
+  }
+
   /** template -> { language, encoding: 'utf8' | 'base64', body } */
   function render(t, language, opts) {
     var o = opts || {};
@@ -403,5 +431,5 @@
     return { language: language, encoding: 'utf8', body: html(t) };
   }
 
-  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, build: build, render: render };
+  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render };
 });

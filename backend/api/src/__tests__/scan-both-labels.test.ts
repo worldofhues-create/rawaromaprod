@@ -117,3 +117,30 @@ test('an old stored template (Code 128 only) still renders in every language', (
   const old = { v: 1, size: '100x50', w: 100, h: 50, reprint: false, elements: [{ t: 'code128', x: 3, y: 30, w: 94, h: 10, d: 'L-7Q3K9XA' }] };
   for (const lang of L.LANGUAGES) assert.ok(L.render(old, lang).body.length > 0, lang);
 });
+
+// SCAN-5: the browser labels that lay themselves out (hand-off PICKED/VERIFIED/MIXED, raw lot, bin,
+// FG lot) get both codes from ONE helper, so none of them can drift to one symbology again.
+test('codesHtml: Code 128 + QR of the same code, sized to fit; QR + text only when the bar cannot fit', () => {
+  const h = L.codesHtml('A-01-03', { maxWidthMm: 60 });
+  assert.match(h.html, /data-code128="A-01-03"/);
+  assert.match(h.html, /data-qr="A-01-03"/);
+  assert.equal(h.code128, true);
+  assert.ok(h.widthMm <= 60);
+  const narrow = L.codesHtml('L-7Q3K9XA', { maxWidthMm: 30 });
+  assert.equal(narrow.code128, false);
+  assert.match(narrow.html, /data-qr="L-7Q3K9XA"/);
+  assert.doesNotMatch(narrow.html, /data-code128/);
+  assert.match(narrow.html, />L-7Q3K9XA</);
+  assert.throws(() => L.codesHtml('Bergamot oil', {}), /opaque/);
+});
+
+test('every browser label in the Factory console draws its codes through RaLabel (no QR-only or code-less label left)', () => {
+  const read = (f: string) => readFileSync(new URL(`../../../../web/${f}`, import.meta.url), 'utf8');
+  const floor = read('ws-floor.js'), floorb = read('ws-floorb.js'), produce = read('ws-produce.js');
+  const fn = (src: string, name: string) => src.slice(src.indexOf(`function ${name}(`), src.indexOf(`function ${name}(`) + 2500);
+  for (const [src, name, what] of <Array<[string, string, string]>>[[floor, 'printLabel', 'hand-off'], [floorb, 'printLabel', 'raw lot'], [produce, 'printBinLabels', 'bin'], [produce, 'labelHtml', 'FG lot']]) {
+    assert.match(fn(src, name), /scanCodes\(/, `${what} label draws both codes`);
+    assert.match(fn(src, 'scanCodes'), /RaLabel\.codesHtml\(/, `${what}: scanCodes is the shared renderer`);
+    assert.doesNotMatch(fn(src, name).slice(0, 1500), /qrcode\(|qrSvg\(/, `${what} label is not QR-only`);
+  }
+});

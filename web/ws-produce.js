@@ -424,9 +424,15 @@
     var bl = $('pv-binlabels'); if (bl) bl.onclick = function () { printBinLabels(bins); };
   }
 
+  // SCAN-5: both codes (Code 128 + QR, same opaque id) from the one renderer. If the value is not an
+  // opaque id it is printed as text and says so, rather than encoding something that should not be.
+  function scanCodes(code, maxW, o) {
+    try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
+    catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + escHtml(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
+  }
   function printBinLabels(bins) {
     var cells = bins.map(function (b) {
-      return '<div class="lb"><div class="c">' + escHtml(b.label) + '</div>' + qrSvg(b.binCode, 3) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
+      return '<div class="lb"><div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
     }).join('');
     openPrint('Bin labels', '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid}.c{font:700 18px Arial}.z{font-size:10px;color:#444}@media print{.noprint{display:none}}</style>' +
       '<div class="grid">' + cells + '</div>');
@@ -536,7 +542,7 @@
     var dg = c.dg ? '<div class="dg"><b>' + escHtml([c.dg.unNumber ? (/^UN/i.test(c.dg.unNumber) ? c.dg.unNumber : 'UN' + c.dg.unNumber) : '', c.dg.dgClass ? 'Class ' + c.dg.dgClass : '', c.dg.packingGroup ? 'PG ' + c.dg.packingGroup : ''].filter(Boolean).join(' · ')) + '</b>' +
       (c.dg.properShippingName ? '<div>' + escHtml(c.dg.properShippingName) + '</div>' : '') + (c.dg.signalWord ? '<div class="sw">' + escHtml(c.dg.signalWord.toUpperCase()) + '</div>' : '') + (c.dg.hazardStatements && !s.small ? '<div>' + escHtml(c.dg.hazardStatements) + '</div>' : '') + '</div>' : '';
     return '<div class="lbl" style="width:' + s.w + ';height:' + s.h + '">' +
-      '<div class="top"><div><div class="pn">' + escHtml(c.productName || c.productCode || c.skuCode) + '</div><div class="sm">' + escHtml((c.productCode ? c.productCode + ' · ' : '') + c.skuCode + (c.packSize ? ' · ' + c.packSize : '')) + '</div></div>' + qrSvg(c.batchNumber, s.small ? 2 : 3) + '</div>' +
+      '<div class="top"><div><div class="pn">' + escHtml(c.productName || c.productCode || c.skuCode) + '</div><div class="sm">' + escHtml((c.productCode ? c.productCode + ' · ' : '') + c.skuCode + (c.packSize ? ' · ' + c.packSize : '')) + '</div></div>' + scanCodes(c.batchNumber, s.small ? 56 : 60, { barHeightMm: s.small ? 6 : 10, textMm: s.small ? 2 : 3 }) + '</div>' +
       '<div class="row"><span>Batch</span><b class="big">' + escHtml(c.batchNumber) + '</b></div>' +
       '<div class="row"><span>Net qty</span><b>' + escHtml(c.netQuantity + (c.unit ? ' ' + c.unit : '')) + (c.packSize ? ' × ' + escHtml(c.packSize) : '') + '</b></div>' +
       '<div class="row"><span>Mfg</span><b>' + escHtml(c.manufacturingDate) + '</b><span>Exp</span><b>' + escHtml(c.expiryDate) + '</b></div>' +

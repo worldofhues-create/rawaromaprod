@@ -75,20 +75,29 @@
   }
 
   /* ── hand-off labels: browser print at 75 x 50 mm ────────────────────────────────────── */
+  // SCAN-5: both codes (Code 128 + QR, same opaque id) from the one renderer. If the value is not an
+  // opaque id it is printed as text and says so, rather than encoding something that should not be.
+  function scanCodes(code, maxW, o) {
+    try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
+    catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + esc(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
+  }
   function printLabel(l) {
     if (!l) return;
+    // the next station scans this: the verifier and mixer find the job by its tote (or job number).
+    var payload = l.kind === 'MIXED' && l.batchNo ? l.batchNo : (l.tote || l.jobNo);
     var w = window.open('', '_blank', 'width=420,height=320');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
     var time = localTime(l.printedDt);
     w.document.write('<!doctype html><meta charset="utf-8"><title>' + esc(l.kind) + ' ' + esc(l.jobNo) + '</title>' +
-      '<style>@page{size:75mm 50mm;margin:0}body{margin:0;font:11px/1.3 system-ui,sans-serif}.l{width:71mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000}' +
-      'h1{margin:0 0 1mm;font-size:22px;letter-spacing:.06em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:6px;font-size:13px}td{padding:0 4px 0 0;vertical-align:top}</style>' +
+      '<style>@page{size:75mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:71mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.cd{margin-top:auto}' +
+      'h1{margin:0 0 .5mm;font-size:18px;letter-spacing:.06em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:6px;font-size:13px}td{padding:0 4px 0 0;vertical-align:top}</style>' +
       '<div class="l"><h1>' + esc(l.kind) + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><table>' +
       '<tr><td>Order</td><td><b>' + esc(l.orderRef || '—') + '</b></td></tr><tr><td>Job</td><td><b>' + esc(l.jobNo) + '</b></td></tr>' +
       (l.tote ? '<tr><td>Tote</td><td><b>' + esc(l.tote) + '</b></td></tr>' : '') +
       (l.batchNo ? '<tr><td>Batch</td><td><b>' + esc(l.batchNo) + '</b></td></tr>' : '') +
       '<tr><td>Lots</td><td>' + esc((l.lots || []).join(', ') || '—') + '</td></tr>' +
-      '<tr><td>By</td><td>' + esc(l.person) + '</td></tr><tr><td>Time</td><td>' + esc(time) + '</td></tr></table></div>' +
+      '<tr><td>By</td><td>' + esc(l.person) + '</td></tr><tr><td>Time</td><td>' + esc(time) + '</td></tr></table>' +
+      (payload ? '<div class="cd">' + scanCodes(payload, 66, { barHeightMm: 7, textMm: 2.2 }) + '</div>' : '') + '</div>' +
       '<script>window.onload=function(){window.print()}<\/script>');
     w.document.close();
   }
