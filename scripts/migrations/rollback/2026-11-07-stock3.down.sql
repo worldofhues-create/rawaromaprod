@@ -4,3 +4,4 @@
 -- @target: main
 
 alter table production.production_order_ingredients drop column if exists issued_amount;
+delete from public.schema_migrations where id like '2026-11-07-stock3%';
