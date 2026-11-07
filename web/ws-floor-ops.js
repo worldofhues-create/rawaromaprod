@@ -474,11 +474,20 @@
     var qb = b.qcBacklog || {}, q2 = qb.qc2Ready || [], pq = qb.packagingQc || [];
     var qc = '<div style="font-size:' + (16 * f) + 'px">QC 2 ready: <b>' + q2.length + '</b> ' + escHtml(q2.join(', ')) + '<br>Packaging QC waiting: <b>' + pq.length + '</b> ' + escHtml(pq.slice(0, 8).join(', ')) + '</div>';
     var sh = b.shipments || {};
+    // FLOOR-2 (F7): the FG rack by zone. The colour NAME and initials sit beside the swatch, so a
+    // colour-blind reader and a black-and-white screen get the same answer.
+    var fr = (b.fgRack || []).map(function (x) {
+      return '<div style="display:flex;gap:10px;align-items:center;padding:8px 10px;background:var(--panel-2);border-radius:8px;font-size:' + (16 * f) + 'px;border-left:' + Math.round(10 * f) + 'px solid ' + escHtml(x.colourHex || 'var(--line)') + '">' +
+        '<b class="mono">' + escHtml(x.batchNumber || '') + '</b><span style="margin-left:auto" class="fo-zone"><b class="mono">' + escHtml(x.zoneCode || 'No zone') + '</b> ' +
+        (x.colourName ? escHtml(x.colourName) + ' <b class="mono">(' + escHtml(x.initials) + ')</b>' : '<span class="t-cap">no colour set</span>') + '</span>' +
+        '<span class="t-cap">' + escHtml((x.state === 'GOING' ? 'to ' : '') + (x.bin || '')) + '</span></div>';
+    }).join('') || '<div class="t-cap" style="font-size:' + (14 * f) + 'px">Nothing on the FG rack.</div>';
     var al = (b.alerts || []).map(function (a) { return '<div style="padding:8px 10px;border-left:6px solid var(--bad,#c33);background:var(--panel-2);border-radius:6px;font-size:' + (15 * f) + 'px"><b>' + escHtml(a.title) + (a.station ? ' · ' + escHtml(a.station) : '') + '</b><div class="t-cap" style="font-size:' + (13 * f) + 'px">' + escHtml(a.body || '') + '</div></div>'; }).join('');
     return '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(' + Math.round(280 * f) + 'px,1fr));gap:' + Math.round(14 * f) + 'px;padding:' + (big ? Math.round(20 * f) : 0) + 'px">' +
       '<div class="card"><div class="card-bd">' + h('Floor queue') + '<div style="display:grid;gap:6px">' + q + '</div></div></div>' +
       '<div class="card"><div class="card-bd">' + h('Maceration') + '<div style="display:grid;gap:6px">' + m + '</div></div></div>' +
       '<div class="card"><div class="card-bd">' + h('QC backlog') + qc + h('Shipping') + '<div style="font-size:' + (16 * f) + 'px">Packing ' + (sh.PACKING || 0) + ' · Packed ' + (sh.PACKED || 0) + ' · Docs ready ' + (sh.DOCS_READY || 0) + ' · AWB ' + (sh.AWB_ASSIGNED || 0) + ' · Held ' + (sh.HOLD || 0) + '</div></div></div>' +
+      '<div class="card" id="fo-fgrack"><div class="card-bd">' + h('FG rack by zone') + '<div style="display:grid;gap:6px">' + fr + '</div></div></div>' +
       (al ? '<div class="card" style="grid-column:1/-1"><div class="card-bd">' + h('Alerts') + '<div style="display:grid;gap:6px">' + al + '</div></div></div>' : '') +
       '</div><div class="t-cap" style="padding:0 ' + (big ? Math.round(20 * f) : 0) + 'px;font-size:' + (13 * f) + 'px">Updated ' + escHtml(when(b.at)) + '</div>';
   }

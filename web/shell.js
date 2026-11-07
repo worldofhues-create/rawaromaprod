@@ -1167,6 +1167,14 @@
     var o = STEP_LABEL[kind](r);
     if (!o.code) { toast('This record has no number to print yet.', 'warn'); return; }
     o.subjectRef = o.code;
+    // FLOOR-2 (F7): the FG lot label carries its zone, the colour NAME and the initials (a thermal
+    // label prints no colour, so the words are the signal). A lot not put away yet says so.
+    if (kind === 'fg_lot' && r.finishedGoodBatchId) {
+      return tunnel('/v1/shelf/fg-batches/' + r.finishedGoodBatchId + '/zone').then(function (res) { return res.status < 400 && res.json ? res.json.data : null; }).catch(function () { return null; }).then(function (z) {
+        o.lines = o.lines.concat(z ? [['Zone', z.code], ['Colour', z.colourName ? z.colourName + ' (' + z.initials + ')' : 'No colour set']] : [['Zone', 'Not put away yet']]);
+        return again ? window.RA.stepReprint(o) : window.RA.stepPrint(o);
+      });
+    }
     return again ? window.RA.stepReprint(o) : window.RA.stepPrint(o);
   }
 

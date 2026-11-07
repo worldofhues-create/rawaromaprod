@@ -37,6 +37,7 @@
     __produce__: 'Sales orders in the order to make them. Plan a run, then follow it to QC and the shelf.',
     __shelftasks__: 'Batches to put on a shelf and orders to pick. Scan or tap a task to finish it.',
     __racklayout__: 'Your racks, shelves and bins, and what sits in each bin.',
+    __fgzones__: 'Each finished-goods zone: its colour, the colour name and the initials printed on every label.',
     __shelfdisplay__: 'A live board for the floor: what to put away and what to pick, bin by bin.',
     __factorysetup__: 'The checklist that gets the factory ready. Approve Ruh\'s drafts one row at a time or together.',
     __formulasetup__: 'Which formula each product is made from. The recipe itself stays in the Vault.',

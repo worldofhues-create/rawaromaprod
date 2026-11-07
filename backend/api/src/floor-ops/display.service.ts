@@ -10,6 +10,7 @@ import type { Sql } from 'postgres';
 import { openAlerts } from './floor-alerts.js';
 import { iso } from './floor-util.js';
 import { MacerationService } from './maceration.service.js';
+import { FgZoneService } from '../shelf/fg-zone.service.js';
 
 @Injectable()
 export class DisplayService {
@@ -37,6 +38,8 @@ export class DisplayService {
       },
       shipments: Object.fromEntries(shipments.map((s) => [String(s.status), Number(s.n)])),
       alerts: await openAlerts(this.sql, station),
+      // FLOOR-2 (F7): the FG rack, each lot with its zone's colour NAME and initials (never colour alone).
+      fgRack: await new FgZoneService(this.sql).rack(),
     };
   }
 }

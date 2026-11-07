@@ -27,7 +27,7 @@
    *  name is not plain enough. Everything else is the endpoint without /v1/ (production-orders …). */
   var SLUG = {
     __dash__: 'home', __tutorial__: 'tutorials', __produce__: 'produce-next', __shelftasks__: 'put-away-and-pick',
-    __racklayout__: 'rack-layout', __shelfdisplay__: 'shelf-display', __devices__: 'devices', __printq__: 'print-queue', __maceration__: 'maceration', __packing__: 'packing-station', __logistics__: 'logistics-station', __couriers__: 'couriers', __floorboard__: 'floor-board', __factorysetup__: 'factory-setup', __formulasetup__: 'formula-setup',
+    __racklayout__: 'rack-layout', __fgzones__: 'fg-zones', __shelfdisplay__: 'shelf-display', __devices__: 'devices', __printq__: 'print-queue', __maceration__: 'maceration', __packing__: 'packing-station', __logistics__: 'logistics-station', __couriers__: 'couriers', __floorboard__: 'floor-board', __factorysetup__: 'factory-setup', __formulasetup__: 'formula-setup',
     __recvaudit__: 'receiving-audit', __payrelease__: 'supplier-payments', __qccheckpoints__: 'qc-checkpoints', __qcgate__: 'batch-qc', __lotrecall__: 'lot-hold-and-recall',
     '/v1/bridge/requirements': 'alembic-orders', '/v1/formula-event-hist': 'formula-history', '/v1/audit-events': 'change-history',
     '/v1/uoms': 'units', '/v1/rm-aliases': 'material-code-names', '/v1/batch-container-mappings': 'batch-containers',

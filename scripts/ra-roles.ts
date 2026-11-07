@@ -238,8 +238,9 @@ export const ROLES: RoleDef[] = [
       // record) and the ingredient family -> colour table. Floor codes are read coded, never named.
       oneOf('platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_family:write', 'masterdata:floor_code:read'),
       // FLOOR-2 (F7, owner: the FG rack "color coded and initial based"): the admin sets each FG zone's
-      // colour, colour name and initials (warehouse holds it through location:*).
-      oneOf('location:fg_zone:write'),
+      // colour, colour name and initials (warehouse holds it through location:*). Reading the zone list
+      // needs the bin read (zones, racks and bins: reference data, no stock quantities).
+      oneOf('location:fg_zone:write', 'location:bin_master:read'),
     ),
     sampleEmail: 'admin@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_ADMIN_PASSWORD',
