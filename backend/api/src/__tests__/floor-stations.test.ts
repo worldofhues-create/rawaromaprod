@@ -262,7 +262,12 @@ test('verifier: cannot verify own pick; out-of-tolerance kept on file and refuse
   assert.equal(out.verified, false);
   const kept = await sql()`select status from production.weighing_record w join production.floor_job j on j.mixing_session_id = w.secure_mixing_session_id where j.floor_job_id = ${s.job.floorJobId}`;
   assert.deepEqual(kept.map((r) => r.status), ['OUT_OF_TOLERANCE']);
-  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126755 }, verifier)).verified, true);
+  // STOCK2-1: the top of the window is still inside tolerance on the exact mg, but over the pick, so it
+  // is held for a supervisor; the bottom of the window is what a verifier can tick alone.
+  const top = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126755 }, verifier);
+  assert.deepEqual([top.withinTolerance, top.verified], [true, false]);
+  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124244 }, verifier)).withinTolerance, false);
+  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124245 }, verifier)).verified, true);
   await assert.rejects(() => stations.completeVerify(s.job.floorJobId, verifier), /not weighed yet: 2/);
   await stations.verifyLine(s.job.floorJobId, l2!.floorLineId, { actualMg: 2250 }, verifier);
   const done = await stations.completeVerify(s.job.floorJobId, verifier);

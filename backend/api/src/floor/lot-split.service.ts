@@ -103,11 +103,15 @@ export class LotSplitService {
 
   /** What the job's material issues will still take from this lot (raised, not yet debited), in mg. */
   private async pendingMg(q: Q, inventoryBatchId: string): Promise<number> {
-    const rows = await q<{ qty: string | null; uom_code: string | null }[]>`
-      select mpli.picked_qty::text as qty, u.uom_code
+    // STOCK2-1, STOCK2-2: by the issue's own pick line, and at the verified weight once there is one.
+    const rows = await q<{ actual_mg: string | null; qty: string | null; uom_code: string | null }[]>`
+      select fl.actual_mg::text, mpli.picked_qty::text as qty, u.uom_code
         from production.material_issue mi
         join production.material_issue_item mii on mii.material_issue_id = mi.material_issue_id
-        left join production.material_pick_list_items mpli on mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id
+        left join production.material_pick_list_items mpli
+          on mpli.material_pick_list_item_id = mii.material_pick_list_item_id
+          or (mii.material_pick_list_item_id is null and mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id)
+        left join production.floor_line fl on fl.material_pick_list_item_id = mpli.material_pick_list_item_id
         left join platform.uom_master u on u.uom_id = mpli.uom_id
        where mii.inventory_batch_id = ${inventoryBatchId}
          and not exists (select 1 from inventory.material_issue_applied a where a.material_issue_id = mi.material_issue_id)`;
@@ -119,7 +123,7 @@ export class LotSplitService {
        where l.picked_batch_id = ${inventoryBatchId} and j.stage = 'PICK'`;
     mg += Number(open?.mg ?? 0);
     for (const r of rows) {
-      const v = qtyToMg(r.qty, r.uom_code);
+      const v = r.actual_mg !== null ? Number(r.actual_mg) : qtyToMg(r.qty, r.uom_code);
       if (v === null) throw new ConflictException('An issue against this lot is in a unit that is not a weight, so what is left cannot be worked out. Ask the supervisor.');
       mg += v;
     }

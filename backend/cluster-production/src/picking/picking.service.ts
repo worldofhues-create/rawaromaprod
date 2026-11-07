@@ -314,14 +314,29 @@ export class PickingService {
 
       const materialIssueId = issue.materialIssueId;
 
+      // STOCK2-2: every issue line names the pick line it draws on. The debit used to find its
+      // quantity by material, so one material on two lines joined twice and debited both lines for
+      // each. Naming only the material still works while one line carries it, and is refused when
+      // two do: picking one for the caller would be a guess about which quantity left the shelf.
+      const taken = new Set<string>();
       for (const item of body.items) {
         let materialId = item.materialId ?? null;
-        if (item.materialPickListItemId) {
+        let pickLineId = item.materialPickListItemId ?? null;
+        if (pickLineId) {
           const line = (await tx.select({ materialId: materialPickListItems.materialId }).from(materialPickListItems)
-            .where(and(eq(materialPickListItems.materialPickListItemId, item.materialPickListItemId),
+            .where(and(eq(materialPickListItems.materialPickListItemId, pickLineId),
               eq(materialPickListItems.materialPickListId, body.materialPickListId))).limit(1))[0];
           if (!line?.materialId) throw new BadRequestException('That line is not on this pick list.');
           materialId = line.materialId;
+        } else {
+          const lines = await tx.select({ id: materialPickListItems.materialPickListItemId }).from(materialPickListItems)
+            .where(and(eq(materialPickListItems.materialPickListId, body.materialPickListId), eq(materialPickListItems.materialId, materialId!)));
+          if (lines.length > 1) throw new ConflictException(`This material is on ${lines.length} lines of the pick list. Name the line, so each one is debited for its own quantity.`);
+          pickLineId = lines[0]?.id ?? null;
+        }
+        if (pickLineId) {
+          if (taken.has(pickLineId)) throw new ConflictException('That pick line is on this issue twice. Each line is issued once, from one lot.');
+          taken.add(pickLineId);
         }
         // The debit and the recall both follow this lot, so it must be a lot of this line's material.
         if (item.inventoryBatchId) {
@@ -342,8 +357,7 @@ export class PickingService {
             join inventory.inventory_batch ib on ib.inventory_batch_id = ${item.inventoryBatchId}::uuid
             left join platform.uom_master pu on pu.uom_id = i.uom_id
             left join platform.uom_master lu on lu.uom_id = ib.uom_id
-            where i.material_pick_list_id = ${body.materialPickListId}::uuid and i.material_id = ${materialId}::uuid
-              and i.picked_qty > 0`)) as unknown as Array<{ qty: string; pick_uom: string | null; lot_uom: string | null }>;
+            where i.material_pick_list_item_id = ${pickLineId}::uuid and i.picked_qty > 0`)) as unknown as Array<{ qty: string; pick_uom: string | null; lot_uom: string | null }>;
           for (const u of units) {
             const moved = convertQty(u.qty, u.pick_uom, u.lot_uom);
             if ('refused' in moved) throw new ConflictException(`That lot cannot be issued for this line. ${moved.refused}`);
@@ -352,6 +366,7 @@ export class PickingService {
         await tx.insert(materialIssueItem).values({
           materialIssueItemId: uuidv7(),
           materialIssueId,
+          materialPickListItemId: pickLineId,
           materialId: materialId!,
           inventoryBatchId: item.inventoryBatchId ?? null,
           issuedQty: true,

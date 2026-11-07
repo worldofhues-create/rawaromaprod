@@ -321,7 +321,7 @@ export class MixingService {
                 from inventory.inventory_event_history
                where reference_document_id = ${issueId}
                  and reference_document_type = 'MATERIAL_ISSUE'
-                 and event_type = 'PRODUCTION_ISSUE'
+                 and event_type in ('PRODUCTION_ISSUE', 'PRODUCTION_ISSUE_ADJUST') -- STOCK2-1: signed, so the sum is the net that left
                group by inventory_batch_id`)) as unknown as Array<{
               inventory_batch_id: string | null;
               qty: string;

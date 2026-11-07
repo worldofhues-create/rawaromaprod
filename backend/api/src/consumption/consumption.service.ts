@@ -20,6 +20,19 @@
  * quantity comes from the linked material_pick_list_items.picked_qty; the batch to decrement is the
  * issue line's inventory_batch_id (what was actually taken).
  *
+ * STOCK2-2: linked by pick line (material_issue_item.material_pick_list_item_id), never by material:
+ * one material on two lines joined twice and debited each line for both. An older row with no link
+ * still matches by material while exactly one line carries it; two refuse rather than guess.
+ *
+ * STOCK2-1: stock leaves at the pick, so the debit stays here, but what it ends on is the verifier's
+ * weight. A floor line verified before this runs is debited at floor_line.actual_mg; one verified
+ * after is trued up by FloorStationService from floor_line.debited_mg, which this writes. The lines
+ * are locked before actual_mg is read and verifyLine writes actual_mg before reading debited_mg, so
+ * whichever transaction commits second sees the other: the weight lands exactly once.
+ *
+ * STOCK2-4: a refusal is also an open floor alert with the next action, closed by the first drain
+ * after the issue is settled either way (debited, or voided by an abort).
+ *
  * RP-PROD-004: the `inventory.material_issue_applied` row inserted below is a single-applier
  * CLAIM, not just a dedupe marker — MixingService.abortSession (backend/cluster-production/src/
  * mixing/mixing.service.ts) races this same INSERT ... ON CONFLICT DO NOTHING against the same
@@ -33,8 +46,9 @@
  */
 import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
-import { convertQty } from '@core/data-kernel';
+import { convertQty, mgToQty } from '@core/data-kernel';
 import type { Sql } from 'postgres';
+import { raiseAlert } from '../floor-ops/floor-alerts.js';
 
 /** A line of the issue does not convert to its lot's unit: rolls the whole debit back. */
 class UnitRefused extends Error {
@@ -63,6 +77,7 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
     if (this.running) return;
     this.running = true;
     try {
+      await this.closeSettledAlerts();
       const events = (await this.sql`
         select o.aggregate_id::text as issue_id
         from production.outbox o
@@ -97,7 +112,31 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
         select ${err.batchId}, 'PRODUCTION_ISSUE_REFUSED', now(), ${issueId}, 'MATERIAL_ISSUE', ${err.message}, 'ACTIVE'
          where not exists (select 1 from inventory.inventory_event_history
                             where reference_document_id = ${issueId} and event_type = 'PRODUCTION_ISSUE_REFUSED')`;
+      await this.alertRefusal(issueId, err.message);
     }
+  }
+
+  /** STOCK2-4: every station reads these, so codes and units only: never a material name. */
+  private async alertRefusal(issueId: string, reason: string): Promise<void> {
+    const [o] = (await this.sql`
+      select po.order_number, j.job_no from production.material_issue mi
+        left join production.production_order po on po.production_order_id = mi.production_order_id
+        left join production.floor_job j on j.production_order_id = mi.production_order_id
+       where mi.material_issue_id = ${issueId}`) as Array<{ order_number: string | null; job_no: string | null }>;
+    const what = o?.job_no ?? o?.order_number ?? 'A material issue';
+    await raiseAlert(this.sql, {
+      kind: 'STOCK_DEBIT_REFUSED', station: 'Floor', subjectType: 'MATERIAL_ISSUE', subjectId: issueId,
+      title: `${what} has not been taken off stock`,
+      body: `${reason} Next: a supervisor corrects the unit on the pick line or the lot. The debit then runs by itself and this alert closes. Until then the lot shows more than the shelf holds.`,
+      dedupeKey: `stock_debit_refused:${issueId}`,
+    }, new Date());
+  }
+
+  private async closeSettledAlerts(): Promise<void> {
+    await this.sql`
+      update platform.floor_alert a set cleared_at = now()
+       where a.kind = 'STOCK_DEBIT_REFUSED' and a.cleared_at is null
+         and exists (select 1 from inventory.material_issue_applied x where x.material_issue_id = a.subject_id)`;
   }
 
   private async debit(issueId: string): Promise<void> {
@@ -111,24 +150,45 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
       if (!claim.length) return;
 
       // Issued lines: the batch actually taken + the planned quantity (from the pick list).
-      const lines = (await tx`
-        select mii.inventory_batch_id::text as inv_batch, mpli.picked_qty::text as qty,
+      const rows = (await tx`
+        select mii.material_issue_item_id::text as item_id, mii.inventory_batch_id::text as inv_batch, mpli.picked_qty::text as qty,
+               mpli.material_pick_list_item_id::text as line_id,
                mi.production_order_id::text as order_id, pu.uom_code as pick_uom, lu.uom_code as lot_uom
         from production.material_issue mi
         join production.material_issue_item mii on mii.material_issue_id = mi.material_issue_id
         left join production.material_pick_list_items mpli
-          on mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id
+          on mpli.material_pick_list_item_id = mii.material_pick_list_item_id
+          or (mii.material_pick_list_item_id is null and mpli.material_pick_list_id = mi.material_pick_list_id and mpli.material_id = mii.material_id)
         left join platform.uom_master pu on pu.uom_id = mpli.uom_id
         left join inventory.inventory_batch ib on ib.inventory_batch_id = mii.inventory_batch_id
         left join platform.uom_master lu on lu.uom_id = ib.uom_id
-        where mi.material_issue_id = ${issueId}`) as Array<{ inv_batch: string | null; qty: string | null; order_id: string | null; pick_uom: string | null; lot_uom: string | null }>;
+        where mi.material_issue_id = ${issueId}`) as Array<{ item_id: string; inv_batch: string | null; qty: string | null; line_id: string | null; order_id: string | null; pick_uom: string | null; lot_uom: string | null }>;
+
+      const seen = new Set<string>();
+      for (const r of rows) {
+        if (r.inv_batch && seen.has(r.item_id)) throw new UnitRefused(r.inv_batch, 'This issue names a material that is on 2 lines of the pick list, and not which line, so the quantity cannot be told.');
+        seen.add(r.item_id);
+      }
+
+      // STOCK2-1: locked before actual_mg is read. See the note at the top of this file.
+      const lineIds = rows.flatMap((r) => (r.line_id ? [r.line_id] : []));
+      const floor = new Map((await tx`
+        select material_pick_list_item_id::text as line_id, target_mg::text, actual_mg::text
+          from production.floor_line where material_pick_list_item_id = any(${lineIds}::uuid[]) for update`
+      ).map((f) => [f.line_id as string, f as unknown as { target_mg: string; actual_mg: string | null }]));
 
       let applied = 0;
-      for (const l of lines) {
+      for (const l of rows) {
         if (!l.inv_batch || !(Number(l.qty) > 0)) continue; // need a known batch AND a known qty to decrement
-        const moved = convertQty(l.qty, l.pick_uom, l.lot_uom);
+        const fl = l.line_id ? floor.get(l.line_id) : undefined;
+        let moved = convertQty(l.qty, l.pick_uom, l.lot_uom);
+        if (fl?.actual_mg != null) {
+          const verified = mgToQty(Number(fl.actual_mg), l.lot_uom);
+          moved = verified === null ? { refused: `A lot kept in ${l.lot_uom} cannot hold the verified weight exactly.` } : { qty: verified };
+        }
         if ('refused' in moved) throw new UnitRefused(l.inv_batch, moved.refused);
         const qty = moved.qty; // exact text in the lot's unit: never through a float
+        if (fl) await tx`update production.floor_line set debited_mg = ${fl.actual_mg ?? fl.target_mg} where material_pick_list_item_id = ${l.line_id}`;
         await tx`
           update inventory.inventory_batch
              set quantity_on_hand = coalesce(quantity_on_hand, 0) - ${qty}::numeric, updated_dt = now()
@@ -136,7 +196,7 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
         await tx`
           insert into inventory.inventory_event_history
             (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, remarks, status)
-          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} ${l.lot_uom} to production (${l.qty} ${l.pick_uom} on the pick list)`}, 'ACTIVE')`;
+          values (${l.inv_batch}, 'PRODUCTION_ISSUE', now(), ${issueId}, 'MATERIAL_ISSUE', ${qty}, ${`issued ${qty} ${l.lot_uom} to production (${l.qty} ${l.pick_uom} on the pick list${fl?.actual_mg != null ? ', verified weight taken' : ''})`}, 'ACTIVE')`;
         // OPS-GREEN Act L (lane ops-factory): reserve -> pick -> issue. The RM reservation the
         // planner held on THIS batch for THIS production order is consumed by the issue, in the
         // same transaction as the debit — otherwise it outlives the stock it reserved and every

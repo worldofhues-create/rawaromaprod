@@ -74,6 +74,7 @@ export const materialIssueItem = production.table(
     materialIssueId: uuid("material_issue_id").references(
       () => materialIssue.materialIssueId,
     ),
+    materialPickListItemId: uuid("material_pick_list_item_id"), // STOCK2-2: the line this draws on; null on an old row with no single match
     materialId: uuid("material_id"), // soft ref → masterdata.material
     inventoryBatchId: uuid("inventory_batch_id"), // soft ref → inventory.inventory_batch
     issuedQty: boolean("issued_qty"),

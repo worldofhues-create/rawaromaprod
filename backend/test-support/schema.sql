@@ -408,6 +408,7 @@ create table if not exists production.material_issue (
 create table if not exists production.material_issue_item (
   material_issue_item_id uuid primary key default gen_random_uuid(),
   material_issue_id uuid references production.material_issue(material_issue_id),
+  material_pick_list_item_id uuid,
   material_id uuid,
   inventory_batch_id uuid,
   issued_qty boolean,
@@ -418,6 +419,7 @@ create table if not exists production.material_issue_item (
   created_by varchar(255),
   updated_by varchar(255)
 );
+alter table production.material_issue_item add column if not exists material_pick_list_item_id uuid;
 
 create table if not exists production.secure_mixing_session (
   secure_mixing_session_id uuid primary key,
@@ -1617,6 +1619,10 @@ create table if not exists production.weighing_record (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- The real check, here too: without it a status the migrations refuse passed every test (STOCK2-1).
+alter table production.weighing_record drop constraint if exists weighing_record_status_chk;
+alter table production.weighing_record add constraint weighing_record_status_chk
+  check (status in ('ACCEPTED', 'OUT_OF_TOLERANCE', 'OVER_PICK', 'NOT_BOOKABLE'));
 create unique index if not exists weighing_record_accepted_uq
   on production.weighing_record (secure_mixing_session_id, sequence_no) where status = 'ACCEPTED';
 create table if not exists packaging.fg_label_record (
@@ -2410,8 +2416,22 @@ create table if not exists production.floor_line (
   weigh_source               varchar(10) check (weigh_source in ('typed', 'scale')),
   verified_by                varchar(255),
   verified_dt                timestamptz,
+  debited_mg                 bigint,
+  over_mg                    bigint,
+  over_source                varchar(10),
+  over_read_by               varchar(255),
+  over_reason                text,
+  over_by                    varchar(255),
+  over_dt                    timestamptz,
   unique (floor_job_id, seq)
 );
+alter table production.floor_line add column if not exists debited_mg bigint;
+alter table production.floor_line add column if not exists over_mg bigint;
+alter table production.floor_line add column if not exists over_source varchar(10);
+alter table production.floor_line add column if not exists over_read_by varchar(255);
+alter table production.floor_line add column if not exists over_reason text;
+alter table production.floor_line add column if not exists over_by varchar(255);
+alter table production.floor_line add column if not exists over_dt timestamptz;
 
 create table if not exists production.floor_mix_step (
   floor_job_id  uuid not null references production.floor_job(floor_job_id),

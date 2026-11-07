@@ -20,6 +20,10 @@
  *     an expired lot, a lot too small for the line, or the wrong bin is refused outright;
  *   - the verifier's weight must be inside the line's tolerance on the EXACT stored mg (display
  *     rounding never decides); an out-of-tolerance reading is kept on file and the tick refused;
+ *   - STOCK2-1: the stock ledger ends on that weight. Under the pick, the difference stays on the lot;
+ *     over the pick, the reading is held until a supervisor records why, because more left the lot
+ *     than the pick allowed. A supervisor cannot widen the tolerance: outside it stays refused. A
+ *     reading the lot's unit cannot hold exactly is refused too, and is never rounded;
  *   - separation of duties: nobody verifies a pick they made, nobody mixes a job they verified;
  *   - two kiosks cannot work the same job at once (the job row is locked for each write).
  *
@@ -30,8 +34,10 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { BatchService, MixingService, PickingService } from '@ra/cluster-production';
-import { mgToQty, qtyToMgExact, uuidv7 } from '@core/data-kernel';
+import { massFactorMg, mgToQty, qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg, codeText } from './floor-code.service.js';
+import { clearAlert, raiseAlert } from '../floor-ops/floor-alerts.js';
+import { gramsText } from './lot-split.service.js';
 import { scanCode } from './scan-code.js';
 
 export type LabelKind = 'PICKED' | 'VERIFIED' | 'MIXED';
@@ -95,6 +101,10 @@ interface LineRow {
   actual_mg: string | null;
   weigh_source: string | null;
   verified_by: string | null;
+  over_mg: string | null;
+  over_source: string | null;
+  over_read_by: string | null;
+  over_by: string | null;
 }
 
 /** A pickable lot of a material, FEFO then FIFO by receipt. Fail closed: a lot with no RM batch has
@@ -226,7 +236,7 @@ export class FloorStationService {
   private async lines(sql: Sql | TransactionSql, jobId: string): Promise<LineRow[]> {
     return sql<LineRow[]>`
       select floor_line_id, material_pick_list_item_id::text, material_id::text, seq, target_mg::text, tolerance_ppm, picked_batch_id::text,
-             picked_by, pick_off_fefo_reason, actual_mg::text, weigh_source, verified_by
+             picked_by, pick_off_fefo_reason, actual_mg::text, weigh_source, verified_by, over_mg::text, over_source, over_read_by, over_by
         from production.floor_line where floor_job_id = ${jobId} order by seq`;
   }
 
@@ -264,9 +274,10 @@ export class FloorStationService {
   async pickView(jobId: string) {
     const j = await this.job(jobId);
     const out = [];
-    for (const l of await this.lines(this.sql, jobId)) {
+    const ls = await this.lines(this.sql, jobId);
+    for (const l of ls) {
       const fc = await this.codes.codeFor(l.material_id);
-      const lot = l.picked_batch_id ? null : await this.directedLot(this.sql, l);
+      const lot = l.picked_batch_id ? null : await this.directedLot(this.sql, l, ls);
       out.push({
         floorLineId: l.floor_line_id, seq: l.seq, floorCode: fc?.code ?? null, colourName: fc?.colourName ?? null, colourHex: fc?.colourHex ?? null, initial: fc?.initial ?? null,
         picked: !!l.picked_batch_id, offFefoReason: l.pick_off_fefo_reason,
@@ -277,13 +288,19 @@ export class FloorStationService {
     return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, lines: out };
   }
 
+  /** STOCK2-2: what this job's other lines have already picked from a lot. On-hand does not show it
+   *  yet: the issue is raised at the end of the pick, so two lines could each see the whole lot. */
+  private takenOnJob(ls: LineRow[], l: LineRow, batchId: string): number {
+    return ls.reduce((a, x) => (x.floor_line_id !== l.floor_line_id && x.picked_batch_id === batchId ? a + Number(x.target_mg) : a), 0);
+  }
+
   /** The lot the picker must take: first FEFO lot holding at least the line's target. */
-  private async directedLot(sql: Sql | TransactionSql, l: LineRow) {
+  private async directedLot(sql: Sql | TransactionSql, l: LineRow, ls: LineRow[]) {
     const need = Number(l.target_mg);
     for (const lot of await PICKABLE_LOTS(sql, l.material_id)) {
       const mg = qtyToMg(lot.qty, lot.uom_code);
       // STOCK-UNITS: a lot that cannot hold the line exactly in its own unit would be refused at the debit.
-      if (mg !== null && mg >= need && mgToQty(need, lot.uom_code) !== null) {
+      if (mg !== null && mg - this.takenOnJob(ls, l, lot.inventory_batch_id) >= need && mgToQty(need, lot.uom_code) !== null) {
         return { inventoryBatchId: lot.inventory_batch_id, batchNumber: lot.batch_number, bin: lot.bin_code, binId: lot.bin_id, expiry: lot.expiry_date, barcode: await this.codes.lotBarcode(lot.inventory_batch_id, null) };
       }
     }
@@ -297,7 +314,8 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'PICK', 'pick');
-      const l = (await this.lines(tx, jobId)).find((x) => x.floor_line_id === lineId);
+      const ls = await this.lines(tx, jobId);
+      const l = ls.find((x) => x.floor_line_id === lineId);
       if (!l) throw new NotFoundException('That line is not on this job.');
       if (l.picked_batch_id) throw new ConflictException(`Line ${l.seq} is already picked.`);
       const fc = await this.codes.codeFor(l.material_id);
@@ -313,12 +331,12 @@ export class FloorStationService {
       const scanned = lots.find((x) => x.inventory_batch_id === scan.inventory_batch_id);
       if (!scanned) throw new BadRequestException('That lot cannot be picked: it is not released by QC, has expired, or is empty.');
       const mg = qtyToMg(scanned.qty, scanned.uom_code);
-      if (mg === null || mg < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line. Take the lot the screen names.');
+      if (mg === null || mg - this.takenOnJob(ls, l, scan.inventory_batch_id) < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line. Take the lot the screen names.');
       if (mgToQty(Number(l.target_mg), scanned.uom_code) === null) throw new BadRequestException(`A lot kept in ${scanned.uom_code} cannot hold this line's weight exactly, so it cannot be debited. Take a lot kept in g, or ask the supervisor.`);
       if (scanned.bin_code && bin.toUpperCase() !== scanned.bin_code.toUpperCase()) {
         throw new BadRequestException(bin ? `Wrong bin: that lot is in ${scanned.bin_code}, you scanned ${bin}.` : `Scan the bin first: that lot is in ${scanned.bin_code}.`);
       }
-      const directed = await this.directedLot(tx, l);
+      const directed = await this.directedLot(tx, l, ls);
       const reason = String(body.reason ?? '').trim();
       if (directed && directed.inventoryBatchId !== scan.inventory_batch_id && !reason) {
         throw new ConflictException(`Take lot ${directed.batchNumber ?? directed.barcode} first (it expires first${directed.expiry ? `, ${directed.expiry}` : ''}). To take this one instead, give a reason.`);
@@ -365,6 +383,7 @@ export class FloorStationService {
         floorLineId: l.floor_line_id, seq: l.seq, floorCode: fc?.code ?? null, colourName: fc?.colourName ?? null, colourHex: fc?.colourHex ?? null, initial: fc?.initial ?? null,
         targetMg: target, toleranceMg: toleranceMg(target, l.tolerance_ppm),
         actualMg: l.actual_mg === null ? null : Number(l.actual_mg), source: l.weigh_source, verified: l.actual_mg !== null,
+        heldOverMg: l.actual_mg === null && l.over_mg !== null ? Number(l.over_mg) : null,
       });
     }
     return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, lines: out };
@@ -397,18 +416,98 @@ export class FloorStationService {
         await tx`update production.floor_job set mixing_session_id = ${sessionId} where floor_job_id = ${jobId}`;
       }
       const fc = await this.codes.codeFor(l.material_id);
-      // An ordinary weighing record, in grams (exact to the mg): kept on file in or out of tolerance.
-      await tx`insert into production.weighing_record (weighing_record_id, production_order_id, secure_mixing_session_id, sequence_no, floor_code,
-          target_qty, uom, gross_qty, tare_qty, net_qty, tolerance_pct, within_tolerance, scale_ref, weighed_by, weighed_dt, status, created_by, updated_by)
-        values (${uuidv7()}, ${j.production_order_id}, ${sessionId}, ${l.seq}, ${fc?.code ?? codeText('UNCODED', 0)},
-          ${mgToGramText(target)}, 'g', ${mgToGramText(actual)}, '0', ${mgToGramText(actual)}, ${(l.tolerance_ppm / 10_000).toFixed(3)}, ${ok},
-          ${body.scaleRef ?? (source === 'typed' ? 'typed' : null)}, ${principal.userId}, now(), ${ok ? 'ACCEPTED' : 'OUT_OF_TOLERANCE'}, ${principal.userId}, ${principal.userId})`;
+      // STOCK2-1: the debit will book this reading, so a reading the lot cannot hold stops here.
+      const [lot] = await tx<{ uom_code: string | null }[]>`
+        select u.uom_code from inventory.inventory_batch ib left join platform.uom_master u on u.uom_id = ib.uom_id where ib.inventory_batch_id = ${l.picked_batch_id}`;
+      const bookable = mgToQty(actual, lot?.uom_code) !== null;
+      const over = ok && bookable && actual > target;
+      const status = !ok ? 'OUT_OF_TOLERANCE' : !bookable ? 'NOT_BOOKABLE' : over ? 'OVER_PICK' : 'ACCEPTED';
+      // An ordinary weighing record, in grams (exact to the mg): kept on file whatever the answer.
+      await this.weighingRecord(tx, j, sessionId, l, fc?.code ?? codeText('UNCODED', 0), actual, ok, body.scaleRef ?? (source === 'typed' ? 'typed' : null), status, principal.userId);
       if (!ok) {
         return { floorLineId: lineId, seq: l.seq, verified: false, withinTolerance: false, targetMg: target, toleranceMg: toleranceMg(target, l.tolerance_ppm), actualMg: actual,
           message: 'Outside tolerance. Re-weigh, or call a supervisor.' };
       }
-      await tx`update production.floor_line set actual_mg = ${actual}, weigh_source = ${source}, verified_by = ${principal.userId}, verified_dt = now() where floor_line_id = ${lineId}`;
+      if (!bookable) {
+        const step = gramsText(massFactorMg(lot?.uom_code)! / 10000);
+        return { floorLineId: lineId, seq: l.seq, verified: false, withinTolerance: true, notBookable: true, targetMg: target, actualMg: actual,
+          message: `This lot is kept in ${lot?.uom_code}, which holds ${step} steps, so ${gramsText(actual)} cannot go on its ledger. Bring the weight to a multiple of ${step} and weigh again.` };
+      }
+      if (over) {
+        await tx`update production.floor_line set over_mg = ${actual}, over_source = ${source}, over_read_by = ${principal.userId} where floor_line_id = ${lineId}`;
+        await raiseAlert(tx as unknown as Sql, {
+          kind: 'STOCK_OVER_PICK', station: 'Floor', subjectType: 'FLOOR_LINE', subjectId: lineId,
+          title: `${j.job_no} line ${l.seq} weighed over the pick`,
+          body: `${gramsText(actual)} against ${gramsText(target)} picked. Next: re-weigh at or under the pick, or a supervisor records why from the Floor queue.`,
+          dedupeKey: `stock_over_pick:${lineId}`,
+        }, new Date());
+        return { floorLineId: lineId, seq: l.seq, verified: false, withinTolerance: true, overPick: true, targetMg: target, actualMg: actual,
+          message: `${gramsText(actual - target)} over the pick. The reading is held. Re-weigh, or call a supervisor to record why.` };
+      }
+      await this.acceptReading(tx, l, actual, source, principal.userId, null);
       return { floorLineId: lineId, seq: l.seq, verified: true, withinTolerance: true, targetMg: target, actualMg: actual };
+    });
+  }
+
+  private weighingRecord(tx: TransactionSql, j: JobRow, sessionId: string, l: LineRow, code: string, actual: number, ok: boolean, scaleRef: string | null, status: string, by: string) {
+    return tx`insert into production.weighing_record (weighing_record_id, production_order_id, secure_mixing_session_id, sequence_no, floor_code,
+          target_qty, uom, gross_qty, tare_qty, net_qty, tolerance_pct, within_tolerance, scale_ref, weighed_by, weighed_dt, status, created_by, updated_by)
+        values (${uuidv7()}, ${j.production_order_id}, ${sessionId}, ${l.seq}, ${code},
+          ${mgToGramText(Number(l.target_mg))}, 'g', ${mgToGramText(actual)}, '0', ${mgToGramText(actual)}, ${(l.tolerance_ppm / 10_000).toFixed(3)}, ${ok},
+          ${scaleRef}, ${by}, now(), ${status}, ${by}, ${by})`;
+  }
+
+  /** The reading stands: on the line, then on the ledger. `over` is the supervisor's record, if any. */
+  private async acceptReading(tx: TransactionSql, l: LineRow, actual: number, source: string, verifiedBy: string, over: { reason: string; by: string } | null) {
+    // Written before debited_mg is read: see the note on the ordering in consumption.service.ts.
+    await tx`update production.floor_line set actual_mg = ${actual}, weigh_source = ${source}, verified_by = ${verifiedBy}, verified_dt = now(),
+        over_mg = ${over ? actual : null}, over_source = ${over ? source : null}, over_read_by = ${over ? verifiedBy : null},
+        over_reason = ${over?.reason ?? null}, over_by = ${over?.by ?? null}, over_dt = ${over ? new Date().toISOString() : null}::timestamptz
+      where floor_line_id = ${l.floor_line_id}`;
+    await clearAlert(tx as unknown as Sql, `stock_over_pick:${l.floor_line_id}`, new Date());
+    const [d] = await tx<{ debited_mg: string | null; issue_id: string | null; uom_code: string | null }[]>`
+      select fl.debited_mg::text, mii.material_issue_id::text as issue_id, u.uom_code
+        from production.floor_line fl
+        left join production.material_issue_item mii on mii.material_pick_list_item_id = fl.material_pick_list_item_id and coalesce(mii.status, 'ACTIVE') <> 'REVERSED'
+        left join inventory.inventory_batch ib on ib.inventory_batch_id = fl.picked_batch_id
+        left join platform.uom_master u on u.uom_id = ib.uom_id
+       where fl.floor_line_id = ${l.floor_line_id}`;
+    if (d?.debited_mg == null || !d.issue_id) return; // not debited yet: the debit itself takes actual_mg
+    const delta = actual - Number(d.debited_mg); // above zero: more left the lot than was debited
+    if (delta === 0) return;
+    const qty = mgToQty(Math.abs(delta), d.uom_code);
+    if (qty === null) throw new ConflictException(`A lot kept in ${d.uom_code} cannot hold this difference exactly.`);
+    const signed = delta > 0 ? qty : `-${qty}`;
+    const [after] = await tx<{ q: string }[]>`
+      update inventory.inventory_batch set quantity_on_hand = coalesce(quantity_on_hand, 0) - ${signed}::numeric, updated_dt = now()
+       where inventory_batch_id = ${l.picked_batch_id} returning quantity_on_hand::text as q`;
+    if (Number(after?.q) < 0) throw new ConflictException(`The lot does not hold the extra ${gramsText(delta)}. Count the lot before this reading goes on the ledger.`);
+    await tx`update production.floor_line set debited_mg = ${actual} where floor_line_id = ${l.floor_line_id}`;
+    await tx`insert into inventory.inventory_event_history
+        (inventory_batch_id, event_type, event_dt, reference_document_id, reference_document_type, event_qty, performed_by, remarks, status)
+      values (${l.picked_batch_id}, 'PRODUCTION_ISSUE_ADJUST', now(), ${d.issue_id}, 'MATERIAL_ISSUE', ${signed}, ${verifiedBy},
+        ${delta < 0 ? `verified ${gramsText(actual)}: ${gramsText(-delta)} under the pick stays on the lot` : `verified ${gramsText(actual)}: ${gramsText(delta)} over the pick, supervisor recorded why`}, 'ACTIVE')`;
+  }
+
+  /** STOCK2-1: a supervisor records why a held reading stands. Not the picker, and not whoever took it. */
+  async approveOverPick(lineId: string, body: { reason?: unknown }, principal: AuthPrincipal) {
+    const reason = String(body.reason ?? '').trim().slice(0, 300);
+    if (!reason) throw new BadRequestException('Say why more than the pick was used.');
+    const [own] = await this.sql<{ floor_job_id: string }[]>`select floor_job_id::text from production.floor_line where floor_line_id = ${lineId}`;
+    if (!own) throw new NotFoundException('No such line.');
+    return this.sql.begin(async (tx) => {
+      const j = await this.lockJob(tx, own.floor_job_id);
+      this.assertStage(j, 'VERIFY', 'verify');
+      const ls = await this.lines(tx, j.floor_job_id);
+      const l = ls.find((x) => x.floor_line_id === lineId)!;
+      if (l.actual_mg !== null || l.over_mg === null) throw new ConflictException(`Line ${l.seq} has no reading held over the pick.`);
+      if (j.picked_by === principal.userId || ls.some((x) => x.picked_by === principal.userId)) throw new ForbiddenException('You picked this job, so someone else must record why.');
+      if (l.over_read_by === principal.userId) throw new ForbiddenException('You took this reading, so someone else must record why.');
+      const actual = Number(l.over_mg), by = l.over_read_by!;
+      const fc = await this.codes.codeFor(l.material_id);
+      await this.weighingRecord(tx, j, j.mixing_session_id!, l, fc?.code ?? codeText('UNCODED', 0), actual, true, 'supervisor', 'ACCEPTED', by);
+      await this.acceptReading(tx, l, actual, l.over_source ?? 'typed', by, { reason, by: principal.userId });
+      return { floorLineId: lineId, seq: l.seq, verified: true, withinTolerance: true, actualMg: actual, jobNo: j.job_no };
     });
   }
 

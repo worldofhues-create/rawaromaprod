@@ -144,6 +144,13 @@ export class FloorController {
     return this.stations.verifyLine(id, line, { actualMg: b?.actualMg, source: s(b?.source), scaleRef: b?.scaleRef ? s(b.scaleRef) : undefined }, p);
   }
 
+  // STOCK2-1: the permission that puts a job on the floor is the one that answers for a held reading.
+  @Permissions('production:floor_job:write')
+  @Post('v1/floor/lines/:line/over-pick')
+  approveOverPick(@Param('line', ParseUUIDPipe) line: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.stations.approveOverPick(line, { reason: b?.reason }, p);
+  }
+
   @Permissions('production:floor_verify:write')
   @Post('v1/floor/jobs/:id/verify/complete')
   completeVerify(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() p: AuthPrincipal) {
