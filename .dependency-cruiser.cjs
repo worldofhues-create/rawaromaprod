@@ -8,7 +8,7 @@
  * Clusters couple to each other ONLY through their `public-api.ts` (enforced here +
  * by each package's `exports` map). No cross-schema coupling, no cycles.
  *
- * Apps (backend/api, web/admin, mobile/consumer) are composition roots — they wire the
+ * Apps (backend/api, mobile/consumer) are composition roots — they wire the
  * clusters together and are therefore allowed to import any tier.
  */
 const CORE_SRC =

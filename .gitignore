@@ -11,6 +11,7 @@ coverage/
 .expo/
 *.tsbuildinfo
 web/.next/
+web/admin/.next/
 ios/
 android/
 

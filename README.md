@@ -18,7 +18,7 @@ not "re-decide everything". Born out of the Namasthethu build; stripped of all d
 | Data | `@core/data-iam` | identity schema: users (single source), credentials, OTP, sessions, **RBAC**, **organizations/teams** + seeds (roles, permissions) | ✅ DB-verified |
 | Data | `@core/data-platform` | control plane: **kill-switch flags**, generic **geo tree** (deep admin hierarchy + PostGIS), generic **master-data engine** (incl. Indian measurement units), themes, content | ✅ DB-verified |
 | Backend | `@core/backend-kernel` + `@core/cluster-*` + `@core/api` | NestJS+Fastify edge layer (JWT/RBAC/flags/envelope), in-proc event bus + outbox publisher, identity & platform clusters, sample api+worker | 🚧 scaffolding |
-| Web | `@core/ui` + `@core/feature-auth` + `@core/admin-shell` | shadcn/Tailwind kit themed by tokens, reusable auth screens, Next.js 15 admin shell, generic data-table | 🚧 scaffolding |
+| Web | `@core/ui` + `@core/feature-auth` | shadcn/Tailwind kit themed by tokens, reusable auth screens, generic data-table | 🚧 scaffolding |
 | Infra | `infra/` + `.github/` | docker-compose dev stack, Caddy, CI, env templates, network-masking topology | ✅ |
 
 ## The standard in one breath

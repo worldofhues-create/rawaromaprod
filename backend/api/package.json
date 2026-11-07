@@ -9,7 +9,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "node --import @swc-node/register/esm-register --test \"src/**/*.spec.ts\"",
-    "build": "nest build",
     "start": "node dist/main.js",
     "start:worker": "node dist/worker.js",
     "dev": "node --import @swc-node/register/esm-register src/main.ts",

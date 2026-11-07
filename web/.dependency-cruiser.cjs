@@ -4,7 +4,7 @@
  * Reuse tiers (matching the backend cluster boundaries):
  *   Tier 1 — generic packages : web/ui            (@core/ui)            — DOMAIN-FREE
  *   Tier 2 — domain features   : web/feature-*     (@core/feature-*)
- *   Tier 3 — apps              : web/admin, …      (thin shells)
+ *   Tier 3 — apps              : web/<app>         (thin shells)
  *
  * Rule of thumb enforced here (violations FAIL CI):
  *   - Tier 1 may NEVER import a Tier 2 feature or a Tier 3 app.

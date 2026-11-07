@@ -11,7 +11,6 @@ Radix components · TanStack Query · react-hook-form + zod · zustand · TypeSc
 |---|---|---|---|
 | `web/ui` | `@core/ui` | 1 — generic | Domain-free component kit (Button, Card, Input, Label, Badge, Dialog, **DataTable**). Themed only through semantic CSS vars. Ships verbatim in every project. |
 | `web/feature-auth` | `@core/feature-auth` | 2 — feature | Reusable auth screens. `core/` = TanStack Query mutations + zustand session store + injected `AuthApiClient`; `web/` = react-hook-form + zod forms (schemas from `@core/contracts`) composed from `@core/ui`. |
-| `web/admin` | `@core/admin-shell` | 3 — app | Next.js 15 App Router sample shell — copy this to start a new app. |
 
 Wires to existing workspace packages: **`@core/tokens`** (semantic tokens + 7 portal themes +
 CSS emitter) and **`@core/contracts`** (zod DTOs). All cross-package deps use `workspace:*`;
@@ -24,7 +23,7 @@ packages resolve via their `main: ./src/index.ts` (no build step for consumers �
 Tier 0  tooling        eslint/ts/tailwind/depcruise configs, CI            → stays verbatim
 Tier 1  generic pkgs   @core/ui (+ future @core/lib)                       → stays, ZERO domain words
 Tier 2  domain feature @core/feature-auth, @core/feature-*                 → auth ships; domain ones deleted from template
-Tier 3  apps           @core/admin-shell (+ project apps)                  → all but one example deleted
+Tier 3  apps           project apps                                        → none in this repo
 ```
 
 **Mechanically enforced — not discipline (CI failures):**
@@ -49,7 +48,7 @@ Tier 3  apps           @core/admin-shell (+ project apps)                  → a
 3. **`@core/ui`'s Tailwind preset** maps each semantic var onto a Tailwind theme key
    (`colors.surface = var(--color-surface)`, …), so components author with semantic
    utilities only.
-4. An app sets **`<html data-portal="admin">`** (see `web/admin/app/layout.tsx`). That single
+4. An app sets **`<html data-portal="admin">`** (in its root layout). That single
    attribute picks the active variable block — the whole app re-skins.
 5. **Multi-role apps** make `data-portal` dynamic: read the portal from the JWT role claim at
    login and set it on `<html>` (worked example in `layout.tsx`). The `portal` field is the
@@ -63,7 +62,7 @@ or app edits.**
 `@core/ui`'s `<DataTable>` is fully generic — parameterized over an arbitrary row type, no
 domain types. The **app** owns the row shape and the typed `columns` and hands them to the
 table, which provides sorting, pagination, and row selection for free
-(`web/admin/app/(dashboard)/users/page.tsx`). The same component renders a finance ledger or
+(the removed sample shell's users page did exactly this). The same component renders a finance ledger or
 an ops queue elsewhere — only the columns change. (A graduation candidate for a shared
 `@agency/*` package once it survives two projects unchanged.)
 
@@ -78,18 +77,10 @@ an ops queue elsewhere — only the columns change. (A graduation candidate for 
   app provides the real (OpenAPI-generated) or a mock client via `<AuthApiProvider>`. The
   feature owns zero networking.
 
-## How to start a new app from this shell
+## How to start a new app
 
-1. **Copy `web/admin`** to `web/<your-app>` and rename it in `package.json`
-   (`@core/<your-app>-shell`).
-2. **Pick the portal**: set `data-portal` in `app/layout.tsx` (constant for single-role, or
-   dynamic from the role claim for multi-role).
-3. **Inject the real API client** in `app/providers.tsx` (replace the demo `AuthApiClient`
-   with the typed client generated from the contracts' OpenAPI spec).
-4. **Compose**: build routes from `@core/ui` primitives + `@core/feature-*` screens. Put any
-   project-specific UI in a new Tier-2 `web/feature-<domain>` package — never in `@core/ui`.
-5. **New brand/portal?** Add or edit a token set in `@core/tokens`, regenerate `theme.css`.
-   Done — no component changes.
+The sample shell `web/admin` was removed: production serves the static consoles, and nothing ran
+it. Its source is at commit `a252c01` if a new Next app wants a starting point.
 
 CI runs `pnpm -r typecheck`, the dependency-cruiser check, and the domain-vocabulary /
 token-discipline lints on every push.
