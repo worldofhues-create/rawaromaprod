@@ -78,6 +78,12 @@ test('issueMaterials: succeeds and flips issued_qty when materialPickListId is p
   await sql`insert into production.production_order_ingredients
     (production_order_ingredient_id, production_order_id, material_id, required_qty, issued_qty, status)
     values (${crypto.randomUUID()}, ${orderId}, ${materialId}, 15, false, 'ACTIVE')`;
+  // STOCK3-2: the line is covered only by a pick that covers it, so the pick now states its 15.
+  await sql`insert into platform.uom_master (uom_id, uom_code, uom_name, status) values (${crypto.randomUUID()}, 'g', 'g', 'ACTIVE') on conflict do nothing`;
+  const [{ uom_id: g }] = await sql`select uom_id from platform.uom_master where uom_code = 'g'` as unknown as [{ uom_id: string }];
+  await sql`insert into production.material_pick_list_items (material_pick_list_item_id, material_pick_list_id, material_id, picked_qty, uom_id, status) values (${crypto.randomUUID()}, ${pickListId}, ${materialId}, 15, ${g}, 'ACTIVE')`;
+  await sql`update production.production_order_ingredients set uom_id = ${g} where production_order_id = ${orderId}`;
+  await sql`update inventory.inventory_batch set quantity_on_hand = 15, uom_id = ${g} where inventory_batch_id = ${inventoryBatchId}`;
 
   const { issue, itemCount } = await svc.issueMaterials(
     {
