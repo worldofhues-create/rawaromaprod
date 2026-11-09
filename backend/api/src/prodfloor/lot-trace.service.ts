@@ -17,6 +17,7 @@ import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { scanCode } from '../floor/scan-code.js';
 import { FloorCodeService, LOT_BARCODE_RE } from '../floor/floor-code.service.js';
+import { PrintService } from '../floor-ops/print.service.js';
 
 type Row = Record<string, unknown>;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -51,7 +52,11 @@ export async function resolveRmLot(sql: Sql, ref: unknown): Promise<string> {
 
 @Injectable()
 export class LotTraceService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql, @Optional() private readonly codes?: FloorCodeService) {}
+  constructor(
+    @Inject(PG_CLIENT) private readonly sql: Sql,
+    @Optional() private readonly codes?: FloorCodeService,
+    @Optional() private readonly print?: PrintService,
+  ) {}
 
   /** WALK2-RP-11: Lot hold & recall asked for a typed rm_batch_id uuid, and anything else (the lot number
    *  on the label in someone's hand) reached Postgres as a uuid and failed as a server error. A raw lot is
@@ -141,7 +146,7 @@ export class LotTraceService {
   async putawayLabel(ref: string, body: Row, principal: AuthPrincipal) {
     const rmBatchId = await this.rmLotId(ref);
     const bin = await this.binRef(body.storageLocationId);
-    return this.sql.begin(async (tx) => {
+    const label = await this.sql.begin(async (tx) => {
       const b = (await tx`select rb.rm_batch_id::text as id, rb.batch_number, rb.status, rb.expiry_date::text as expiry, rb.received_qty::text as qty, u.uom_code,
                                  rb.storage_location_id::text as loc, ra.alias_name as floor_code, rb.created_dt::date::text as received
                             from inventory.rm_batch_master rb
@@ -172,5 +177,27 @@ export class LotTraceService {
       await tx`insert into inventory.raw_lot_label (rm_batch_id, storage_location_id, payload, reprint, printed_by) values (${rmBatchId}, ${loc}, ${JSON.stringify(payload)}::jsonb, ${prev > 0}, ${principal.userId})`;
       return payload;
     });
+    // FLOOR-FIX-2: the label is QUEUED to the print agent (plan §4, "Scan the bin -> raw-lot label
+    // printed"). It used to be logged and never reach a printer. One `code` drives both the QR and the
+    // Code 128 (label-render.js), so the two can never disagree; it is the opaque L- id the picker scans.
+    // Queued after the label row commits: a print failure parks the job and raises an alert, it never
+    // undoes the putaway record.
+    if (!this.print) return label;
+    const station = typeof body.station === 'string' && body.station.trim() ? body.station.trim().slice(0, 60) : 'Warehouse';
+    const code = label.barcode ?? label.lotId;
+    const job = await this.print.enqueue({
+      station, labelKind: 'raw_lot', subjectRef: code,
+      content: {
+        brand: 'RAW AROMA CHEM',
+        title: label.floorCode ?? 'Raw lot',
+        lines: [
+          ['Lot', label.lotId], ['Qty', label.qty == null ? null : `${label.qty}${label.uom ? ' ' + label.uom : ''}`],
+          ['Expiry', label.expiry], ['Bin', label.binCode], ['Received', label.received as string | null], ['Hazard', label.hazard],
+        ],
+        code,
+        reprint: label.reprint,
+      },
+    }, principal);
+    return { ...label, printJobId: job.printJobId, printStatus: job.status };
   }
 }

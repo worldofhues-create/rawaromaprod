@@ -3,6 +3,7 @@
 import { Module } from '@nestjs/common';
 import { PolicyModule } from '../policy/policy.module.js';
 import { FloorModule } from '../floor/floor.module.js';
+import { FloorOpsModule } from '../floor-ops/floor-ops.module.js';
 import { ProdfloorController } from './prodfloor.controller.js';
 import { ReceivingService } from './receiving.service.js';
 import { PaymentReleaseService } from './payment-release.service.js';
@@ -12,7 +13,7 @@ import { QcReviewController } from './qc-review.controller.js';
 import { QcReviewService } from './qc-review.service.js';
 
 @Module({
-  imports: [PolicyModule, FloorModule], // SCAN-5: FloorCodeService mints the raw-lot label's L- code
+  imports: [PolicyModule, FloorModule, FloorOpsModule], // SCAN-5: FloorCodeService mints the raw-lot label's L- code; FLOOR-FIX-2: PrintService queues it
   controllers: [ProdfloorController, QcReviewController],
   providers: [ReceivingService, PaymentReleaseService, QcFloorService, LotTraceService, QcReviewService],
 })
