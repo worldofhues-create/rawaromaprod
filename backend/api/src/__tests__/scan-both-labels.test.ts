@@ -137,7 +137,9 @@ test('codesHtml: Code 128 + QR of the same code, sized to fit; QR + text only wh
 test('every browser label in the Factory console draws its codes through RaLabel (no QR-only or code-less label left)', () => {
   const read = (f: string) => readFileSync(new URL(`../../../../web/${f}`, import.meta.url), 'utf8');
   const floor = read('ws-floor.js'), floorb = read('ws-floorb.js'), produce = read('ws-produce.js');
-  const fn = (src: string, name: string) => src.slice(src.indexOf(`function ${name}(`), src.indexOf(`function ${name}(`) + 2500);
+  // 4000: JOURNEY-FIX-RP-2 put the print-job path (with its browser fallback) ahead of the browser label in
+  // ws-floor.js printLabel, which pushed its scanCodes( call past the old 2500-character window.
+  const fn = (src: string, name: string) => src.slice(src.indexOf(`function ${name}(`), src.indexOf(`function ${name}(`) + 4000);
   for (const [src, name, what] of <Array<[string, string, string]>>[[floor, 'printLabel', 'hand-off'], [floorb, 'printLabel', 'raw lot'], [produce, 'printBinLabels', 'bin'], [produce, 'labelHtml', 'FG lot']]) {
     assert.match(fn(src, name), /scanCodes\(/, `${what} label draws both codes`);
     assert.match(fn(src, 'scanCodes'), /RaLabel\.codesHtml\(/, `${what}: scanCodes is the shared renderer`);

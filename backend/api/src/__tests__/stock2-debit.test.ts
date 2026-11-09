@@ -102,7 +102,7 @@ async function picked(s: Awaited<ReturnType<typeof floorJob>>) {
   await stations.completePick(s.job.floorJobId, { tote: `T-${tag()}` }, picker);
   return line!.floorLineId;
 }
-const reading = (s: { job: { floorJobId: string } }, lineId: string, actualMg: number) => stations.verifyLine(s.job.floorJobId, lineId, { actualMg, source: 'scale' }, verifier);
+const reading = (s: { job: { floorJobId: string } }, lineId: string, actualMg: number) => stations.verifyLine(s.job.floorJobId, lineId, { actualMg, source: 'typed' }, verifier);
 
 /* ── STOCK2-1: the ledger ends on the verified weight ─────────────────────────────────────── */
 

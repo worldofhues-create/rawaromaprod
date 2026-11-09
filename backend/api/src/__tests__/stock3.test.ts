@@ -161,7 +161,7 @@ test('STOCK3-1 the verified weight is what the guard reads', async () => {
   const [line] = (await stations.pickView(job.floorJobId)).lines;
   await stations.pickLine(job.floorJobId, line!.floorLineId, { bin: l.bin, barcode: l.barcode }, picker);
   await stations.completePick(job.floorJobId, { tote: `T-${tag()}` }, picker);
-  await stations.verifyLine(job.floorJobId, line!.floorLineId, { actualMg: 125_200, source: 'scale' }, verifier);
+  await stations.verifyLine(job.floorJobId, line!.floorLineId, { actualMg: 125_200, source: 'typed' }, verifier);
   await setLot(l.id, '125.2000'); // the pick figure would not fit; the weight that actually left does
   const i = (await sql()`select material_issue_id::text as id from production.material_issue where production_order_id = ${o.orderId}`)[0]!.id as string;
   await apply(i);
@@ -241,7 +241,7 @@ test('STOCK3-2 the verified weight is the real quantity; a reading in tolerance 
   await stations.pickLine(job.floorJobId, line!.floorLineId, { bin: l.bin, barcode: l.barcode }, picker);
   await stations.completePick(job.floorJobId, { tote: `T-${tag()}` }, picker);
   assert.equal((await ingredients(o.orderId))[0]!.amount, 125.5);
-  await stations.verifyLine(job.floorJobId, line!.floorLineId, { actualMg: 125_200, source: 'scale' }, verifier);
+  await stations.verifyLine(job.floorJobId, line!.floorLineId, { actualMg: 125_200, source: 'typed' }, verifier);
   const [r] = await ingredients(o.orderId);
   assert.deepEqual([r!.issued_qty, r!.amount], [true, 125.2]);
 });
