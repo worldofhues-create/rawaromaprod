@@ -37,6 +37,7 @@ import { BatchService, MixingService, PickingService, settleIssued, type IssuedS
 import { massFactorMg, mgToQty, qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg, codeText } from './floor-code.service.js';
 import { clearAlert, raiseAlert } from '../floor-ops/floor-alerts.js';
+import { SCALE_READING_FRESH_MS } from '../floor-ops/scale.service.js';
 import { gramsText } from './lot-split.service.js';
 import { scanCode } from './scan-code.js';
 
@@ -395,10 +396,26 @@ export class FloorStationService {
     }
   }
 
+  private async assertScaleReading(ref: unknown, mg: number): Promise<void> {
+    const id = typeof ref === 'string' ? ref : '';
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('A weight from the scale names its reading (scaleRef).');
+    const [r] = await this.sql`
+      select sr.mg, sr.read_at > now() - (${SCALE_READING_FRESH_MS} * interval '1 millisecond') as fresh
+        from platform.scale_reading sr join platform.device_master dm on dm.device_id = sr.device_id
+       where sr.scale_reading_id = ${id}::uuid and sr.stable and dm.status <> 'revoked'`;
+    if (!r) throw new BadRequestException('That scale reading was not found.');
+    if (!r.fresh) throw new ConflictException('That scale reading is too old. Put it on the scale again.');
+    if (Number(r.mg) !== mg) throw new ConflictException('The weight does not match the scale reading.');
+  }
+
   async verifyLine(jobId: string, lineId: string, body: { actualMg?: unknown; source?: string; scaleRef?: string }, principal: AuthPrincipal) {
     const actual = Number(body.actualMg);
     if (!Number.isSafeInteger(actual) || actual <= 0) throw new BadRequestException('Enter the weight on the scale.');
     const source = body.source === 'scale' ? 'scale' : 'typed';
+    // JOURNEY-FIX: a weight filed as from the scale names a fresh, stable reading of exactly this
+    // weight from a scale that is not revoked -- packing's resolveWeight rule. Before, any scaleRef
+    // (or none) was taken on the client's word, so a typed weight could be filed as weighed.
+    if (source === 'scale') await this.assertScaleReading(body.scaleRef, actual);
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'VERIFY', 'verify');

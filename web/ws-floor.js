@@ -314,6 +314,8 @@
       body = '<form id="fl-w" class="card" style="display:flex;flex-direction:column;gap:12px"><div style="font-size:18px">Line ' + next.seq + ': ' + code(next.floorCode) + ' ' + swatch(next) + '</div>' +
         '<div style="font-size:24px;font-weight:600">' + esc(W.formatTolerance(next.targetMg, next.toleranceMg, u)) + '</div>' +
         '<label>Weight on the scale (' + u + ')<input id="fl-wt" class="fld" inputmode="decimal" autocomplete="off" style="min-height:56px;font-size:22px"></label>' +
+        // JOURNEY-FIX: read the paired scale at this station, as Packing does; typing over it files the weight as typed.
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + btn('fl-wsc', 'Read scale', '', big(' type="button"')) + '<span id="fl-wsrc" class="t-cap">typed</span></div>' +
         '<div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-wtick', 'Record weight', 'p', big(' type="submit"')) + '</form>';
     } else {
       body = '<div class="card" style="display:flex;flex-direction:column;gap:12px"><div style="font-size:18px">Every line is weighed inside tolerance.</div><div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' + btn('fl-vdone', 'Finish and print VERIFIED', 'p', big()) + '</div>';
@@ -355,12 +357,26 @@
       $('fl-lo-lot').value = ''; $('fl-lo-wt').value = ''; $('fl-lo-bin').value = ''; $('fl-lo-err').textContent = '';
       listReturns();
     };
-    var f = $('fl-w');
+    var f = $('fl-w'), reading = null;
+    if (f) {
+      $('fl-wt').oninput = function () { reading = null; $('fl-wsrc').textContent = 'typed'; };
+      $('fl-wsc').onclick = async function () {
+        // The kiosk's station when this tablet is paired as one, else the floor's own station name.
+        var k = null; try { k = JSON.parse(localStorage.getItem('ra.kiosk') || 'null'); } catch (x) { /* private mode */ }
+        var r = await call('/v1/scales/latest?station=' + encodeURIComponent((k && k.station) || 'Floor'));
+        var rd = r.status < 400 ? (data(r) || {}).reading : null;
+        if (!rd) { $('fl-err').textContent = 'No stable reading from a scale at this station in the last minute.'; return; }
+        reading = rd; $('fl-err').textContent = '';
+        $('fl-wt').value = W.formatIn(rd.mg, W.lineUnit(next.targetMg, 'g')).replace(/\s*(k?g|mg)$/, '');
+        $('fl-wsrc').textContent = 'from scale · stable';
+      };
+    }
     if (f) { $('fl-wt').focus(); f.onsubmit = async function (e) {
       e.preventDefault();
-      var u2 = W.lineUnit(next.targetMg, 'g'), mg = W.parseToMg($('fl-wt').value, u2);
+      var u2 = W.lineUnit(next.targetMg, 'g'), mg = reading ? reading.mg : W.parseToMg($('fl-wt').value, u2);
       if (mg === null || mg <= 0) { $('fl-err').textContent = 'Type the weight as a number, e.g. 125.5.'; return; }
-      var r = await call('/v1/floor/jobs/' + id + '/verify/lines/' + next.floorLineId, { method: 'POST', body: { actualMg: mg, source: 'typed' } });
+      var r = await call('/v1/floor/jobs/' + id + '/verify/lines/' + next.floorLineId, { method: 'POST',
+        body: reading ? { actualMg: mg, source: 'scale', scaleRef: reading.scaleReadingId } : { actualMg: mg, source: 'typed' } });
       if (r.status >= 400) { $('fl-err').textContent = err(r, 'That weight was not recorded.'); return; }
       var x = data(r);
       if (x.overPick) { verifyJobView(V, id); return; } // STOCK2-1: the row and the alert carry it from here
