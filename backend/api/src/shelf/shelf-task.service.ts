@@ -96,6 +96,8 @@ export function buildFgBatchReceived(input: {
   rack: string | null;
   releasedAt: string | null;
   qcBatchNo?: string | null;
+  /** Made from an oil batch: ALEMBIC releases it against qc_batch_no, so the field is required. */
+  compounded?: boolean;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   const payload: bridgeContracts.FgBatchReceivedPayload = {
@@ -108,6 +110,8 @@ export function buildFgBatchReceived(input: {
     ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
+  // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.
+  if (input.compounded && !(input.qcBatchNo && input.qcBatchNo.trim())) problems.push('qc_batch_no: a compounded batch names the oil batch QC released');
   if (qtyKg === null) problems.push('qty_kg: the unit is not a mass and the pack size is not written as one (e.g. "25 kg")');
   if (problems.length) return { ok: false, problems: [...new Set(problems)] };
   bridgeContracts.assertNoFormulaContent(payload);
@@ -319,7 +323,7 @@ export class ShelfTaskService {
   private async emitReceived(tx: ShelfTx, fg: FgBatchInfo, qty: number, bin: BinLocation) {
     const built = buildFgBatchReceived({
       batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
-      rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo,
+      rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {
