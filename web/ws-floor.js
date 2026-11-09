@@ -114,6 +114,19 @@
     if (!l) return;
     // the next station scans this: the verifier and mixer find the job by its tote (or job number).
     var payload = l.kind === 'MIXED' && l.batchNo ? l.batchNo : (l.tote || l.jobNo);
+    // JOURNEY-FIX-RP-2: a print job like every other step's label, so a printer paired at the station
+    // prints it and the Print queue keeps it; with none paired, stepPrint prints it in the browser.
+    // A role without platform:print_job:write (picker, verifier, mixer today: an owner RBAC decision)
+    // gets null back, and the label still prints in the browser below rather than not at all.
+    if (payload && window.RA && window.RA.stepPrint && !l._browser) {
+      var spec = { labelKind: 'floor_' + String(l.kind).toLowerCase(), subjectRef: payload, code: payload, defaultStation: 'Floor',
+        title: l.kind + (l.reprint ? ' REPRINT' : ''),
+        lines: [['Order', l.orderRef || '—'], ['Job', l.jobNo]].concat(l.tote ? [['Tote', l.tote]] : [], l.batchNo ? [['Batch', l.batchNo]] : [],
+          [['Lots', (l.lots || []).join(', ') || '—'], ['By', l.person || ''], ['Time', localTime(l.printedDt)]]) };
+      Promise.resolve(window.RA.stepPrint(spec)).then(function (job) { if (!job) printLabel(Object.assign({}, l, { _browser: true })); },
+        function () { printLabel(Object.assign({}, l, { _browser: true })); });
+      return;
+    }
     var w = window.open('', '_blank', 'width=420,height=320');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
     var time = localTime(l.printedDt);
