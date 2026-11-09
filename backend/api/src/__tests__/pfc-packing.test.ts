@@ -43,7 +43,16 @@ async function fgLot(opts: { qc?: string | null; dg?: boolean } = {}) {
   if (opts.dg) await sql`insert into packaging.product_dg_info (product_dg_info_id, product_id, un_number, dg_class, packing_group) values (${randomUUID()}, ${product}, '1266', '3', 'III')`;
   return fg;
 }
-const unitBody = (fg: string, mg = 100_000) => ({ finishedGoodBatchId: fg, targetMg: 100_000, toleranceMg: 1_000, mg, weightSource: 'typed', sealed: true });
+
+/** FLOOR-FIX-3: a typed weight carries a second person's sign-off. */
+const signer = principal({ userId: randomUUID(), roles: ['verifier'] });
+async function signedTyped(mg: number, station: string, by: ReturnType<typeof principal>) {
+  const sc = new ScaleService(testClient());
+  const c = await sc.requestTypedCheck({ station, mg }, by);
+  await sc.signTypedCheck(c.checkId, signer);
+  return { mg, weightSource: 'typed', weightCheckId: c.checkId };
+}
+const unitBody = async (fg: string, mg = 100_000) => ({ finishedGoodBatchId: fg, targetMg: 100_000, toleranceMg: 1_000, ...(await signedTyped(mg, STATION, packer)), sealed: true });
 async function printAll(subject: string) {
   for (const j of await print.list({ subjectRef: subject })) if (j.status !== 'printed') await print.markBrowserPrinted(j.printJobId, packer);
 }
@@ -62,10 +71,10 @@ test('unit: weight within tolerance (exact mg), sealed; the branded customer lab
   const so = await order();
   const fg = await fgLot();
   const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [fg] }, packer);
-  await assert.rejects(async () => packing.addUnit(s.shipmentId, unitBody(fg, 101_001), STATION, packer), /tolerance/);
-  await assert.rejects(async () => packing.addUnit(s.shipmentId, { ...unitBody(fg), sealed: false }, STATION, packer), /seal/);
-  await assert.rejects(async () => packing.addUnit(s.shipmentId, unitBody(await fgLot()), STATION, packer), /not one of this shipment's lots/);
-  const u = await packing.addUnit(s.shipmentId, unitBody(fg, 101_000), STATION, packer);
+  await assert.rejects(async () => packing.addUnit(s.shipmentId, await unitBody(fg, 101_001), STATION, packer), /tolerance/);
+  await assert.rejects(async () => packing.addUnit(s.shipmentId, { ...(await unitBody(fg)), sealed: false }, STATION, packer), /seal/);
+  await assert.rejects(async () => packing.addUnit(s.shipmentId, await unitBody(await fgLot()), STATION, packer), /not one of this shipment's lots/);
+  const u = await packing.addUnit(s.shipmentId, await unitBody(fg, 101_000), STATION, packer);
   assert.equal(u.unit.weightSource, 'typed');
   assert.equal(u.unit.netMg, 101_000);
   const t = u.label.template;
@@ -83,7 +92,7 @@ test('hazard line comes only from the product\'s sourced DG record', async () =>
   const so = await order();
   const fg = await fgLot({ dg: true });
   const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [fg] }, packer);
-  const u = await packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer);
+  const u = await packing.addUnit(s.shipmentId, await unitBody(fg), STATION, packer);
   assert.match(u.label.template.elements.map((e) => e.s).join(' '), /UN1266 · Class 3 · PG III/);
 });
 
@@ -93,9 +102,9 @@ test('cartons: a unit of another order or another lot is refused; a unit cannot 
   const a = await packing.start({ salesOrderId: soA, finishedGoodBatchIds: [fgA] }, packer);
   const a2 = await packing.start({ salesOrderId: soA, finishedGoodBatchIds: [fgB] }, packer);
   const b = await packing.start({ salesOrderId: soB, finishedGoodBatchIds: [fgB] }, packer);
-  const ua = await packing.addUnit(a.shipmentId, unitBody(fgA), STATION, packer);
-  const uOtherLot = await packing.addUnit(a2.shipmentId, unitBody(fgB), STATION, packer);
-  const uOtherOrder = await packing.addUnit(b.shipmentId, unitBody(fgB), STATION, packer);
+  const ua = await packing.addUnit(a.shipmentId, await unitBody(fgA), STATION, packer);
+  const uOtherLot = await packing.addUnit(a2.shipmentId, await unitBody(fgB), STATION, packer);
+  const uOtherOrder = await packing.addUnit(b.shipmentId, await unitBody(fgB), STATION, packer);
   const c = await packing.openCarton(a.shipmentId, packer);
   await assert.rejects(async () => packing.scanUnit(c.cartonId, uOtherOrder.unit.unitCode, packer), /another order/);
   await assert.rejects(async () => packing.scanUnit(c.cartonId, uOtherLot.unit.unitCode, packer), /lot/);
@@ -108,13 +117,13 @@ test('carton weight: never lighter than its contents, nor beyond the packaging a
   const so = await order();
   const fg = await fgLot();
   const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [fg] }, packer);
-  const u = await packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer);
+  const u = await packing.addUnit(s.shipmentId, await unitBody(fg), STATION, packer);
   const c = await packing.openCarton(s.shipmentId, packer);
-  await assert.rejects(async () => packing.closeCarton(c.cartonId, { mg: 150_000, weightSource: 'typed' }, STATION, packer), /no units/);
+  await assert.rejects(async () => packing.closeCarton(c.cartonId, await signedTyped(150_000, STATION, packer), STATION, packer), /no units/);
   await packing.scanUnit(c.cartonId, u.unit.unitCode, packer);
-  await assert.rejects(async () => packing.closeCarton(c.cartonId, { mg: 99_000, weightSource: 'typed' }, STATION, packer), /lighter/);
-  await assert.rejects(async () => packing.closeCarton(c.cartonId, { mg: 5_000_000, weightSource: 'typed', allowanceMg: 500_000 }, STATION, packer), /allowance/);
-  const closed = await packing.closeCarton(c.cartonId, { mg: 180_000, weightSource: 'typed' }, STATION, packer);
+  await assert.rejects(async () => packing.closeCarton(c.cartonId, await signedTyped(99_000, STATION, packer), STATION, packer), /lighter/);
+  await assert.rejects(async () => packing.closeCarton(c.cartonId, { ...(await signedTyped(5_000_000, STATION, packer)), allowanceMg: 500_000 }, STATION, packer), /allowance/);
+  const closed = await packing.closeCarton(c.cartonId, await signedTyped(180_000, STATION, packer), STATION, packer);
   assert.equal(closed.status, 'CLOSED');
   assert.equal(closed.grossMg, 180_000);
 });
@@ -123,16 +132,16 @@ test('finish: needs every unit in a closed carton and its label printed; prints 
   const so = await order();
   const fg = await fgLot();
   const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [fg] }, packer);
-  const u1 = await packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer);
-  const u2 = await packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer);
+  const u1 = await packing.addUnit(s.shipmentId, await unitBody(fg), STATION, packer);
+  const u2 = await packing.addUnit(s.shipmentId, await unitBody(fg), STATION, packer);
   const c1 = await packing.openCarton(s.shipmentId, packer);
   await packing.scanUnit(c1.cartonId, u1.unit.unitCode, packer);
   await assert.rejects(async () => packing.openCarton(s.shipmentId, packer), /open/);
-  await packing.closeCarton(c1.cartonId, { mg: 150_000, weightSource: 'typed' }, STATION, packer);
+  await packing.closeCarton(c1.cartonId, await signedTyped(150_000, STATION, packer), STATION, packer);
   await assert.rejects(async () => packing.finish(s.shipmentId, STATION, packer), /not in a carton/);
   const c2 = await packing.openCarton(s.shipmentId, packer);
   await packing.scanUnit(c2.cartonId, u2.unit.unitCode, packer);
-  await packing.closeCarton(c2.cartonId, { mg: 150_000, weightSource: 'typed' }, STATION, packer);
+  await packing.closeCarton(c2.cartonId, await signedTyped(150_000, STATION, packer), STATION, packer);
   await assert.rejects(async () => packing.finish(s.shipmentId, STATION, packer), /label/);
   await printAll(u1.unit.unitCode);
   await printAll(u2.unit.unitCode);
@@ -142,7 +151,7 @@ test('finish: needs every unit in a closed carton and its label printed; prints 
   assert.equal(done.cartonLabels.length, 2);
   assert.match(done.cartonLabels[1]!.template.elements.map((e) => e.s).join(' '), /Carton: 2 of 2/);
   assert.match(done.packingList.template.elements.map((e) => e.s).join(' '), /PACKING LIST/);
-  await assert.rejects(async () => packing.addUnit(s.shipmentId, unitBody(fg), STATION, packer), /PACKED/);
+  await assert.rejects(async () => packing.addUnit(s.shipmentId, await unitBody(fg), STATION, packer), /PACKED/);
 });
 
 test('WALK2-RP-9: candidates list open orders and QC-passed lots by number; a shipment names its lots', async () => {

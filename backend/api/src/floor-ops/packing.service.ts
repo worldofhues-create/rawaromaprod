@@ -145,7 +145,7 @@ export class PackingService {
     const target = body.targetMg, tol = body.toleranceMg;
     if (!Number.isSafeInteger(target) || (target as number) <= 0) throw new BadRequestException('targetMg must be whole milligrams above 0.');
     if (!Number.isSafeInteger(tol) || (tol as number) < 0) throw new BadRequestException('toleranceMg must be whole milligrams, 0 or more.');
-    const w = await this.scales.resolveWeight({ mg: body.mg, weightSource: body.weightSource, scaleReadingId: body.scaleReadingId }, station);
+    const w = await this.scales.resolveWeight({ mg: body.mg, weightSource: body.weightSource, scaleReadingId: body.scaleReadingId, weightCheckId: body.weightCheckId }, station, principal, `shipment ${shipmentId} unit`);
     const fgId = String(body.finishedGoodBatchId ?? '');
     const unit = await this.sql.begin(async (tx) => {
       const s = await this.packingShipment(tx as unknown as Sql, shipmentId);
@@ -215,7 +215,7 @@ export class PackingService {
   }
 
   async closeCarton(cartonId: string, body: Record<string, unknown>, station: string, principal: AuthPrincipal) {
-    const w = await this.scales.resolveWeight({ mg: body.mg, weightSource: body.weightSource, scaleReadingId: body.scaleReadingId }, station);
+    const w = await this.scales.resolveWeight({ mg: body.mg, weightSource: body.weightSource, scaleReadingId: body.scaleReadingId, weightCheckId: body.weightCheckId }, station, principal, `carton ${cartonId}`);
     const allowance = body.allowanceMg === undefined ? DEFAULT_PACKAGING_ALLOWANCE_MG : Number(body.allowanceMg);
     if (!Number.isSafeInteger(allowance) || allowance < 0) throw new BadRequestException('allowanceMg must be whole milligrams.');
     return this.sql.begin(async (tx) => {

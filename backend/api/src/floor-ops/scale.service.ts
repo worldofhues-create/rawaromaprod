@@ -9,11 +9,12 @@
  *
  * resolveWeight is what a station calls with the weight it is about to record: "scale" must name a
  * fresh stable reading from a scale at the same station with the same value; anything else is
- * recorded as "typed". (Whether a typed weight needs a second person is a rules-engine policy,
- * lane A.) Display (formatWeight, max 2 decimals, the scale's resolution) is web/weight.js, lane A.
+ * recorded as "typed", and (FLOOR-FIX-3) only with a second person's sign-off: requestTypedCheck,
+ * then signTypedCheck by a verifier, supervisor or admin who is not the typist; resolveWeight uses the
+ * signed check once, for that station and that exact figure. Display (formatWeight, max 2 decimals, the scale's resolution) is web/weight.js, lane A.
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, Optional } from '@nestjs/common';
-import { PG_CLIENT } from '@core/backend-kernel';
+import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import type { PairedDevice } from './devices.service.js';
@@ -21,6 +22,9 @@ import { FLOOR_CLOCK } from './floor.tokens.js';
 import { iso, systemClock, type Clock } from './floor-util.js';
 
 export const SCALE_READING_FRESH_MS = 60 * 1000;
+/** FLOOR-FIX-3: who may sign a typed weight. */
+export const TYPED_WEIGHT_SIGNERS = ['verifier', 'supervisor', 'admin'] as const;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const FACTOR: Record<string, number> = { mg: 1, g: 1000, kg: 1_000_000 };
 
 /** "125.47", unit g -> 125470. Null when it is finer than 1 mg. */
@@ -95,10 +99,59 @@ export class ScaleService {
     };
   }
 
-  async resolveWeight(body: { mg?: unknown; weightSource?: unknown; scaleReadingId?: unknown }, station: string) {
+  /** FLOOR-FIX-3: the typist asks for a second person to confirm a typed weight. */
+  async requestTypedCheck(body: { station?: unknown; mg?: unknown; reason?: unknown }, principal: AuthPrincipal) {
+    const station = typeof body.station === 'string' ? body.station.trim().slice(0, 60) : '';
+    if (!station) throw new BadRequestException('station is required.');
+    if (!Number.isSafeInteger(body.mg) || (body.mg as number) <= 0) throw new BadRequestException('The weight must be a whole number of milligrams above 0.');
+    const reason = typeof body.reason === 'string' ? body.reason.trim().slice(0, 300) || null : null;
+    const [r] = await this.sql`insert into platform.typed_weight_check (check_id, station, mg, reason, typed_by)
+      values (${uuidv7()}::uuid, ${station}, ${body.mg as number}, ${reason}, ${principal.userId}::uuid) returning *`;
+    return this.shapeCheck(r!);
+  }
+
+  /** FLOOR-FIX-3: a verifier, supervisor or admin who did not type it signs. Audited on the row. */
+  async signTypedCheck(id: string, principal: AuthPrincipal) {
+    if (!UUID_RE.test(id)) throw new BadRequestException('That is not a typed-weight check.');
+    const role = TYPED_WEIGHT_SIGNERS.find((r) => principal.roles.includes(r));
+    return this.sql.begin(async (tx) => {
+      const [c] = await tx`select * from platform.typed_weight_check where check_id = ${id}::uuid for update`;
+      if (!c) throw new BadRequestException('That typed-weight check was not found.');
+      if (String(c.typed_by) === principal.userId) throw new ForbiddenException('You typed this weight, so someone else must sign it.');
+      if (!role) throw new ForbiddenException('A typed weight is signed by a verifier or supervisor.');
+      if (c.status !== 'PENDING') throw new ConflictException('This typed weight is already signed.');
+      const [r] = await tx`update platform.typed_weight_check set status = 'APPROVED', signed_by = ${principal.userId}::uuid, signed_role = ${role},
+          signed_at = ${this.clock().toISOString()}::timestamptz where check_id = ${id}::uuid returning *`;
+      return this.shapeCheck(r!);
+    });
+  }
+
+  private shapeCheck(r: Record<string, unknown>) {
+    return {
+      checkId: String(r.check_id), station: String(r.station), mg: Number(r.mg), reason: (r.reason as string | null) ?? null,
+      typedBy: String(r.typed_by), status: String(r.status) as 'PENDING' | 'APPROVED' | 'USED',
+      signedBy: (r.signed_by as string | null) ?? null, signedRole: (r.signed_role as string | null) ?? null, signedAt: iso(r.signed_at),
+    };
+  }
+
+  async resolveWeight(body: { mg?: unknown; weightSource?: unknown; scaleReadingId?: unknown; weightCheckId?: unknown }, station: string, principal?: AuthPrincipal, usedFor?: string) {
     const mg = body.mg;
     if (!Number.isSafeInteger(mg) || (mg as number) <= 0) throw new BadRequestException('The weight must be a whole number of milligrams above 0.');
-    if (body.weightSource === 'typed') return { mg: mg as number, weightSource: 'typed' as const, scaleReadingId: null };
+    if (body.weightSource === 'typed') {
+      const id = typeof body.weightCheckId === 'string' ? body.weightCheckId : '';
+      if (!UUID_RE.test(id)) throw new ConflictException('A typed weight needs a second person: ask a verifier or supervisor to sign it.');
+      const [c] = await this.sql`select * from platform.typed_weight_check where check_id = ${id}::uuid`;
+      if (!c) throw new ConflictException('That typed-weight check was not found.');
+      if (c.status === 'PENDING') throw new ConflictException('This typed weight is not signed yet: a verifier or supervisor signs it first.');
+      if (c.status === 'USED') throw new ConflictException('That sign-off was already used. Ask for a new one.');
+      if (String(c.station) !== station) throw new ConflictException('That sign-off is for another station, not this station.');
+      if (Number(c.mg) !== mg) throw new ConflictException('The weight does not match the signed figure.');
+      if (principal && String(c.typed_by) !== principal.userId) throw new ConflictException('That sign-off is for a weight someone else typed.');
+      const [used] = await this.sql`update platform.typed_weight_check set status = 'USED', used_at = ${this.clock().toISOString()}::timestamptz, used_for = ${usedFor ?? null}
+         where check_id = ${id}::uuid and status = 'APPROVED' returning check_id`;
+      if (!used) throw new ConflictException('That sign-off was already used. Ask for a new one.');
+      return { mg: mg as number, weightSource: 'typed' as const, scaleReadingId: null, weightCheckId: id };
+    }
     if (body.weightSource !== 'scale') throw new BadRequestException('weightSource must be scale or typed.');
     const id = typeof body.scaleReadingId === 'string' ? body.scaleReadingId : '';
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('A weight from the scale names its reading (scaleReadingId).');
@@ -109,6 +162,6 @@ export class ScaleService {
       throw new ConflictException('That scale reading is too old. Put it on the scale again.');
     }
     if (Number(r.mg) !== mg) throw new ConflictException('The weight does not match the scale reading.');
-    return { mg: mg as number, weightSource: 'scale' as const, scaleReadingId: id };
+    return { mg: mg as number, weightSource: 'scale' as const, scaleReadingId: id, weightCheckId: null };
   }
 }

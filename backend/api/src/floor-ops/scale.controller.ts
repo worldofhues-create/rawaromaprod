@@ -3,8 +3,8 @@
  *   POST /v1/device-agent/scale-readings {raw} | {mg, stable}   a paired scale's reading (stable only kept)   device token
  *   GET  /v1/scales/latest?station=                             the station's fresh stable reading             any signed-in person
  */
-import { BadRequestException, Body, Controller, Get, Headers, Post, Query } from '@nestjs/common';
-import { AnyAuthenticated, Public } from '@core/backend-kernel';
+import { BadRequestException, Body, Controller, Get, Headers, Param, Post, Query } from '@nestjs/common';
+import { AnyAuthenticated, CurrentUser, Public, type AuthPrincipal } from '@core/backend-kernel';
 import { DevicesService } from './devices.service.js';
 import { ScaleService } from './scale.service.js';
 
@@ -24,5 +24,19 @@ export class ScaleController {
   async latest(@Query('station') station?: string) {
     if (!station) throw new BadRequestException('station is required.');
     return { reading: await this.scales.latest(station) };
+  }
+
+  /** FLOOR-FIX-3: a typed weight needs a second person. The typist asks... */
+  @AnyAuthenticated('the typist asks for a sign-off on a weight they typed; a weight carries no formula or price')
+  @Post('scales/typed-checks')
+  requestTypedCheck(@Body() body: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.scales.requestTypedCheck(body ?? {}, p);
+  }
+
+  /** ...and a verifier, supervisor or admin who did not type it signs (the role is checked in the service). */
+  @AnyAuthenticated('signing is limited to verifier, supervisor and admin roles by ScaleService.signTypedCheck')
+  @Post('scales/typed-checks/:id/sign')
+  signTypedCheck(@Param('id') id: string, @CurrentUser() p: AuthPrincipal) {
+    return this.scales.signTypedCheck(id, p);
   }
 }

@@ -30,6 +30,15 @@ let couriers: CourierService;
 let logistics: LogisticsService;
 const user = principal({ userId: randomUUID(), roles: ['logistics'], permissions: ['sales:logistics:write', 'sales:dispatch_master:write'] });
 const ST = 'Logistics 1';
+/** FLOOR-FIX-3: a typed weight carries a second person's sign-off. */
+const signer = principal({ userId: randomUUID(), roles: ['verifier'] });
+async function signedTyped(mg: number, station: string, by: ReturnType<typeof principal>) {
+  const sc = new ScaleService(testClient());
+  const c = await sc.requestTypedCheck({ station, mg }, by);
+  await sc.signTypedCheck(c.checkId, signer);
+  return { mg, weightSource: 'typed', weightCheckId: c.checkId };
+}
+
 const COURIER = `dlv${randomUUID().slice(0, 6)}`;
 
 before(async () => {
@@ -59,10 +68,10 @@ async function packed(opts: { dg?: boolean; amount?: number } = {}) {
   if (opts.dg) await sql`insert into packaging.product_dg_info (product_dg_info_id, product_id, un_number, dg_class, packing_group, proper_shipping_name) values (${randomUUID()}, ${product}, '1266', '3', 'III', 'PERFUMERY PRODUCTS')`;
   const s = await packing.start({ salesOrderId: so, finishedGoodBatchIds: [fg] }, user);
   for (let i = 0; i < 2; i++) {
-    const u = await packing.addUnit(s.shipmentId, { finishedGoodBatchId: fg, targetMg: 10_000, toleranceMg: 100, mg: 10_000, weightSource: 'typed', sealed: true }, ST, user);
+    const u = await packing.addUnit(s.shipmentId, { finishedGoodBatchId: fg, targetMg: 10_000, toleranceMg: 100, ...(await signedTyped(10_000, ST, user)), sealed: true }, ST, user);
     const c = await packing.openCarton(s.shipmentId, user);
     await packing.scanUnit(c.cartonId, u.unit.unitCode, user);
-    await packing.closeCarton(c.cartonId, { mg: 60_000, weightSource: 'typed' }, ST, user);
+    await packing.closeCarton(c.cartonId, await signedTyped(60_000, ST, user), ST, user);
   }
   await printAll(`U-${s.shipmentNo}`);
   await packing.finish(s.shipmentId, ST, user);

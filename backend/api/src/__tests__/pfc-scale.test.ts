@@ -67,7 +67,7 @@ test('resolveWeight: "from scale" must match a fresh stable reading at the same 
   const s = await scaleAt(st);
   const rd = await scales.record(s, { raw: 'ST,+00050.00  g' });
   const w = await scales.resolveWeight({ mg: 50000, weightSource: 'scale', scaleReadingId: rd.scaleReadingId }, st);
-  assert.deepEqual(w, { mg: 50000, weightSource: 'scale', scaleReadingId: rd.scaleReadingId });
+  assert.deepEqual(w, { mg: 50000, weightSource: 'scale', scaleReadingId: rd.scaleReadingId, weightCheckId: null });
   await assert.rejects(() => scales.resolveWeight({ mg: 50010, weightSource: 'scale', scaleReadingId: rd.scaleReadingId }, st), /does not match/);
   await assert.rejects(() => scales.resolveWeight({ mg: 50000, weightSource: 'scale', scaleReadingId: rd.scaleReadingId }, 'Another station'), /this station/);
   const t0 = now;
@@ -77,7 +77,8 @@ test('resolveWeight: "from scale" must match a fresh stable reading at the same 
   } finally {
     now = t0;
   }
-  assert.deepEqual(await scales.resolveWeight({ mg: 1234, weightSource: 'typed' }, st), { mg: 1234, weightSource: 'typed', scaleReadingId: null });
+  // FLOOR-FIX-3: a typed weight alone is refused; the sign-off path is floor-fix-typed-weight.test.ts.
+  await assert.rejects(() => scales.resolveWeight({ mg: 1234, weightSource: 'typed' }, st), /second person/);
   await assert.rejects(() => scales.resolveWeight({ mg: 12.5, weightSource: 'typed' }, st), /whole number/);
   await assert.rejects(() => scales.resolveWeight({ mg: 10, weightSource: 'guess' }, st), /scale or typed/);
 });
