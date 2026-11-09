@@ -21,6 +21,7 @@ import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { clearAlert, openAlerts, raiseAlert } from './floor-alerts.js';
 import { FLOOR_CLOCK } from './floor.tokens.js';
+import { scaleConfig } from './scale.service.js';
 import { iso, newDeviceToken, sha256, sixDigitCode, systemClock, text, type Clock } from './floor-util.js';
 
 export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale', 'scanner'] as const;
@@ -78,6 +79,7 @@ export class DevicesService {
     const site = text(body, 'site', 80, false);
     let config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : {};
     if (kind === 'scanner') config = scannerConfig(config);
+    if (kind === 'scale') config = scaleConfig(config); // FLOOR-FIX-4: category precision default
     if (JSON.stringify(config).length > 4000) throw new BadRequestException('config is too large.');
     const deviceId = uuidv7();
     const unpaired = UNPAIRED.includes(kind);
@@ -224,6 +226,7 @@ export class DevicesService {
     if (config) {
       const [k] = await this.sql`select kind from platform.device_master where device_id = ${deviceId}::uuid`;
       if (k?.kind === 'scanner') config = scannerConfig(config);
+      if (k?.kind === 'scale') config = scaleConfig(config); // FLOOR-FIX-4: an admin's per-device override
     }
     const [dev] = await this.sql`
       update platform.device_master

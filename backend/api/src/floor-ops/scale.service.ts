@@ -22,6 +22,30 @@ import { FLOOR_CLOCK } from './floor.tokens.js';
 import { iso, systemClock, type Clock } from './floor-util.js';
 
 export const SCALE_READING_FRESH_MS = 60 * 1000;
+/** FLOOR-FIX-4 (owner decision): lab and QC scales read to 0.01 g, floor scales to 0.1 g. Stored in mg. */
+export const SCALE_PRECISION_MG = { lab: 10, qc: 10, floor: 100 } as const;
+export type ScaleCategory = keyof typeof SCALE_PRECISION_MG;
+/** A scale's display resolution in mg: an admin's per-device override, else its category's default.
+ *  A scale with no category is a floor scale: the coarser default never shows a figure finer than it read. */
+export function scaleResolutionMg(cfg: Record<string, unknown>): number {
+  const o = cfg.resolutionMg;
+  if (Number.isSafeInteger(o) && (o as number) > 0) return o as number;
+  return SCALE_PRECISION_MG[scaleCategory(cfg)];
+}
+function scaleCategory(cfg: Record<string, unknown>): ScaleCategory {
+  const c = String(cfg.category ?? 'floor').toLowerCase();
+  return (c in SCALE_PRECISION_MG ? c : 'floor') as ScaleCategory;
+}
+/** FLOOR-FIX-4: a scale's config as stored: category checked, resolutionMg filled from the default
+ *  unless the admin set one (then resolutionOverride is true). */
+export function scaleConfig(config: Record<string, unknown>): Record<string, unknown> {
+  const c = String(config.category ?? 'floor').toLowerCase();
+  if (!(c in SCALE_PRECISION_MG)) throw new BadRequestException('A scale category is lab, qc or floor.');
+  const o = config.resolutionMg;
+  const override = Number.isSafeInteger(o) && (o as number) > 0 && o !== SCALE_PRECISION_MG[c as ScaleCategory];
+  return { ...config, category: c, resolutionMg: override ? o : SCALE_PRECISION_MG[c as ScaleCategory], resolutionOverride: override };
+}
+
 /** FLOOR-FIX-3: who may sign a typed weight. */
 export const TYPED_WEIGHT_SIGNERS = ['verifier', 'supervisor', 'admin'] as const;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -95,7 +119,7 @@ export class ScaleService {
       deviceId: String(r.device_id),
       mg: Number(r.mg),
       readAt: iso(r.read_at),
-      resolutionMg: Number.isSafeInteger(cfg.resolutionMg) ? (cfg.resolutionMg as number) : null,
+      resolutionMg: scaleResolutionMg(typeof cfg === 'string' ? JSON.parse(cfg) : cfg), // FLOOR-FIX-4
     };
   }
 
