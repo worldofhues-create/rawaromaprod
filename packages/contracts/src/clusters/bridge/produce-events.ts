@@ -144,12 +144,16 @@ export function packSizeKg(packSize: string | null | undefined): number | null {
 export function fgQtyKg(qty: number, unit: string | null | undefined, packSize: string | null | undefined): number | null {
   if (!(qty > 0) || !Number.isFinite(qty)) return null;
   const per = kgPerUnit(unit);
-  if (per !== null) return round4(qty * per);
+  if (per !== null) return wireKg(qty * per);
   const pack = packSizeKg(packSize);
-  return pack === null ? null : round4(qty * pack);
+  return pack === null ? null : wireKg(qty * pack);
 }
 
-const round4 = (n: number) => Math.round(n * 10_000) / 10_000;
+/** FLOOR-FIX-8 (ALEMBIC doc 17 §5.1): a kg figure for the wire, at most 6 decimals (1 mg).
+ *  ALEMBIC refuses a float tail (0.30000000000000004) as permanent; 4 decimals dropped sub-50 mg. */
+export function wireKg(n: number): number {
+  return Math.round(n * 1_000_000) / 1_000_000;
+}
 
 /* ── 3. DOCS-001 wire shapes (ALEMBIC docs/bridge/COMPLIANCE_FACTS.md) ─────────────────────── */
 
