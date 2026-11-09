@@ -33,6 +33,12 @@ export class ScaleController {
     return this.scales.requestTypedCheck(body ?? {}, p);
   }
 
+  @AnyAuthenticated('the list a verifier or supervisor signs from: station, figure and reason, no formula or price')
+  @Get('scales/typed-checks')
+  pendingTypedChecks(@Query('station') station?: string) {
+    return this.scales.pendingTypedChecks(station ?? null);
+  }
+
   /** ...and a verifier, supervisor or admin who did not type it signs (the role is checked in the service). */
   @AnyAuthenticated('signing is limited to verifier, supervisor and admin roles by ScaleService.signTypedCheck')
   @Post('scales/typed-checks/:id/sign')

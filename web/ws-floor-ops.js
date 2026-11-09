@@ -160,17 +160,34 @@
       sel('fo-lang', 'Printer language', [['zpl', 'ZPL (Zebra…)'], ['tspl', 'TSPL (TSC…)'], ['epl', 'EPL'], ['escpos', 'ESC/POS (receipt)'], ['pdf', 'PDF (office)']], 'zpl'),
       sel('fo-size', 'Label size', Object.keys((window.RaLabel || { SIZES: {} }).SIZES).map(function (k) { return [k, RaLabel.SIZES[k].name]; }), '100x50'),
       sel('fo-screen', 'Kiosk screen', [['packing', 'Packing station'], ['logistics', 'Logistics station'], ['maceration', 'Maceration'], ['printq', 'Print queue'], ['floorboard', 'Floor board']], 'packing'),
-      fld('fo-res', 'Scale resolution (mg)', 'type="number" min="1" placeholder="10"'),
+      sel('fo-cat', 'Scale category', [['floor', 'Floor (0.1 g)'], ['lab', 'Lab (0.01 g)'], ['qc', 'QC (0.01 g)']], 'floor'),
+      fld('fo-res', 'Scale resolution override (mg)', 'type="number" min="1" placeholder="from the category"'),
+      // FLOOR-FIX-16: how the kiosk reads this scale over Web Serial.
+      sel('fo-proto', 'Scale protocol', Object.keys((window.RaScaleSerial || { PROTOCOLS: { generic: { name: 'Generic' } } }).PROTOCOLS).map(function (k) { return [k, RaScaleSerial.PROTOCOLS[k].name]; }), 'generic'),
+      sel('fo-baud', 'Scale baud rate', [['', 'Protocol default']].concat(((window.RaScaleSerial || { BAUDS: [] }).BAUDS).map(function (b) { return [String(b), String(b)]; })), ''),
       sel('fo-conn', 'Scanner connection', [['usb_wedge', 'USB keyboard (wedge)'], ['bluetooth', 'Bluetooth'], ['camera', 'Tablet / phone camera']], 'usb_wedge'),
       '<fieldset id="fo-syms" style="border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:4px 12px;grid-column:1/-1"><legend class="t-cap">Scanner reads (for a scanner)</legend>' +
         SYMS.map(function (s, i) { return '<label style="display:flex;gap:6px;align-items:center;min-height:44px"><input type="checkbox" name="fo-sym" value="' + s[0] + '"' + (i < 2 ? ' checked' : '') + '> ' + escHtml(s[1]) + '</label>'; }).join('') + '</fieldset>',
       btn('', 'Add device', 'p', ' type="submit"')]) + '</form><div id="fo-pair" style="margin-top:12px">' + (FV.pair || '') + '</div>') : '';
     var al = (alerts.items || []).map(function (a) { return '<tr><td>' + chip('bad', (function (k) { k = String(k || '').replace(/_/g, ' ').toLowerCase(); return k.charAt(0).toUpperCase() + k.slice(1); })(a.kind)) + '</td><td>' + escHtml(a.station || '') + '</td><td>' + escHtml(a.title) + '<div class="t-cap">' + escHtml(a.body || '') + '</div></td><td>' + escHtml(when(a.raisedAt)) + '</td></tr>'; });
-    V.innerHTML = form + card('Devices', (d.items || []).length + ' registered', table(['Name', 'Kind', 'Station', 'Status', 'Set-up', 'Last seen', ''], rows)) + card('Station alerts', al.length + ' open', table(['Alert', 'Station', 'What', 'Since'], al));
+    V.innerHTML = form + card('Devices', (d.items || []).length + ' registered', table(['Name', 'Kind', 'Station', 'Status', 'Set-up', 'Last seen', ''], rows)) + card('Station alerts', al.length + ' open', table(['Alert', 'Station', 'What', 'Since'], al)) +
+      card('Typed weights', 'a verifier or supervisor who did not type it signs', '<div id="fo-tw">Loading…</div>');
+    // FLOOR-FIX-3/16: a weight typed instead of read from a scale needs a second person.
+    (async function () {
+      var tw = await call('/v1/scales/typed-checks'); var box = document.getElementById('fo-tw'); if (!box) return;
+      var its = (tw && tw.items) || [];
+      box.innerHTML = its.length ? table(['Station', 'Weight', 'Why typed', ''], its.map(function (c) {
+        return '<tr><td>' + escHtml(c.station) + '</td><td>' + escHtml(W.formatWeight(c.mg, 'g')) + '</td><td>' + escHtml(c.reason || '') + '</td><td>' + btn('', 'Sign', 'sm', ' data-sign="' + escHtml(c.checkId) + '"') + '</td></tr>';
+      })) : '<p class="t-cap">No typed weight is waiting.</p>';
+      box.querySelectorAll('[data-sign]').forEach(function (b) { b.addEventListener('click', async function () {
+        var r = await call('/v1/scales/typed-checks/' + b.getAttribute('data-sign') + '/sign', 'POST', {}); if (!r) return;
+        toast('Signed: ' + W.formatWeight(r.mg, 'g') + ' at ' + r.station + '.', 'good'); viewDevices(item, V);
+      }); });
+    })();
     on('fo-add', 'submit', async function (e) {
       e.preventDefault();
       var kind = val('fo-kind'); FV.kind = kind;
-      var config = kind === 'label_printer' ? { language: val('fo-lang'), size: val('fo-size') } : kind === 'kiosk' ? { screen: val('fo-screen') } : kind === 'scale' && val('fo-res') ? { resolutionMg: Number(val('fo-res')) } :
+      var config = kind === 'label_printer' ? { language: val('fo-lang'), size: val('fo-size') } : kind === 'kiosk' ? { screen: val('fo-screen') } : kind === 'scale' ? Object.assign({ category: val('fo-cat'), protocol: val('fo-proto') }, val('fo-baud') ? { baudRate: Number(val('fo-baud')) } : {}, val('fo-res') ? { resolutionMg: Number(val('fo-res')) } : {}) :
         kind === 'scanner' ? { connection: val('fo-conn'), symbologies: [].map.call(document.querySelectorAll('input[name="fo-sym"]:checked'), function (c) { return c.value; }) } : {};
       var r = await call('/v1/devices', 'POST', { kind: kind, station: val('fo-station'), name: val('fo-name'), config: config });
       if (!r) return;
@@ -281,11 +298,12 @@
   /* ── weight entry: from the station's scale, or typed ──────────────────────────────────── */
   function weightField(prefix, label) {
     return '<label style="display:flex;flex-direction:column;gap:5px"><span class="t-cap">' + escHtml(label) + ' (g)</span><div style="display:flex;gap:6px"><input id="' + prefix + '" class="fld" inputmode="decimal" style="flex:1;min-width:0" placeholder="0.00">' +
-      btn(prefix + '-sc', 'Read scale', 'sm') + '</div><span id="' + prefix + '-src" class="t-cap">typed</span></label>';
+      btn(prefix + '-sc', 'Read scale', 'sm') + (kiosk() ? btn(prefix + '-cn', 'Connect scale', 'sm') : '') + '</div><span id="' + prefix + '-src" class="t-cap">typed</span></label>';
   }
   function bindWeight(prefix, stn) {
     var st = { reading: null };
-    on(prefix, 'input', function () { st.reading = null; var s = document.getElementById(prefix + '-src'); if (s) s.textContent = 'typed'; });
+    on(prefix, 'input', function () { st.reading = null; st.check = null; var s = document.getElementById(prefix + '-src'); if (s) s.textContent = 'typed'; });
+    on(prefix + '-cn', 'click', function () { connectScale(function (txt) { var s = document.getElementById(prefix + '-src'); if (s) s.textContent = txt; }); });
     on(prefix + '-sc', 'click', async function () {
       var r = await call('/v1/scales/latest?station=' + encodeURIComponent(stn())); if (!r) return;
       if (!r.reading) { toast('No stable reading from a scale at this station in the last minute.', 'bad'); return; }
@@ -298,8 +316,50 @@
       if (st.reading) return { mg: st.reading.mg, weightSource: 'scale', scaleReadingId: st.reading.scaleReadingId };
       var mg = W.parseToMg(val(prefix), 'g');
       if (mg === null || !(mg > 0)) { toast('Enter the weight in grams (at most 3 decimals).', 'bad'); return null; }
-      return { mg: mg, weightSource: 'typed' };
+      // FLOOR-FIX-3/16: a typed weight is accepted only once a second person has signed it.
+      if (st.check && st.check.mg === mg) {
+        var id = st.check.checkId; st.check = null;
+        return { mg: mg, weightSource: 'typed', weightCheckId: id };
+      }
+      (async function () {
+        var reason = window.prompt('This weight was typed, not read from the scale. Why? (a verifier or supervisor signs it)', 'Scale not reading');
+        if (reason === null) return;
+        var c = await call('/v1/scales/typed-checks', 'POST', { station: stn(), mg: mg, reason: reason }); if (!c) return;
+        st.check = c;
+        var s = document.getElementById(prefix + '-src');
+        if (s) s.textContent = 'typed · waiting for a second person to sign (Floor devices → Typed weights), then press again';
+        toast('Ask a verifier or supervisor to sign this typed weight, then press again.', 'warn');
+      })();
+      return null;
     };
+  }
+
+  /* FLOOR-FIX-16: the kiosk reads its station's scale over Web Serial and posts stable lines as the
+   * paired SCALE (its own token, paired here once with the code Admin shows), never as the kiosk. */
+  var scaleConn = null;
+  async function connectScale(say) {
+    if (scaleConn) { say('scale connected · reading'); return; }
+    if (!window.RaScaleSerial || !navigator.serial) { toast('This browser cannot read a serial scale. Use Chrome or Edge, or type the weight (a second person signs it).', 'bad'); return; }
+    var sc; try { sc = JSON.parse(localStorage.getItem('ra.scale') || 'null'); } catch (e) { sc = null; }
+    if (!sc || !sc.token) {
+      var code = window.prompt('Pair the scale: enter the 6-digit code Admin shows for it on Floor devices.');
+      if (!code) return;
+      var pr = await fetch('/v1/device-agent/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code.trim(), info: { via: 'kiosk-serial' } }) });
+      var pj = await pr.json().catch(function () { return null; }); var pd = pj && (pj.data || pj);
+      if (!pr.ok || !pd || !pd.token || !pd.device || pd.device.kind !== 'scale') { toast('That code did not pair a scale.', 'bad'); return; }
+      sc = { token: pd.token, deviceId: pd.device.deviceId }; localStorage.setItem('ra.scale', JSON.stringify(sc));
+    }
+    var me = await fetch('/v1/device-agent/me', { headers: { 'x-device-token': sc.token } });
+    var mj = await me.json().catch(function () { return null; }); var md = mj && (mj.data || mj);
+    if (!me.ok || !md) { localStorage.removeItem('ra.scale'); toast('The scale is no longer paired. Pair it again.', 'bad'); return; }
+    try {
+      scaleConn = await RaScaleSerial.connect({
+        token: sc.token, config: md.config || {},
+        onReading: function (r) { say('scale · ' + (r.stable ? 'stable · ' : 'settling · ') + W.formatWeight(r.mg, 'g', (md.config || {}).resolutionMg)); },
+        onError: function (e) { scaleConn = null; toast(String(e && e.message || e), 'bad'); },
+      });
+      say('scale connected · reading');
+    } catch (e) { toast(String(e && e.message || e), 'bad'); }
   }
 
   // WALK2-RP-9: shipment and carton chips read the wire words (PACKING, DOCS READY, OPEN), and documents

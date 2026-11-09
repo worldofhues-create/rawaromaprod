@@ -73,6 +73,8 @@
        board and kiosk lock. After the other ws-*.js (it adds to their ROLES). -->
   <script src="/label-render.js"></script>
   <script src="/scan-input.js"></script>
+  <!-- FLOOR-FIX-16: the kiosk reads a physical scale over Web Serial (Chrome, Edge). -->
+  <script src="/scale-serial.js"></script>
   <script src="/ws-floor-ops.js"></script>
   <!-- Lane pf-d: Stock cover (order intelligence) and QC review (perfumer + vault approver decision).
        After the other ws-*.js (it adds to their ROLES, and a QC-review-only workspace for the two Vault roles). -->

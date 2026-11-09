@@ -41,10 +41,21 @@ function scaleCategory(cfg: Record<string, unknown>): ScaleCategory {
 export function scaleConfig(config: Record<string, unknown>): Record<string, unknown> {
   const c = String(config.category ?? 'floor').toLowerCase();
   if (!(c in SCALE_PRECISION_MG)) throw new BadRequestException('A scale category is lab, qc or floor.');
+  // FLOOR-FIX-16: how the kiosk reads it (web/scale-serial.js PROTOCOLS), set per device in Admin.
+  const protocol = String(config.protocol ?? 'generic').toLowerCase();
+  if (!(SCALE_PROTOCOLS as readonly string[]).includes(protocol)) throw new BadRequestException(`A scale protocol is one of ${SCALE_PROTOCOLS.join(', ')}.`);
+  const baudRate = config.baudRate === undefined || config.baudRate === null || config.baudRate === '' ? SCALE_DEFAULT_BAUD[protocol as ScaleProtocol] : Number(config.baudRate);
+  if (!(SCALE_BAUDS as readonly number[]).includes(baudRate)) throw new BadRequestException(`A scale baud rate is one of ${SCALE_BAUDS.join(', ')}.`);
   const o = config.resolutionMg;
   const override = Number.isSafeInteger(o) && (o as number) > 0 && o !== SCALE_PRECISION_MG[c as ScaleCategory];
-  return { ...config, category: c, resolutionMg: override ? o : SCALE_PRECISION_MG[c as ScaleCategory], resolutionOverride: override };
+  return { ...config, protocol, baudRate, category: c, resolutionMg: override ? o : SCALE_PRECISION_MG[c as ScaleCategory], resolutionOverride: override };
 }
+
+/** FLOOR-FIX-16: the serial protocols the kiosk reader speaks (web/scale-serial.js), and their default baud. */
+export const SCALE_PROTOCOLS = ['generic', 'sics', 'and', 'ohaus', 'sartorius'] as const;
+export type ScaleProtocol = (typeof SCALE_PROTOCOLS)[number];
+const SCALE_DEFAULT_BAUD: Record<ScaleProtocol, number> = { generic: 9600, sics: 9600, and: 2400, ohaus: 9600, sartorius: 9600 };
+export const SCALE_BAUDS = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200] as const;
 
 /** FLOOR-FIX-3: who may sign a typed weight. */
 export const TYPED_WEIGHT_SIGNERS = ['verifier', 'supervisor', 'admin'] as const;
@@ -148,6 +159,13 @@ export class ScaleService {
           signed_at = ${this.clock().toISOString()}::timestamptz where check_id = ${id}::uuid returning *`;
       return this.shapeCheck(r!);
     });
+  }
+
+  /** FLOOR-FIX-16: typed weights waiting for a second person, newest first (the signer's list). */
+  async pendingTypedChecks(station?: string | null) {
+    const rows = await this.sql`select * from platform.typed_weight_check where status = 'PENDING'
+      ${station ? this.sql`and station = ${station}` : this.sql``} order by created_at desc limit 50`;
+    return { items: rows.map((r) => this.shapeCheck(r)) };
   }
 
   private shapeCheck(r: Record<string, unknown>) {
