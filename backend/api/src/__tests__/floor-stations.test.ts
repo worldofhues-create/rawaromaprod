@@ -356,3 +356,25 @@ test('scan-resolve: ]Q1 (QR) and ]C0 (Code 128) wedge scans resolve the same lot
   assert.equal(await resolveRmLot(sql(), `]Q1${l.barcode}`), rb!.id);
   assert.equal(await resolveRmLot(sql(), `]C0${l.batchNo}\r`), rb!.id);
 });
+
+/* JOURNEY-FIX (RawProd): the verifier's weight could be recorded as `source: 'scale'` with any
+ * scaleRef, or none, and nothing checked it against a reading. Packing's resolveWeight refuses that;
+ * the floor did not, so a typed weight could be filed as weighed. A scale weight now names a fresh,
+ * stable reading of exactly that many mg from a scale that is not revoked. */
+test('verifier: a weight filed as from the scale must name a fresh reading of exactly that weight', async () => {
+  const s = await setup();
+  await picked(s);
+  const [l1] = (await stations.verifyView(s.job.floorJobId)).lines;
+  const target = l1!.targetMg;
+  await assert.rejects(() => stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: target, source: 'scale' }, verifier), /names its reading/);
+  await assert.rejects(() => stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: target, source: 'scale', scaleRef: uid() }, verifier), /not found/);
+  const dev = uid(), reading = uid(), stale = uid();
+  await sql()`insert into platform.device_master (device_id, kind, station, name, status, config, created_at, updated_at)
+    values (${dev}, 'scale', ${'Floor-' + tag()}, 'Bench scale', 'active', '{}'::jsonb, now(), now())`;
+  await sql()`insert into platform.scale_reading (scale_reading_id, device_id, station, mg, stable, raw, read_at)
+    values (${reading}, ${dev}, 'x', ${target}, true, 'S S  t g', now()), (${stale}, ${dev}, 'x', ${target}, true, 'S S  t g', now() - interval '10 minutes')`;
+  await assert.rejects(() => stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: target, source: 'scale', scaleRef: stale }, verifier), /too old/);
+  await assert.rejects(() => stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: target + 1, source: 'scale', scaleRef: reading }, verifier), /does not match/);
+  const ok = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: target, source: 'scale', scaleRef: reading }, verifier);
+  assert.equal(ok.verified, true);
+});
