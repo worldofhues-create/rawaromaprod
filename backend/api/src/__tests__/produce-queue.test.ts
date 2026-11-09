@@ -170,7 +170,7 @@ test('counters and the formula-needed list', async () => {
   const { items, counters } = await queue.queue(500);
   const row = items.find((i) => i.alembicRequirementId === blocked.id)!;
   assert.equal(row.stage, 'BLOCKED');
-  assert.equal(row.blockMessage, 'No approved formula for this product in the Vault — a formulator must seal and approve one');
+  assert.equal(row.blockMessage, 'Formula not on file'); // FLOOR-FIX-7
   assert.ok(counters.blocked >= 1 && counters.open >= 1 && counters.kgToProduce >= 12);
   const needs = await queue.formulaNeeds();
   const mine = needs.find((n) => n.productCode === p.productCode)!;

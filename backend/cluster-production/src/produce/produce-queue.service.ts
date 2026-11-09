@@ -93,8 +93,10 @@ export interface QueueCounters {
 
 /** Plain words for the floor, one per block reason. */
 export const BLOCK_MESSAGES: Record<string, string> = {
-  NO_APPROVED_FORMULA: 'No approved formula for this product in the Vault — a formulator must seal and approve one',
-  NO_FORMULA_LINK: 'No approved formula for this product in the Vault — a formulator must seal and approve one, and the product must be linked to it',
+  // FLOOR-FIX-7: owner decision (Alembic CLAUDE_CODE_REPLY.md): exactly "Formula not on file", fail-closed.
+  // What to do next is the Ruh insight's `fix` line and the formula_needed alert, not this message.
+  NO_APPROVED_FORMULA: 'Formula not on file',
+  NO_FORMULA_LINK: 'Formula not on file',
   UNKNOWN_SKU: 'This SKU is not in the factory catalogue — add it on the Product SKUs screen',
   QTY_NOT_IN_KG: 'The quantity is not in a unit of mass, so a run size cannot be worked out — ask ALEMBIC to resend it in kg',
 };

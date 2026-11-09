@@ -9,7 +9,7 @@
  *   extended  a second requirement for the same approved formula JOINS the open run: its size and
  *             bill of materials grow, only the new requirement hears ProductionScheduled.
  *   blocked   no approved formula (or no formula linked to the product) → a plain refusal
- *             ("No approved formula for this product in the Vault — a formulator must seal and
+ *             ("Formula not on file", FLOOR-FIX-7; was "No approved formula for this product in the Vault — a formulator must seal and
  *             approve one"), the reason recorded on the requirement, the formula roles alerted,
  *             nothing created.
  *   MASKED    no formula name, material identity or percentage reaches any main-box payload or log:
@@ -174,7 +174,7 @@ test('blocked: no approved formula → a plain refusal, recorded, formula roles 
   const runsBefore = (await testClient()`select count(*)::int as n from production.production_order`)[0]!.n as number;
   await assert.rejects(() => plan.planRequirement(r.id, principal({ roles: ['production'] })),
     (e: unknown) => e instanceof PlanBlockedException
-      && (e as Error).message === 'No approved formula for this product in the Vault — a formulator must seal and approve one');
+      && (e as Error).message === 'Formula not on file');
   const [req] = await testClient()`select produce_block_reason, production_order_id from bridge.production_requirement where alembic_requirement_id = ${r.id}`;
   assert.deepEqual({ ...req }, { produce_block_reason: 'NO_APPROVED_FORMULA', production_order_id: null });
   const alert = await testClient()`select kind, roles, title, detail from production.produce_alert where kind = 'formula_needed' and ref_id = ${p.productId}`;
@@ -198,7 +198,7 @@ test('blocked: a product not linked to any formula says so', async () => {
   const r = await requirement({ sku: p.skuCode, qtyKg: 10 });
   await assert.rejects(() => plan.planRequirement(r.id, principal()),
     (e: unknown) => e instanceof PlanBlockedException && (e as PlanBlockedException).reason === 'NO_FORMULA_LINK'
-      && /No approved formula for this product in the Vault/.test((e as Error).message));
+      && /^Formula not on file$/.test((e as Error).message));
   const unknown = await requirement({ sku: `NOPE-${randomUUID().slice(0, 6)}`, qtyKg: 1 });
   await assert.rejects(() => plan.planRequirement(unknown.id, principal()), /not in the factory catalogue/);
 });
