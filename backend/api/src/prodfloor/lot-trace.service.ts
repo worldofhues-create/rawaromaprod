@@ -182,7 +182,7 @@ export class LotTraceService {
     // Code 128 (label-render.js), so the two can never disagree; it is the opaque L- id the picker scans.
     // Queued after the label row commits: a print failure parks the job and raises an alert, it never
     // undoes the putaway record.
-    if (!this.print) return label;
+    if (!this.print) return { ...label, printJobId: null as string | null, printStatus: null as string | null };
     const station = typeof body.station === 'string' && body.station.trim() ? body.station.trim().slice(0, 60) : 'Warehouse';
     const code = label.barcode ?? label.lotId;
     const job = await this.print.enqueue({
@@ -198,6 +198,6 @@ export class LotTraceService {
         reprint: label.reprint,
       },
     }, principal);
-    return { ...label, printJobId: job.printJobId, printStatus: job.status };
+    return { ...label, printJobId: job.printJobId as string | null, printStatus: job.status as string | null };
   }
 }
