@@ -1,0 +1,35 @@
+# FLOOR-FIX-15 (ALEMBIC doc 17 §5.8): the node:test unit suite on every push and pull request. Until
+# this, CI ran only the Playwright walks, so the bridge contract tests never ran on a push.
+# .gitignore lists .github/workflows/ because the usual push credential lacks workflow scope; this
+# file is force-added, like browser-suite.yml.
+name: unit-tests
+on:
+  pull_request:
+  push:
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      postgres:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci_only_not_a_secret
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:ci_only_not_a_secret@localhost:5432/rawprod_unit_test
+      PGPASSWORD: ci_only_not_a_secret
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - run: psql -h localhost -U postgres -d postgres -c 'create database rawprod_unit_test'
+      - run: pnpm test
