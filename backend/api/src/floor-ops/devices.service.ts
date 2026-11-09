@@ -39,7 +39,9 @@ function scannerConfig(config: Record<string, unknown>): Record<string, unknown>
 export type DeviceKind = (typeof DEVICE_KINDS)[number];
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
 /** Heartbeat is every 60 s; two missed beats make a device offline. */
-export const OFFLINE_AFTER_MS = 2 * 60 * 1000;
+// FLOOR-FIX-6: plan §1.4, offline after 60 s without a heartbeat (was 2 min). Senders beat every
+// 15-20 s so one late beat on a slow network does not flap a device offline.
+export const OFFLINE_AFTER_MS = 60 * 1000;
 /** Wrong codes allowed per minute, across all callers, before pairing pauses for the minute. */
 export const PAIR_FAILS_PER_MINUTE = 20;
 

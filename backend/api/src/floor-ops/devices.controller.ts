@@ -12,7 +12,7 @@
  *
  * Device (no person; X-Device-Token header, station-scoped):
  *   POST  /v1/device-agent/pair {code}      the code -> the device token, once      public (the code is the secret)
- *   POST  /v1/device-agent/heartbeat        every 60 s                              device token
+ *   POST  /v1/device-agent/heartbeat        every 20 s                              device token
  *   GET   /v1/device-agent/me               which station this device serves        device token
  */
 import { Body, Controller, Get, Headers, NotFoundException, Param, ParseUUIDPipe, Patch, Post, Query } from '@nestjs/common';

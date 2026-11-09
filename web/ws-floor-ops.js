@@ -607,7 +607,7 @@
       var d; try { d = JSON.parse(localStorage.getItem('ra.device') || 'null'); } catch (e) { d = null; }
       if (d && d.token && navigator.onLine) fetch('/v1/device-agent/heartbeat', { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-token': d.token }, body: '{}' }).catch(function () {});
     };
-    beat(); setInterval(beat, 60000);
+    beat(); setInterval(beat, 20000); // FLOOR-FIX-6: inside the 60 s offline window
     document.documentElement.classList.add('ra-kiosk');
     var css = document.createElement('style');
     // Kiosk: one station's screen, big touch targets for gloved hands, no rail and no way out.

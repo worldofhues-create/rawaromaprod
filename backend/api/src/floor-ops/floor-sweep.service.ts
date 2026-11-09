@@ -21,13 +21,22 @@ export class FloorSweepService {
     private readonly couriers: CourierService,
   ) {}
 
+  private devicesRunning = false;
+
+  /** FLOOR-FIX-6: its own 15 s sweep, so the 60 s offline window reads as ~60 s, not up to 2 min. */
+  @Interval('device-sweep', 15_000)
+  async deviceTick() {
+    if (this.devicesRunning) return;
+    this.devicesRunning = true;
+    try { await this.devices.sweepOffline(); } catch (e) { this.log.warn(`devices sweep failed: ${(e as Error).message}`); } finally { this.devicesRunning = false; }
+  }
+
   @Interval('floor-sweep', 60_000)
   async tick() {
     if (this.running) return;
     this.running = true;
     try {
       for (const [name, fn] of [
-        ['devices', () => this.devices.sweepOffline()],
         ['print', () => this.print.sweepStale()],
         ['maceration', () => this.maceration.sweepAlarms()],
         ['couriers', () => this.couriers.syncAll()],

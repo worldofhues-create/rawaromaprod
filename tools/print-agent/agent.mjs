@@ -134,7 +134,7 @@ async function main() {
   if (cmd !== 'run') throw new Error('usage: agent.mjs pair|run|test');
   const beat = async () => { try { await call(cfg, 'POST', '/v1/device-agent/heartbeat', {}); } catch (e) { console.error('heartbeat:', e.message); } };
   await beat();
-  setInterval(beat, 60_000);
+  setInterval(beat, 20_000); // FLOOR-FIX-6: well inside the 60 s offline window
   for (;;) {
     try {
       const r = await processOnce(cfg, { renderer });
