@@ -23,6 +23,12 @@ function unit(u: string): string {
   return u.trim().toLowerCase();
 }
 
+/** FLOOR-FIX-13: a unit this file can convert. A requirement in any other unit is refused at the door
+ *  (ALEMBIC doc 17 §5.6): accepted, it could never complete. */
+export function isConvertibleUnit(u: unknown): boolean {
+  return typeof u === 'string' && Object.prototype.hasOwnProperty.call(FACTORS, unit(u));
+}
+
 /** `qty` expressed in `from`, converted into `to`; null when the pair is not convertible. */
 export function convertQty(qty: number, from: string, to: string): number | null {
   if (!Number.isFinite(qty)) return null;

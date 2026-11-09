@@ -7,6 +7,7 @@
  * `bridge.contract.spec.ts` exists to catch before either service is running.
  */
 import { bridge as bridgeContracts } from '@core/contracts';
+import { isConvertibleUnit } from './quantity.js';
 
 const { LEGACY_PRIORITIES, LOT_POLICIES, isRequirementPriority } = bridgeContracts;
 
@@ -288,7 +289,7 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       needEither('mapped_sku', (v) => isNonEmptyString(v), 'sku', (v) => isNonEmptyString(v));
       if (present('qty') || !present('qty_kg')) {
         need('qty', isPositiveQty);
-        need('uom', (v) => isNonEmptyString(v, 20));
+        need('uom', (v) => isNonEmptyString(v, 20) && isConvertibleUnit(v)); // FLOOR-FIX-13
       }
       need('needed_by', isIsoInstant);
       newFields();
@@ -297,7 +298,7 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       if (sales) optional('request_ref', (v) => isNonEmptyString(v, 100));
       optional('mapped_sku', (v) => isNonEmptyString(v));
       optional('qty', isPositiveQty);
-      optional('uom', (v) => isNonEmptyString(v, 20));
+      optional('uom', (v) => isNonEmptyString(v, 20) && isConvertibleUnit(v)); // FLOOR-FIX-13
       optional('needed_by', isIsoInstant);
       newFields();
       break;
