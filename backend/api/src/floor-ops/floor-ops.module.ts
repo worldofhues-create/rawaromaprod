@@ -20,10 +20,12 @@ import { CourierController, LogisticsController } from './logistics.controller.j
 import { LogisticsService } from './logistics.service.js';
 import { CourierService } from './courier.service.js';
 import { DisplayService } from './display.service.js';
+import { FloorModule } from '../floor/floor.module.js';
 
 const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService, DisplayService];
 
 @Module({
+  imports: [FloorModule], // FLOOR-FIX-1: the TV board ranks with FloorQueueService
   controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController, LogisticsController, CourierController],
   providers: [...SERVICES],
   exports: [...SERVICES],

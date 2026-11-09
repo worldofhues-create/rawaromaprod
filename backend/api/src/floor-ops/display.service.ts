@@ -4,22 +4,36 @@
  * timers ("Day 23 of 45"), the QC backlog (batches ready for QC 2; finished-good lots waiting for
  * packaging QC), the packing and logistics queues, and the station's open alerts. Read-only.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { openAlerts } from './floor-alerts.js';
 import { iso } from './floor-util.js';
 import { MacerationService } from './maceration.service.js';
 import { FgZoneService } from '../shelf/fg-zone.service.js';
+import { FloorQueueService } from '../floor/floor-queue.service.js';
+import { PolicyService } from '../policy/policy.service.js';
+import { FloorCodeService } from '../floor/floor-code.service.js';
 
 @Injectable()
 export class DisplayService {
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql, private readonly maceration: MacerationService) {}
+  private readonly floorQueue: FloorQueueService;
+
+  // FLOOR-FIX-1: the board ranks with the kiosks' own FloorQueueService, never a sort of its own.
+  // It used to order `expedite desc, promise_dt`, which put every late job above every new one, so
+  // the TV named a different next job than the kiosk under it. Built from the same sql when not
+  // injected, so a caller that predates the injection still gets the one queue function.
+  constructor(
+    @Inject(PG_CLIENT) private readonly sql: Sql,
+    private readonly maceration: MacerationService,
+    @Optional() floorQueue?: FloorQueueService,
+  ) {
+    this.floorQueue = floorQueue ?? new FloorQueueService(sql, new PolicyService(sql), new FloorCodeService(sql));
+  }
 
   async feed(station: string | null) {
-    const queue = await this.sql`
-      select job_no, stage, order_ref, promise_dt, expedite from production.floor_job
-       where stage <> 'DONE' order by expedite desc, promise_dt nulls last, job_no limit 30`;
+    // HELD jobs have no position on the kiosk either; the board shows the first 30 it would make.
+    const queue = (await this.floorQueue.queue()).items.filter((q) => q.priority !== 'HOLD').slice(0, 30);
     const runs = await this.maceration.runs();
     const fgWaiting = await this.sql`
       select f.batch_number, f.created_dt from packaging.finished_good_batch_master f
@@ -30,7 +44,7 @@ export class DisplayService {
     return {
       at: new Date().toISOString(),
       station,
-      queue: queue.map((q) => ({ jobNo: String(q.job_no), stage: String(q.stage), orderRef: q.order_ref ?? null, promiseAt: iso(q.promise_dt), expedite: !!q.expedite })),
+      queue: queue.map((q) => ({ jobNo: q.jobNo, stage: q.stage, orderRef: q.orderRef ?? null, promiseAt: iso(q.promiseDt), expedite: !!q.expedite, position: q.position, lane: q.lane })),
       maceration: runs.map((r) => ({ batchNumber: r.batchNumber, label: r.label, day: r.day, needDays: r.needDays, endsAt: r.endsAt, readyForQc2: r.readyForQc2, overMax: r.overMax, freezeDue: r.freezeRequired && !r.freezeDoneAt })),
       qcBacklog: {
         qc2Ready: runs.filter((r) => r.readyForQc2).map((r) => r.batchNumber),
