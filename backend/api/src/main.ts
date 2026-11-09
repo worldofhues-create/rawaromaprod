@@ -15,6 +15,7 @@ import { Logger } from '@nestjs/common';
 import { ConfigService, PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { AppModule } from './app.module.js';
+import { installRawJsonParser } from './raw-json-parser.js';
 import { WorkerModule } from './worker.module.js';
 import { assertMainRoleCannotReadVault } from './vault-isolation-check.js';
 
@@ -31,26 +32,8 @@ async function bootstrap(): Promise<void> {
    * own registration a moment later (`FST_ERR_CTP_ALREADY_PRESENT`). */
   await app.init();
 
-  // REPLACES Nest's default JSON parser: every route keeps its normal parsed body, but the
-  // exact bytes are also stashed on `req.rawBody`. Needed by BridgeController: an HMAC
-  // signature (docs/bridge/EVENT_CONTRACT.md) is computed over the exact bytes sent, and
-  // a re-serialization of the parsed body can produce different bytes than the sender
-  // signed. Falls back to Fastify's own default JSON error shape on a parse failure, so
-  // every other route's behaviour is unchanged.
-  const fastifyInstance = app.getHttpAdapter().getInstance();
-  fastifyInstance.removeContentTypeParser('application/json');
-  fastifyInstance.addContentTypeParser(
-    'application/json',
-    { parseAs: 'string' },
-    (_req, body: string, done: (err: Error | null, body?: unknown) => void) => {
-      (_req as unknown as { rawBody?: string }).rawBody = body;
-      try {
-        done(null, body.length ? JSON.parse(body) : {});
-      } catch (err) {
-        done(err as Error, undefined);
-      }
-    },
-  );
+  // The bytes-in-hand JSON parser the bridge HMAC needs: raw-json-parser.ts (FLOOR-FIX-10).
+  installRawJsonParser(app);
 
   const config = app.get(ConfigService);
 
