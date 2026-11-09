@@ -322,8 +322,8 @@
         return { mg: mg, weightSource: 'typed', weightCheckId: id };
       }
       (async function () {
-        var reason = window.prompt('This weight was typed, not read from the scale. Why? (a verifier or supervisor signs it)', 'Scale not reading');
-        if (reason === null) return;
+        var a = await ask('Typed weight', 'This weight was typed, not read from the scale, so a verifier or supervisor who did not type it signs it.', [{ n: 'reason', l: 'Why typed', t: 'textarea', req: true, value: 'Scale not reading' }], 'Ask for a sign-off');
+        if (!a) return; var reason = a.reason;
         var c = await call('/v1/scales/typed-checks', 'POST', { station: stn(), mg: mg, reason: reason }); if (!c) return;
         st.check = c;
         var s = document.getElementById(prefix + '-src');
@@ -342,8 +342,8 @@
     if (!window.RaScaleSerial || !navigator.serial) { toast('This browser cannot read a serial scale. Use Chrome or Edge, or type the weight (a second person signs it).', 'bad'); return; }
     var sc; try { sc = JSON.parse(localStorage.getItem('ra.scale') || 'null'); } catch (e) { sc = null; }
     if (!sc || !sc.token) {
-      var code = window.prompt('Pair the scale: enter the 6-digit code Admin shows for it on Floor devices.');
-      if (!code) return;
+      var pa = await ask('Pair the scale', 'Enter the 6-digit code Admin shows for this scale on Floor devices.', [{ n: 'code', l: 'Pairing code', req: true }], 'Pair');
+      if (!pa) return; var code = pa.code;
       var pr = await fetch('/v1/device-agent/pair', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ code: code.trim(), info: { via: 'kiosk-serial' } }) });
       var pj = await pr.json().catch(function () { return null; }); var pd = pj && (pj.data || pj);
       if (!pr.ok || !pd || !pd.token || !pd.device || pd.device.kind !== 'scale') { toast('That code did not pair a scale.', 'bad'); return; }
