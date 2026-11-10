@@ -371,12 +371,16 @@
     return latin1Bytes(s);
   }
 
+  /* RAC-CODES-RP-1: a RAC code (RAC 27 / 1150, or a variant / formula id under it)
+     prints in JetBrains Mono; everything else in Manrope (owner, 2026-11-10). The
+     barcode payload is untouched: it still encodes the opaque code (batch_no). */
+  var RAC_CODE_RE = /RAC \d{2} \/ \d{4}/;
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   /** The browser fallback: absolutely placed in mm, so print preview matches the label. */
   function html(t) {
-    var parts = ['<div class="ra-label" style="position:relative;box-sizing:border-box;width:' + t.w + 'mm;height:' + t.h + 'mm;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif;overflow:hidden;page-break-after:always">'];
+    var parts = ['<div class="ra-label" style="position:relative;box-sizing:border-box;width:' + t.w + 'mm;height:' + t.h + 'mm;background:#fff;color:#000;font-family:Manrope,Arial,Helvetica,sans-serif;overflow:hidden;page-break-after:always">'];
     withReprint(t).forEach(function (e) {
-      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + '">' + esc(e.s) + '</div>');
+      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + (RAC_CODE_RE.test(e.s) ? ';font-family:\'JetBrains Mono\',ui-monospace,monospace' : '') + '">' + esc(e.s) + '</div>');
       else if (e.t === 'code128') {
         var cb = code128Bars(e.d), rects = cb.bars.map(function (b) { return '<rect x="' + b[0] + '" y="0" width="' + b[1] + '" height="10"/>'; }).join('');
         parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + cb.modules + ' 10" preserveAspectRatio="none" shape-rendering="crispEdges" data-code128="' + esc(e.d) + '" aria-label="Code 128 ' + esc(e.d) + '">' + rects + '</svg>');
