@@ -361,7 +361,7 @@
     var needRework = last && last.decision === 'REWORK' && d.reworks.length < Number(last.reworkNo) + 1;
     var closed = last && /APPROVE|REJECT|REVIEW|HOLD_CAPA/.test(last.decision);
     var hist = d.rounds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Round</th><th>Spec</th><th>Decision</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
-      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>v' + r.specVersion + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType ? defWord(r.defectType) : '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
+      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>' + esc(self.RacCode ? self.RacCode.spec(r.specProductCode, r.specVersion) : 'v' + r.specVersion) + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType ? defWord(r.defectType) : '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p>No QC round yet.</p>';
     var form = '';
     if (closed) form = '<p>' + chip('n', 'Last decision: ' + (QD[last.decision] || [0, last.decision])[1]) + ' No further round is taken here.</p>';
@@ -381,7 +381,7 @@
         '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div><button type="submit" class="btn p">Record QC round</button></form>';
     }
     // SCAN-11: the QC-approved mark (QC 1 or QC 2), once the last round approves.
-    var qa = last && last.decision === 'APPROVE' ? '<p>' + SB('fb-qa', { labelKind: 'qc_approved', subjectRef: d.batch.batchNumber, code: d.batch.batchNumber, title: 'QC APPROVED', defaultStation: 'QC lab', lines: [['Round', last.roundNo], ['Spec', 'v' + last.specVersion]] }) + '</p>' : '';
+    var qa = last && last.decision === 'APPROVE' ? '<p>' + SB('fb-qa', { labelKind: 'qc_approved', subjectRef: d.batch.batchNumber, code: d.batch.batchNumber, title: 'QC APPROVED', defaultStation: 'QC lab', lines: [['Round', last.roundNo], ['Spec', self.RacCode ? self.RacCode.spec(last.specProductCode, last.specVersion) : 'v' + last.specVersion]] }) + '</p>' : '';
     host.innerHTML = card('Batch ' + esc(d.batch.batchNumber || '') + (d.hold ? ' · ON HOLD' : ''), hist + qa, d.hold ? esc(d.hold.reason) : '') + card(needRework ? 'Rework' : 'QC round', form, 'Every round tests every checkpoint, after a rework too.');
     var sel = $('fb-qprod');
     if (sel) sel.onchange = async function () {

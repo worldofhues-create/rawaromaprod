@@ -132,3 +132,19 @@ test('RAC: material search ranks with the one search -- code spellings, old code
   assert.equal(top('pthalate'), 'b');
   assert.equal(top('DEMO-MAT-0001'), 'c', 'non-RAC codes still exact');
 });
+
+/* RAC-CODES-RP-3: every vault version display names a RAC formula's versions F{n}, and the QC spec
+   line names a RAC product's spec version by its code (a spec is per product, not a formula). */
+test('RAC: all three vault version displays and the QC spec line', () => {
+  const vault = readFileSync(new URL('web-vault/vault.js', ROOT), 'utf8');
+  assert.equal((vault.match(/racVersion\((formula|r|x)\.formulaCode, /g) ?? []).length, 3, 'versions table, recipe list, recipe import');
+  assert.ok(!/'v' \+ (v|x\.version)\.versionNumber/.test(vault), 'no bare v{n} version display left');
+  const floorb = readFileSync(new URL('web/ws-floorb.js', ROOT), 'utf8');
+  assert.equal((floorb.match(/RacCode\.spec\(/g) ?? []).length, 2, 'QC rounds table and QC APPROVED label');
+  const RC = umdLoad('web/rac-code.js');
+  assert.equal(RC.spec!('RAC 27 / 1150', 3), 'RAC 27 / 1150 · spec v3');
+  assert.equal(RC.spec!('DEMO-PRD-1', 3), 'v3');
+  assert.equal(RC.spec!(null, 2), 'v2');
+  const qc = readFileSync(new URL('backend/api/src/prodfloor/qc-floor.service.ts', ROOT), 'utf8');
+  assert.match(qc, /pm\.product_code as "specProductCode"/);
+});

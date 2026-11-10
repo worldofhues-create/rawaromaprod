@@ -1647,7 +1647,7 @@
           td('Product', h('span', {}, [h('span', { class: 'mono' }, [r.productCode]), h('div', { style: 'color:var(--ink-3)' }, [r.productName || ''])])),
           td('Kind', r.kind === 'single_chemical' ? 'Single chemical' : 'Blend'),
           td('Formula', r.formulaCode, 'mono'),
-          td('Version', v ? 'v' + v.versionNumber + ' · ' + v.sealedCount + ' line(s)' : '—'),
+          td('Version', v ? racVersion(r.formulaCode, v.versionNumber) + ' · ' + v.sealedCount + ' line(s)' : '—'), /* RAC-CODES-RP-3 */
           td('State', h('span', { class: 'chip ' + sg[0] }, [sg[1]])),
           td('', h('div', { style: 'display:flex;gap:6px;justify-content:flex-end' }, acts)),
         ]);
@@ -1788,7 +1788,7 @@
         var notes = x.errors.map(function (m) { return h('div', { class: 'chip r', style: 'margin:2px 0' }, [m]); })
           .concat(x.warnings.map(function (m) { return h('div', { class: 'chip a', style: 'margin:2px 0' }, [m]); }));
         return h('tr', {}, [td('Formula', (x.productCode ? x.productCode + ' · ' : '') + (x.formulaCode || ''), 'mono'), td('Lines', x.lineCount), td('Total %', x.total),
-          td('Into', 'v' + x.version.versionNumber + (x.version.create ? ' (new)' : '')), td('Notes', notes.length ? h('div', {}, notes) : h('span', { class: 'chip g' }, ['OK']))]);
+          td('Into', racVersion(x.formulaCode, x.version.versionNumber) + (x.version.create ? ' (new)' : '')) /* RAC-CODES-RP-3 */, td('Notes', notes.length ? h('div', {}, notes) : h('span', { class: 'chip g' }, ['OK']))]);
       });
       out.appendChild(h('p', { class: 'card-note' }, [r.errorCount ? (r.errorCount + ' problem(s) to fix — nothing will be sealed until the file is clean.')
         : ('Ready: ' + r.recipes.length + ' recipe(s), ' + r.rows.length + ' line(s)' + (r.warningCount ? ', ' + r.warningCount + ' warning(s) — check them before sealing.' : '.'))]));

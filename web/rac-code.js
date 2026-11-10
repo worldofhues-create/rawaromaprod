@@ -39,6 +39,14 @@
     if (n == null || n === '') return '';
     return FORMULA.test(String(formulaCode || '').trim()) ? String(formulaCode).trim() + ' / F' + n : 'v' + n;
   }
+  /* RAC-CODES-RP-3: a QC checkpoint spec is pinned per PRODUCT (quality.qc_checkpoint_set.product_id),
+     not per formula grade, and the floor never holds the formula -- so its version is named by the
+     RAC product code, 'RAC 27 / 1150 · spec v3', never by a formula id (F{n} is a formula's, and a
+     spec version is not one). A product without a RAC code keeps plain 'v{n}'. */
+  function spec(productCode, n) {
+    if (n == null || n === '') return '';
+    return PRODUCT.test(String(productCode || '').trim()) ? String(productCode).trim() + ' · spec v' + n : 'v' + n;
+  }
   function normalise(s) { return String(s == null ? '' : s).replace(/[\s/.\-·_]+/g, '').toUpperCase(); }
-  return { gradeLabel: gradeLabel, parse: parse, line: line, version: version, normalise: normalise };
+  return { gradeLabel: gradeLabel, parse: parse, line: line, version: version, spec: spec, normalise: normalise };
 });

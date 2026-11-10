@@ -104,8 +104,10 @@ export class QcFloorService {
     const b = (await this.sql`select oil_batch_id::text as "oilBatchId", batch_number as "batchNumber", produced_qty::text as "producedQty", status from production.oil_batch_master where oil_batch_id = ${oilBatchId}`)[0];
     if (!b) throw new NotFoundException('Batch not found.');
     const rounds = await this.sql`select r.round_no as "roundNo", r.decision, r.defect_type as "defectType", r.reasons, r.rework_no as "reworkNo", r.inspector_id as "inspectorId",
-        r.created_dt as "createdDt", s.version as "specVersion", r.qc_capa_id::text as "capaId" from quality.batch_qc_round r
-        join quality.qc_checkpoint_set s on s.qc_checkpoint_set_id = r.qc_checkpoint_set_id where r.oil_batch_id = ${oilBatchId} order by r.round_no`;
+        r.created_dt as "createdDt", s.version as "specVersion", pm.product_code as "specProductCode", r.qc_capa_id::text as "capaId" from quality.batch_qc_round r
+        join quality.qc_checkpoint_set s on s.qc_checkpoint_set_id = r.qc_checkpoint_set_id
+        /* RAC-CODES-RP-3: the spec's product, so a RAC product's spec version is named by its code. */
+        left join packaging.product_master pm on pm.product_id = s.product_id where r.oil_batch_id = ${oilBatchId} order by r.round_no`;
     const reworks = await this.sql`select rework_no as "reworkNo", adjustment_mg::text as "adjustmentMg", note, created_by as "createdBy", created_dt as "createdDt" from quality.batch_rework where oil_batch_id = ${oilBatchId} order by rework_no`;
     const pin = (await this.sql`select qc_checkpoint_set_id::text as id from quality.batch_qc_round where oil_batch_id = ${oilBatchId} order by round_no limit 1`)[0];
     const hold = (await this.sql`select lot_hold_id::text as "lotHoldId", reason, held_dt as "heldDt" from inventory.lot_hold where subject_type = 'OIL_BATCH' and subject_id = ${oilBatchId} and released_dt is null`)[0] ?? null;
