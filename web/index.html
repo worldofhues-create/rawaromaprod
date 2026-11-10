@@ -16,7 +16,7 @@
        then the ALEMBIC visual contract (web/ui-contract/CONTRACT_HASH pins its version; do not
        hand-edit alembic-tokens.css — regenerate + re-vendor instead), then the Factory layer. -->
   <!-- FONT-RP-1: Manrope + JetBrains Mono, self-hosted; the only two faces. -->
-  <link rel="preload" href="/ui-contract/fonts/manrope-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/ui-contract/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/ui-contract/fonts/type.css">
   <link rel="stylesheet" href="/ui-contract/rac-console.css">
   <link rel="stylesheet" href="/ui-contract/alembic-tokens.css">
@@ -29,7 +29,7 @@
 <body>
   <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body> so
        it paints before shell.js runs; it lifts once #app has content. -->
-  <script src="/rac-preload.js" data-mount="#app" data-logo="/logo/raw-logo@3x.png" data-fonts="/ui-contract/fonts/"></script>
+  <script src="/rac-preload.js" data-mount="#app" data-logo="/logo/rac-lockup-shell-fluke-ink.png" data-fonts="/ui-contract/fonts/"></script>
   <div class="stage" id="root"><div id="app" class="app"></div></div>
   <script src="/qrcode.js"></script>
   <!-- Split from the former monolithic app.js (mechanical, no behaviour change) so parallel

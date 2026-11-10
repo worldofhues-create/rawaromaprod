@@ -553,7 +553,7 @@
     var ended = sessionEndedNote ? h('p', { class: 'sub', role: 'status', id: 'vault-ended' }, ['Your session ended for security; sign in again.']) : null;
     sessionEndedNote = false;
     var card = h('div', { class: 'login-card' }, [
-      h('img', { class: 'brand-logo brand-logo--login', src: '/logo/raw-logo.png', srcset: '/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x', width: '88', height: '40', alt: 'RAW Aromachem' }),
+      raw('<span class="brand-lockup brand-lockup--login"><img class="brand-logo brand-logo--login" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--login" src="/logo/rac-wordmark-ink.png" alt="RAW Aromachem"></span>'),
       h('h1', { class: 'mark' }, ['Vault']),
       h('p', { class: 'sub' }, ['Raw Aromachem formula access.']),
       ended,
@@ -603,7 +603,7 @@
   function raw(html) { var t = document.createElement('template'); t.innerHTML = html.trim(); return t.content.firstChild; }
   // BrandMark — the RAW logo (UX-D, release/ui/BRAND_ASSETS.md): reversed art on the ink rail.
   function brandMark(sub, onInk) {
-    return raw('<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (onInk ? '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' : '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="66" height="30" alt="">') + '<span class="bt">Alembic<small>' + sub + '</small></span></span>');
+    return raw('<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (onInk ? '<span class="brand-lockup brand-lockup--rail"><img class="brand-logo brand-logo--rail" src="/logo/rac-icon-shell-fluke-white.png" alt=""><img class="brand-wordmark brand-wordmark--rail" src="/logo/rac-wordmark-white.png" alt=""></span>' : '<span class="brand-lockup brand-lockup--rail"><img class="brand-logo brand-logo--rail" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--rail" src="/logo/rac-wordmark-ink.png" alt=""></span>') + '<span class="bt">Alembic<small>' + sub + '</small></span></span>');
   }
   // Rail state, as the reference's useRailToggle: collapsed by default (body.rail-off, the dock is
   // the navigation); on a phone the rail opens as a drawer (body.rail-open).
@@ -805,7 +805,7 @@
       !trail && HELP[activeView] ? h('p', { class: 'screen-help', style: 'margin:0 0 var(--s-snug);font:var(--w-reg) var(--t-body)/1.4 var(--font-ui);color:var(--ink-2);max-width:80ch' }, [HELP[activeView]]) : null, contentEl]);
     var main = h('div', { class: 'main' }, [h('div', { class: 'secure-banner' }, [h('span', { class: 'dot' }), h('span', {}, ['Secure zone · every reveal is logged']), h('span', { class: 'who-when' }, [session.email + ' · ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })])]), bar, h('div', { class: 'content' }, [view])]);
     var dock = h('div', { class: 'glass glass-deep qdock', role: 'toolbar', 'aria-label': 'Quick access' },
-      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Vault home', onclick: function () { go(visible[0].id); } }, [raw('<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">')]),
+      [h('button', { type: 'button', class: 'brandmark qd-brand', 'aria-label': 'Vault home', onclick: function () { go(visible[0].id); } }, [raw('<span class="brand-lockup brand-lockup--dock"><img class="brand-logo brand-logo--dock" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--dock" src="/logo/rac-wordmark-ink.png" alt=""></span>')]),
        h('button', { type: 'button', id: 'pv-dock-toggle', class: 'qb dk-navtoggle hot', 'aria-label': 'All sections', 'aria-pressed': 'false', onclick: function () { setRail(!railOpen); } },
          [raw(CI.menu), h('span', { class: 'kb' }, [h('span', { class: 'kb-d' }, ['All sections']), h('span', { class: 'kb-m' }, ['More']), h('span', { class: 'kc' }, [' · ⌘\\'])])]),
        h('span', { class: 'sep' })]

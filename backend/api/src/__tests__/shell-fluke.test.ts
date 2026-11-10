@@ -182,3 +182,22 @@ test('smaller stock: front panel only, through RaLabel.build, still fail closed'
   const ok = L.build(SF.smallContent(SF.compose(facts()), { mode: 'production' }), '75x50');
   assert.ok(ok.elements.some((e: { t: string; d?: string }) => e.t === 'code128' && e.d === 'L-7Q3K9XA'));
 });
+
+/* BRAND-6: the RAC marks are the brand handoff's images; "RAC" is never typed as the mark (an RAC
+   CODE such as 'RAC 27' is data and stays text). */
+test('BRAND-6: the wrap draws the handoff icon and wordmark, never the letters RAC, and the PDF prints them as one-ink stencils', () => {
+  const t = SF.template(SF.compose(facts()), { mode: 'preview' });
+  const marks = t.elements.filter((e: { t: string }) => e.t === 'mark');
+  assert.ok(marks.filter((e: { m: string }) => e.m === 'icon').length >= 2, 'the seal and the ink band carry the icon');
+  assert.ok(marks.some((e: { m: string }) => e.m === 'wordmark'));
+  assert.ok(!SF.texts(t).some((s: string) => s.trim() === 'RAC'), 'no RAC set in type');
+  assert.ok(!t.elements.some((e: { t: string }) => e.t === 'path'), 'no traced path left');
+  const svg = SF.svg(t, { marks: sb.RaBrandMarks });
+  assert.match(svg, /<mask id="mk-icon-[^"]+"><image href="data:image\/png;base64,/);
+  assert.match(svg, /data-mark="wordmark"/);
+  const pdf = Buffer.from(L.render(t, 'pdf').body, 'base64').toString('latin1');
+  assert.ok((pdf.match(/\/ImageMask true/g) || []).length === 2, 'one stencil XObject per mark');
+  assert.match(pdf, /\/XObject << \/Mk1 \d+ 0 R \/Mk2 \d+ 0 R >>/);
+  assert.equal(SF.INK.sand, '#EFE6D8', 'Sand from the brand handoff');
+  assert.ok(SF.texts(t).includes('Because every great fragrance starts RAW.'));
+});

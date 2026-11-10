@@ -497,7 +497,7 @@
   function brandMark(sub, onInk, compact) {
     // UX-D (release/ui/BRAND_ASSETS.md): the RAW logo, not a letter tile — reversed art on the ink
     // rail, colour art on light glass; logo/brand.css fixes the height per context.
-    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (compact ? '<img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt="">' : (onInk ? '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo-ondark.png" srcset="/logo/raw-logo-ondark.png 1x, /logo/raw-logo-ondark@2x.png 2x, /logo/raw-logo-ondark@3x.png 3x" width="66" height="30" alt="">' : '<img class="brand-logo brand-logo--rail" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="66" height="30" alt="">')) +
+    return '<span class="brandmark' + (onInk ? ' on-ink' : '') + '">' + (compact ? '<span class="brand-lockup brand-lockup--dock"><img class="brand-logo brand-logo--dock" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--dock" src="/logo/rac-wordmark-ink.png" alt=""></span>' : (onInk ? '<span class="brand-lockup brand-lockup--rail"><img class="brand-logo brand-logo--rail" src="/logo/rac-icon-shell-fluke-white.png" alt=""><img class="brand-wordmark brand-wordmark--rail" src="/logo/rac-wordmark-white.png" alt=""></span>' : '<span class="brand-lockup brand-lockup--rail"><img class="brand-logo brand-logo--rail" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--rail" src="/logo/rac-wordmark-ink.png" alt=""></span>')) +
       (compact ? '' : '<span class="bt">Alembic' + (sub ? '<small>' + sub + '</small>' : '') + '</span>') + '</span>';
   }
   // GCard — one card shell so every panel is the same shape: glass, lift, title + caption, the
@@ -787,7 +787,7 @@
   }
   function dockInnerHtml() {
     var items = dockNav();
-    return '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><img class="brand-logo brand-logo--dock" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="48" height="22" alt=""></button>' +
+    return '<button type="button" class="brandmark qd-brand" id="ra-dock-home" aria-label="Dashboard"><span class="brand-lockup brand-lockup--dock"><img class="brand-logo brand-logo--dock" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--dock" src="/logo/rac-wordmark-ink.png" alt=""></span></button>' +
       '<button type="button" id="ra-dock-toggle" class="qb dk-navtoggle hot" aria-label="All sections" aria-pressed="false">' + CI.menu +
         '<span class="kb"><span class="kb-d">All sections</span><span class="kb-m">More</span><span class="kc"> · ⌘\\</span></span></button>' +
       '<span class="sep"></span>' +
@@ -2804,7 +2804,7 @@
     $('app').className = '';
     $('app').innerHTML =
       '<div class="login-wrap"><div class="login-card">' +
-        '<img class="brand-logo brand-logo--login" src="/logo/raw-logo.png" srcset="/logo/raw-logo.png 1x, /logo/raw-logo@2x.png 2x, /logo/raw-logo@3x.png 3x" width="88" height="40" alt="RAW Aromachem">' +
+        '<span class="brand-lockup brand-lockup--login"><img class="brand-logo brand-logo--login" src="/logo/rac-icon-shell-fluke-ink.png" alt=""><img class="brand-wordmark brand-wordmark--login" src="/logo/rac-wordmark-ink.png" alt="RAW Aromachem"></span>' +
         '<h1 class="mark">Factory</h1>' +
         '<p class="sub">Raw Aromachem production.</p>' +
         '<a id="lb" href="' + (alembicSignInUrl('factory') || '#') + '" class="btn p"' + (ALEMBIC_CONSOLE_URL ? '' : ' aria-disabled="true"') + '>Raw Aromachem sign-in &rarr;</a>' +

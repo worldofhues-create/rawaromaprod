@@ -25,7 +25,7 @@
        visitor's IP disclosed to Google) and, here, the reason a same-origin `connect-src 'self'`
        CSP is enough with no font-origin allowance at all. -->
   <!-- FONT-RP-1: Manrope + JetBrains Mono, self-hosted; the only two faces. -->
-  <link rel="preload" href="/fonts/manrope-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/manrope-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="/fonts/type.css">
   <link rel="stylesheet" href="/rac-console.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
@@ -36,7 +36,7 @@
 </head>
 <body>
   <!-- UX-D: the RAW welcome (ALEMBIC's public/rac-preload.js, byte-identical), first in <body>. -->
-  <script src="/rac-preload.js" data-mount="#root" data-logo="/logo/raw-logo@3x.png" data-fonts="/fonts/"></script>
+  <script src="/rac-preload.js" data-mount="#root" data-logo="/logo/rac-lockup-shell-fluke-ink.png" data-fonts="/fonts/"></script>
   <div class="stage" id="root"></div>
   <!-- UX-F: click/notification/alert sounds (window.RaSound); before the console script, which calls it. -->
   <script src="/sound.js"></script>

@@ -8,3 +8,11 @@
 .brand-logo--rail{height:30px}
 .brand-logo--dock{height:22px}
 .brand-logo--login{height:40px;margin:0 0 var(--s-base,20px)}
+/* BRAND-8: the RAC header lockup from the owner's brand handoff -- the Shell Fluke icon and the
+   wordmark image (never "RAC" typed), 8 px apart at the 20 px header size, 0.5 x icon height
+   elsewhere; the icon heights below replace the RAW artwork's. */
+.brand-lockup{display:inline-flex;align-items:center;flex:0 0 auto;line-height:0}
+.brand-lockup--rail{gap:8px}.brand-lockup--rail .brand-logo{height:20px}.brand-wordmark--rail{height:17px}
+.brand-lockup--dock{gap:8px}.brand-lockup--dock .brand-logo{height:16px}.brand-wordmark--dock{height:13.6px}
+.brand-lockup--login{gap:14px;margin:0 0 var(--s-base,20px)}.brand-lockup--login .brand-logo{height:28px;margin:0}.brand-wordmark--login{height:23.8px}
+.brand-wordmark{display:block;flex:0 0 auto;width:auto;object-fit:contain}
