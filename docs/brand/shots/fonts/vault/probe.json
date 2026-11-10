@@ -1,0 +1,28 @@
+[
+  {
+    "route": "/index.html",
+    "title": "Vault · Raw Aromachem",
+    "fonts": [
+      "Manrope 200 800 loaded",
+      "JetBrains Mono 100 800 loaded"
+    ],
+    "manropeCheck": true,
+    "body": "Manrope, system-ui, sans-serif",
+    "code": null,
+    "mono": {
+      "tag": "SPAN",
+      "text": "RAW Aromachem",
+      "family": "\"JetBrains Mono\", ui-monospace, monospace"
+    },
+    "heading": "Manrope, system-ui, sans-serif",
+    "firstFamiliesOfTextNodes": [
+      "Manrope",
+      "JetBrains Mono"
+    ],
+    "fontRequests": [
+      "http://127.0.0.1:3472/fonts/manrope-variable.woff2",
+      "http://127.0.0.1:3472/fonts/jetbrains-mono-variable.woff2"
+    ],
+    "shot": "docs/brand/shots/fonts/vault/index_html.png"
+  }
+]
