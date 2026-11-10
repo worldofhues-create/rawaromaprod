@@ -20,7 +20,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../../../../', import.meta.url));
-const ALLOWED = new Set(['manrope', 'jetbrains mono']);
+const ALLOWED = new Set(['manrope', 'jetbrains mono', 'rozha one', 'noto nastaliq urdu']); // BRAND-9: the brand handoff's four
 const GENERIC = new Set(['sans-serif', 'serif', 'monospace', 'system-ui', 'ui-sans-serif', 'ui-serif', 'ui-monospace',
   'cursive', 'fantasy', 'inherit', 'initial', 'unset', 'emoji', 'math']);
 const KNOWN = ['Outfit', 'Cabinet Grotesk', 'Geist', 'Inter', 'Roboto', 'Helvetica Neue', 'Helvetica', 'Arial', 'SF Pro',
@@ -83,11 +83,14 @@ test('the label screen/print HTML is Manrope, with the code in JetBrains Mono', 
 test('each console root declares both faces from its own origin, and ships no other font file', () => {
   for (const dir of ['web/ui-contract/fonts', 'web-platform/fonts', 'web-vault/fonts']) {
     const css = readFileSync(join(ROOT, dir, 'type.css'), 'utf8');
-    assert.match(css, /font-family: 'Manrope';[^}]*src: url\(\/(ui-contract\/)?fonts\/manrope-variable\.woff2\)/, dir);
-    assert.match(css, /font-family: 'JetBrains Mono';[^}]*src: url\(\/(ui-contract\/)?fonts\/jetbrains-mono-variable\.woff2\)/, dir);
+    for (const [fam, file] of [['Manrope', 'manrope-latin'], ['Manrope', 'manrope-latin-ext'], ['JetBrains Mono', 'jetbrains-mono-latin'],
+      ['Rozha One', 'rozha-one-latin'], ['Rozha One', 'rozha-one-devanagari'], ['Noto Nastaliq Urdu', 'noto-nastaliq-urdu-latin'], ['Noto Nastaliq Urdu', 'noto-nastaliq-urdu-arabic']])
+      assert.match(css, new RegExp(`font-family:'${fam}';[^}]*src:url\\(/(ui-contract/)?fonts/${file}\\.woff2\\)`), `${dir}: ${fam} ${file}`);
     const fonts = readdirSync(join(ROOT, dir)).filter((f) => /\.(woff2?|ttf|otf)$/.test(f)).sort();
-    assert.deepEqual(fonts, ['jetbrains-mono-variable.woff2', 'manrope-variable.woff2'], dir);
-    for (const lic of ['OFL-manrope.txt', 'OFL-jetbrains-mono.txt']) assert.ok(existsSync(join(ROOT, dir, lic)), `${dir}/${lic}`);
+    assert.deepEqual(fonts, ['jetbrains-mono-latin.woff2', 'manrope-latin-ext.woff2', 'manrope-latin.woff2', 'noto-nastaliq-urdu-arabic.woff2',
+      'noto-nastaliq-urdu-latin.woff2', 'rozha-one-devanagari.woff2', 'rozha-one-latin.woff2'], dir);
+    assert.doesNotMatch(readFileSync(join(ROOT, dir.split('/')[0], dir.startsWith('web/') ? 'index.html' : 'index.html'), 'utf8'), /rel="preload"[^>]*(rozha|noto)/, 'Rozha / Noto never preloaded');
+    for (const lic of ['OFL-manrope.txt', 'OFL-jetbrains-mono.txt', 'OFL-rozha-one.txt', 'OFL-noto-nastaliq-urdu.txt']) assert.ok(existsSync(join(ROOT, dir, lic)), `${dir}/${lic}`);
   }
   assert.ok(!existsSync(join(ROOT, 'web/fonts')) || readdirSync(join(ROOT, 'web/fonts')).length === 0, 'web/fonts holds old files');
 });
@@ -100,6 +103,8 @@ test('the scanner fires on each planted shape', () => {
     "<b style=\"font-family:'Comic Neue', system-ui\">",
     "el.style.fontFamily = 'Georgia, serif'",
     ".x{font-family:'Manrope','Inter',sans-serif}",
+    ".x{font-family:'Tiro Devanagari Hindi',serif}", // BRAND-9: a fifth family
   ]) assert.ok(offFaces(planted).length > 0, planted);
+  assert.deepEqual(offFaces(".x{font-family:'Rozha One',serif}.u{font-family:'Noto Nastaliq Urdu',serif}"), []);
   assert.deepEqual(offFaces(".x{font-family:'Manrope', system-ui, sans-serif}.c{font:600 11px 'JetBrains Mono',ui-monospace,monospace}"), []);
 });

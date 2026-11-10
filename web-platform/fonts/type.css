@@ -1,27 +1,35 @@
-/* FONT-RP-1: the two faces RawProd ships, and no other.
+/* BRAND-9 (RawProd, the same sheet as ALEMBIC BRAND-1): the brand handoff's type (handoff/brand/README.md, "RAW Brand Typekit v4", OFL 1.1),
+ * superseding FONT-1's self-converted variable files. Four families, and no other:
  *
- * Owner decision 2026-11-10: Manrope is the only UI face; JetBrains Mono is
- * for codes, labels and numbers. Both are the upstream variable fonts (OFL 1.1,
- * licences beside them), served from this origin -- the same files as
- * ALEMBIC's apps/web/public/fonts. No font CDN.
+ *   Manrope          200-700  everything (display 200, body 400, UI 500-600)
+ *   JetBrains Mono   400/500  codes, labels, eyebrows
+ *   Rozha One        400      accent serif and Devanagari -- loaded only where a rule names it
+ *   Noto Nastaliq Urdu 400/600 Urdu / Arabic-script setting -- loaded only where a rule names it
+ *
+ * The handoff's fonts.css declares one file per weight, but its six Manrope files are
+ * byte-identical (sha256 8bd97e6b...: Google's latin subset of the variable font, wght 200-800),
+ * as are its two JetBrains Mono and its two Noto pairs. So each is declared ONCE over its weight
+ * range: the same glyphs, without a mid-tier phone fetching one file six times.
+ *
+ * That latin subset has no rupee sign. manrope-latin-ext.woff2 is the same upstream Manrope
+ * (google/fonts Manrope[wght].ttf, v4.505, the handoff's own version) cut to the latin-ext range,
+ * where U+20B9 lives; the browser fetches it only for a character in that range.
+ *
+ * Rozha One and Noto Nastaliq Urdu are never preloaded, and no stack names them yet, so no page
+ * downloads them: a face is fetched only when text in its unicode-range is set in its family.
  */
-@font-face {
-  font-family: 'Manrope';
-  font-style: normal;
-  font-weight: 200 800;
-  font-display: swap;
-  src: url(/fonts/manrope-variable.woff2) format('woff2');
-}
-@font-face {
-  font-family: 'JetBrains Mono';
-  font-style: normal;
-  font-weight: 100 800;
-  font-display: swap;
-  src: url(/fonts/jetbrains-mono-variable.woff2) format('woff2');
-}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:200 700;font-display:swap;src:url(/fonts/manrope-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Manrope';font-style:normal;font-weight:200 700;font-display:swap;src:url(/fonts/manrope-latin-ext.woff2) format('woff2');unicode-range:U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF}
+@font-face{font-family:'JetBrains Mono';font-style:normal;font-weight:400 500;font-display:swap;src:url(/fonts/jetbrains-mono-latin.woff2) format('woff2')}
+@font-face{font-family:'Rozha One';font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/rozha-one-devanagari.woff2) format('woff2');unicode-range:U+0900-097F, U+1CD0-1CF4, U+1CF7-1CF9, U+200C-200D, U+20A8, U+20B9, U+20F0, U+25CC, U+A830-A839, U+A8E0-A8FF, U+11B00-11B0A}
+@font-face{font-family:'Rozha One';font-style:normal;font-weight:400;font-display:swap;src:url(/fonts/rozha-one-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
+@font-face{font-family:'Noto Nastaliq Urdu';font-style:normal;font-weight:400 600;font-display:swap;src:url(/fonts/noto-nastaliq-urdu-arabic.woff2) format('woff2');unicode-range:U+0600-06FF, U+0750-077F, U+0870-0891, U+0897-08E1, U+08E3-08FF, U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FE74, U+FE76-FEFC, U+102E0-102FB, U+10E60-10E7E, U+10EC2-10EC7, U+10EC9-10EEE, U+10EF0-10EFF, U+1EE00-1EE03, U+1EE05-1EE1F, U+1EE21-1EE22, U+1EE24, U+1EE27, U+1EE29-1EE32, U+1EE34-1EE37, U+1EE39, U+1EE3B, U+1EE42, U+1EE47, U+1EE49, U+1EE4B, U+1EE4D-1EE4F, U+1EE51-1EE52, U+1EE54, U+1EE57, U+1EE59, U+1EE5B, U+1EE5D, U+1EE5F, U+1EE61-1EE62, U+1EE64, U+1EE67-1EE6A, U+1EE6C-1EE72, U+1EE74-1EE77, U+1EE79-1EE7C, U+1EE7E, U+1EE80-1EE89, U+1EE8B-1EE9B, U+1EEA1-1EEA3, U+1EEA5-1EEA9, U+1EEAB-1EEBB, U+1EEF0-1EEF1}
+@font-face{font-family:'Noto Nastaliq Urdu';font-style:normal;font-weight:400 600;font-display:swap;src:url(/fonts/noto-nastaliq-urdu-latin.woff2) format('woff2');unicode-range:U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD}
 :root {
   --font-sans: 'Manrope', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-accent: 'Rozha One', serif;
+  --font-urdu: 'Noto Nastaliq Urdu', serif;
 }
 body { font-family: var(--font-sans); }
 code, kbd, samp, pre { font-family: var(--font-mono); }

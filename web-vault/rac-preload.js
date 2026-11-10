@@ -91,8 +91,8 @@
   function fontCss(dir) {
     if (!dir) return '';
     var tail = ') format("woff2");font-style:normal;font-display:swap}';
-    return (declared('Manrope', '200 800') ? '' : '@font-face{font-family:Manrope;font-weight:200 800;src:url(' + dir + 'manrope-variable.woff2' + tail) +
-      (declared('JetBrains Mono', '100 800') ? '' : '@font-face{font-family:\'JetBrains Mono\';font-weight:100 800;src:url(' + dir + 'jetbrains-mono-variable.woff2' + tail);
+    return (declared('Manrope', '200 700') ? '' : '@font-face{font-family:Manrope;font-weight:200 700;src:url(' + dir + 'manrope-latin.woff2' + tail) +
+      (declared('JetBrains Mono', '400 500') ? '' : '@font-face{font-family:\'JetBrains Mono\';font-weight:400 500;src:url(' + dir + 'jetbrains-mono-latin.woff2' + tail);
   }
 
   function mountCss(sel) {
