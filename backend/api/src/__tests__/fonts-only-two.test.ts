@@ -8,9 +8,10 @@
  * The planted cases at the bottom prove the scanner fires -- a scan that matches nothing would
  * otherwise pass exactly like a clean tree.
  *
- * Deliberately NOT scanned: label-render.js's PDF and printer-command paths (Type1 Helvetica in
- * the label PDF; printer-resident fonts in TSPL/ZPL/ESC-POS), which cannot carry a web font --
- * see the lane report. Its screen/print HTML path IS scanned.
+ * label-render.js is checked by its own test below: its HTML is Manrope with codes in JetBrains
+ * Mono, and its PDF embeds Manrope (FONT-RP-5, pfc-label-render.test.ts). Deliberately kept: the
+ * printer languages (TSPL/ZPL/EPL/ESC-POS) print in the printer's resident fonts, which no
+ * command can make Manrope.
  */
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -76,6 +77,7 @@ test('the label screen/print HTML is Manrope, with the code in JetBrains Mono', 
   assert.match(html, /font-family:Manrope,system-ui,sans-serif/);
   assert.match(html, /e\.mono \? ';font-family:\\'JetBrains Mono\\'/);
   assert.doesNotMatch(src, /Hue Cycle|huecycle/i, 'labels carry no Hue Cycle footer');
+  assert.doesNotMatch(src, /\/BaseFont \/(Helvetica|Times|Courier)|Subtype \/Type1/, 'the label PDF names no built-in font');
 });
 
 test('each console root declares both faces from its own origin, and ships no other font file', () => {

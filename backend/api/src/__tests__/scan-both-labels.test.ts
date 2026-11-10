@@ -12,6 +12,7 @@ import { runInNewContext } from 'node:vm';
 
 const sandbox: Record<string, unknown> = { Buffer };
 runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox);
+runInNewContext(readFileSync(new URL('../../../../web/label-pdf-font.js', import.meta.url), 'utf8'), sandbox); // FONT-RP-5
 runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const L = sandbox.RaLabel as any;

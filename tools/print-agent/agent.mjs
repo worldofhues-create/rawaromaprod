@@ -36,6 +36,8 @@ export function loadRenderer(path = join(here, '..', '..', 'web', 'label-render.
   const sandbox = { Buffer };
   // SCAN-1: the QR encoder sits next to the renderer and loads first, as on the page.
   runInNewContext(readFileSync(join(dirname(path), 'qrcode.js'), 'utf8'), sandbox);
+  // FONT-RP-5: the Manrope subset that label PDFs embed.
+  runInNewContext(readFileSync(join(dirname(path), 'label-pdf-font.js'), 'utf8'), sandbox);
   runInNewContext(readFileSync(path, 'utf8'), sandbox);
   return sandbox.RaLabel;
 }

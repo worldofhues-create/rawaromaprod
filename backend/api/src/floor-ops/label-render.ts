@@ -23,6 +23,8 @@ export function label(): RaLabel {
     const sandbox: Record<string, unknown> = { Buffer };
     // SCAN-1: the QR encoder first, exactly as the page loads it (qrcode.js before label-render.js).
     runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox);
+    // FONT-RP-5: the Manrope subset label PDFs embed (the page loads it on demand; the server always).
+    runInNewContext(readFileSync(new URL('../../../../web/label-pdf-font.js', import.meta.url), 'utf8'), sandbox);
     runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
     loaded = sandbox.RaLabel as RaLabel;
   }

@@ -11,10 +11,20 @@ import { runInNewContext } from 'node:vm';
 // Loaded as the page loads it (a classic script), in a vm with Buffer for the binary languages.
 const sandbox: Record<string, unknown> = { Buffer };
 runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox); // SCAN-1
+runInNewContext(readFileSync(new URL('../../../../web/label-pdf-font.js', import.meta.url), 'utf8'), sandbox); // FONT-RP-5
 runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const L = sandbox.RaLabel as any;
 
+/* FONT-RP-5: PDF text is Manrope glyph ids (Identity-H); read it back through the font's cmap. */
+function pdfText(pdf: string): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const F = sandbox.RaLabelPdfFont as any;
+  const inv = (face: any) => new Map(Object.entries(face.cmap as Record<string, number>).map(([cp, g]) => [g, String.fromCodePoint(Number(cp))]));
+  const maps: Record<string, Map<number, string>> = { F1: inv(F.regular), F2: inv(F.bold) };
+  return [...pdf.matchAll(/BT \/(F[12]) [\d.]+ Tf [\d.-]+ [\d.-]+ Td <([0-9A-F]*)> Tj ET/g)]
+    .map((m) => (m[2]!.match(/.{4}/g) || []).map((h) => maps[m[1]!]!.get(parseInt(h, 16)) ?? '?').join('')).join('\n');
+}
 const SIZES_12_4 = ['38x25', '50x25', '75x50', '100x50', '100x100', '100x150', '62mm', 'a4'];
 const content = {
   title: 'PACKED',
@@ -59,7 +69,7 @@ test('reprint: the label says REPRINT in every language', () => {
   assert.equal(t.reprint, true);
   for (const lang of ['zpl', 'tspl', 'epl']) assert.match(L.render(t, lang).body, /REPRINT/, lang);
   assert.match(Buffer.from(L.render(t, 'escpos').body, 'base64').toString('latin1'), /REPRINT/);
-  assert.match(Buffer.from(L.render(t, 'pdf').body, 'base64').toString('latin1'), /REPRINT/);
+  assert.match(pdfText(Buffer.from(L.render(t, 'pdf').body, 'base64').toString('latin1')), /REPRINT/);
   assert.match(L.render(t, 'html').body, /REPRINT/);
   // Even a template built without the banner element gets it from the renderer.
   const bare = { ...L.build(content, '100x50'), reprint: true };
@@ -116,7 +126,12 @@ test('PDF: a valid one-page PDF at the label size', () => {
   assert.match(pdf, /^%PDF-1\.4/);
   assert.match(pdf, /%%EOF\s*$/);
   assert.match(pdf, /\/MediaBox \[0 0 283\.46 425\.2\d*\]/);
-  assert.ok(pdf.includes('(Order: SO-1234) Tj'));
+  assert.ok(pdfText(pdf).includes('Order: SO-1234'));
+  // FONT-RP-5: Manrope is embedded (a TrueType program, Identity-H, ToUnicode) and no built-in font is named.
+  assert.match(pdf, /\/Subtype \/Type0 \/BaseFont \/Manrope-(Regular|Bold) \/Encoding \/Identity-H/);
+  assert.match(pdf, /\/FontFile2 \d+ 0 R/);
+  assert.match(pdf, /\/ToUnicode \d+ 0 R/);
+  assert.doesNotMatch(pdf, /Helvetica|\/Type1/);
   const xref = Number(/startxref\s+(\d+)/.exec(pdf)![1]);
   assert.equal(pdf.slice(xref, xref + 4), 'xref');
 });
@@ -142,4 +157,19 @@ test('code128: every pattern is 11 modules (stop 13), and the check digit is the
 test('unknown language or size is refused', () => {
   assert.throws(() => L.build(content, '10x10'), /size/);
   assert.throws(() => L.render(L.build(content, '100x50'), 'postscript'), /language/);
+});
+
+test('PDF: the rupee sign is a Manrope glyph and every xref offset points at its object', () => {
+  const t = L.build({ title: 'Iso E Super', lines: [['Price', '₹1,200']], code: 'FG-0012' }, '100x50');
+  const pdf = Buffer.from(L.render(t, 'pdf').body, 'base64').toString('latin1');
+  assert.ok(pdfText(pdf).includes('Price: ₹1,200'), pdfText(pdf));
+  assert.match(pdf, /<[0-9A-F]{4}> <20B9>/, 'ToUnicode maps a glyph to U+20B9');
+  const xref = Number(/startxref\s+(\d+)/.exec(pdf)![1]);
+  const rows = pdf.slice(xref).split('\n').slice(3).filter((r) => / 00000 n $/.test(r)).map((r) => Number(r.slice(0, 10)));
+  rows.forEach((off, i) => assert.equal(pdf.slice(off, off + String(i + 1).length + 6), `${i + 1} 0 obj`, `object ${i + 1}`));
+  // the embedded program parses as TrueType: version 0x00010000 and a glyf table
+  const m = /\/Length1 (\d+) >>\nstream\n/.exec(pdf)!;
+  const ttf = Buffer.from(pdf.slice(m.index + m[0].length, m.index + m[0].length + Number(m[1])), 'latin1');
+  assert.equal(ttf.readUInt32BE(0), 0x00010000);
+  assert.ok(ttf.includes(Buffer.from('glyf')));
 });

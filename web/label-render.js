@@ -82,6 +82,13 @@
 
   function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
   function r2(v) { return Math.round(v * 100) / 100; }
+  /* FONT-RP-4: font size per mm of element height. Lines are pitched at 1.25 h, so a line's
+   * descender plus the next line's cap must fit in 1.25 h. Manrope's cap is 0.72 em and its
+   * descender 0.30 em: 1.02 em * 1.15 = 1.17 h, leaving a gap. The old 1.4 (cap 1.0 h) put
+   * 1.43 h of glyph into 1.25 h -- the descender of one line struck the caps of the next, in
+   * Arial too (1.30 h), and visibly in Manrope. */
+  var TEXT_EM = 1.15;
+
   function fit(s, widthMm, hMm) {
     var max = Math.max(3, Math.floor(widthMm / (hMm * 0.62)));
     s = String(s == null ? '' : s);
@@ -335,13 +342,46 @@
     return b;
   }
 
-  function pdfText(s) { return String(s).replace(/[^\x20-\x7e]/g, '?').replace(/([()\\])/g, '\\$1'); }
+  /* FONT-RP-5: label PDFs embed Manrope (static 400/700 subsets, web/label-pdf-font.js) as
+   * Type0 / CIDFontType2 / Identity-H fonts with a ToUnicode map, so the rupee sign prints and the
+   * text copies as what it says. The font file is NOT part of this script: the page loads it with
+   * loadPdfFont() only when it renders a PDF; the server and tests load it beside this file. */
+  function pdfFont() {
+    var F = typeof RaLabelPdfFont !== 'undefined' ? RaLabelPdfFont : (typeof self !== 'undefined' ? self.RaLabelPdfFont : undefined);
+    if (!F) throw new Error('The label PDF font is not loaded: call RaLabel.loadPdfFont() first (web/label-pdf-font.js).');
+    return F;
+  }
+  function loadPdfFont(src) {
+    if (typeof RaLabelPdfFont !== 'undefined' || (typeof self !== 'undefined' && self.RaLabelPdfFont)) return Promise.resolve();
+    return new Promise(function (ok, bad) {
+      var el = document.createElement('script');
+      el.src = src || '/label-pdf-font.js'; el.onload = function () { ok(); }; el.onerror = function () { bad(new Error('Could not load the label PDF font.')); };
+      document.head.appendChild(el);
+    });
+  }
+  function b64ToLatin1(b) { return typeof Buffer !== 'undefined' ? Buffer.from(b, 'base64').toString('latin1') : atob(b); }
+  function hex4(n) { return ('000' + n.toString(16).toUpperCase()).slice(-4); }
+  /** Glyph ids for a string in one face; characters the subset lacks print as '?'. */
+  function glyphs(face, s) {
+    var out = [];
+    for (var i = 0; i < s.length; i++) {
+      var cp = s.codePointAt(i); if (cp > 0xffff) i++;
+      var g = face.cmap[cp]; if (g === undefined) { g = face.cmap[63]; cp = 63; }
+      out.push([g, cp]);
+    }
+    return out;
+  }
   function pdf(t) {
+    var F = pdfFont();
     var k = 72 / 25.4, Wp = (t.w * k).toFixed(2), Hp = (t.h * k).toFixed(2), ops = [];
     var Y = function (mm) { return (t.h - mm) * k; };
+    var used = { regular: null, bold: null };
     withReprint(t).forEach(function (e) {
       if (e.t === 'text') {
-        ops.push('BT /' + (e.b ? 'F2' : 'F1') + ' ' + (e.h * 1.4 * k).toFixed(2) + ' Tf ' + (e.x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td (' + pdfText(e.s) + ') Tj ET');
+        var fk = e.b ? 'bold' : 'regular', face = F[fk], gs = glyphs(face, String(e.s));
+        used[fk] = used[fk] || {};
+        gs.forEach(function (g) { used[fk][g[0]] = g[1]; });
+        ops.push('BT /' + (e.b ? 'F2' : 'F1') + ' ' + (e.h * TEXT_EM * k).toFixed(2) + ' Tf ' + (e.x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td <' + gs.map(function (g) { return hex4(g[0]); }).join('') + '> Tj ET');
       } else if (e.t === 'code128') {
         var cb = code128Bars(e.d), mod = e.w / cb.modules;
         cb.bars.forEach(function (bar) {
@@ -359,11 +399,27 @@
     var objs = [
       '<< /Type /Catalog /Pages 2 0 R >>',
       '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
-      '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + Wp + ' ' + Hp + '] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>',
-      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
-      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+      null, // the page, once the font object numbers are known
       '<< /Length ' + stream.length + ' >>\nstream\n' + stream + '\nendstream'
     ];
+    var fontRefs = [];
+    ['regular', 'bold'].forEach(function (fk) {
+      if (!used[fk]) return;
+      var face = F[fk], gids = Object.keys(used[fk]).map(Number).sort(function (a, b) { return a - b; });
+      var ttf = b64ToLatin1(face.ttf), n = objs.length + 1; // n: Type0, n+1 CIDFont, n+2 descriptor, n+3 file, n+4 ToUnicode
+      var bf = gids.map(function (g) { return '<' + hex4(g) + '> <' + hex4(used[fk][g]) + '>'; });
+      var cmap = '/CIDInit /ProcSet findresource begin 12 dict begin begincmap /CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def /CMapName /Adobe-Identity-UCS def /CMapType 2 def\n' +
+        '1 begincodespacerange <0000> <FFFF> endcodespacerange\n' + bf.length + ' beginbfchar\n' + bf.join('\n') + '\nendbfchar\nendcmap CMapName currentdict /CMap defineresource pop end end';
+      objs.push('<< /Type /Font /Subtype /Type0 /BaseFont /' + face.ps + ' /Encoding /Identity-H /DescendantFonts [' + (n + 1) + ' 0 R] /ToUnicode ' + (n + 4) + ' 0 R >>');
+      objs.push('<< /Type /Font /Subtype /CIDFontType2 /BaseFont /' + face.ps + ' /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ' + (n + 2) + ' 0 R /DW 0 /W [' +
+        gids.map(function (g) { return g + ' [' + face.w[g] + ']'; }).join(' ') + '] /CIDToGIDMap /Identity >>');
+      objs.push('<< /Type /FontDescriptor /FontName /' + face.ps + ' /Flags 32 /FontBBox [' + face.bbox.join(' ') + '] /ItalicAngle 0 /Ascent ' + face.ascent + ' /Descent ' + face.descent +
+        ' /CapHeight ' + face.cap + ' /StemV ' + (fk === 'bold' ? 120 : 80) + ' /FontFile2 ' + (n + 3) + ' 0 R >>');
+      objs.push('<< /Length ' + ttf.length + ' /Length1 ' + ttf.length + ' >>\nstream\n' + ttf + '\nendstream');
+      objs.push('<< /Length ' + cmap.length + ' >>\nstream\n' + cmap + '\nendstream');
+      fontRefs.push('/' + (fk === 'bold' ? 'F2' : 'F1') + ' ' + n + ' 0 R');
+    });
+    objs[2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + Wp + ' ' + Hp + '] /Resources << /Font << ' + fontRefs.join(' ') + ' >> >> /Contents 4 0 R >>';
     var s = '%PDF-1.4\n', offs = [];
     objs.forEach(function (o, i) { offs.push(s.length); s += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
     var xref = s.length;
@@ -378,7 +434,7 @@
   function html(t) {
     var parts = ['<div class="ra-label" style="position:relative;box-sizing:border-box;width:' + t.w + 'mm;height:' + t.h + 'mm;background:#fff;color:#000;font-family:Manrope,system-ui,sans-serif;overflow:hidden;page-break-after:always">'];
     withReprint(t).forEach(function (e) {
-      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + (e.mono ? ';font-family:\'JetBrains Mono\',ui-monospace,monospace' : '') + '">' + esc(e.s) + '</div>');
+      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * TEXT_EM) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + (e.mono ? ';font-family:\'JetBrains Mono\',ui-monospace,monospace' : '') + '">' + esc(e.s) + '</div>');
       else if (e.t === 'code128') {
         var cb = code128Bars(e.d), rects = cb.bars.map(function (b) { return '<rect x="' + b[0] + '" y="0" width="' + b[1] + '" height="10"/>'; }).join('');
         parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + cb.modules + ' 10" preserveAspectRatio="none" shape-rendering="crispEdges" data-code128="' + esc(e.d) + '" aria-label="Code 128 ' + esc(e.d) + '">' + rects + '</svg>');
@@ -433,5 +489,5 @@
     return { language: language, encoding: 'utf8', body: html(t) };
   }
 
-  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render };
+  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render, loadPdfFont: loadPdfFont };
 });
