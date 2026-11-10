@@ -371,29 +371,71 @@
     }
     return out;
   }
+  /* SHELL-FLUKE-1: the packed-goods wrap (web/shell-fluke.js) draws in two spot colours with shapes,
+   * right-aligned and arc-set text and JetBrains Mono codes. Those are opt-in element properties:
+   *   any element  c: '#RRGGBB'  fill colour (absent = black, exactly the bytes every older template made)
+   *   text         mono, a: 'r' (right edge at x + w), ls (letter spacing, em)
+   *   rect         { x, y, w, h }           poly { pts: [[x, y]...] }     circle { x, y, r, sw? (stroke mm) }
+   *   arctext      { x, y, r, s, h, start (deg, 0 = 12 o'clock, clockwise) }
+   * Every older template has none of them, so its PDF is byte-for-byte what it was. */
+  function rgbOp(c) { var n = parseInt(String(c).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) { return (v / 255).toFixed(3); }).join(' '); }
+  function faceKey(F, e) { return e.mono && F.mono ? (e.b ? 'monoBold' : 'mono') : (e.b ? 'bold' : 'regular'); }
+  var FONT_TAG = { regular: 'F1', bold: 'F2', mono: 'F3', monoBold: 'F4' };
+  function textWidthMm(face, gs, fsMm, lsEm) {
+    var adv = 0; gs.forEach(function (g) { adv += (face.w[g[0]] || 0) / 1000; });
+    return adv * fsMm + (lsEm || 0) * fsMm * Math.max(gs.length - 1, 0);
+  }
   function pdf(t) {
     var F = pdfFont();
     var k = 72 / 25.4, Wp = (t.w * k).toFixed(2), Hp = (t.h * k).toFixed(2), ops = [];
     var Y = function (mm) { return (t.h - mm) * k; };
-    var used = { regular: null, bold: null };
+    var used = { regular: null, bold: null, mono: null, monoBold: null };
+    function useGlyphs(fk, gs) { used[fk] = used[fk] || {}; gs.forEach(function (g) { used[fk][g[0]] = g[1]; }); }
+    var P = function (v) { return (v * k).toFixed(2); };
     withReprint(t).forEach(function (e) {
+      var col = e.c && e.c !== '#000000' ? rgbOp(e.c) : null;
+      if (col) ops.push('q ' + col + ' rg ' + col + ' RG');
       if (e.t === 'text') {
-        var fk = e.b ? 'bold' : 'regular', face = F[fk], gs = glyphs(face, String(e.s));
-        used[fk] = used[fk] || {};
-        gs.forEach(function (g) { used[fk][g[0]] = g[1]; });
-        ops.push('BT /' + (e.b ? 'F2' : 'F1') + ' ' + (e.h * TEXT_EM * k).toFixed(2) + ' Tf ' + (e.x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td <' + gs.map(function (g) { return hex4(g[0]); }).join('') + '> Tj ET');
+        var fk = faceKey(F, e), face = F[fk], gs = glyphs(face, String(e.s)), fs = e.h * TEXT_EM;
+        useGlyphs(fk, gs);
+        var x = e.x;
+        if (e.a === 'r') x = e.x + e.w - textWidthMm(face, gs, fs, e.ls);
+        ops.push('BT /' + FONT_TAG[fk] + ' ' + (fs * k).toFixed(2) + ' Tf ' + (e.ls ? (e.ls * fs * k).toFixed(3) + ' Tc ' : '') + (x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td <' + gs.map(function (g) { return hex4(g[0]); }).join('') + '> Tj ET');
+      } else if (e.t === 'arctext') {
+        var fk2 = faceKey(F, e), face2 = F[fk2], gs2 = glyphs(face2, String(e.s)), fs2 = e.h * TEXT_EM, ang = (e.start || 0) * Math.PI / 180;
+        useGlyphs(fk2, gs2);
+        gs2.forEach(function (g) {
+          var adv = (face2.w[g[0]] || 0) / 1000 * fs2 + (e.ls || 0) * fs2, mid = ang + adv / 2 / e.r;
+          // the glyph's baseline is tangent to the circle at its centre; start half an advance back
+          var gx = e.x + e.r * Math.sin(mid) - Math.cos(mid) * adv / 2, gy = e.y - e.r * Math.cos(mid) - Math.sin(mid) * adv / 2;
+          var ca = Math.cos(-mid), sa = Math.sin(-mid);
+          ops.push('BT /' + FONT_TAG[fk2] + ' ' + (fs2 * k).toFixed(2) + ' Tf ' + ca.toFixed(4) + ' ' + sa.toFixed(4) + ' ' + (-sa).toFixed(4) + ' ' + ca.toFixed(4) + ' ' + P(gx) + ' ' + Y(gy).toFixed(2) + ' Tm <' + hex4(g[0]) + '> Tj ET');
+          ang += adv / e.r;
+        });
+      } else if (e.t === 'rect') {
+        ops.push(P(e.x) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + P(e.w) + ' ' + P(e.h) + ' re f');
+      } else if (e.t === 'poly') {
+        ops.push(e.pts.map(function (p, i) { return P(p[0]) + ' ' + Y(p[1]).toFixed(2) + (i ? ' l' : ' m'); }).join(' ') + ' h f');
+      } else if (e.t === 'circle') {
+        var r = e.r, cx = e.x, cy = e.y, kk = 0.5523 * r;
+        var c = function (x, y) { return P(x) + ' ' + Y(y).toFixed(2); };
+        ops.push((e.sw ? P(e.sw) + ' w ' : '') + c(cx + r, cy) + ' m ' + c(cx + r, cy - kk) + ' ' + c(cx + kk, cy - r) + ' ' + c(cx, cy - r) + ' c ' +
+          c(cx - kk, cy - r) + ' ' + c(cx - r, cy - kk) + ' ' + c(cx - r, cy) + ' c ' + c(cx - r, cy + kk) + ' ' + c(cx - kk, cy + r) + ' ' + c(cx, cy + r) + ' c ' +
+          c(cx + kk, cy + r) + ' ' + c(cx + r, cy + kk) + ' ' + c(cx + r, cy) + ' c ' + (e.sw ? 'S' : 'f'));
       } else if (e.t === 'code128') {
         var cb = code128Bars(e.d), mod = e.w / cb.modules;
         cb.bars.forEach(function (bar) {
           ops.push(((e.x + bar[0] * mod) * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + (bar[1] * mod * k).toFixed(2) + ' ' + (e.h * k).toFixed(2) + ' re f');
         });
       } else if (e.t === 'qr') {
-        qrMatrix(e.d).forEach(function (row, r) {
+        var QM = qrMatrix(e.d), qm = e.m || e.w / QM.length; // SHELL-FLUKE-1: a sized-by-width QR has no m
+        QM.forEach(function (row, r) {
           row.forEach(function (dk, cI) {
-            if (dk) ops.push(((e.x + cI * e.m) * k).toFixed(2) + ' ' + Y(e.y + (r + 1) * e.m).toFixed(2) + ' ' + (e.m * k).toFixed(2) + ' ' + (e.m * k).toFixed(2) + ' re f');
+            if (dk) ops.push(((e.x + cI * qm) * k).toFixed(2) + ' ' + Y(e.y + (r + 1) * qm).toFixed(2) + ' ' + (qm * k).toFixed(2) + ' ' + (qm * k).toFixed(2) + ' re f');
           });
         });
       } else if (e.t === 'line') ops.push((e.x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + (e.w * k).toFixed(2) + ' ' + (e.h * k).toFixed(2) + ' re f');
+      if (col) ops.push('Q');
     });
     var stream = ops.join('\n');
     var objs = [
@@ -403,7 +445,7 @@
       '<< /Length ' + stream.length + ' >>\nstream\n' + stream + '\nendstream'
     ];
     var fontRefs = [];
-    ['regular', 'bold'].forEach(function (fk) {
+    ['regular', 'bold', 'mono', 'monoBold'].forEach(function (fk) {
       if (!used[fk]) return;
       var face = F[fk], gids = Object.keys(used[fk]).map(Number).sort(function (a, b) { return a - b; });
       var ttf = b64ToLatin1(face.ttf), n = objs.length + 1; // n: Type0, n+1 CIDFont, n+2 descriptor, n+3 file, n+4 ToUnicode
@@ -414,10 +456,10 @@
       objs.push('<< /Type /Font /Subtype /CIDFontType2 /BaseFont /' + face.ps + ' /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >> /FontDescriptor ' + (n + 2) + ' 0 R /DW 0 /W [' +
         gids.map(function (g) { return g + ' [' + face.w[g] + ']'; }).join(' ') + '] /CIDToGIDMap /Identity >>');
       objs.push('<< /Type /FontDescriptor /FontName /' + face.ps + ' /Flags 32 /FontBBox [' + face.bbox.join(' ') + '] /ItalicAngle 0 /Ascent ' + face.ascent + ' /Descent ' + face.descent +
-        ' /CapHeight ' + face.cap + ' /StemV ' + (fk === 'bold' ? 120 : 80) + ' /FontFile2 ' + (n + 3) + ' 0 R >>');
+        ' /CapHeight ' + face.cap + ' /StemV ' + (fk === 'bold' || fk === 'monoBold' ? 120 : 80) + ' /FontFile2 ' + (n + 3) + ' 0 R >>');
       objs.push('<< /Length ' + ttf.length + ' /Length1 ' + ttf.length + ' >>\nstream\n' + ttf + '\nendstream');
       objs.push('<< /Length ' + cmap.length + ' >>\nstream\n' + cmap + '\nendstream');
-      fontRefs.push('/' + (fk === 'bold' ? 'F2' : 'F1') + ' ' + n + ' 0 R');
+      fontRefs.push('/' + FONT_TAG[fk] + ' ' + n + ' 0 R');
     });
     objs[2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + Wp + ' ' + Hp + '] /Resources << /Font << ' + fontRefs.join(' ') + ' >> >> /Contents 4 0 R >>';
     var s = '%PDF-1.4\n', offs = [];
@@ -493,5 +535,5 @@
     return { language: language, encoding: 'utf8', body: html(t) };
   }
 
-  return { SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render, loadPdfFont: loadPdfFont };
+  return { TEXT_EM: TEXT_EM, SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render, loadPdfFont: loadPdfFont };
 });
