@@ -351,6 +351,20 @@
     if (!F) throw new Error('The label PDF font is not loaded: call RaLabel.loadPdfFont() first (web/label-pdf-font.js).');
     return F;
   }
+  /* BRAND-6: the handoff's RAC marks (web/brand-marks.js), loaded beside the font. */
+  function brandMarks() {
+    var M = typeof RaBrandMarks !== 'undefined' ? RaBrandMarks : (typeof self !== 'undefined' ? self.RaBrandMarks : undefined);
+    if (!M) throw new Error('The brand marks are not loaded (web/brand-marks.js).');
+    return M;
+  }
+  function loadBrandMarks(src) { // BRAND-6: fetched only by a page that draws the pack wrap
+    if (typeof RaBrandMarks !== 'undefined' || (typeof self !== 'undefined' && self.RaBrandMarks)) return Promise.resolve();
+    return new Promise(function (ok, bad) {
+      var el = document.createElement('script');
+      el.src = src || '/brand-marks.js'; el.onload = function () { ok(); }; el.onerror = function () { bad(new Error('Could not load the brand marks.')); };
+      document.head.appendChild(el);
+    });
+  }
   function loadPdfFont(src) {
     if (typeof RaLabelPdfFont !== 'undefined' || (typeof self !== 'undefined' && self.RaLabelPdfFont)) return Promise.resolve();
     return new Promise(function (ok, bad) {
@@ -390,7 +404,7 @@
     var F = pdfFont();
     var k = 72 / 25.4, Wp = (t.w * k).toFixed(2), Hp = (t.h * k).toFixed(2), ops = [];
     var Y = function (mm) { return (t.h - mm) * k; };
-    var used = { regular: null, bold: null, mono: null, monoBold: null };
+    var used = { regular: null, bold: null, mono: null, monoBold: null }, marksUsed = {};
     function useGlyphs(fk, gs) { used[fk] = used[fk] || {}; gs.forEach(function (g) { used[fk][g[0]] = g[1]; }); }
     var P = function (v) { return (v * k).toFixed(2); };
     withReprint(t).forEach(function (e) {
@@ -423,6 +437,11 @@
         ops.push(P(e.x) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + P(e.w) + ' ' + P(e.h) + ' re f');
       } else if (e.t === 'path') { // SHELL-FLUKE-7: several rings, even-odd (the mark's gaps stay open)
         ops.push(e.rings.map(function (r) { return r.map(function (p, i) { return P(p[0]) + ' ' + Y(p[1]).toFixed(2) + (i ? ' l' : ' m'); }).join(' ') + ' h'; }).join(' ') + ' f*');
+      } else if (e.t === 'mark') { // BRAND-6: the handoff mark's 1-bit stencil, painted in the current fill colour
+        var MK = brandMarks()[e.m];
+        if (!MK) throw new Error('Unknown brand mark "' + e.m + '".');
+        if (!marksUsed[e.m]) marksUsed[e.m] = 'Mk' + (Object.keys(marksUsed).length + 1);
+        ops.push('q ' + P(e.w) + ' 0 0 ' + P(e.h) + ' ' + P(e.x) + ' ' + Y(e.y + e.h).toFixed(2) + ' cm /' + marksUsed[e.m] + ' Do Q');
       } else if (e.t === 'poly') {
         ops.push(e.pts.map(function (p, i) { return P(p[0]) + ' ' + Y(p[1]).toFixed(2) + (i ? ' l' : ' m'); }).join(' ') + ' h f');
       } else if (e.t === 'circle') {
@@ -470,7 +489,12 @@
       objs.push('<< /Length ' + cmap.length + ' >>\nstream\n' + cmap + '\nendstream');
       fontRefs.push('/' + FONT_TAG[fk] + ' ' + n + ' 0 R');
     });
-    objs[2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + Wp + ' ' + Hp + '] /Resources << /Font << ' + fontRefs.join(' ') + ' >> >> /Contents 4 0 R >>';
+    var xRefs = Object.keys(marksUsed).map(function (m) { // BRAND-6: one /ImageMask per mark used
+      var MK = brandMarks()[m], bits = b64ToLatin1(MK.bits);
+      objs.push('<< /Type /XObject /Subtype /Image /Width ' + MK.w + ' /Height ' + MK.h + ' /ImageMask true /BitsPerComponent 1 /Decode [1 0] /Length ' + bits.length + ' >>\nstream\n' + bits + '\nendstream');
+      return '/' + marksUsed[m] + ' ' + objs.length + ' 0 R';
+    });
+    objs[2] = '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ' + Wp + ' ' + Hp + '] /Resources << /Font << ' + fontRefs.join(' ') + ' >>' + (xRefs.length ? ' /XObject << ' + xRefs.join(' ') + ' >>' : '') + ' >> /Contents 4 0 R >>';
     var s = '%PDF-1.4\n', offs = [];
     objs.forEach(function (o, i) { offs.push(s.length); s += (i + 1) + ' 0 obj\n' + o + '\nendobj\n'; });
     var xref = s.length;
@@ -544,5 +568,5 @@
     return { language: language, encoding: 'utf8', body: html(t) };
   }
 
-  return { TEXT_EM: TEXT_EM, SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render, loadPdfFont: loadPdfFont };
+  return { TEXT_EM: TEXT_EM, SIZES: SIZES, LANGUAGES: LANGUAGES, CODE128: CODE128, code128Values: code128Values, code128Bars: code128Bars, qrMatrix: qrMatrix, codesHtml: codesHtml, build: build, render: render, loadPdfFont: loadPdfFont, loadBrandMarks: loadBrandMarks };
 });

@@ -38,6 +38,7 @@ export function loadRenderer(path = join(here, '..', '..', 'web', 'label-render.
   runInNewContext(readFileSync(join(dirname(path), 'qrcode.js'), 'utf8'), sandbox);
   // FONT-RP-5: the Manrope subset that label PDFs embed.
   runInNewContext(readFileSync(join(dirname(path), 'label-pdf-font.js'), 'utf8'), sandbox);
+  runInNewContext(readFileSync(join(dirname(path), 'brand-marks.js'), 'utf8'), sandbox); // BRAND-6
   runInNewContext(readFileSync(path, 'utf8'), sandbox);
   return sandbox.RaLabel;
 }

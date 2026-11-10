@@ -15,7 +15,7 @@ const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const out = resolve(process.argv[2] || 'docs/brand/shots/shell-fluke');
 mkdirSync(out, { recursive: true });
 const sb = { Buffer };
-for (const f of ['web/qrcode.js', 'web/label-pdf-font.js', 'web/label-render.js', 'web/shell-fluke.js']) runInNewContext(readFileSync(join(ROOT, f), 'utf8'), sb);
+for (const f of ['web/qrcode.js', 'web/label-pdf-font.js', 'web/brand-marks.js', 'web/label-render.js', 'web/shell-fluke.js']) runInNewContext(readFileSync(join(ROOT, f), 'utf8'), sb);
 const L = sb.RaLabel, SF = sb.ShellFluke;
 
 const seller = { name: 'RAW AROMACHEM (PREVIEW)', address: '1 Preview Road, Indore, Madhya Pradesh', pin: '452000',

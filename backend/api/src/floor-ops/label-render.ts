@@ -25,6 +25,7 @@ export function label(): RaLabel {
     runInNewContext(readFileSync(new URL('../../../../web/qrcode.js', import.meta.url), 'utf8'), sandbox);
     // FONT-RP-5: the Manrope subset label PDFs embed (the page loads it on demand; the server always).
     runInNewContext(readFileSync(new URL('../../../../web/label-pdf-font.js', import.meta.url), 'utf8'), sandbox);
+    runInNewContext(readFileSync(new URL('../../../../web/brand-marks.js', import.meta.url), 'utf8'), sandbox); // BRAND-6
     runInNewContext(readFileSync(new URL('../../../../web/label-render.js', import.meta.url), 'utf8'), sandbox);
     loaded = sandbox.RaLabel as RaLabel;
   }

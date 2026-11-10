@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import { runInNewContext } from 'node:vm';
 
 const sb: Record<string, unknown> = { Buffer };
-for (const f of ['qrcode.js', 'label-pdf-font.js', 'label-render.js', 'rac-code.js', 'shell-fluke.js']) {
+for (const f of ['qrcode.js', 'label-pdf-font.js', 'brand-marks.js', 'label-render.js', 'rac-code.js', 'shell-fluke.js']) {
   runInNewContext(readFileSync(new URL('../../../../web/' + f, import.meta.url), 'utf8'), sb);
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

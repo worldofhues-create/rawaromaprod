@@ -634,7 +634,8 @@
       (c.zone ? '<div class="zone"><span>ZONE</span><b>' + escHtml(c.zone.code) + '</b>' + (c.zone.colourName ? '<span class="zsw" style="background:' + escHtml(c.zone.colourHex) + '"></span><b>' + escHtml(c.zone.colourName) + ' (' + escHtml(c.zone.initials) + ')</b>' : '<span>no colour set</span>') + '</div>' : '') + '</div>';
   }
   function printLabel(fgId, size) {
-    tunnel('/v1/finished-good-batches/' + fgId + '/label').then(function (res) {
+    /* BRAND-6: the handoff's RAC marks load with the first wrap, not with the kiosk. */
+    window.RaLabel.loadBrandMarks().then(function () { return tunnel('/v1/finished-good-batches/' + fgId + '/label'); }).then(function (res) {
       if (res.status >= 400) { toast(err(res, 'This batch cannot be labelled. Try again.'), 'bad'); return; }
       var c = data(res); if (!c) return;
       var s = SIZES[size] || SIZES['100x50'];
@@ -670,7 +671,7 @@
       var why = composed.problems.length ? '<div class="noprint" style="font:13px/1.5 Manrope, system-ui, sans-serif;margin:12px 0"><b>Preview only, not for sale. A production print needs:</b><ul>' +
         composed.problems.map(function (p) { return '<li>' + escHtml(p.message) + '</li>'; }).join('') + '</ul></div>' : '';
       openPrint((mode === 'preview' ? 'PREVIEW ' : '') + 'Shell Fluke ' + c.batchNumber, '<style>@page{size:240mm 100mm;margin:0}body{margin:0}@media print{.noprint{display:none}}</style>' +
-        window.ShellFluke.svg(t, { code128Bars: window.RaLabel.code128Bars, qrMatrix: window.RaLabel.qrMatrix }) + why);
+        window.ShellFluke.svg(t, { code128Bars: window.RaLabel.code128Bars, qrMatrix: window.RaLabel.qrMatrix, marks: window.RaBrandMarks }) + why);
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
   function chooseLabelSize(fgId) {
