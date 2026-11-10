@@ -39,14 +39,15 @@
 })(typeof globalThis !== 'undefined' ? globalThis : self, function (root) {
   'use strict';
 
-  /* Colours sampled from the Claude Design screenshots (2026-11-10 12.11.45): the brand book (v6) does
-     not name these four yet. OQ-LABEL-4 asks for the book's values; replace them here only. */
+  /* SHELL-FLUKE-9: the owner's colour book, "RAC - Color System - Usage Guidelines.pdf" p.3 (V1,
+     November 2026; its own note: PMS values are nearest matches, confirm on a physical swatch). The
+     sand stock and paper are not inks and stay as they were. */
   var INK = {
-    abyss: '#0B0B0D',   // spot 1: Abyss Ink
-    horizon: '#6D85F3', // spot 2: Horizon Blue
-    dusk: '#8289A7',    // emboss plate, preview only: Dusk Violet
-    surface: '#C9CBD8', // emboss plate, preview only: Surface Light
-    sand: '#F2F0EB',    // the stock itself (no ink)
+    abyss: '#0B0B0D',   // spot 1: Abyss Ink, RAC P-01 primary ground, PMS Black 6 C
+    horizon: '#2F5DFF', // spot 2: Horizon Blue, RAC P-02 signal, PMS 2728 C
+    dusk: '#9C9BD6',    // emboss plate, preview only: Dusk Violet, RAC AT-03 atmosphere, PMS 2716 C
+    surface: '#829EFF', // emboss plate, preview only: Surface Light, RAC AT-01 atmosphere, PMS 2718 C
+    sand: '#F2F0EB',    // the stock itself (no ink); sampled from the design screenshot
     paper: '#FFFFFF'    // knock-out (no ink) behind the barcode
   };
   var PRINT_INKS = [INK.abyss, INK.horizon];
