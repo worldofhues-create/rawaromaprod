@@ -376,6 +376,7 @@
    *   any element  c: '#RRGGBB'  fill colour (absent = black, exactly the bytes every older template made)
    *   text         mono, a: 'r' (right edge at x + w), ls (letter spacing, em)
    *   rect         { x, y, w, h }           poly { pts: [[x, y]...] }     circle { x, y, r, sw? (stroke mm) }
+   *   path         { rings: [[[x, y]...]...] } even-odd           text tail { s, h, mono, gap } same baseline
    *   arctext      { x, y, r, s, h, start (deg, 0 = 12 o'clock, clockwise) }
    * Every older template has none of them, so its PDF is byte-for-byte what it was. */
   function rgbOp(c) { var n = parseInt(String(c).slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255].map(function (v) { return (v / 255).toFixed(3); }).join(' '); }
@@ -401,6 +402,12 @@
         var x = e.x;
         if (e.a === 'r') x = e.x + e.w - textWidthMm(face, gs, fs, e.ls);
         ops.push('BT /' + FONT_TAG[fk] + ' ' + (fs * k).toFixed(2) + ' Tf ' + (e.ls ? (e.ls * fs * k).toFixed(3) + ' Tc ' : '') + (x * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td <' + gs.map(function (g) { return hex4(g[0]); }).join('') + '> Tj ET');
+        if (e.tail) { // SHELL-FLUKE-7: a smaller run on the same baseline, starting where the head's glyphs end
+          var tk = faceKey(F, e.tail), tf = F[tk], tg = glyphs(tf, String(e.tail.s)), tfs = e.tail.h * TEXT_EM;
+          useGlyphs(tk, tg);
+          var tx = x + textWidthMm(face, gs, fs, e.ls) + (e.tail.gap || 0);
+          ops.push('BT /' + FONT_TAG[tk] + ' ' + (tfs * k).toFixed(2) + ' Tf ' + (tx * k).toFixed(2) + ' ' + Y(e.y + e.h).toFixed(2) + ' Td <' + tg.map(function (g) { return hex4(g[0]); }).join('') + '> Tj ET');
+        }
       } else if (e.t === 'arctext') {
         var fk2 = faceKey(F, e), face2 = F[fk2], gs2 = glyphs(face2, String(e.s)), fs2 = e.h * TEXT_EM, ang = (e.start || 0) * Math.PI / 180;
         useGlyphs(fk2, gs2);
@@ -414,6 +421,8 @@
         });
       } else if (e.t === 'rect') {
         ops.push(P(e.x) + ' ' + Y(e.y + e.h).toFixed(2) + ' ' + P(e.w) + ' ' + P(e.h) + ' re f');
+      } else if (e.t === 'path') { // SHELL-FLUKE-7: several rings, even-odd (the mark's gaps stay open)
+        ops.push(e.rings.map(function (r) { return r.map(function (p, i) { return P(p[0]) + ' ' + Y(p[1]).toFixed(2) + (i ? ' l' : ' m'); }).join(' ') + ' h'; }).join(' ') + ' f*');
       } else if (e.t === 'poly') {
         ops.push(e.pts.map(function (p, i) { return P(p[0]) + ' ' + Y(p[1]).toFixed(2) + (i ? ' l' : ' m'); }).join(' ') + ' h f');
       } else if (e.t === 'circle') {
