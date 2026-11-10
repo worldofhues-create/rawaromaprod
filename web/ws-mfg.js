@@ -84,7 +84,7 @@
     var byId = {}; batches.forEach(function (b) { byId[b.finishedGoodBatchId] = b; });
     // Batch/lot + status always visible in the picker itself (Addendum §10), not just after pick.
     var opts = batches.map(function (b) {
-      return '<option value="' + b.finishedGoodBatchId + '">' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + (b.skuCode ? ' · ' + b.skuCode : '') + ' · avail ' + b.availableQty + '</option>';
+      return '<option value="' + b.finishedGoodBatchId + '">' + (b.batchNumber || String(b.finishedGoodBatchId).slice(0, 8)) + (b.skuCode ? ' · ' + (self.RacCode ? self.RacCode.line(null, b.skuCode) : b.skuCode) : '') + ' · avail ' + b.availableQty + '</option>';
     }).join('');
     var body = '<div style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3);margin-bottom:2px">' + escHtml(row.soNumber || 'Sales order') + '</div>' +
       (batches.length

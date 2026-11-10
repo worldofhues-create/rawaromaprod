@@ -459,6 +459,13 @@
 
   // §109.8 lifecycle: DRAFT → VERSIONED → REVIEW → APPROVED → LOCKED → SUPERSEDED, plus the
   // pre-existing terminal REJECTED/ARCHIVED.
+  /* RAC-CODES-RP-2: a formula keyed to a RAC product + grade (RAC 27 / 1150 / ALIKE)
+     names its versions F{n}: 'RAC 27 / 1150 / ALIKE / F3'. Any other formula keeps 'v{n}'.
+     Same rule as web/rac-code.js `version`, asserted equal by contract-guard-rac-codes.test.ts. */
+  function racVersion(formulaCode, n) {
+    var c = String(formulaCode || '').trim();
+    return /^RAC \d{2} \/ \d{4} \/ (RESEMBLE|ALIKE|CLOSE)$/.test(c) ? c + ' / F' + n : 'v' + n;
+  }
   function statusChip(status) {
     var tone = { DRAFT: 'n', VERSIONED: 'n', REVIEW: 'a', APPROVED: 'g', LOCKED: 'g', SUPERSEDED: 'a', REJECTED: 'r', ARCHIVED: 'a' }[status] || 'n';
     var word = { DRAFT: 'Draft', VERSIONED: 'Finalized', REVIEW: 'In review', APPROVED: 'Approved', LOCKED: 'Locked', SUPERSEDED: 'Replaced by newer', REJECTED: 'Rejected', ARCHIVED: 'Archived' }[status];
@@ -926,7 +933,7 @@
 
       var rows = versions.map(function (v) {
         return rowLink(h('tr', { onclick: function () { location.hash = '#/version/' + v.formulaVersionId; } }, [
-          h('td', { class: 'mono', 'data-label': 'Version' }, ['v' + v.versionNumber]),
+          h('td', { class: 'mono', 'data-label': 'Version' }, [racVersion(formula.formulaCode, v.versionNumber)]),
           h('td', { 'data-label': 'Status' }, [statusChip(v.status)]),
           h('td', { 'data-label': 'Approved' }, [fmtDt(v.approvedDt)]),
         ]), '#/version/' + v.formulaVersionId, 'Open version ' + v.versionNumber);

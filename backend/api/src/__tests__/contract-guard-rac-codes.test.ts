@@ -92,3 +92,43 @@ test('RAC: a label carries code + grade, never the reference fragrance, never a 
   assert.ok(!out.body.includes('Creed'), 'no trademark on a pack');
   assert.ok(out.body.includes('data-code128="B-2611-0007"'), 'the barcode still encodes the batch number, not the RAC code');
 });
+
+/* RAC-CODES-RP-2: the browser display helper (web/rac-code.js) agrees with the pinned module,
+   the vault names RAC formula versions F{n}, and material search ranks with the one search. */
+const umdLoad = (rel: string) => { const m = { exports: {} as unknown }; new Function('module', 'exports', readFileSync(new URL(rel, ROOT), 'utf8'))(m, m.exports); return m.exports as Record<string, (...a: unknown[]) => unknown>; };
+
+test('RAC: floor/QC display helper agrees with the pinned module', () => {
+  const RC = umdLoad('web/rac-code.js');
+  for (const c of ['RAC 27 / 1150', 'RAC 27 / 1150 / 1K / ALIKE', 'RAC 60 / 1032 / 1K / MATERIAL', 'DEMO-MAT-0001', 'RAC40-01437-REF-1K']) {
+    const a = RC.parse!(c) as { product?: string; grade?: string } | null;
+    const b = parseRacCode(c);
+    assert.equal(a?.product ?? null, b?.product ?? null, c);
+    assert.equal(a?.grade ?? null, b?.grade ?? null, c);
+    assert.equal(RC.normalise!(c), normaliseCode(c), c);
+  }
+  assert.equal(RC.line!('RAC 27 / 1150', 'RAC 27 / 1150 / 1K / ALIKE'), 'RAC 27 / 1150 · 1K · ALIKE 95%');
+  assert.equal(RC.line!('DEMO-PRD-1', 'DEMO-SKU-1'), 'DEMO-PRD-1 · DEMO-SKU-1', 'a non-RAC code passes through untouched');
+  assert.equal(RC.version!('RAC 27 / 1150 / ALIKE', 3), formulaId('RAC 27 / 1150', 'ALIKE', 3));
+  assert.equal(RC.version!('DEMO-FRM-001', 3), 'v3');
+  const vault = readFileSync(new URL('web-vault/vault.js', ROOT), 'utf8');
+  const racVersion = new Function(/(function racVersion[\s\S]*?\n {2}\})/.exec(vault)![1] + '; return racVersion;')() as (c: string, n: number) => string;
+  assert.equal(racVersion('RAC 27 / 1150 / ALIKE', 3), 'RAC 27 / 1150 / ALIKE / F3');
+  assert.equal(racVersion('DEMO-FRM-001', 2), 'v2');
+});
+
+test('RAC: material search ranks with the one search -- code spellings, old codes as aliases, typos', async () => {
+  const { rankMaterials } = await import('../../../cluster-masterdata/src/rank-materials.ts');
+  const rows = [
+    { materialId: 'a', materialCode: 'RAC 60 / 1032', materialName: 'RAC Ambergris', uomId: null },
+    { materialId: 'b', materialCode: 'RAC 84 / 1002', materialName: 'RAC DEP (Di Ethyl Pthalate)', uomId: null },
+    { materialId: 'c', materialCode: 'DEMO-MAT-0001', materialName: 'Demo Citrus Accord 01', uomId: null },
+  ];
+  const aliases = [{ materialId: 'a', aliasName: 'RAC10-00031' }];
+  const top = (q: string) => rankMaterials(rows as never, aliases, q, 5)[0]?.materialId;
+  assert.equal(top('RAC601032'), 'a');
+  assert.equal(top('RAC-60-1032'), 'a');
+  assert.equal(top('RAC10-00031'), 'a', 'old code via rm_alias');
+  assert.equal(top('ambergirs'), 'a', 'typo');
+  assert.equal(top('pthalate'), 'b');
+  assert.equal(top('DEMO-MAT-0001'), 'c', 'non-RAC codes still exact');
+});

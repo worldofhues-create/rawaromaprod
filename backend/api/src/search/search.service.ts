@@ -6,6 +6,7 @@
  * are excluded. Snake_case columns are camelised so the result matches the list shape, and the
  * global MaterialMaskingInterceptor still masks materialId for non-reveal roles.
  */
+import { normaliseCode } from '@core/contracts/rac'; // RAC-CODES-RP-2
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
@@ -123,9 +124,17 @@ export class SearchService {
     }
     const lim = Math.min(Math.max(1, limit || 100), 500);
     const term = `%${String(q || '').trim()}%`;
+    /* RAC-CODES-RP-2: a code is matched in any spelling -- `RAC271150`, `RAC-27-1150` and
+       `RAC 27 / 1150` are one code -- by the ONE normaliser (packages/contracts/src/rac
+       normaliseCode: spaces, slashes, dots, middle dots, hyphens, underscores out; upper case).
+       The row text is normalised the same way in SQL, so an old code held in any column still hits. */
+    const norm = normaliseCode(q);
     const rows = (await this.sql.unsafe(
-      `select * from ${cfg.schema}.${cfg.table} as t where t::text ilike $1 order by t.created_dt desc nulls last limit ${lim}`,
-      [term],
+      `select * from ${cfg.schema}.${cfg.table} as t
+        where t::text ilike $1
+           or ($2 <> '' and regexp_replace(upper(t::text), '[[:space:]/.\u00b7_-]+', '', 'g') like '%' || $2 || '%')
+        order by t.created_dt desc nulls last limit ${lim}`,
+      [term, /^[A-Z0-9]{4,}$/.test(norm) && /\d/.test(norm) ? norm : ''],
     )) as Array<Record<string, unknown>>;
     return { items: rows.map(camelKeys), nextCursor: null };
   }

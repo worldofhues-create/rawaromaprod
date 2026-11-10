@@ -12,6 +12,7 @@ import {
   type MasterdataDb,
 } from './cluster-masterdata.tokens.js';
 import { materialMatchKey, type AliasRef, type MasterdataLookup, type MaterialRef } from './public-api.js';
+import { MATERIAL_SEARCH_POOL, rankMaterials } from './rank-materials.js'; // RAC-CODES-RP-2
 
 const { material, rmAlias } = masterdataSchema;
 
@@ -73,12 +74,15 @@ export class MasterdataLookupService implements MasterdataLookup {
     return out;
   }
 
+  /* RAC-CODES-RP-2: ranked by the ONE RAC search (packages/contracts/src/rac, a pinned copy of
+     ALEMBIC's), so `RAC271150`, `RAC-60-1032`, an old code held as an rm_alias, and a typo all find
+     what the storefront and the consoles find. The candidate pool is the material master (bounded):
+     ranking needs the rows a plain ILIKE would miss -- a typo, or a code written another way. */
   async searchMaterials(query: string, limit: number): Promise<MaterialRef[]> {
     const q = query.trim();
     if (!q) return [];
-    const like = `%${q.replace(/[%_\\]/g, (c) => `\\${c}`)}%`;
     const cap = Math.max(1, Math.min(limit, 50));
-    return this.db
+    const rows = await this.db
       .select({
         materialId: material.materialId,
         materialCode: material.materialCode,
@@ -86,9 +90,13 @@ export class MasterdataLookupService implements MasterdataLookup {
         uomId: material.uomId,
       })
       .from(material)
-      .where(or(sql`${material.materialCode} ilike ${like}`, sql`${material.materialName} ilike ${like}`))
       .orderBy(material.materialCode)
-      .limit(cap);
+      .limit(MATERIAL_SEARCH_POOL);
+    const aliases = await this.db
+      .select({ materialId: rmAlias.materialId, aliasName: rmAlias.aliasName })
+      .from(rmAlias)
+      .limit(MATERIAL_SEARCH_POOL * 4);
+    return rankMaterials(rows, aliases, q, cap);
   }
 
   async matchMaterials(keys: string[]): Promise<MaterialRef[]> {

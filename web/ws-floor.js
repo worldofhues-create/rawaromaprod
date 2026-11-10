@@ -535,7 +535,7 @@
       var row = function (k, v) { return '<div style="display:flex;flex-wrap:wrap;gap:4px 14px;padding:6px 0;border-bottom:1px solid var(--line)"><b style="min-width:110px">' + k + '</b><span style="flex:1;min-width:0;overflow-wrap:anywhere">' + v + '</span></div>'; };
       // FLOOR-5: a table here clipped long values at 375 px, hazard line included: stacked rows wrap instead.
       $('fl-sco').innerHTML = '<div class="card">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
-        (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(x.materialCode) + ')') : '') +
+        (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(self.RacCode ? self.RacCode.line(x.materialCode, null) : x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
         row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +
         (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') +

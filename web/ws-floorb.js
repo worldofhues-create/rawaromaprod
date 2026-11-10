@@ -293,7 +293,7 @@
     V.innerHTML = '<div class="loading">Loading…</div>';
     var prods = await getRows('/v1/product-qc-specs?limit=200');
     if (stale('qccheckpoints')) return;
-    V.innerHTML = '<div class="grid">' + card('Product', row(field('Product', pick('fb-cprod', prods, 'productId', function (p) { return (p.productCode || '') + ' ' + (p.productName || ''); }, 'Choose a product…')))) + '<div id="fb-cp" class="c12"></div></div>';
+    V.innerHTML = '<div class="grid">' + card('Product', row(field('Product', pick('fb-cprod', prods, 'productId', function (p) { return (self.RacCode ? self.RacCode.line(p.productCode, null) : (p.productCode || '')) + ' ' + (p.productName || ''); }, 'Choose a product…')))) + '<div id="fb-cp" class="c12"></div></div>';
     $('fb-cprod').onchange = function () { if (this.value) loadCp(this.value); };
   }
   function cpRow(c) {
@@ -369,7 +369,7 @@
     else {
       var cpList = cps;
       form = '<form id="fb-qr" style="display:flex;flex-direction:column;gap:var(--s-snug)">' +
-        (cps ? '' : row(field('Product (pins its current checkpoint version)', pick('fb-qprod', prods, 'productId', function (p) { return (p.productCode || '') + ' ' + (p.productName || ''); }, 'Choose…')))) +
+        (cps ? '' : row(field('Product (pins its current checkpoint version)', pick('fb-qprod', prods, 'productId', function (p) { return (self.RacCode ? self.RacCode.line(p.productCode, null) : (p.productCode || '')) + ' ' + (p.productName || ''); }, 'Choose…')))) +
         '<div id="fb-qcps">' + (cpList ? cpList.map(function (c) {
           return '<div data-cp="' + c.id + '" data-type="' + c.checkType + '" style="display:flex;gap:var(--s-snug);align-items:center;flex-wrap:wrap"><strong style="min-width:160px">' + esc(c.name) + (c.critical ? ' ' + chip('r', 'critical') : '') + '</strong>' +
             (c.checkType === 'RANGE' ? '<input class="fld" data-v inputmode="decimal" placeholder="' + esc(c.min) + ' – ' + esc(c.max) + '" style="width:140px">' : '<select class="fld" data-v><option value="">Result…</option><option value="1">Pass</option><option value="0">Fail</option></select>') +
