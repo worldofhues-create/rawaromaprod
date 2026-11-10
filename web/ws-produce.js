@@ -662,7 +662,8 @@
         productName: c.productName, productCode: c.productCode, variantCode: v && v.grade ? c.skuCode : null,
         genericName: null, packSize: c.packSize, netQuantity: { value: c.netQuantity, unit: c.unit },
         batch: { lotCode: c.batchNumber, manufacturingDate: c.manufacturingDate, useByDate: c.expiryDate },
-        mrp: null, sds: null, ifra: null, seller: null, accords: []
+        mrp: null, sds: null, ifra: null, seller: null, accords: [],
+        verifyUrl: typeof window.ALEMBIC_LOT_VERIFY_URL === 'string' ? window.ALEMBIC_LOT_VERIFY_URL : null /* SHELL-FLUKE-8: console-config.js, per environment */
       });
       var mode = composed.production ? 'production' : 'preview';
       var t = window.ShellFluke.template(composed, { mode: mode });

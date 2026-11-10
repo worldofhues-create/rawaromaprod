@@ -30,6 +30,7 @@ const full = {
     hazardStatements: 'H226 H317', allergens: ['Linalool', 'Limonene', 'Coumarin'], flammable: true },
   ifra: { onFile: true, certificateNo: 'IFRA-PREVIEW-0001', amendment: '51st' },
   seller,
+  verifyUrl: 'https://raw.huecycle.in/store/lot/', // SHELL-FLUKE-8: ALEMBIC's lot-verify page
   referenceFragrance: 'Creed Aventus', // handed over on purpose: it must NOT print (OQ-LABEL-1)
 };
 const unclassified = { ...full, productName: 'Vetiver Haze', accords: ['Woody', 'Earthy'], productCode: 'RAC 31 / 2204', variantCode: 'RAC 31 / 2204 / 250G / CLOSE',

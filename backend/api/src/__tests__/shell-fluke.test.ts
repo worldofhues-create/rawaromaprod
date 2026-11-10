@@ -132,9 +132,16 @@ test('barcodes: no EAN-13; the lot Code 128 carries exactly batch_no; QR is the 
   assert.doesNotMatch(SF.texts(t).join('\n'), /GS1|EAN/);
   const qr = t.elements.find((e: { t: string }) => e.t === 'qr');
   assert.equal(qr.d, 'L-7Q3K9XA');
-  assert.doesNotMatch(SF.texts(t).join('\n'), /VERIFY/, 'no "verify" promise without a verify page (OQ-LABEL-2)');
-  const v = SF.template(SF.compose(facts({ verifyUrl: 'https://verify.invalid/lot/' })), { mode: 'production' });
-  assert.equal(v.elements.find((e: { t: string }) => e.t === 'qr').d, 'https://verify.invalid/lot/L-7Q3K9XA');
+  assert.doesNotMatch(SF.texts(t).join('\n'), /VERIFY/, 'no "verify" promise without a verify base');
+  // SHELL-FLUKE-8: ALEMBIC's /store/lot/<code>, with the exact caption
+  const v = SF.template(SF.compose(facts({ verifyUrl: 'https://raw.huecycle.in/store/lot/' })), { mode: 'production' });
+  assert.equal(v.elements.find((e: { t: string }) => e.t === 'qr').d, 'https://raw.huecycle.in/store/lot/L-7Q3K9XA');
+  assert.ok(SF.texts(v).join(' ').includes('SCAN TO VERIFY LOT · PDP · SDS · COA'));
+  for (const bad of ['http://raw.huecycle.in/store/lot/', 'https://raw.huecycle.in/lot/', 'https://evil.example/store/lot/x', 'javascript:alert(1)//store/lot/']) {
+    const b = SF.template(SF.compose(facts({ verifyUrl: bad })), { mode: 'production' });
+    assert.equal(b.elements.find((e: { t: string }) => e.t === 'qr').d, 'L-7Q3K9XA', bad);
+    assert.doesNotMatch(SF.texts(b).join(' '), /VERIFY/, bad);
+  }
 });
 
 test('print plates are exactly the two spot inks (dunes are the emboss plate)', () => {
