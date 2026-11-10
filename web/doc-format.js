@@ -67,8 +67,8 @@
       : '<h2' + (centred ? ' class="c"' : '') + '>' + product + '</h2><table>' + record +
         ABSENT[kind].map(function (l) { return kv(l, null); }).join('') + '</table>';
     var foot = kind === 'ifra' ? '<p class="foot">' + HOUSE.name + ', Regulatory Affairs</p>' : '';
-    return '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' +
-      'body{font-family:Arial,Helvetica,sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto;font-size:13px}' +
+    return '<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>' + esc(title) + '</title><style>' +
+      'body{font-family:Manrope, system-ui, sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto;font-size:13px}' +
       '.c{text-align:center}.r{text-align:right}.lh{font-size:12px;line-height:1.5;margin-bottom:18px}' +
       'h1{font-size:20px;margin:0 0 8px;font-weight:600}h2{font-size:16px;margin:4px 0 14px;font-weight:600}' +
       'table{width:100%;border-collapse:collapse}td{padding:7px 10px;border:1px solid #D6D6D2}.k{width:42%;font-weight:600}' +

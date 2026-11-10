@@ -108,7 +108,7 @@
   // opaque id it is printed as text and says so, rather than encoding something that should not be.
   function scanCodes(code, maxW, o) {
     try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
-    catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + esc(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
+    catch (e) { return '<span style="font:700 12px JetBrains Mono, ui-monospace, monospace">' + esc(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
   }
   function printLabel(l) {
     if (!l) return;
@@ -130,8 +130,8 @@
     var w = window.open('', '_blank', 'width=420,height=320');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
     var time = localTime(l.printedDt);
-    w.document.write('<!doctype html><meta charset="utf-8"><title>' + esc(l.kind) + ' ' + esc(l.jobNo) + '</title>' +
-      '<style>@page{size:75mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:71mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.cd{margin-top:auto}' +
+    w.document.write('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>' + esc(l.kind) + ' ' + esc(l.jobNo) + '</title>' +
+      '<style>@page{size:75mm 50mm;margin:0}body{margin:0;font:9px/1.15 Manrope, system-ui, sans-serif}.l{width:71mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.cd{margin-top:auto}' +
       'h1{margin:0 0 .5mm;font-size:18px;letter-spacing:.06em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:6px;font-size:13px}td{padding:0 4px 0 0;vertical-align:top}</style>' +
       '<div class="l"><h1>' + esc(l.kind) + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><table>' +
       '<tr><td>Order</td><td><b>' + esc(l.orderRef || '—') + '</b></td></tr><tr><td>Job</td><td><b>' + esc(l.jobNo) + '</b></td></tr>' +
@@ -163,8 +163,8 @@
     var w = window.open('', '_blank', 'width=520,height=360');
     if (!w) { toast('The label window was blocked. Allow pop-ups for this site, then reprint.', 'bad'); return; }
     var row = function (k, v) { return v ? '<div>' + esc(k) + ' <b>' + esc(v) + '</b></div>' : ''; };
-    w.document.write('<!doctype html><meta charset="utf-8"><title>Lot ' + esc(l.barcode) + '</title>' +
-      '<style>@page{size:100mm 50mm;margin:0}body{margin:0;font:9px/1.15 system-ui,sans-serif}.l{width:96mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.t{min-width:0}.g{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm;font-size:8px}.g div{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.g .w{grid-column:1/-1}.cd{margin-top:auto}' +
+    w.document.write('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>Lot ' + esc(l.barcode) + '</title>' +
+      '<style>@page{size:100mm 50mm;margin:0}body{margin:0;font:9px/1.15 Manrope, system-ui, sans-serif}.l{width:96mm;height:46mm;padding:2mm;box-sizing:border-box;border:1px solid #000;display:flex;flex-direction:column}.t{min-width:0}.g{display:grid;grid-template-columns:1fr 1fr;gap:0 3mm;font-size:8px}.g div{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}.g .w{grid-column:1/-1}.cd{margin-top:auto}' +
       'h1{margin:0 0 .5mm;font-size:14px;letter-spacing:.04em}.r{font-weight:700;border:2px solid #000;padding:0 3px;margin-left:4px;font-size:11px}td{padding:0 4px 0 0;vertical-align:top}.sw{display:inline-block;width:9px;height:9px;border:1px solid #000;vertical-align:middle;margin-right:3px}</style>' +
       '<div class="l"><div class="t"><h1>' + (l.kind === 'RETURN' ? 'RAW LOT · RETURNED' : 'RAW LOT · SPLIT') + (l.reprint ? '<span class="r">REPRINT</span>' : '') + '</h1><div class="g">' +
       row('Code', l.floorCode) + (l.colourName ? '<div>Colour <span class="sw" style="background:' + esc(l.colourHex) + '"></span><b>' + esc(l.colourName) + ' (' + esc(l.initial) + ')</b></div>' : '') +

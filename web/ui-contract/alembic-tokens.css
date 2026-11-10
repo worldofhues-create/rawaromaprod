@@ -16,8 +16,8 @@
 
 :root{
   /* fonts */
-  --font-ui: 'Outfit','Helvetica Neue',ui-sans-serif,system-ui,sans-serif;
-  --font-mono: 'JetBrains Mono',ui-monospace,monospace;
+  --font-ui: 'Manrope', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
 
   /* type scale */
   --t-hero: 38px;

@@ -19,13 +19,14 @@
   <link rel="icon" href="/favicon-48.png" sizes="48x48" type="image/png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png" sizes="180x180">
   <meta name="robots" content="noindex, nofollow, noarchive">
-  <!-- Outfit/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
-       same reasoning web/ui-contract/fonts/outfit.css already documents for the factory console
+  <!-- Manrope/JetBrains Mono vendored, not fetched from fonts.googleapis.com/fonts.gstatic.com --
+       same reasoning web/ui-contract/fonts/type.css documents for the factory console
        (two third-party origins in the boot path of a console that handles credentials, every
        visitor's IP disclosed to Google) and, here, the reason a same-origin `connect-src 'self'`
        CSP is enough with no font-origin allowance at all. -->
-  <link rel="stylesheet" href="/fonts/outfit.css">
-  <link rel="stylesheet" href="/fonts/jetbrains-mono.css">
+  <!-- FONT-RP-1: Manrope + JetBrains Mono, self-hosted; the only two faces. -->
+  <link rel="preload" href="/fonts/manrope-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/fonts/type.css">
   <link rel="stylesheet" href="/rac-console.css">
   <link rel="stylesheet" href="/alembic-tokens.css">
   <link rel="stylesheet" href="/vault.css">

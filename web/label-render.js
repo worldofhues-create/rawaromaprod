@@ -176,12 +176,14 @@
       els.push({ t: 'text', x: r2(x === undefined ? m : x), y: r2(y), w: r2(w === undefined ? tw : w), h: r2(h), s: fit(s, w === undefined ? tw : w, h), b: !!bold });
       y += h * pitchK;
     }
+    /* FONT-RP-1: the code printed as text is a code, so it is set in JetBrains Mono. */
+    function codeText(s, h, bold, x, w) { text(s, h, bold, x, w); els[els.length - 1].mono = true; }
     if (c.reprint) text('REPRINT', fh * 1.2, true);
     if (c.brand) text(c.brand, fh * 0.9, true);
     if (c.title) text(c.title, fh * 1.4, true);
     lines.forEach(function (l) { text(l[0] + ': ' + l[1], fh, false); });
     if (c.footer) text(c.footer, fh * 0.8, false);
-    if (L && L.kind === 'qr') text(code, Math.min(fh * 1.2, 3), true);
+    if (L && L.kind === 'qr') codeText(code, Math.min(fh * 1.2, 3), true);
 
     // ── the codes ──
     var H = S.h;
@@ -193,7 +195,7 @@
         els.push({ t: 'code128', x: r2(L.bq), y: r2(top), w: r2(L.bw), h: r2(bh), m: L.bx, d: code });
         els.push({ t: 'qr', x: r2(L.bq + L.bw + L.gap), y: r2(top), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
         y = top + bh + 0.3;
-        text(code, ch, false, L.bq, L.bw);
+        codeText(code, ch, false, L.bq, L.bw);
       } else if (L.kind === 'corner') {
         els.push({ t: 'qr', x: r2(W - L.qq - L.qw), y: r2(m), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
         var top2 = S.continuous ? Math.max(y, m + L.qw) + GAP : S.h - m - ch * pitchK - BAR_MIN_H;
@@ -201,7 +203,7 @@
         top2 = S.continuous ? top2 : S.h - m - ch * pitchK - bh2;
         els.push({ t: 'code128', x: r2(L.bq), y: r2(top2), w: r2(L.bw), h: r2(bh2), m: L.bx, d: code });
         y = top2 + bh2 + 0.3;
-        text(code, ch, false, L.bq, L.bw);
+        codeText(code, ch, false, L.bq, L.bw);
       } else {
         els.push({ t: 'qr', x: r2(W - L.qq - L.qw), y: r2(m), w: r2(L.qw), h: r2(L.qw), m: L.qx, d: code });
         y = Math.max(y, m + L.qw);
@@ -374,9 +376,9 @@
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
   /** The browser fallback: absolutely placed in mm, so print preview matches the label. */
   function html(t) {
-    var parts = ['<div class="ra-label" style="position:relative;box-sizing:border-box;width:' + t.w + 'mm;height:' + t.h + 'mm;background:#fff;color:#000;font-family:Arial,Helvetica,sans-serif;overflow:hidden;page-break-after:always">'];
+    var parts = ['<div class="ra-label" style="position:relative;box-sizing:border-box;width:' + t.w + 'mm;height:' + t.h + 'mm;background:#fff;color:#000;font-family:Manrope,system-ui,sans-serif;overflow:hidden;page-break-after:always">'];
     withReprint(t).forEach(function (e) {
-      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + '">' + esc(e.s) + '</div>');
+      if (e.t === 'text') parts.push('<div style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;font-size:' + r2(e.h * 1.4) + 'mm;line-height:1;white-space:nowrap;font-weight:' + (e.b ? 700 : 400) + (e.mono ? ';font-family:\'JetBrains Mono\',ui-monospace,monospace' : '') + '">' + esc(e.s) + '</div>');
       else if (e.t === 'code128') {
         var cb = code128Bars(e.d), rects = cb.bars.map(function (b) { return '<rect x="' + b[0] + '" y="0" width="' + b[1] + '" height="10"/>'; }).join('');
         parts.push('<svg style="position:absolute;left:' + e.x + 'mm;top:' + e.y + 'mm;width:' + e.w + 'mm;height:' + e.h + 'mm" viewBox="0 0 ' + cb.modules + ' 10" preserveAspectRatio="none" shape-rendering="crispEdges" data-code128="' + esc(e.d) + '" aria-label="Code 128 ' + esc(e.d) + '">' + rects + '</svg>');
@@ -408,7 +410,7 @@
     var cells = [];
     M.forEach(function (row, r) { row.forEach(function (dk, c) { if (dk) cells.push('<rect x="' + c + '" y="' + r + '" width="1" height="1"/>'); }); });
     var qr = '<svg data-qr="' + esc(d) + '" aria-label="QR ' + esc(d) + '" viewBox="0 0 ' + n + ' ' + n + '" shape-rendering="crispEdges" style="display:block;width:' + qw + 'mm;height:' + qw + 'mm;margin:' + r2(4 * qx0) + 'mm;flex:none">' + cells.join('') + '</svg>';
-    var txt = '<span style="font:700 ' + (o.textMm || 2.6) + 'mm/1.1 ui-monospace,Menlo,monospace;letter-spacing:.04em">' + esc(d) + '</span>';
+    var txt = '<span style="font:700 ' + (o.textMm || 2.6) + 'mm/1.1 \'JetBrains Mono\',ui-monospace,monospace;letter-spacing:.04em">' + esc(d) + '</span>';
     if (!pick) {
       return { code128: false, widthMm: r2(qw + 8 * qx0), html: '<span class="ra-codes" style="display:inline-flex;align-items:center;gap:1mm;background:#fff;color:#000">' + qr + txt + '</span>' };
     }

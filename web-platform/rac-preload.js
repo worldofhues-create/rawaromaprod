@@ -38,9 +38,10 @@
 
   var HELLOS = ['Hello', 'नमस्ते', 'Bonjour', 'Hola', 'Ciao', 'こんにちは', 'مرحبا', 'Olá', 'Hallo', '你好', '안녕하세요', 'Привет'];
 
-  var DISPLAY = '"Cabinet Grotesk","Helvetica Neue",Arial,sans-serif';
-  var SANS = 'Outfit,"Helvetica Neue",-apple-system,Arial,sans-serif';
-  var MONO = '"JetBrains Mono",ui-monospace,Menlo,monospace';
+  /* FONT-RP-1: Manrope for every word, JetBrains Mono for codes; generic fallbacks only. */
+  var DISPLAY = 'Manrope,system-ui,sans-serif';
+  var SANS = 'Manrope,system-ui,sans-serif';
+  var MONO = '"JetBrains Mono",ui-monospace,monospace';
   var EASE = 'cubic-bezier(.2,.8,.2,1)';
 
   var CSS =
@@ -77,7 +78,7 @@
      life of the page (own-origin.spec, /store on webkit). This script runs
      after the head's stylesheets, so their faces are already in
      document.fonts; where the page declares none at that weight
-     (RawProd's consoles have no Cabinet Grotesk), the welcome brings its own. */
+     (a page that has not loaded fonts/type.css), the welcome brings its own. */
   function declared(family, weight) {
     var found = false;
     try {
@@ -90,9 +91,8 @@
   function fontCss(dir) {
     if (!dir) return '';
     var tail = ') format("woff2");font-style:normal;font-display:swap}';
-    return (declared('Cabinet Grotesk', '100 900') ? '' : '@font-face{font-family:\'Cabinet Grotesk\';font-weight:100 900;src:url(' + dir + 'cabinet-grotesk-variable.woff2' + tail) +
-      (declared('Outfit', '300') ? '' : '@font-face{font-family:Outfit;font-weight:300;src:url(' + dir + 'outfit-300-latin.woff2' + tail) +
-      (declared('JetBrains Mono', '500') ? '' : '@font-face{font-family:\'JetBrains Mono\';font-weight:500;src:url(' + dir + 'jetbrains-mono-500-latin.woff2' + tail);
+    return (declared('Manrope', '200 800') ? '' : '@font-face{font-family:Manrope;font-weight:200 800;src:url(' + dir + 'manrope-variable.woff2' + tail) +
+      (declared('JetBrains Mono', '100 800') ? '' : '@font-face{font-family:\'JetBrains Mono\';font-weight:100 800;src:url(' + dir + 'jetbrains-mono-variable.woff2' + tail);
   }
 
   function mountCss(sel) {
@@ -273,7 +273,7 @@
     // Ask for the three faces now: a face is otherwise only fetched when a word first
     // uses it, which is after the logo intro -- and the first hellos drew in the fallback.
     var go = false, once = function () { if (!go) { go = true; begin(); } };
-    try { ['700 1em "Cabinet Grotesk"', '300 1em Outfit', '500 1em "JetBrains Mono"'].forEach(function (f) { D.fonts.load(f); }); } catch (e) { /* no FontFace API: the swap covers it */ }
+    try { ['700 1em Manrope', '300 1em Manrope', '500 1em "JetBrains Mono"'].forEach(function (f) { D.fonts.load(f); }); } catch (e) { /* no FontFace API: the swap covers it */ }
     if (D.fonts && D.fonts.ready) D.fonts.ready.then(once);
     T(once, 450);
   }

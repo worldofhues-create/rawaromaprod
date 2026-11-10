@@ -480,14 +480,14 @@
   // opaque id it is printed as text and says so, rather than encoding something that should not be.
   function scanCodes(code, maxW, o) {
     try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
-    catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + esc(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
+    catch (e) { return '<span style="font:700 12px JetBrains Mono, ui-monospace, monospace">' + esc(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
   }
   function printLabel(p) {
     // The picker scans the opaque L- code (p.barcode); a lot with no stock row yet has only its
     // RM batch number, which the hold / recall / putaway fields also resolve.
     var codeVal = p.barcode || p.lotId;
     var w = window.open('', '_blank', 'width=420,height=320'); if (!w) { toast('Allow pop-ups to print the label.', 'bad'); return; }
-    w.document.write('<!doctype html><meta charset="utf-8"><title>Raw lot ' + esc(p.lotId) + '</title><style>@page{size:100mm 50mm;margin:2mm}body{font:11px/1.2 system-ui;margin:0}h1{font:700 15px ui-monospace,monospace;margin:0 0 4px}p{margin:2px 0}.hz{font-weight:700}</style>' +
+    w.document.write('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>Raw lot ' + esc(p.lotId) + '</title><style>@page{size:100mm 50mm;margin:2mm}body{font:11px/1.2 system-ui;margin:0}h1{font:700 15px JetBrains Mono, ui-monospace, monospace;margin:0 0 4px}p{margin:2px 0}.hz{font-weight:700}</style>' +
       '<div><h1>' + esc(p.lotId) + (p.reprint ? ' · REPRINT' : '') + '</h1><p>Code ' + esc(p.floorCode || '—') + '</p><p>Qty ' + esc(p.qty) + ' ' + esc(p.uom || '') + '</p><p>Expiry ' + esc(p.expiry || '—') + '</p><p>Received ' + esc(p.received || '') + '</p><p>Bin ' + esc(p.binCode || 'not on file') + '</p><p class="hz">' + esc(p.hazard) + '</p>' + scanCodes(codeVal, 94, { barHeightMm: 8 }) + '</div>');
     w.document.close(); w.focus(); setTimeout(function () { w.print(); }, 200);
   }

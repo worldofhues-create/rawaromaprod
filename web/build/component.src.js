@@ -260,7 +260,7 @@ class Component extends DCLogic {
 
   buildFlow(out, dark){
     const ic=(k)=>this.icon(k,15);
-    const lab=(lx,ly,t)=>({style:`position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);font:600 9.5px 'JetBrains Mono',monospace;color:var(--t3);background:var(--surface);border:1px solid var(--cbord);padding:1px 6px;border-radius:6px;white-space:nowrap`,text:t});
+    const lab=(lx,ly,t)=>({style:`position:absolute;left:${lx}px;top:${ly}px;transform:translate(-50%,-50%);font:600 9.5px 'JetBrains Mono', ui-monospace, monospace;color:var(--t3);background:var(--surface);border:1px solid var(--cbord);padding:1px 6px;border-radius:6px;white-space:nowrap`,text:t});
     out.refreshIcon=this.icon('refresh',16); out.expandIcon=this.icon('expand',15); out.minusIcon=this.icon('minus',16); out.plusIcon=this.icon('plus',16); out.saveIcon=this.icon('download',15); out.loadIcon=this.icon('box',15); out.playIcon=this.icon('play',12); out.flowHubIcon=this.icon('droplet',22);
     out.flowNodes=[
       {hub:true, wrap:'left:500px;top:8px;width:60px;height:60px'},
@@ -351,7 +351,7 @@ class Component extends DCLogic {
     // skin + light/dark tokens
     const dark = (st.theme || this.props.sidebarTheme || 'light')==='dark';
     const skin = st.skin || 'neumorphic';
-    const rootStyle = this.skinTokens(skin, dark, accent)+";font-family:'Urbanist',system-ui,sans-serif;color:var(--t1);min-height:100vh;color-scheme:"+(dark?'dark':'light');
+    const rootStyle = this.skinTokens(skin, dark, accent)+";font-family:'Manrope', system-ui, sans-serif;color:var(--t1);min-height:100vh;color-scheme:"+(dark?'dark':'light');
 
     const out = {
       rootStyle, brandMark:this.icon('droplet',18), checkIcon:this.icon('check',14), logoutIcon:this.icon('logout',16),

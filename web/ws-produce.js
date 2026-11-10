@@ -383,8 +383,8 @@
           : '<tr><td>' + (i + 1) + '</td><td class="loc">' + escHtml(t.label || 'ANY BIN') + '</td><td>' + escHtml(t.taskNo) + '</td><td>' + escHtml(t.batchNo || '') + '</td><td>' + escHtml((t.sku || '') + (t.packSize ? ' · ' + t.packSize : '')) + '</td><td class="q">' + escHtml(num(t.qty) + ' ' + (t.uom || '')) + '</td><td>' + escHtml(t.reference || '') + '</td><td>' + qrSvg(t.qr, 2) + '</td><td class="tick"></td></tr>';
       }).join('');
       var css = thermal
-        ? '@page{size:80mm auto;margin:3mm}body{font-family:Arial,sans-serif;width:74mm;margin:0;color:#000}h1{font-size:14px;margin:0 0 4px}.t{border-bottom:1px dashed #000;padding:6px 0;font-size:12px}.loc{font:700 20px/1.1 Arial}.q{font-weight:700}svg{margin-top:4px}'
-        : '@page{size:A4;margin:12mm}body{font-family:Arial,sans-serif;color:#141413}h1{font-size:16px;letter-spacing:.12em;margin:0}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border-bottom:1px solid #ccc;padding:6px;font-size:12px;text-align:left;vertical-align:middle}.loc{font:700 16px Arial}.q{font-weight:700}.tick{width:22px;border:1px solid #000}';
+        ? '@page{size:80mm auto;margin:3mm}body{font-family:Manrope, system-ui, sans-serif;width:74mm;margin:0;color:#000}h1{font-size:14px;margin:0 0 4px}.t{border-bottom:1px dashed #000;padding:6px 0;font-size:12px}.loc{font:700 20px/1.1 Manrope, system-ui, sans-serif}.q{font-weight:700}svg{margin-top:4px}'
+        : '@page{size:A4;margin:12mm}body{font-family:Manrope, system-ui, sans-serif;color:#141413}h1{font-size:16px;letter-spacing:.12em;margin:0}table{width:100%;border-collapse:collapse;margin-top:10px}th,td{border-bottom:1px solid #ccc;padding:6px;font-size:12px;text-align:left;vertical-align:middle}.loc{font:700 16px Manrope, system-ui, sans-serif}.q{font-weight:700}.tick{width:22px;border:1px solid #000}';
       openPrint(title, '<style>' + css + '@media print{.noprint{display:none}}</style>' +
         '<h1>Raw Aromachem · ' + title + '</h1><div style="font-size:11px;color:#555">' + d.items.length + ' task(s) · rack walking order · ' + new Date().toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) + '</div>' +
         (thermal ? rows : '<table><thead><tr><th>#</th><th>Location</th><th>Task</th><th>Batch</th><th>SKU</th><th>Qty</th><th>For</th><th>QR</th><th>✓</th></tr></thead><tbody>' + rows + '</tbody></table>'));
@@ -393,7 +393,7 @@
 
   function openPrint(title, inner) {
     var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print.', 'bad'); return null; }
-    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + escHtml(title) + '</title></head><body>' + inner +
+    w.document.write('<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>' + escHtml(title) + '</title></head><body>' + inner +
       '<div class="noprint" style="margin:20px 0;text-align:center"><button onclick="window.print()" style="padding:10px 26px;background:#E9F260;color:#141413;border:none;border-radius:10px;font-weight:600;cursor:pointer;font-size:14px">Print</button></div></body></html>');
     w.document.close();
     return w;
@@ -478,7 +478,7 @@
   // opaque id it is printed as text and says so, rather than encoding something that should not be.
   function scanCodes(code, maxW, o) {
     try { var x = (o || {}); x.maxWidthMm = maxW; return window.RaLabel.codesHtml(String(code), x).html; }
-    catch (e) { return '<span style="font:700 12px ui-monospace,monospace">' + escHtml(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
+    catch (e) { return '<span style="font:700 12px JetBrains Mono, ui-monospace, monospace">' + escHtml(code) + '</span><span style="font-size:9px"> (no scan code: not an opaque id)</span>'; }
   }
   // FLOOR-3 (R7): the sheet was printed with no record, so a second sheet of the same bins (two labels
   // on a bin) left no trace. It is logged like a single label: the first sheet is a print job naming
@@ -494,7 +494,7 @@
       var cells = bins.map(function (b) {
         return '<div class="lb">' + (reprint ? '<div class="rp">REPRINT</div>' : '') + '<div class="c">' + escHtml(b.label) + '</div>' + scanCodes(b.binCode, 58, { barHeightMm: 8 }) + '<div class="z">' + escHtml((b.zoneCode || '') + (b.walkSeq != null ? ' · walk ' + b.walkSeq : '')) + '</div></div>';
       }).join('');
-      return '<style>@page{size:A4;margin:8mm}body{font-family:Arial,sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid;position:relative}.c{font:700 18px Arial}.z{font-size:10px;color:#444}.rp{position:absolute;top:1mm;right:1.5mm;font:700 9px Arial;border:1.5px solid #000;padding:0 2px}@media print{.noprint{display:none}}</style>' +
+      return '<style>@page{size:A4;margin:8mm}body{font-family:Manrope, system-ui, sans-serif;margin:0}.grid{display:flex;flex-wrap:wrap;gap:4mm}.lb{width:60mm;height:32mm;border:1px solid #000;border-radius:2mm;display:flex;flex-direction:column;align-items:center;justify-content:center;page-break-inside:avoid;position:relative}.c{font:700 18px Manrope, system-ui, sans-serif}.z{font-size:10px;color:#444}.rp{position:absolute;top:1mm;right:1.5mm;font:700 9px Manrope, system-ui, sans-serif;border:1.5px solid #000;padding:0 2px}@media print{.noprint{display:none}}</style>' +
         '<div class="grid">' + cells + '</div>';
     }
     function openSheet2(bins, d) {
@@ -640,7 +640,7 @@
       var s = SIZES[size] || SIZES['100x50'];
       var n = s.sheet || 1, body = '';
       for (var i = 0; i < n; i++) body += labelHtml(c, size);
-      openPrint('Label ' + c.batchNumber, '<style>@page{size:' + s.page + ';margin:' + (s.sheet ? '8mm' : '2mm') + '}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
+      openPrint('Label ' + c.batchNumber, '<style>@page{size:' + s.page + ';margin:' + (s.sheet ? '8mm' : '2mm') + '}body{margin:0;font-family:Manrope, system-ui, sans-serif;color:#000}' +
         '.wrap{display:flex;flex-wrap:wrap;gap:4mm}.lbl{box-sizing:border-box;border:1px solid #000;border-radius:2mm;padding:2.5mm;display:flex;flex-direction:column;gap:1.2mm;page-break-inside:avoid;overflow:hidden}' +
         '.top{display:flex;justify-content:space-between;gap:2mm}.pn{font-weight:700;font-size:' + (s.small ? '12px' : '18px') + '}.sm{font-size:' + (s.small ? '8px' : '11px') + '}' +
         '.row{display:flex;gap:2mm;align-items:baseline;font-size:' + (s.small ? '8px' : '12px') + '}.row span{color:#333}.big{font-size:' + (s.small ? '12px' : '20px') + '}.qc{border:1px solid #000;padding:0 1mm}' +

@@ -1712,8 +1712,8 @@
     }
     function open(extra) {
       var w = window.open('', '_blank', 'width=820,height=920'); if (!w) { toast('Allow pop-ups to print.', 'bad'); return; }
-      var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + docTitle + '</title><style>' +
-        'body{font-family:Arial,Helvetica,sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto}' +
+      var html = '<!DOCTYPE html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>' + docTitle + '</title><style>' +
+        'body{font-family:Manrope, system-ui, sans-serif;color:#141413;padding:40px;max-width:720px;margin:auto}' +
         'h1{font-size:14px;letter-spacing:.16em;color:#141413;margin:0;font-weight:600}h2{font-size:20px;margin:4px 0}.sub{color:#66665E;font-size:12px}' +
         'hr{border:none;border-top:2px solid #E6E6E3;margin:14px 0}table{width:100%;border-collapse:collapse;margin-top:8px}' +
         'td{padding:7px 10px;border-bottom:1px solid #E6E6E3;font-size:13px}.k{color:#66665E;width:42%;font-weight:600}.v{font-weight:700}' +

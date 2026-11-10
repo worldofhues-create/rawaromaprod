@@ -153,7 +153,7 @@
     el.setAttribute('role', 'dialog');
     el.setAttribute('aria-modal', 'true');
     el.setAttribute('aria-label', 'Scan with the camera');
-    el.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;font:16px/1.4 system-ui,sans-serif;text-align:center';
+    el.style.cssText = 'position:fixed;inset:0;z-index:2147483000;background:rgba(0,0,0,.86);color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:16px;font:16px/1.4 Manrope, system-ui, sans-serif;text-align:center';
     el.innerHTML = inner + '<button type="button" class="btn" data-scan-close style="min-height:52px;min-width:160px">Close</button>';
     el.querySelector('[data-scan-close]').onclick = closeCamera;
     el.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeCamera(); });

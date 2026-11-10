@@ -30,7 +30,7 @@
   z-index:530;
   border-radius:var(--r-xl, 26px);flex-direction:column;max-height:calc(100dvh - 190px);
   display:none;
-  font-family:var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));
+  font-family:var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));
   color:var(--ink, #141413);
 }
 /* A host with no `.glass` surface still gets the reference's frosted panel. */
@@ -74,7 +74,7 @@
 .aria-in{
   flex:1;min-width:0;height:36px;border-radius:var(--r-pill, 999px);border:0;outline:none;padding:0 var(--s-snug, 12px);
   background:rgba(255,255,255,.8);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
-  font:var(--w-reg, 400) var(--t-body, 13.5px)/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink, #141413);
+  font:var(--w-reg, 400) var(--t-body, 13.5px)/1 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));color:var(--ink, #141413);
 }
 .aria-in:focus{box-shadow:0 0 0 1.5px var(--accent-line, rgba(233,242,96,.55))}
 /* thinking shimmer */
@@ -85,13 +85,13 @@
 
 /* Aria empty state: the greeting and the questions it can answer. */
 .aria-empty{padding:var(--s-base, 20px) 2px}
-.aria-empty p{margin:0 0 var(--s-base, 20px);font:400 13.5px/1.6 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
-.aria-empty .lbl{display:block;margin-bottom:var(--s-snug, 12px);font:500 10px/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3, #66665E)}
+.aria-empty p{margin:0 0 var(--s-base, 20px);font:400 13.5px/1.6 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-empty .lbl{display:block;margin-bottom:var(--s-snug, 12px);font:500 10px/1 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));letter-spacing:.14em;text-transform:uppercase;color:var(--ink-3, #66665E)}
 .aria-empty .prompts{display:flex;flex-direction:column;gap:6px}
 .aria-empty .prompts button{
   text-align:left;padding:10px 12px;border-radius:10px;cursor:pointer;
   background:var(--surf-2, var(--panel-2, #F1F1EE));border:1px solid var(--gl-hair, rgba(20,20,19,.07));
-  font:400 13px/1.4 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink, #141413);transition:background .18s,border-color .18s,transform .18s;
+  font:400 13px/1.4 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));color:var(--ink, #141413);transition:background .18s,border-color .18s,transform .18s;
 }
 .aria-empty .prompts button:hover{background:#fff;border-color:var(--line-2, rgba(20,20,19,.14));transform:translateX(2px)}
 .aria-empty .prompts button:focus-visible{outline:2px solid var(--accent-line, rgba(233,242,96,.55));outline-offset:2px}
@@ -110,7 +110,7 @@
   padding:9px 12px;border-radius:13px;white-space:pre-wrap;overflow-wrap:anywhere;
   background:rgba(255,255,255,.78);color:var(--ink, #141413);
   box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
-  font:var(--w-reg, 400) var(--t-body, 13.5px)/1.5 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));
+  font:var(--w-reg, 400) var(--t-body, 13.5px)/1.5 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));
 }
 .aria-line.me .aria-bub{background:rgba(20,20,19,.9);color:#F4F4F1;box-shadow:none}
 /* A refusal is an answer: said plainly, marked so it does not read as a fact. */
@@ -130,10 +130,10 @@
 
 /* Where an answer came from, and the records it rests on. */
 .aria-meta{display:flex;flex-wrap:wrap;align-items:center;gap:5px;margin-top:6px}
-.aria-src{font:var(--w-med, 500) var(--t-micro, 10px)/1 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E)}
+.aria-src{font:var(--w-med, 500) var(--t-micro, 10px)/1 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E)}
 .aria-fact{display:inline-flex;align-items:center;gap:5px;max-width:100%;padding:4px 8px;border-radius:var(--r-pill, 999px);
   background:rgba(255,255,255,.72);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));
-  font:var(--w-med, 500) 11px/1.2 var(--ui, var(--font-ui, "Outfit", system-ui, sans-serif));color:var(--ink-2, #5C5C56);
+  font:var(--w-med, 500) 11px/1.2 var(--ui, var(--font-ui, "Manrope", system-ui, sans-serif));color:var(--ink-2, #5C5C56);
   overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aria-fact i{width:6px;height:6px;border-radius:50%;flex:0 0 auto;background:var(--accent, #E9F260);box-shadow:0 0 0 .5px rgba(90,100,16,.35)}
 .aria-fact.is-reg i{background:var(--amber, #6E5F0F)}
@@ -192,24 +192,24 @@ body.aria-rail .body > .col:last-child{display:none}
 .aria-threads-bar{display:flex;align-items:center;gap:6px;padding:0 var(--s-base, 20px) var(--s-snug, 12px);flex:0 0 auto;flex-wrap:wrap}
 .aria-threads-btn{height:28px;padding:0 12px;border-radius:var(--r-pill, 999px);border:0;cursor:pointer;
   background:rgba(255,255,255,.72);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));color:var(--ink-2, #5C5C56);
-  font:var(--w-med, 500) 12px/1 var(--ui, var(--font-ui, system-ui, sans-serif));white-space:nowrap;transition:box-shadow .18s, background .18s}
+  font:var(--w-med, 500) 12px/1 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));white-space:nowrap;transition:box-shadow .18s, background .18s}
 .aria-threads-btn:hover{color:var(--ink, #141413);box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
 .aria-threads-btn.on{background:var(--accent-soft, rgba(233,242,96,.16));color:var(--ink, #141413);box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
-.aria-threads-proj{margin-left:auto;font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-3, #66665E);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.aria-threads-proj{margin-left:auto;font:500 11px/1 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink-3, #66665E);max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aria-threads-drawer{display:flex;flex-direction:column;gap:8px;animation:ariaLineIn .22s ease both}
 .aria-threads-group{display:flex;flex-direction:column;gap:4px}
-.aria-threads-lbl{font:600 10.5px/1.2 var(--ui, var(--font-ui, system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E);margin-top:4px}
-.aria-threads-note{font:400 12.5px/1.5 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-lbl{font:600 10.5px/1.2 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));letter-spacing:.08em;text-transform:uppercase;color:var(--ink-3, #66665E);margin-top:4px}
+.aria-threads-note{font:400 12.5px/1.5 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
 .aria-threads-row{display:flex;align-items:center;gap:4px;padding:4px;border-radius:var(--r-md, 14px);background:rgba(255,255,255,.6);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07))}
 .aria-threads-row.on{background:var(--accent-soft, rgba(233,242,96,.16));box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
 .aria-threads-title{flex:1;min-width:0;text-align:left;border:0;background:transparent;cursor:pointer;padding:4px 6px;
-  font:500 12.5px/1.35 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink, #141413);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  font:500 12.5px/1.35 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink, #141413);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .aria-threads-title em{display:block;font-style:normal;font-size:11px;color:var(--ink-3, #66665E);overflow:hidden;text-overflow:ellipsis}
-.aria-threads-mini{border:0;background:transparent;cursor:pointer;padding:4px 6px;border-radius:8px;font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-mini{border:0;background:transparent;cursor:pointer;padding:4px 6px;border-radius:8px;font:500 11px/1 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
 .aria-threads-mini:hover{background:rgba(20,20,19,.06);color:var(--ink, #141413)}
-.aria-threads-select{max-width:96px;height:24px;border-radius:8px;border:0;box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));background:rgba(255,255,255,.8);font:500 11px/1 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
+.aria-threads-select{max-width:96px;height:24px;border-radius:8px;border:0;box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));background:rgba(255,255,255,.8);font:500 11px/1 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink-2, #5C5C56)}
 .aria-threads-input{width:100%;box-sizing:border-box;border-radius:10px;border:0;outline:none;padding:7px 10px;
-  background:rgba(255,255,255,.85);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));font:400 12.5px/1.4 var(--ui, var(--font-ui, system-ui, sans-serif));color:var(--ink, #141413);resize:vertical}
+  background:rgba(255,255,255,.85);box-shadow:0 0 0 .5px var(--gl-hair, rgba(20,20,19,.07));font:400 12.5px/1.4 var(--ui, var(--font-ui, 'Manrope', system-ui, sans-serif));color:var(--ink, #141413);resize:vertical}
 .aria-threads-input:focus{box-shadow:0 0 0 1px var(--accent-line, rgba(233,242,96,.55))}
 .aria-threads-form{display:flex;flex-direction:column;gap:6px;margin-top:6px}
 

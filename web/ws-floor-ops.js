@@ -80,7 +80,7 @@
     var html = RaLabel.render(template, 'html').body;
     var w = window.open('', '_blank', 'width=700,height=800');
     if (!w) { toast('Allow pop-ups to print in the browser.', 'bad'); return false; }
-    w.document.write('<!doctype html><meta charset="utf-8"><title>' + escHtml(title) + '</title><style>@page{size:' + template.w + 'mm ' + template.h + 'mm;margin:0}body{margin:0}</style>' + html);
+    w.document.write('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="/ui-contract/fonts/type.css"><title>' + escHtml(title) + '</title><style>@page{size:' + template.w + 'mm ' + template.h + 'mm;margin:0}body{margin:0}</style>' + html);
     w.document.close();
     // Printed from here, not by a script inside the pop-up (a strict CSP would block that).
     setTimeout(function () { try { w.focus(); w.print(); } catch (e) { /* the person can print from the window */ } }, 250);

@@ -1,6 +1,6 @@
 import type { Portal, SemanticTokens } from './types.js';
 
-const SANS = '"Inter", system-ui, sans-serif';
+const SANS = '"Manrope", system-ui, sans-serif'; // FONT-RP-1
 const MONO = '"JetBrains Mono", ui-monospace, monospace';
 
 /** Base (light) — portals override only what differs, keeping them in sync. */

@@ -5,8 +5,9 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Pair this device · RAW Factory</title>
   <link rel="icon" href="/favicon.ico">
-  <link rel="stylesheet" href="/ui-contract/fonts/outfit.css">
-  <link rel="stylesheet" href="/ui-contract/fonts/jetbrains-mono.css">
+  <!-- FONT-RP-1: Manrope + JetBrains Mono, self-hosted; the only two faces. -->
+  <link rel="preload" href="/ui-contract/fonts/manrope-variable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/ui-contract/fonts/type.css">
   <!-- Lane pf-c (plan section 2): pair a TV or a kiosk tablet with the 6-digit code from Admin ->
        Devices (or the QR, which opens this page with #code=). The device gets a station-scoped
        token: a TV then shows the floor board read-only; a kiosk is locked to its station's screen
@@ -16,21 +17,21 @@
     :root { --bg: #EDEDEB; --ink: #151515; --ink-3: #6b6b6b; --panel: #fff; --panel-2: #f4f4f2; --accent: #c4561b; --bad: #b3261e; --ok: #1e7b45; }
     @media (prefers-color-scheme: dark) { :root { --bg: #111; --ink: #f2f2f2; --ink-3: #a0a0a0; --panel: #1b1b1b; --panel-2: #242424; } }
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.4 Outfit, system-ui, sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--ink); font: 400 16px/1.4 'Manrope', system-ui, sans-serif; }
     main { max-width: 520px; margin: 0 auto; padding: 32px 16px; }
-    h1 { font: 600 28px/1.2 Outfit, system-ui, sans-serif; margin: 0 0 6px; }
+    h1 { font: 600 28px/1.2 'Manrope', system-ui, sans-serif; margin: 0 0 6px; }
     .t-cap { color: var(--ink-3); font-size: 14px; }
     .panel { background: var(--panel); border-radius: 14px; padding: 20px; margin-top: 18px; }
-    input { width: 100%; font: 600 40px/1.2 'JetBrains Mono', monospace; letter-spacing: .3em; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid #ccc; background: var(--panel-2); color: var(--ink); }
-    button { width: 100%; margin-top: 14px; min-height: 56px; font: 600 18px Outfit, system-ui, sans-serif; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
+    input { width: 100%; font: 600 40px/1.2 'JetBrains Mono', ui-monospace, monospace; letter-spacing: .3em; text-align: center; padding: 12px; border-radius: 10px; border: 1px solid #ccc; background: var(--panel-2); color: var(--ink); }
+    button { width: 100%; margin-top: 14px; min-height: 56px; font: 600 18px 'Manrope', system-ui, sans-serif; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }
     button.ghost { background: var(--panel-2); color: var(--ink); }
     .msg { margin-top: 12px; min-height: 1.4em; }
     .bad { color: var(--bad); } .ok { color: var(--ok); }
     #board { display: none; padding: 20px; }
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; }
     .row { display: flex; justify-content: space-between; gap: 10px; padding: 10px 12px; background: var(--panel-2); border-radius: 8px; font-size: 22px; margin-top: 6px; }
-    .mono { font-family: 'JetBrains Mono', monospace; }
-    h2 { font: 600 26px/1.2 Outfit, system-ui, sans-serif; margin: 0 0 8px; }
+    .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+    h2 { font: 600 26px/1.2 'Manrope', system-ui, sans-serif; margin: 0 0 8px; }
     /* WALK2-RP-20: a 4K TV showed the 1080p board at a quarter of the screen. */
     @media (min-width: 2500px) { #board { padding: 40px; } .grid { grid-template-columns: repeat(auto-fit, minmax(600px, 1fr)); gap: 32px; } .row { font-size: 44px; padding: 18px 24px; } h2 { font-size: 52px; } #board .t-cap { font-size: 28px; } .panel { padding: 36px; } }
     #net { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px; text-align: center; background: var(--bad); color: #fff; display: none; font-weight: 600; }

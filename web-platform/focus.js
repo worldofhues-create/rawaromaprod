@@ -200,7 +200,7 @@
     s.textContent = [
       '.ra-focus-exit{position:fixed;top:10px;left:50%;transform:translate(-50%,-160%);z-index:9000;display:inline-flex;align-items:center;gap:6px;',
       'padding:7px 12px;border-radius:999px;border:.5px solid rgba(255,255,255,.18);background:rgba(18,19,17,.9);color:#F2F4EA;',
-      'font:500 12px/1 var(--font-ui,var(--ui,system-ui,sans-serif));cursor:pointer;transition:transform .2s ease;min-height:32px}',
+      'font:500 12px/1 var(--font-ui,var(--ui,Manrope, system-ui, sans-serif));cursor:pointer;transition:transform .2s ease;min-height:32px}',
       '.ra-focus-exit.show,.ra-focus-exit:focus-visible{transform:translate(-50%,0)}',
       // On a phone the top of the screen is the sheet's title: the pill sits above the dock instead.
       '@media (max-width:720px){.ra-focus-exit{top:auto;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translate(-50%,240px)}',
@@ -209,11 +209,11 @@
       '@media (max-width:720px){.ra-focus-exit.ra-in-flow{position:static;display:flex;width:max-content;margin:0 auto 10px;transform:none}}',
       '.ra-focus-exit[hidden],.ra-focus-note[hidden]{display:none}',
       '.ra-focus-note{position:fixed;left:50%;top:14px;transform:translateX(-50%);z-index:9001;max-width:min(440px,calc(100vw - 32px));',
-      'padding:10px 14px;border-radius:12px;background:rgba(18,19,17,.94);color:#F2F4EA;font:400 12.5px/1.45 var(--font-ui,var(--ui,system-ui,sans-serif));',
+      'padding:10px 14px;border-radius:12px;background:rgba(18,19,17,.94);color:#F2F4EA;font:400 12.5px/1.45 var(--font-ui,var(--ui,Manrope, system-ui, sans-serif));',
       'box-shadow:0 18px 40px -20px rgba(0,0,0,.7);pointer-events:none}',
       '.ra-install{position:fixed;left:16px;bottom:16px;z-index:580;width:min(360px,calc(100vw - 32px));display:flex;gap:12px;align-items:flex-start;',
       'padding:14px;border-radius:16px;background:rgba(18,19,17,.96);color:#F2F4EA;border:.5px solid rgba(255,255,255,.14);',
-      'box-shadow:0 22px 44px -22px rgba(0,0,0,.8);font:400 12.5px/1.45 var(--font-ui,var(--ui,system-ui,sans-serif))}',
+      'box-shadow:0 22px 44px -22px rgba(0,0,0,.8);font:400 12.5px/1.45 var(--font-ui,var(--ui,Manrope, system-ui, sans-serif))}',
       '.ra-install img{width:40px;height:40px;border-radius:10px;flex:0 0 auto}',
       '.ra-install b{display:block;font-weight:500;font-size:13.5px;margin-bottom:3px}',
       '.ra-install p{margin:0 0 10px;opacity:.8}',
@@ -224,7 +224,7 @@
       '@media (display-mode: window-controls-overlay){',
       '.ra-titlebar{display:flex;align-items:center;position:fixed;left:env(titlebar-area-x,0);top:env(titlebar-area-y,0);',
       'width:env(titlebar-area-width,100%);height:env(titlebar-area-height,0px);padding:0 12px;z-index:8999;box-sizing:border-box;',
-      '-webkit-app-region:drag;app-region:drag;font:500 12px/1 var(--font-ui,var(--ui,system-ui,sans-serif));color:var(--ink-2,#5C5C56);background:var(--bg,#EDEDEB)}',
+      '-webkit-app-region:drag;app-region:drag;font:500 12px/1 var(--font-ui,var(--ui,Manrope, system-ui, sans-serif));color:var(--ink-2,#5C5C56);background:var(--bg,#EDEDEB)}',
       '.stage{margin-top:env(titlebar-area-height,0px) !important;height:calc(100dvh - env(titlebar-area-height,0px)) !important}',
       '}',
       '@media (prefers-reduced-motion: reduce){.ra-focus-exit{transition:none}}'

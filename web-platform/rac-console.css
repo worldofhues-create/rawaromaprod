@@ -1071,8 +1071,8 @@ img,svg,video,canvas{max-width:100%}
   --ink:#141413; --ink-2:#5C5C56; --ink-3:#66665E;
   --rail:#26262B; --rail-2:#33333A;
   --accent:#E9F260; --blue:#5A5A66; --green:#5F6B2E; --amber:#6E5F0F; --red:#8A5A4C; --purple:#7A7A88;
-  --ui:'Outfit','Helvetica Neue',ui-sans-serif,system-ui,sans-serif;
-  --mono:'JetBrains Mono',ui-monospace,monospace;
+  --ui:'Manrope', system-ui, sans-serif;
+  --mono:'JetBrains Mono', ui-monospace, monospace;
   --card:var(--panel-2); --accent-soft:rgba(233,242,96,.16); --accent-line:rgba(233,242,96,.55);
 }
 *{box-sizing:border-box}
