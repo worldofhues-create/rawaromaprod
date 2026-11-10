@@ -348,7 +348,8 @@
 
   /* ── SVG: the screen preview and the browser print ───────────────────────────────── */
   function esc(s) { return String(s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
-  var MONO = "'JetBrains Mono',ui-monospace,monospace", SANS = 'Manrope,system-ui,sans-serif';
+  /* Whole literal attributes, so both repos' face scanners read the two faces (fonts-only-two, check-brand). */
+  var MONO = ' font-family="JetBrains Mono, ui-monospace, monospace"', SANS = ' font-family="Manrope, system-ui, sans-serif"';
   /** deps: { code128Bars, qrMatrix } (RaLabel's, or ALEMBIC's equivalents). Without them a code is drawn as its text. */
   function svg(t, deps) {
     var D = deps || {}, out = [];
@@ -360,7 +361,7 @@
       else if (e.t === 'circle') out.push('<circle cx="' + e.x + '" cy="' + e.y + '" r="' + e.r + '"' + (e.sw ? ' fill="none" stroke="' + e.c + '" stroke-width="' + e.sw + '"' : fill) + '/>');
       else if (e.t === 'text') {
         var fs = r2(e.h * TEXT_EM);
-        out.push('<text x="' + (e.a === 'r' ? r2(e.x + e.w) : e.x) + '" y="' + r2(e.y + e.h) + '" font-size="' + fs + '" font-family="' + (e.mono ? MONO : SANS) + '" font-weight="' + (e.b ? 700 : 400) + '"' +
+        out.push('<text x="' + (e.a === 'r' ? r2(e.x + e.w) : e.x) + '" y="' + r2(e.y + e.h) + '" font-size="' + fs + '"' + (e.mono ? MONO : SANS) + ' font-weight="' + (e.b ? 700 : 400) + '"' +
           (e.ls ? ' letter-spacing="' + r2(e.ls * fs) + '"' : '') + (e.a === 'r' ? ' text-anchor="end"' : '') + fill + '>' + esc(e.s) + '</text>');
       } else if (e.t === 'arctext') {
         var id = 'arc' + Math.round(e.x * 10) + '-' + Math.round(e.y * 10), a0 = (e.start || 0) * Math.PI / 180;
@@ -368,13 +369,13 @@
         // two half circles: one arc whose ends coincide is dropped by renderers
         out.push('<path id="' + id + '" d="M' + sx + ',' + sy + ' A' + e.r + ',' + e.r + ' 0 0 1 ' + mx + ',' + my + ' A' + e.r + ',' + e.r + ' 0 0 1 ' + sx + ',' + sy + '" fill="none"/>');
         var fs2 = r2(e.h * TEXT_EM);
-        out.push('<text font-size="' + fs2 + '" font-family="' + (e.mono ? MONO : SANS) + '"' + (e.ls ? ' letter-spacing="' + r2(e.ls * fs2) + '"' : '') + fill + '><textPath href="#' + id + '">' + esc(e.s) + '</textPath></text>');
+        out.push('<text font-size="' + fs2 + '"' + (e.mono ? MONO : SANS) + (e.ls ? ' letter-spacing="' + r2(e.ls * fs2) + '"' : '') + fill + '><textPath href="#' + id + '">' + esc(e.s) + '</textPath></text>');
       } else if (e.t === 'code128') {
-        if (!D.code128Bars) { out.push('<text x="' + e.x + '" y="' + (e.y + 4) + '" font-size="3" font-family="' + MONO + '"' + fill + '>' + esc(e.d) + '</text>'); return; }
+        if (!D.code128Bars) { out.push('<text x="' + e.x + '" y="' + (e.y + 4) + '" font-size="3"' + MONO + fill + '>' + esc(e.d) + '</text>'); return; }
         var cb = D.code128Bars(e.d), k = e.w / cb.modules;
         out.push('<g data-code128="' + esc(e.d) + '"' + fill + ' shape-rendering="crispEdges">' + cb.bars.map(function (b) { return '<rect x="' + r2(e.x + b[0] * k) + '" y="' + e.y + '" width="' + r2(b[1] * k) + '" height="' + e.h + '"/>'; }).join('') + '</g>');
       } else if (e.t === 'qr') {
-        if (!D.qrMatrix) { out.push('<text x="' + e.x + '" y="' + (e.y + 4) + '" font-size="2" font-family="' + MONO + '"' + fill + '>' + esc(e.d) + '</text>'); return; }
+        if (!D.qrMatrix) { out.push('<text x="' + e.x + '" y="' + (e.y + 4) + '" font-size="2"' + MONO + fill + '>' + esc(e.d) + '</text>'); return; }
         var M = D.qrMatrix(e.d), q = e.w / M.length, cells = [];
         M.forEach(function (row, r) { row.forEach(function (dk, c) { if (dk) cells.push('<rect x="' + r2(e.x + c * q) + '" y="' + r2(e.y + r * q) + '" width="' + r2(q + 0.01) + '" height="' + r2(q + 0.01) + '"/>'); }); });
         out.push('<g data-qr="' + esc(e.d) + '"' + fill + ' shape-rendering="crispEdges">' + cells.join('') + '</g>');
