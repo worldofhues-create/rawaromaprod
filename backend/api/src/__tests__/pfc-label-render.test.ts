@@ -21,8 +21,8 @@ function pdfText(pdf: string): string {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const F = sandbox.RaLabelPdfFont as any;
   const inv = (face: any) => new Map(Object.entries(face.cmap as Record<string, number>).map(([cp, g]) => [g, String.fromCodePoint(Number(cp))]));
-  const maps: Record<string, Map<number, string>> = { F1: inv(F.regular), F2: inv(F.bold) };
-  return [...pdf.matchAll(/BT \/(F[12]) [\d.]+ Tf [\d.-]+ [\d.-]+ Td <([0-9A-F]*)> Tj ET/g)]
+  const maps: Record<string, Map<number, string>> = { F1: inv(F.regular), F2: inv(F.bold), F3: inv(F.mono), F4: inv(F.monoBold) }; // SHELL-FLUKE-1: codes in JetBrains Mono
+  return [...pdf.matchAll(/BT \/(F[1-4]) [\d.]+ Tf [\d.-]+ [\d.-]+ Td <([0-9A-F]*)> Tj ET/g)]
     .map((m) => (m[2]!.match(/.{4}/g) || []).map((h) => maps[m[1]!]!.get(parseInt(h, 16)) ?? '?').join('')).join('\n');
 }
 const SIZES_12_4 = ['38x25', '50x25', '75x50', '100x50', '100x100', '100x150', '62mm', 'a4'];

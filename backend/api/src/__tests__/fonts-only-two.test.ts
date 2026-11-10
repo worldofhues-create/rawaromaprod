@@ -75,7 +75,7 @@ test('the label screen/print HTML is Manrope, with the code in JetBrains Mono', 
   const html = src.slice(src.indexOf('function html('), src.indexOf('function codesHtml('));
   assert.deepEqual(offFaces(html), []);
   assert.match(html, /font-family:Manrope,system-ui,sans-serif/);
-  assert.match(html, /e\.mono \? ';font-family:\\'JetBrains Mono\\'/);
+  assert.match(html, /e\.mono(?: \|\| RAC_CODE_RE\.test\(e\.s\))? \? ';font-family:\\'JetBrains Mono\\'/ /* SHELL-FLUKE-0: the rac-codes merge adds the RAC-code test */);
   assert.doesNotMatch(src, /Hue Cycle|huecycle/i, 'labels carry no Hue Cycle footer');
   assert.doesNotMatch(src, /\/BaseFont \/(Helvetica|Times|Courier)|Subtype \/Type1/, 'the label PDF names no built-in font');
 });
