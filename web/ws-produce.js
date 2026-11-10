@@ -649,9 +649,34 @@
         '@media print{.noprint{display:none}}</style><div class="wrap">' + body + '</div>');
     }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
   }
+  /* SHELL-FLUKE-4: the packed-goods wrap, 240 x 100 mm (web/shell-fluke.js). The batch label carries
+     the code, grade, pack, net qty, lot and dates; it does NOT carry the server MRP, the seller profile,
+     per-material SDS hazard data or an IFRA certificate, and the wrap refuses to invent them -- so until
+     those reach this box the wrap prints only as PREVIEW · NOT FOR SALE, with the list of what is missing. */
+  function shellFluke(fgId) {
+    tunnel('/v1/finished-good-batches/' + fgId + '/label').then(function (res) {
+      if (res.status >= 400) { toast(err(res, 'This batch cannot be labelled. Try again.'), 'bad'); return; }
+      var c = data(res); if (!c || !window.ShellFluke) return;
+      var v = self.RacCode && self.RacCode.parse(c.skuCode);
+      var composed = window.ShellFluke.compose({
+        productName: c.productName, productCode: c.productCode, variantCode: v && v.grade ? c.skuCode : null,
+        genericName: null, packSize: c.packSize, netQuantity: { value: c.netQuantity, unit: c.unit },
+        batch: { lotCode: c.batchNumber, manufacturingDate: c.manufacturingDate, useByDate: c.expiryDate },
+        mrp: null, sds: null, ifra: null, seller: null, accords: []
+      });
+      var mode = composed.production ? 'production' : 'preview';
+      var t = window.ShellFluke.template(composed, { mode: mode });
+      var why = composed.problems.length ? '<div class="noprint" style="font:13px/1.5 Manrope, system-ui, sans-serif;margin:12px 0"><b>Preview only, not for sale. A production print needs:</b><ul>' +
+        composed.problems.map(function (p) { return '<li>' + escHtml(p.message) + '</li>'; }).join('') + '</ul></div>' : '';
+      openPrint((mode === 'preview' ? 'PREVIEW ' : '') + 'Shell Fluke ' + c.batchNumber, '<style>@page{size:240mm 100mm;margin:0}body{margin:0}@media print{.noprint{display:none}}</style>' +
+        window.ShellFluke.svg(t, { code128Bars: window.RaLabel.code128Bars, qrMatrix: window.RaLabel.qrMatrix }) + why);
+    }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+  }
   function chooseLabelSize(fgId) {
     var m = openSheet({ tag: 'div', style: 'max-width:420px', title: 'Print label', meta: 'Browser print or save as PDF',
-      body: Object.keys(SIZES).map(function (k) { return '<button type="button" class="btn" data-size="' + k + '" style="width:100%;justify-content:center">' + escHtml(SIZES[k].name) + '</button>'; }).join('') });
+      body: Object.keys(SIZES).map(function (k) { return '<button type="button" class="btn" data-size="' + k + '" style="width:100%;justify-content:center">' + escHtml(SIZES[k].name) + '</button>'; }).join('') +
+        '<button type="button" class="btn" data-wrap="1" style="width:100%;justify-content:center">Pack wrap, Shell Fluke (240 × 100 mm)</button>' });
+    var wb = m.sheet.querySelector('[data-wrap]'); if (wb) wb.onclick = function () { m.close(); shellFluke(fgId); }; /* SHELL-FLUKE-4 */
     [].forEach.call(m.sheet.querySelectorAll('[data-size]'), function (b) { b.onclick = function () { m.close(); printLabel(fgId, b.getAttribute('data-size')); }; });
   }
 
