@@ -355,14 +355,15 @@ export class PickingService {
           if (held.length) throw new ConflictException('That lot is on hold and cannot be issued. Choose another lot.');
           // FLOOR-QC-IN-1: issuing is consuming. Only a lot QC has released goes into a batch: the latest
           // incoming inspection ACCEPT/PASS and the raw lot not QUARANTINE/REJECTED/HOLD. A stock row with
-          // no raw lot has no QC result, so it is refused too (fail closed). Same rule as
+          // no raw lot has no QC result, so it is refused too (fail closed). LEGACY_RELEASE (FLOOR-QC-IN-1-LEGACY) is
+          // a release QC made before the sample rule; inventory.rm_lot_qc_result decides which word is latest. Same rule as
           // cluster-inventory batch/lot-qc.ts, which this cluster does not import.
           const qc = ((await tx.execute(sql`select rb.batch_number, upper(coalesce(rb.status, '')) as status,
-              (select upper(coalesce(q.overall_result, '')) from quality.qc_inspections q where q.rm_batch_id = rb.rm_batch_id order by q.created_dt desc nulls last limit 1) as result
+              inventory.rm_lot_qc_result(rb.rm_batch_id) as result
             from inventory.inventory_batch ib left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
             where ib.inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as Array<{ batch_number: string | null; status: string | null; result: string | null }>)[0];
           if (!qc?.status && !qc?.batch_number) throw new ConflictException('That lot has no raw-lot record, so it is not released by QC. Choose another lot.');
-          if (['QUARANTINE', 'REJECTED', 'HOLD'].includes(String(qc.status)) || !['ACCEPT', 'PASS'].includes(String(qc.result ?? ''))) {
+          if (['QUARANTINE', 'REJECTED', 'HOLD'].includes(String(qc.status)) || !['ACCEPT', 'PASS', 'LEGACY_RELEASE'].includes(String(qc.result ?? ''))) {
             const why = qc.status === 'QUARANTINE' ? 'is in quarantine' : qc.status === 'REJECTED' || qc.result === 'REJECT' ? 'was rejected by QC' : 'is not released by QC';
             throw new ConflictException(`Lot ${qc.batch_number ?? ''} ${why} and cannot be issued: it is not released by QC. Choose another lot.`);
           }

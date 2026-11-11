@@ -6,7 +6,9 @@
  * it, so with the worker down -- or in the seconds before it ran -- a lot QC had never seen was a
  * plain ACTIVE lot that "Release to stock" and the putaway label both accepted.
  *
- * "Released" means one thing everywhere: the latest incoming inspection is ACCEPT (or PASS), the batch
+ * "Released" means one thing everywhere: the latest incoming inspection is ACCEPT (or PASS) -- or a
+ * LEGACY_RELEASE newer than every inspection (FLOOR-QC-IN-1-LEGACY: a lot QC released before the sample
+ * rule, scripts/migrations/2026-11-12-legacy-qc-release.sql) -- the batch
  * is not QUARANTINE / REJECTED / HOLD, and no hold is open on it. Fail closed: no inspection at all is
  * not released.
  */
@@ -24,7 +26,7 @@ export async function recordLotQcEvent(tx: Exec, rmBatchId: string, event: 'QUAR
 export async function rmLotQcRefusal(tx: Exec, rmBatchId: string): Promise<string | null> {
   const rows = (await tx.execute(sql`
     select rb.batch_number, upper(coalesce(rb.status, '')) as status,
-           (select upper(coalesce(q.overall_result, '')) from quality.qc_inspections q where q.rm_batch_id = rb.rm_batch_id order by q.created_dt desc nulls last limit 1) as qc,
+           inventory.rm_lot_qc_result(rb.rm_batch_id) as qc,
            (select h.reason from inventory.lot_hold h where h.subject_type = 'RM_LOT' and h.subject_id = rb.rm_batch_id and h.released_dt is null limit 1) as hold
       from inventory.rm_batch_master rb where rb.rm_batch_id = ${rmBatchId}::uuid`)) as unknown as Array<{ batch_number: string | null; status: string; qc: string | null; hold: string | null }>;
   const r = rows[0];
@@ -32,7 +34,7 @@ export async function rmLotQcRefusal(tx: Exec, rmBatchId: string): Promise<strin
   const n = r.batch_number ?? 'This lot';
   if (r.status === 'REJECTED' || r.qc === 'REJECT') return `${n} was rejected by QC.`;
   if (r.hold) return `${n} is on hold: ${r.hold}`;
-  if (r.qc === 'ACCEPT' || r.qc === 'PASS') return null; // QC accepted: QUARANTINE is the state it is released from
+  if (r.qc === 'ACCEPT' || r.qc === 'PASS' || r.qc === 'LEGACY_RELEASE') return null; // QC accepted: QUARANTINE is the state it is released from
   if (r.status === 'QUARANTINE') return `${n} is in quarantine, waiting for incoming QC. It is not released by QC.`;
   return `${n} is not released by QC (${r.qc ? `latest result ${r.qc}` : 'no QC result on file'}).`;
 }

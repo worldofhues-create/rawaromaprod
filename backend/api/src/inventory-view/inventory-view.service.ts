@@ -31,7 +31,7 @@ export class InventoryViewService {
              lu.uom_code                 as uom,
              coalesce(r.parts, '[]'::json) as "reservedParts",
              qc.overall_result           as "qcStatus",
-             (ib.rm_batch_id is not null and upper(coalesce(qc.overall_result,'')) not in ('ACCEPT','PASS')) as "isBlocked",
+             (ib.rm_batch_id is not null and upper(coalesce(qc.overall_result,'')) not in ('ACCEPT','PASS','LEGACY_RELEASE')) as "isBlocked",
              rb.expiry_date              as "expiryDate",
              case when rb.expiry_date is not null then (rb.expiry_date - current_date) end as "daysToExpiry",
              coalesce(s.status_code, rb.status) as "status"
@@ -47,12 +47,8 @@ export class InventoryViewService {
                  where sr.inventory_batch_id = ib.inventory_batch_id and sr.released_dt is null and coalesce(sr.status, 'ACTIVE') <> 'RELEASED'
                  group by 2) x
       ) r on true
-      left join (
-        select distinct on (rm_batch_id) rm_batch_id, overall_result
-        from quality.qc_inspections
-        where rm_batch_id is not null
-        order by rm_batch_id, created_dt desc
-      ) qc on qc.rm_batch_id = ib.rm_batch_id
+      -- FLOOR-QC-IN-1-LEGACY: QC's latest word, a pre-sample-rule LEGACY_RELEASE included (one rule, in SQL).
+      left join lateral (select inventory.rm_lot_qc_result(ib.rm_batch_id) as overall_result) qc on true
       ${where}
       order by rb.expiry_date asc nulls last, rb.batch_number asc nulls last
       limit ${limit}`;

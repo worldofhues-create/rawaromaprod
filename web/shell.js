@@ -334,7 +334,7 @@
     '/v1/grns': ['grnNumber', 'grnDate', 'status'],
     '/v1/grn-items': ['grnNumber', 'orderedQty', 'receivedQty', 'acceptedQty', 'rejectedQty', 'damagedQty', 'varianceType', 'status'],
     '/v1/rm-batches': ['batchNumber', 'expiryDate', 'fefoFlag', 'status'],
-    '/v1/qc-inspections': ['batchNumber', 'overallResult', 'inspectionDt', 'status'],
+    '/v1/qc-inspections': ['batchNumber', 'overallResult', 'legacyRelease', 'inspectionDt', 'status'],
     '/v1/qc-result-details': ['parameterName', 'observedValue', 'observedText', 'result', 'status'],
     '/v1/qc-parameters': ['parameterCode', 'parameterName', 'status'],
     '/v1/inventory-batches': ['rmBatchId', 'availableQty', 'reservedQty', 'status'],
@@ -448,6 +448,8 @@
     if (isQtyKey(k) && isFinite(Number(v))) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);font-weight:var(--w-med)">' + escCell(trimNum(v)) + '</span>' + unitHtml(k, r);
     // The chip says the status in words (screen-guide.js); the code stays in the row for search/sort.
     if (k === 'status' || k === 'overallResult' || k === 'approvalStatus' || k === 'lifecycleStatus' || (k === 'result' && /^[A-Z_]+$/.test(String(v)))) { var tone = STATUS[String(v).toLowerCase()] || 'n'; return '<span class="chip ' + tone + '"><i class="dot"></i>' + escCell(statusWord(v)) + '</span>'; }
+    // FLOOR-QC-IN-1-LEGACY: "Released before the sample rule" -- a release QC made with no sample on file.
+    if (k === 'legacyRelease') return '<span class="chip a"><i class="dot"></i>' + escCell(v) + '</span>';
     if (k === 'when' && typeof v === 'string') { var w = new Date(v); return '<span style="color:var(--ink-2)">' + escCell(isNaN(w) ? v : w.toLocaleString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })) + '</span>'; }
     if (k === 'result' && typeof v === 'string' && v.indexOf('Refused') === 0) return '<span style="color:var(--red)">' + escCell(v) + '</span>';
     if (isUuid(v)) return '<span style="font-family:var(--font-mono);font-size:var(--t-cap);color:var(--ink-2)">' + escCell(String(v).slice(0, 8).toUpperCase()) + '</span>';

@@ -159,8 +159,9 @@ export class LotTraceService {
       if ((await tx`select 1 from inventory.lot_hold where subject_type = 'RM_LOT' and subject_id = ${rmBatchId} and released_dt is null`).length) throw new ConflictException('This lot is on hold.');
       // FLOOR-QC-IN-1: not quarantined is not the same as released. A lot recorded ACTIVE with no
       // inspection at all printed a putaway label; the label goes on only after QC accepts the lot.
-      const [qc] = await tx`select upper(coalesce(overall_result, '')) as r from quality.qc_inspections where rm_batch_id = ${rmBatchId} order by created_dt desc nulls last limit 1`;
-      if (!qc || !['ACCEPT', 'PASS'].includes(String(qc.r))) throw new ConflictException(`This lot is not released by QC (${qc ? `latest result ${qc.r || 'none'}` : 'no QC result on file'}): it is put away after incoming QC accepts it.`);
+      // FLOOR-QC-IN-1-LEGACY: a pre-sample-rule LEGACY_RELEASE is a release too (inventory.rm_lot_qc_result).
+      const [qc] = await tx`select r from (select inventory.rm_lot_qc_result(${rmBatchId}::uuid) as r) x where r is not null`;
+      if (!qc || !['ACCEPT', 'PASS', 'LEGACY_RELEASE'].includes(String(qc.r))) throw new ConflictException(`This lot is not released by QC (${qc ? `latest result ${qc.r || 'none'}` : 'no QC result on file'}): it is put away after incoming QC accepts it.`);
       if (b.expiry && String(b.expiry) < new Date().toISOString().slice(0, 10)) throw new ConflictException('This lot is past its expiry: QC must retest and re-date it first.');
       const lastLoc = (await tx`select storage_location_id::text as loc from inventory.raw_lot_label where rm_batch_id = ${rmBatchId} order by printed_dt desc limit 1`)[0]?.loc as string | undefined;
       const loc = bin?.id ?? (b.loc as string) ?? lastLoc ?? null;

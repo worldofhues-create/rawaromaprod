@@ -3207,3 +3207,66 @@ create table if not exists quality.qc_sample_retention (
 alter table platform.device_master drop constraint if exists device_master_kind_check;
 alter table platform.device_master add constraint device_master_kind_check
   check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner', 'temp_sensor'));
+
+-- FLOOR-QC-IN-1-LEGACY: inventory.inventory_status_master exactly as packages/data-inventory/src/schema/inventory-batch.ts
+-- defines it, so InventoryViewService.availability (which joins it) runs in this harness.
+create table if not exists inventory.inventory_status_master (
+  inventory_status_id uuid primary key default gen_random_uuid(),
+  status_code varchar(50),
+  status_name varchar(200),
+  status varchar(30),
+  created_dt timestamptz not null default now(),
+  updated_dt timestamptz not null default now(),
+  created_by varchar(255),
+  updated_by varchar(255)
+);
+create unique index if not exists inventory_status_master_code_uq on inventory.inventory_status_master (status_code);
+
+-- FLOOR-QC-IN-1-LEGACY: schema part of scripts/migrations/2026-11-12-legacy-qc-release.sql (its data block and
+-- app-role grant left out; legacy-qc-release.test.ts runs the whole file).
+alter table inventory.lot_qc_event add column if not exists released_at timestamptz;
+alter table inventory.lot_qc_event add column if not exists released_by varchar(255);
+alter table inventory.lot_qc_event add column if not exists source text;
+alter table inventory.lot_qc_event drop constraint if exists lot_qc_event_event_check;
+alter table inventory.lot_qc_event add constraint lot_qc_event_event_check
+  check (event in ('QUARANTINED', 'RELEASED', 'REJECTED', 'LEGACY_RELEASE'));
+-- A legacy release always names the record it was taken from.
+alter table inventory.lot_qc_event drop constraint if exists lot_qc_event_legacy_source_chk;
+alter table inventory.lot_qc_event add constraint lot_qc_event_legacy_source_chk
+  check (event <> 'LEGACY_RELEASE' or (source is not null and length(trim(source)) > 0));
+
+create table if not exists inventory.legacy_qc_release_2026_11_12 (
+  rm_batch_id          uuid primary key,
+  grp                  char(1) not null check (grp in ('A', 'B')),
+  prior_status         varchar(30),
+  opened_inspection_id uuid,
+  settled_dt           timestamptz not null default clock_timestamp()
+);
+
+-- "Released" for a raw lot, in ONE place: the latest inspection's result, or LEGACY_RELEASE when a
+-- legacy release is newer than every inspection (a re-test opened after it supersedes it). Null when
+-- the lot has neither. Every floor and QC check reads this.
+create or replace function inventory.rm_lot_qc_result(p_rm_batch_id uuid) returns text
+language sql stable as $$
+  select case
+           when l.at is not null and (q.created_dt is null or l.at > q.created_dt) then 'LEGACY_RELEASE'
+           when q.created_dt is not null then upper(coalesce(q.overall_result, ''))
+         end
+    from (select 1) one
+    left join lateral (select overall_result, created_dt from quality.qc_inspections
+                        where rm_batch_id = p_rm_batch_id order by created_dt desc nulls last limit 1) q on true
+    left join lateral (select at from inventory.lot_qc_event
+                        where rm_batch_id = p_rm_batch_id and event = 'LEGACY_RELEASE' order by at desc limit 1) l on true
+$$;
+
+-- The badge's facts: when, who (and their name when the id is a user on file), and the source row.
+create or replace function inventory.rm_lot_legacy_release(p_rm_batch_id uuid) returns jsonb
+language sql stable as $$
+  select jsonb_build_object('label', 'Released before the sample rule',
+           'releasedAt', to_char(l.released_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'), 'releasedBy', l.released_by,
+           'releasedByName', (select u.user_name from iam.user_master u where u.user_id::text = l.released_by),
+           'source', l.source)
+    from inventory.lot_qc_event l
+   where l.rm_batch_id = p_rm_batch_id and l.event = 'LEGACY_RELEASE'
+   order by l.at desc limit 1
+$$;

@@ -165,8 +165,8 @@ export class FloorQueueService {
             select ib.quantity_on_hand::text as qty, u.uom_code from inventory.inventory_batch ib
               join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
               left join platform.uom_master u on u.uom_id = ib.uom_id
-              join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
-             where ib.material_id = ${l.material_id} and ib.quantity_on_hand > 0 and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS')
+              join lateral (select inventory.rm_lot_qc_result(ib.rm_batch_id) as overall_result) qc on true
+             where ib.material_id = ${l.material_id} and ib.quantity_on_hand > 0 and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS', 'LEGACY_RELEASE')
                -- FLOOR-QC-IN-1: the same lots the pick station will take (floor-station.service PICKABLE_LOTS).
                and upper(coalesce(rb.status, '')) not in ('QUARANTINE', 'REJECTED', 'HOLD')
                and not exists (select 1 from inventory.lot_hold h where h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null)

@@ -135,9 +135,9 @@ const PICKABLE_LOTS = (sql: Sql | TransactionSql, materialId: string) => sql<{
     join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
     left join platform.uom_master u on u.uom_id = ib.uom_id
     left join location.bin_master b on b.bin_id = ib.storage_location_id
-    join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
+    join lateral (select inventory.rm_lot_qc_result(ib.rm_batch_id) as overall_result) qc on true
    where ib.material_id = ${materialId} and ib.quantity_on_hand > 0
-     and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS')
+     and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS', 'LEGACY_RELEASE')
      -- FLOOR-QC-IN-1: QC's latest word is not enough while the raw lot itself is quarantined, rejected or
      -- held. A temperature excursion (FLOOR-TEMP-1) or a recall holds the lot, and a held lot was still
      -- directed here: only the issue refused it, after the picker had walked to the bin.

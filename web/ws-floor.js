@@ -675,7 +675,10 @@
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(self.RacCode ? self.RacCode.line(x.materialCode, null) : x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
         row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) +
-        (x.holdReason ? row('Hold', esc(x.holdReason)) : '') + (x.status === 'QUARANTINE' ? row('QC', 'Waiting for incoming QC. Not pickable until QC releases it.') : '') + row('Hazard', esc(x.hazard)) +
+        (x.holdReason ? row('Hold', esc(x.holdReason)) : '') +
+        // FLOOR-QC-IN-1-LEGACY: released by QC before the sample rule. The date and releaser are from the release record; none on file says so.
+        (x.legacyRelease ? row('QC', chip('a', x.legacyRelease.label) + ' ' + esc((x.legacyRelease.releasedAt ? 'on ' + String(x.legacyRelease.releasedAt).slice(0, 10) : 'release date not on file') + ' · ' + (x.legacyRelease.releasedByName || x.legacyRelease.releasedBy ? 'by ' + (x.legacyRelease.releasedByName || x.legacyRelease.releasedBy) : 'releaser not on file'))) : '') +
+        (x.status === 'QUARANTINE' ? row('QC', 'Waiting for incoming QC. Not pickable until QC releases it.') : '') + row('Hazard', esc(x.hazard)) +
         (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') +
         // FLOOR-1 (R8): split this lot across two bins; a child lot's own label reprints with a reason.
         (can('inventory:lot_split:write') ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fl-split', 'Split this lot', '', big()) +

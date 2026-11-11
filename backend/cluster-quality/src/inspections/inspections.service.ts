@@ -69,7 +69,11 @@ export class InspectionsService {
     const rows = (await this.db.execute(sql`
       select qi.qc_inspection_id as "qcInspectionId", qi.rm_batch_id as "rmBatchId",
              b.batch_number as "batchNumber", qi.overall_result as "overallResult",
-             qi.inspection_dt as "inspectionDt", qi.status as "status"
+             qi.inspection_dt as "inspectionDt", qi.status as "status",
+             -- FLOOR-QC-IN-1-LEGACY: the badge on the inspection that is the lot's pre-sample-rule release.
+             case when inventory.rm_lot_qc_result(qi.rm_batch_id) = 'LEGACY_RELEASE'
+                   and upper(coalesce(qi.overall_result, '')) in ('ACCEPT', 'PASS')
+                  then 'Released before the sample rule' end as "legacyRelease"
         from quality.qc_inspections qi
         left join inventory.rm_batch_master b on b.rm_batch_id = qi.rm_batch_id
        ${query.cursor ? sql`where qi.qc_inspection_id < ${query.cursor}` : sql``}

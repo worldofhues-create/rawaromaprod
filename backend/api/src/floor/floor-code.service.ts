@@ -176,22 +176,24 @@ export class FloorCodeService {
     const [r] = await this.sql<{
       inventory_batch_id: string; material_id: string | null; qty: string | null; uom_code: string | null; batch_number: string | null;
       expiry_date: string | null; bin_code: string | null; qc: string | null; rm_batch_id: string | null; material_name: string | null; material_code: string | null;
+      legacy: Record<string, unknown> | null;
     }[]>`
       select ib.inventory_batch_id::text, ib.material_id::text, ib.quantity_on_hand::text as qty, u.uom_code, rb.batch_number,
-             rb.expiry_date::text, b.bin_code, qc.overall_result as qc, ib.rm_batch_id::text, m.material_name, m.material_code
+             rb.expiry_date::text, b.bin_code, qc.overall_result as qc, ib.rm_batch_id::text, m.material_name, m.material_code,
+             inventory.rm_lot_legacy_release(ib.rm_batch_id) as legacy
         from inventory.lot_barcode lb
         join inventory.inventory_batch ib on ib.inventory_batch_id = lb.inventory_batch_id
         left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
         left join platform.uom_master u on u.uom_id = ib.uom_id
         left join location.bin_master b on b.bin_id = ib.storage_location_id
         left join masterdata.material m on m.material_id = ib.material_id
-        left join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
+        left join lateral (select inventory.rm_lot_qc_result(ib.rm_batch_id) as overall_result) qc on true
        where lb.barcode = ${barcode}`;
     if (!r) throw new NotFoundException('This lot label is not known here.');
     const fc = r.material_id ? await this.codeFor(r.material_id) : null;
     const today = new Date().toISOString().slice(0, 10);
     const expired = !!r.expiry_date && r.expiry_date < today;
-    const released = !!r.rm_batch_id && ['ACCEPT', 'PASS'].includes(String(r.qc ?? '').toUpperCase());
+    const released = !!r.rm_batch_id && ['ACCEPT', 'PASS', 'LEGACY_RELEASE'].includes(String(r.qc ?? '').toUpperCase());
     // FLOOR-QC-IN-1 / FLOOR-TEMP-1: a released lot on hold (recall, temperature excursion) read RELEASED
     // and pickable here while the pick station refused it. The hold and its reason are the answer.
     const [hold] = r.rm_batch_id ? await this.sql<{ reason: string; source: string }[]>`
@@ -213,6 +215,10 @@ export class FloorCodeService {
       pickable: released && !hold && !expired && Number(r.qty ?? 0) > 0,
       status: expired ? 'EXPIRED' : hold ? 'ON_HOLD' : released ? 'RELEASED' : 'QUARANTINE',
       holdReason: hold?.reason ?? null,
+      // FLOOR-QC-IN-1-LEGACY: released by QC before the sample rule -- the badge, with the original release
+      // date and releaser from the record it was taken from. Null for every other lot, and once a newer
+      // inspection is QC's word.
+      legacyRelease: released && String(r.qc).toUpperCase() === 'LEGACY_RELEASE' ? r.legacy : null,
       hazard: HAZARD_PENDING,
     };
     // FLOOR-1 (R8): a child lot names the lot it was split from (or came back from the verifier as).
