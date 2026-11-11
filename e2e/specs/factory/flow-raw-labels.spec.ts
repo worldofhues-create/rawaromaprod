@@ -88,6 +88,7 @@ test('raw flow: every step prints both codes, reprints with a reason, and its la
   expect(JSON.stringify((await printedJob('qc_tag', lot.batchNumber)).template.elements)).toContain('QUARANTINE');
   const { qcParam } = await master();
   await must('qc', 'POST', `/v1/qc-inspections/${lot.insp}/results`, { results: [{ qcParameterId: qcParam, observedValue: 1.47, result: 'PASS' }] });
+  await must('qc', 'POST', '/v1/qc-sample-retentions', { qcInspectionId: lot.insp, rmBatchId: lot.rmBatch, sampleCode: `RS-${lot.batchNumber}`, retainedDt: new Date().toISOString() }); // FLOOR-QC-IN-1: the sample drawn and kept
   await must('qc', 'POST', `/v1/qc-inspections/${lot.insp}/disposition`, { dispositionCode: 'ACCEPT', dispositionReason: 'within spec' });
   await page.reload(); await openNav(page, 'Test queue');
   await rowAction(page, lot.batchNumber, 'Print label');

@@ -20,18 +20,20 @@ import { CourierController, LogisticsController } from './logistics.controller.j
 import { LogisticsService } from './logistics.service.js';
 import { CourierService } from './courier.service.js';
 import { DisplayService } from './display.service.js';
+import { TemperatureAgentController, TemperatureController } from './temperature.controller.js';
+import { TemperatureService } from './temperature.service.js';
 import { FloorModule } from '../floor/floor.module.js';
 
-const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService, DisplayService];
+const SERVICES = [DevicesService, PrintService, ScaleService, MacerationService, PackingService, CourierService, LogisticsService, DisplayService, TemperatureService];
 
 @Module({
   imports: [FloorModule], // FLOOR-FIX-1: the TV board ranks with FloorQueueService
-  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController, LogisticsController, CourierController],
+  controllers: [DevicesController, DeviceAgentController, PrintController, PrintAgentController, ScaleController, MacerationController, PackingController, LogisticsController, CourierController, TemperatureController, TemperatureAgentController],
   providers: [...SERVICES],
   exports: [...SERVICES],
 })
 export class FloorOpsModule {}
 
 /** Worker: the floor sweeps (offline devices, stale print jobs, maceration alarms, courier sync). */
-@Module({ providers: [DevicesService, PrintService, MacerationService, CourierService, FloorSweepService] })
+@Module({ providers: [DevicesService, PrintService, MacerationService, CourierService, TemperatureService, FloorSweepService] })
 export class FloorOpsWorkerModule {}

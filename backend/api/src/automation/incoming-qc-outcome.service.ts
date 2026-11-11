@@ -143,6 +143,9 @@ export class IncomingQcOutcomeService implements OnModuleInit, OnModuleDestroy {
       update inventory.rm_batch_master set status = 'RELEASED', updated_by = ${SYSTEM_ACTOR}
        where rm_batch_id = ${rmBatchId}
     `;
+    // FLOOR-QC-IN-1: the release is on the lot's QC record.
+    await tx`insert into inventory.lot_qc_event (rm_batch_id, event, detail, actor)
+      values (${rmBatchId}, 'RELEASED', 'incoming QC accepted: released to stock (automation:g3)', ${SYSTEM_ACTOR})`;
 
     return {
       decision: 'FIRED' as const,
@@ -164,6 +167,8 @@ export class IncomingQcOutcomeService implements OnModuleInit, OnModuleDestroy {
     }
 
     await tx`update inventory.rm_batch_master set status = 'REJECTED', updated_by = ${SYSTEM_ACTOR} where rm_batch_id = ${rmBatchId}`;
+    await tx`insert into inventory.lot_qc_event (rm_batch_id, event, detail, actor)
+      values (${rmBatchId}, 'REJECTED', ${'incoming QC rejected (inspection ' + qcInspectionId + ')'}, ${SYSTEM_ACTOR})`;
 
     if (!row.grn_item_id) {
       return {

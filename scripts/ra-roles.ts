@@ -366,6 +366,9 @@ export const ROLES: RoleDef[] = [
         'inventory:lot_barcode:resolve',
         // FLOOR-1 (R8): split a lot across two bins (a child lot with its own L- code).
         'inventory:lot_split:write',
+        // FLOOR-TEMP-1: stores read the zone thermometers and log them.
+        'quality:temperature:read',
+        'quality:temperature:write',
       ),
       startsWith('location:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -458,7 +461,9 @@ export const ROLES: RoleDef[] = [
       ),
       oneOf('masterdata:rm_alias:read', 'inventory:inventory_batch:read'),
       // PROD-A: production opens floor jobs from its runs and watches the floor queue.
-      oneOf('production:floor_queue:read', 'production:floor_job:write', 'inventory:lot_barcode:resolve', 'masterdata:floor_code:read', 'platform:policy:read'),
+      oneOf('production:floor_queue:read', 'production:floor_job:write', 'inventory:lot_barcode:resolve', 'masterdata:floor_code:read', 'platform:policy:read',
+        // FLOOR-TEMP-1: the production rooms are zones too; production logs them.
+        'quality:temperature:read', 'quality:temperature:write'),
       (p) => p.startsWith('location:') && isRead(p),
     ),
     sampleEmail: 'production@rawaroma.local',

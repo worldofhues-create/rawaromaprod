@@ -1,7 +1,7 @@
 /* Factory: incoming QC, test queue and results. */
 import { expect, test } from '@playwright/test';
 import { master, receivedLot } from '../../harness/chain';
-import { confirmDialog, expectRefused, openNav, rowAction, searchFor, signIn, sql } from '../../harness/walk';
+import { confirmDialog, expectRefused, factoryCall, openNav, rowAction, searchFor, signIn, sql } from '../../harness/walk';
 
 test('QC records a result and accepts; the lot leaves quarantine onto the stock books', async ({ page }) => {
   await master();
@@ -18,6 +18,12 @@ test('QC records a result and accepts; the lot leaves quarantine onto the stock 
   await sheet.getByRole('button', { name: /^(Save|Record|Submit)/ }).click();
   await expect.poll(() => sql(`select count(*) from quality.qc_result_details where qc_inspection_id='${insp}'`)).toBe('1');
 
+  // FLOOR-QC-IN-1: a result alone does not release the lot; the retained sample must be on file too.
+  const early = await factoryCall(page, 'POST', `/v1/qc-inspections/${insp}/disposition`, { dispositionCode: 'ACCEPT', dispositionReason: 'walk' });
+  expect(early.status).toBe(409);
+  expect(JSON.stringify(early.json)).toContain('retained sample');
+  const rs = await factoryCall(page, 'POST', '/v1/qc-sample-retentions', { qcInspectionId: insp, rmBatchId: rmBatch, sampleCode: `RS-${batchNumber}`, retainedDt: new Date().toISOString() });
+  expect(rs.status).toBeLessThan(300);
   await page.reload();
   await expect(page.locator('#ra-title')).toHaveText('Test queue');
   await searchFor(page, batchNumber);

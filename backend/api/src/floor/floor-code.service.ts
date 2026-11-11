@@ -192,6 +192,10 @@ export class FloorCodeService {
     const today = new Date().toISOString().slice(0, 10);
     const expired = !!r.expiry_date && r.expiry_date < today;
     const released = !!r.rm_batch_id && ['ACCEPT', 'PASS'].includes(String(r.qc ?? '').toUpperCase());
+    // FLOOR-QC-IN-1 / FLOOR-TEMP-1: a released lot on hold (recall, temperature excursion) read RELEASED
+    // and pickable here while the pick station refused it. The hold and its reason are the answer.
+    const [hold] = r.rm_batch_id ? await this.sql<{ reason: string; source: string }[]>`
+      select reason, source from inventory.lot_hold where subject_type = 'RM_LOT' and subject_id = ${r.rm_batch_id} and released_dt is null` : [];
     const out: Record<string, unknown> = {
       kind: 'lot',
       barcode,
@@ -206,8 +210,9 @@ export class FloorCodeService {
       quantityLeft: r.qty === null ? null : `${r.qty} ${r.uom_code ?? ''}`.trim(),
       expiry: r.expiry_date,
       expired,
-      pickable: released && !expired && Number(r.qty ?? 0) > 0,
-      status: expired ? 'EXPIRED' : released ? 'RELEASED' : 'QUARANTINE',
+      pickable: released && !hold && !expired && Number(r.qty ?? 0) > 0,
+      status: expired ? 'EXPIRED' : hold ? 'ON_HOLD' : released ? 'RELEASED' : 'QUARANTINE',
+      holdReason: hold?.reason ?? null,
       hazard: HAZARD_PENDING,
     };
     // FLOOR-1 (R8): a child lot names the lot it was split from (or came back from the verifier as).

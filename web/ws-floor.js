@@ -75,7 +75,8 @@
     floormix: ['floormix', 'Mix', 'flask', '__floormix__'],
     floorscan: ['floorscan', 'Scan a lot', 'scan', '__floorscan__'],
     rules: ['rules', 'Rules', 'sliders', '__rules__'],
-    floorcolours: ['floorcolours', 'Floor colours', 'tag', '__floorcolours__']
+    floorcolours: ['floorcolours', 'Floor colours', 'tag', '__floorcolours__'],
+    floortemps: ['floortemps', 'Temperatures', 'thermo', '__floortemps__']
   };
   var NEW_ROLES = {
     picker: ['Picker', 'Picking', ['floorpick', 'floorqueue', 'floorscan']],
@@ -91,7 +92,8 @@
     ROLES[k] = { label: d[0], dept: d[1], user: d[0], nav: d[2].map(function (n) { return NAV[n].slice(); }) };
     ROLES[k].nav.push(['tutorial', 'Tutorials', 'bookOpen', '__tutorial__']);
   });
-  var ADD = { superadmin: ['floorqueue', 'rules', 'floorcolours', 'floorscan'], admin: ['rules', 'floorcolours'], production: ['floorqueue', 'floorscan'], warehouse: ['floorscan'] };
+  // FLOOR-TEMP-1: Temperatures for the roles that log or own them (the server decides each action).
+  var ADD = { superadmin: ['floorqueue', 'rules', 'floorcolours', 'floorscan', 'floortemps'], admin: ['rules', 'floorcolours'], production: ['floorqueue', 'floorscan', 'floortemps'], warehouse: ['floorscan', 'floortemps'], qc: ['floortemps'] };
   Object.keys(ADD).forEach(function (role) {
     var R = ROLES[role]; if (!R) return;
     ADD[role].forEach(function (k) { if (!R.nav.some(function (n) { return n[0] === k; })) R.nav.push(NAV[k].slice()); });
@@ -100,7 +102,7 @@
     var WS = window.RaRoutes.WORKSPACE, SL = window.RaRoutes.SLUG;
     Object.keys(NEW_ROLES).forEach(function (k) { if (!WS[k]) WS[k] = k; });
     SL.__floorqueue__ = 'floor-queue'; SL.__floorpick__ = 'pick'; SL.__floorverify__ = 'verify'; SL.__floormix__ = 'mix';
-    SL.__floorscan__ = 'scan-a-lot'; SL.__rules__ = 'rules'; SL.__floorcolours__ = 'floor-colours';
+    SL.__floorscan__ = 'scan-a-lot'; SL.__rules__ = 'rules'; SL.__floorcolours__ = 'floor-colours'; SL.__floortemps__ = 'temperatures';
   }
 
   /* ── hand-off labels: browser print at 75 x 50 mm ────────────────────────────────────── */
@@ -238,7 +240,7 @@
       (items.length ? items.map(function (j) {
         var tone = j.priority === 'HOLD' ? 'r' : !j.ready ? 'a' : j.lane === 'DELAYED' ? 'r' : 'b';
         return '<div class="card" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap"><div style="flex:1;min-width:220px">' +
-          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + (j.position ? '<b style="font-size:20px">#' + j.position + '</b>' : '') + code(j.jobNo) + chip(tone, j.priority === 'HOLD' ? 'Held' : !j.ready ? 'Waiting' : j.lane === 'DELAYED' ? 'Delayed ' + j.daysLate + 'd' : 'New') + '</div>' +
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">' + (j.position ? '<b style="font-size:20px">#' + j.position + '</b>' : '') + code(j.jobNo) + chip(tone, j.priority === 'HOLD' ? 'Held' : !j.ready ? 'Waiting' : j.lane === 'DELAYED' ? 'Delayed ' + j.daysLate + 'd' : 'New') + (j.stopped ? chip('r', 'Line stopped') : '') + '</div>' +
           '<div style="color:var(--ink-3);margin-top:4px">' + esc(j.orderRef || '') + (j.tote ? ' · tote ' + esc(j.tote) : '') + '</div><div style="margin-top:4px">' + esc(String(j.why || '').replace(/^(New|Delayed \d+ days?): /, '')) + '</div></div>' +
           (j.ready && j.priority !== 'HOLD' ? btn('fl-open-' + j.floorJobId, title, 'p', big(' data-job="' + esc(j.floorJobId) + '"')) : '') + '</div>';
       }).join('') : '<div class="card">Nothing waiting at this station.</div>') + '</div>';
@@ -252,12 +254,137 @@
     };
   }
 
+  /* ── FLOOR-LOT-STOP-1: the full-stop screen ──────────────────────────────────────────────
+   * A wrong lot stopped this job on the server; every station write on it is refused until a supervisor
+   * resumes it. This screen is all the station shows: what was scanned, what the line needed, who scanned
+   * it, and for someone holding the supervisor's permission, the resume with a reason. The person who
+   * scanned cannot resume it (the server refuses them too). */
+  function lineStopped(V, id, d, after, why) {
+    var s = d.stop;
+    if (!s) {
+      // From the Floor queue: the supervisor's resume, straight to the reason.
+      askForm({ title: 'Resume ' + d.jobNo, submit: 'Resume the line', intro: why,
+        fields: [{ n: 'reason', l: 'What was wrong, and what was done?', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var r = await call('/v1/floor/jobs/' + id + '/stop/resume', { method: 'POST', body: { reason: v.reason } });
+          if (r.status >= 400) { fail(err(r, 'The line was not resumed.')); return; }
+          close(); toast('Resumed. The reason is on file.', 'good'); after();
+        } });
+      return;
+    }
+    if (window.RaSound) window.RaSound.play('alarm');
+    var canResume = can('production:floor_job:write');
+    V.innerHTML = '<div role="alert" style="display:flex;flex-direction:column;gap:14px;max-width:880px">' +
+      '<div class="card" style="border:3px solid var(--red);display:flex;flex-direction:column;gap:12px">' +
+      '<div style="font-size:30px;font-weight:700;color:var(--red);letter-spacing:.02em">LINE STOPPED</div>' +
+      '<div style="font-size:18px">' + code(d.jobNo) + (s.lineSeq ? ' · line ' + esc(s.lineSeq) : '') + '</div>' +
+      '<div style="font-size:20px;font-weight:600">' + esc(s.detail) + '</div>' +
+      '<div style="display:grid;grid-template-columns:max-content 1fr;gap:6px 16px;font-size:16px">' +
+        '<span style="color:var(--ink-3)">Scanned</span>' + code(s.scanned) +
+        '<span style="color:var(--ink-3)">The line needs</span><span>' + esc(s.expected || 'Not on file') + '</span>' +
+        '<span style="color:var(--ink-3)">Stopped by</span><span>' + esc(s.stoppedBy) + ' at ' + esc(localTime(s.stoppedDt)) + '</span></div>' +
+      '<div>Nothing on this job moves until a supervisor checks the lot and resumes the line with a reason. Put the scanned lot back where it came from.</div>' +
+      (canResume ? btn('fl-resume', 'Resume the line', 'p', big()) : '<div class="card" style="font-weight:600">Call a supervisor.</div>') +
+      '</div></div>';
+    var b = $('fl-resume');
+    if (b) b.onclick = function () {
+      askForm({ title: 'Resume ' + d.jobNo, submit: 'Resume the line', intro: s.detail,
+        fields: [{ n: 'reason', l: 'What was wrong, and what was done?', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var r = await call('/v1/floor/jobs/' + id + '/stop/resume', { method: 'POST', body: { reason: v.reason } });
+          if (r.status >= 400) { fail(err(r, 'The line was not resumed.')); return; }
+          close(); toast('Resumed. The reason is on file.', 'good'); after();
+        } });
+    };
+  }
+
+  /* ── FLOOR-TEMP-1: Temperatures ─────────────────────────────────────────────────────────
+   * Each zone, its last reading and when the next is due; a zone past its interval is overdue (the floor
+   * sweep also raises it on every screen). A reading is typed from the room thermometer; the server stamps
+   * the time. A reading outside a material's sourced limit holds its lots in the zone. Materials with no
+   * sourced limit are counted as "no limit on file", never as within limits. */
+  function fmtC(a, b) {
+    var t = function (c) { return (c / 100).toFixed(2) + ' °C'; };
+    return a != null && b != null ? t(a) + ' to ' + t(b) : a != null ? 'at or above ' + t(a) : 'at or below ' + t(b);
+  }
+  async function viewTemps(item, V) {
+    V.innerHTML = '<div class="loading">Loading…</div>';
+    var res = await call('/v1/temperature/zones');
+    if (res.status === 403) { V.innerHTML = errBox('Your role does not log temperatures.'); return; }
+    if (res.status >= 400) { V.innerHTML = errBox(err(res, 'The zones did not load.')); return; }
+    var zones = (data(res) || {}).items || [];
+    var canLog = can('quality:temperature:write'), canZone = can('quality:storage_zone:write'), canLimit = can('quality:temperature_limit:write');
+    var note = '<div class="card" style="color:var(--ink-3)">A zone with a paired sensor is read by the sensor. Every other zone is logged by hand from the room thermometer at its interval, and between readings its temperature is not known. A sensor that stops sending makes its zone overdue, so it is logged by hand.</div>';
+    var list = zones.length ? zones.map(function (z) {
+      var last = z.lastReading;
+      return '<form class="card" data-zone="' + esc(z.zoneId) + '" style="display:flex;flex-direction:column;gap:10px">' +
+        '<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(z.code) + '<b>' + esc(z.name) + '</b>' + chip('n', z.kind === 'PRODUCTION' ? 'Production' : 'Storage') +
+          (z.source === 'SENSOR' ? chip('g', 'Sensor: ' + z.sensor.name) : chip('a', 'Manual logging')) + (z.overdue ? chip('r', last ? (z.source === 'SENSOR' ? 'Sensor silent: log by hand' : 'Overdue') : 'Never logged') : chip('g', 'Due ' + localTime(z.dueAt))) + (z.openExcursions ? chip('r', z.openExcursions + ' lot(s) on hold') : '') + '</div>' +
+        '<div>' + (last ? 'Last: <b>' + esc(last.text) + '</b> at ' + esc(localTime(last.readAt)) + ' by ' + esc(last.by) : 'No reading on file.') + ' · every ' + esc(z.logIntervalMin) + ' min' + (z.bounds ? ' · kept ' + esc(fmtC(z.bounds.minCentiC, z.bounds.maxCentiC)) + ' (' + esc(z.bounds.source) + ')' : ' · no zone bounds on file') + ' · bins ' + esc((z.bins || []).join(', ') || 'none') + '</div>' +
+        (canLog ? '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end"><label style="flex:1;min-width:160px">Thermometer reading (°C)<input name="t" class="fld" inputmode="decimal" autocomplete="off" style="min-height:56px;font-size:22px"></label>' +
+          '<label style="flex:2;min-width:200px">Note (optional)<input name="n" class="fld" style="min-height:56px;font-size:18px"></label>' + btn('fl-t-' + esc(z.zoneId), 'Log reading', 'p', big(' type="submit"')) + '</div>' : '') +
+        '<div data-out role="status" style="min-height:20px"></div></form>';
+    }).join('') : '<div class="card">No zones are set up yet. QC sets up each storage and production zone and the bins in it.</div>';
+    var setup = '';
+    if (canZone) setup += '<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="flex:1">Add a storage or production zone, its bins, and how often it is logged.</span>' + btn('fl-zone-add', 'Add zone', '', big()) + '</div>';
+    if (can('platform:device:write')) setup += '<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="flex:1">Pair a temperature sensor to a zone. It pairs like a scale or printer, with a 6-digit code, from Devices.</span>' + btn('fl-sensor', 'Pair sensor', '', big()) + '</div>';
+    if (canLimit) setup += '<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><span style="flex:1">Material temperature limits: only from a source (SDS section, supplier specification, CoA). A material with no limit on file is never checked.</span>' + btn('fl-limit-add', 'Set a limit', '', big()) + '</div>';
+    V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:880px">' + note + list + setup + '</div>';
+    V.querySelectorAll('form[data-zone]').forEach(function (f) { f.onsubmit = async function (e) {
+      e.preventDefault();
+      var out = f.querySelector('[data-out]');
+      var r = await call('/v1/temperature/zones/' + f.getAttribute('data-zone') + '/readings', { method: 'POST', body: { tempC: f.t.value.trim(), note: f.n.value.trim() } });
+      if (r.status >= 400) { out.style.color = 'var(--red)'; out.textContent = err(r, 'The reading was not logged.'); if (window.RaSound) window.RaSound.play('scan-bad'); return; }
+      var x = data(r);
+      var msg = 'Logged ' + x.text + '.' + (x.checked ? ' ' + x.checked + ' lot(s) checked against their limit.' : '') + (x.noLimitOnFile ? ' ' + x.noLimitOnFile + ' lot(s) have no limit on file and were not checked.' : '');
+      if (x.excursions.length) {
+        if (window.RaSound) window.RaSound.play('alarm');
+        toast('Excursion: ' + x.excursions.length + ' lot(s) put on hold: ' + x.excursions.map(function (e) { return e.lot + ' (' + e.limit + ')'; }).join(', ') + '. QC decides each.', 'bad');
+      } else toast(msg, 'good');
+      viewTemps(item, V);
+    }; });
+    var ps = $('fl-sensor');
+    if (ps) ps.onclick = function () {
+      askForm({ title: 'Pair a temperature sensor', submit: 'Get pairing code',
+        fields: [{ n: 'zone', l: 'Zone code', req: true }, { n: 'name', l: 'Sensor name', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var r = await call('/v1/devices', { method: 'POST', body: { kind: 'temp_sensor', station: 'Temperature ' + String(v.zone).toUpperCase(), name: v.name, config: { zoneCode: v.zone } } });
+          if (r.status >= 400) { fail(err(r, 'The sensor was not added.')); return; }
+          var p = data(r).pairing;
+          close(); toast('Pairing code ' + p.code + ', valid ' + p.validMinutes + ' min. Enter it on the sensor; the zone switches to the sensor once it pairs.', 'good'); viewTemps(item, V);
+        } });
+    };
+    var za = $('fl-zone-add');
+    if (za) za.onclick = function () {
+      askForm({ title: 'Add a zone', submit: 'Add zone',
+        fields: [{ n: 'code', l: 'Zone code (e.g. RM-STORE-A)', req: true }, { n: 'name', l: 'Name', req: true }, { n: 'kind', l: 'Kind: STORAGE or PRODUCTION', value: 'STORAGE', req: true },
+          { n: 'interval', l: 'Log every (minutes)', t: 'number', min: 5, req: true }, { n: 'bins', l: 'Bin codes in this zone, separated by commas' },
+          { n: 'min', l: 'Zone min °C (blank if none)' }, { n: 'max', l: 'Zone max °C (blank if none)' }, { n: 'bsrc', l: 'Document that sets the bounds (required with bounds)' }],
+        onSubmit: async function (v, fail, close) {
+          var r = await call('/v1/temperature/zones', { method: 'POST', body: { code: v.code, name: v.name, kind: String(v.kind || 'STORAGE').trim().toUpperCase(), logIntervalMin: Number(v.interval), bins: String(v.bins || '').split(',').map(function (b) { return b.trim(); }).filter(Boolean), minC: v.min, maxC: v.max, boundsSource: v.bsrc } });
+          if (r.status >= 400) { fail(err(r, 'The zone was not added.')); return; }
+          close(); toast('Zone added.', 'good'); viewTemps(item, V);
+        } });
+    };
+    var la = $('fl-limit-add');
+    if (la) la.onclick = function () {
+      askForm({ title: 'Set a material temperature limit', submit: 'Save limit', intro: 'A limit replaces the current one; the old one stays on file.',
+        fields: [{ n: 'code', l: 'Material code', req: true }, { n: 'min', l: 'Min °C (blank if none)' }, { n: 'max', l: 'Max °C (blank if none)' }, { n: 'source', l: 'Source (SDS section, supplier spec or CoA)', req: true }],
+        onSubmit: async function (v, fail, close) {
+          var r = await call('/v1/temperature/limits', { method: 'POST', body: { materialCode: v.code, minC: v.min, maxC: v.max, source: v.source } });
+          if (r.status >= 400) { fail(err(r, 'The limit was not saved.')); return; }
+          close(); toast('Limit saved, with its source.', 'good'); viewTemps(item, V);
+        } });
+    };
+  }
+
   /* ── 1 Picker ───────────────────────────────────────────────────────────────────────── */
   async function viewPick(item, V) { await pickJob(V, 'PICK', 'Start picking', function (id) { pickJobView(V, id); }); await stockAlerts(V); }
   async function pickJobView(V, id) {
     var res = await call('/v1/floor/jobs/' + id + '/pick');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'This job cannot be opened.')); return; }
     var d = data(res), open = d.lines.filter(function (l) { return !l.picked; }), next = open[0];
+    if (d.stop) { lineStopped(V, id, d, function () { pickJobView(V, id); }); return; }
     var head = '<div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(d.jobNo) + '<span>' + esc(d.orderRef || '') + '</span><span style="margin-left:auto">' + (d.lines.length - open.length) + ' of ' + d.lines.length + ' picked</span></div>';
     var list = d.lines.map(function (l) {
       return '<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line);flex-wrap:wrap"><b>' + l.seq + '</b>' + code(l.floorCode) + swatch(l) +
@@ -283,7 +410,10 @@
       e.preventDefault();
       var r = await call('/v1/floor/jobs/' + id + '/pick/lines/' + next.floorLineId, { method: 'POST', body: { bin: $('fl-bin').value.trim(), barcode: $('fl-lot').value.trim(), reason: $('fl-why').value.trim() } });
       if (r.status >= 400) {
+        // FLOOR-LOT-STOP-1: a wrong lot stops the line; the server says so and the job reopens on the stop screen.
+        if (/line is stopped/.test(err(r, ''))) { pickJobView(V, id); return; }
         $('fl-err').textContent = err(r, 'That scan was refused.');
+        if (window.RaSound) window.RaSound.play('scan-bad');
         if (/give a reason/.test($('fl-err').textContent)) { $('fl-why-l').hidden = false; $('fl-why').focus(); }
         return;
       }
@@ -471,7 +601,10 @@
       (d.items.length ? d.items.map(function (j) {
         var p = j.prediction;
         var fin = !p ? '' : p.atRisk ? chip('r', 'Late by ' + p.lateByDays + 'd') + ' ' + esc(p.explain) : esc(p.explain);
-        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin +
+        return '<tr><td>' + (j.position || '—') + '</td><td>' + esc(j.jobNo) + (j.expedite ? ' ' + chip('r', 'Expedite') : '') + (j.priority === 'SUGGESTED' ? ' ' + chip('n', 'Suggested') : '') +
+          // FLOOR-LOT-STOP-1: a stopped job says so here, and a supervisor resumes it from this row.
+          (j.stopped ? '<div style="margin-top:6px">' + chip('r', 'Line stopped') + '</div><div style="margin-top:4px">' + esc(j.stopped) + '</div>' +
+            (canOpen ? '<div style="margin-top:6px">' + btn('fl-res-' + j.floorJobId, 'Resume the line', 'p', ' data-resume="' + esc(j.floorJobId) + '" data-jobno="' + esc(j.jobNo) + '" data-why="' + esc(j.stopped) + '"') + '</div>' : '') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin +
           // SCAN-11: the job ticket (its job number is what the next station's find field takes).
           '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + SB('fl-jt-' + j.floorJobId, { labelKind: 'floor_job', subjectRef: j.jobNo, code: j.jobNo, title: 'FLOOR JOB', defaultStation: 'Floor', lines: [['Order', j.orderRef], ['Stage', ({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage]] }) +
           '</div></td></tr>';
@@ -480,6 +613,10 @@
         return '<p style="margin:6px 0 0">' + esc(s.sku) + ': make ' + esc(s.qty) + '. ' + esc(s.reasoning) + ' <span class="t-cap">Choose it as the stock-cover suggestion when you put a run on the floor.</span></p>';
       }).join('') + '</div>' : '');
     stockAlerts(V);
+    V.querySelectorAll('[data-resume]').forEach(function (b) { b.onclick = function () {
+      var id = b.getAttribute('data-resume');
+      lineStopped(V, id, { jobNo: b.getAttribute('data-jobno'), stop: null }, function () { viewQueue(item, V); }, b.getAttribute('data-why'));
+    }; });
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {
       e.preventDefault();
@@ -537,7 +674,8 @@
       $('fl-sco').innerHTML = '<div class="card">' + row('Floor code', code(x.floorCode || 'No code yet')) + row('Colour', swatch(x) || '—') +
         (x.materialName ? row('Material', esc(x.materialName) + ' (' + esc(self.RacCode ? self.RacCode.line(x.materialCode, null) : x.materialCode) + ')') : '') +
         row('Bin', esc(x.bin || '—')) + row('Lot', esc(x.lot || '—')) + row('Left', esc(x.quantityLeftMg != null ? W.formatWeight(x.quantityLeftMg) : x.quantityLeft || '—')) +
-        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) + row('Hazard', esc(x.hazard)) +
+        row('Expiry', esc(x.expiry || 'Not on file')) + row('Status', chip(x.pickable ? 'g' : 'r', (function (v) { v = String(v || '').replace(/_/g, ' ').toLowerCase(); return v ? v.charAt(0).toUpperCase() + v.slice(1) : (x.pickable ? 'Pickable' : 'Not pickable'); })(x.status))) +
+        (x.holdReason ? row('Hold', esc(x.holdReason)) : '') + (x.status === 'QUARANTINE' ? row('QC', 'Waiting for incoming QC. Not pickable until QC releases it.') : '') + row('Hazard', esc(x.hazard)) +
         (x.splitFrom ? row(x.splitKind === 'RETURN' ? 'Returned from' : 'Split from', code(x.splitFrom)) : '') +
         // FLOOR-1 (R8): split this lot across two bins; a child lot's own label reprints with a reason.
         (can('inventory:lot_split:write') ? '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">' + btn('fl-split', 'Split this lot', '', big()) +
@@ -682,6 +820,6 @@
 
   window.RA.registerViews({
     __floorqueue__: viewQueue, __floorpick__: viewPick, __floorverify__: viewVerify, __floormix__: viewMix,
-    __floorscan__: viewScan, __rules__: viewRules, __floorcolours__: viewColours
+    __floorscan__: viewScan, __rules__: viewRules, __floorcolours__: viewColours, __floortemps__: viewTemps
   });
 })();

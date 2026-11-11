@@ -130,7 +130,7 @@
   });
 
   /* ── Devices ─────────────────────────────────────────────────────────────────────────────── */
-  var KINDS = [['label_printer', 'Label printer'], ['display', 'TV display'], ['kiosk', 'Kiosk tablet'], ['scale', 'Scale'], ['scanner', 'Barcode scanner']];
+  var KINDS = [['label_printer', 'Label printer'], ['display', 'TV display'], ['kiosk', 'Kiosk tablet'], ['scale', 'Scale'], ['scanner', 'Barcode scanner'], ['temp_sensor', 'Temperature sensor']];
   // SCAN-4: what a scanner reads, recorded per station. Names match BarcodeDetector's, one vocabulary.
   var SYMS = [['qr_code', 'QR'], ['code_128', 'Code 128'], ['code_39', 'Code 39'], ['ean_13', 'EAN-13'], ['ean_8', 'EAN-8'], ['upc_a', 'UPC-A'], ['data_matrix', 'Data Matrix'], ['pdf417', 'PDF417']];
   function symWords(a) { return (a || []).map(function (k) { return (SYMS.filter(function (s) { return s[0] === k; })[0] || [0, k])[1]; }).join(', '); }
@@ -140,6 +140,7 @@
     return '<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;padding:12px;background:var(--panel-2);border-radius:var(--r-md)">' + qr +
       '<div><div class="t-cap">Pair "' + escHtml(dev.name) + '" at ' + escHtml(dev.station) + '</div><div style="font:600 44px/1.1 var(--font-mono);letter-spacing:.12em">' + escHtml(p.code) + '</div>' +
       '<div class="t-cap">On the device open ' + escHtml(location.origin) + '/pair.html, or scan the QR. Valid until ' + escHtml(when(p.expiresAt)) + ' (10 minutes), once.</div>' +
+      (dev.kind === 'temp_sensor' ? '<div class="t-cap">The sensor pairs with this code (POST /v1/device-agent/pair), then posts each reading as {"tempC":"18.25"} to <code>' + escHtml(location.origin) + '/v1/device-agent/temperature-readings</code> with its X-Device-Token. Until it is paired the zone is logged by hand.</div>' : '') +
       (dev.kind === 'label_printer' ? '<div class="t-cap">Print agent: <code>node tools/print-agent/agent.mjs pair --api ' + escHtml(location.origin) + ' --code ' + escHtml(p.code) + '</code></div>' : '') + '</div></div>';
   }
   async function viewDevices(item, V) {
@@ -165,6 +166,8 @@
       // FLOOR-FIX-16: how the kiosk reads this scale over Web Serial.
       sel('fo-proto', 'Scale protocol', Object.keys((window.RaScaleSerial || { PROTOCOLS: { generic: { name: 'Generic' } } }).PROTOCOLS).map(function (k) { return [k, RaScaleSerial.PROTOCOLS[k].name]; }), 'generic'),
       sel('fo-baud', 'Scale baud rate', [['', 'Protocol default']].concat(((window.RaScaleSerial || { BAUDS: [] }).BAUDS).map(function (b) { return [String(b), String(b)]; })), ''),
+      // FLOOR-TEMP-1: a sensor reads one zone; the zone is set up on the Temperatures screen first.
+      fld('fo-zone', 'Sensor zone code (for a temperature sensor)', 'placeholder="RM-STORE-A"'),
       sel('fo-conn', 'Scanner connection', [['usb_wedge', 'USB keyboard (wedge)'], ['bluetooth', 'Bluetooth'], ['camera', 'Tablet / phone camera']], 'usb_wedge'),
       '<fieldset id="fo-syms" style="border:0;padding:0;margin:0;display:flex;flex-wrap:wrap;gap:4px 12px;grid-column:1/-1"><legend class="t-cap">Scanner reads (for a scanner)</legend>' +
         SYMS.map(function (s, i) { return '<label style="display:flex;gap:6px;align-items:center;min-height:44px"><input type="checkbox" name="fo-sym" value="' + s[0] + '"' + (i < 2 ? ' checked' : '') + '> ' + escHtml(s[1]) + '</label>'; }).join('') + '</fieldset>',
@@ -188,6 +191,7 @@
       e.preventDefault();
       var kind = val('fo-kind'); FV.kind = kind;
       var config = kind === 'label_printer' ? { language: val('fo-lang'), size: val('fo-size') } : kind === 'kiosk' ? { screen: val('fo-screen') } : kind === 'scale' ? Object.assign({ category: val('fo-cat'), protocol: val('fo-proto') }, val('fo-baud') ? { baudRate: Number(val('fo-baud')) } : {}, val('fo-res') ? { resolutionMg: Number(val('fo-res')) } : {}) :
+        kind === 'temp_sensor' ? { zoneCode: val('fo-zone') } :
         kind === 'scanner' ? { connection: val('fo-conn'), symbologies: [].map.call(document.querySelectorAll('input[name="fo-sym"]:checked'), function (c) { return c.value; }) } : {};
       var r = await call('/v1/devices', 'POST', { kind: kind, station: val('fo-station'), name: val('fo-name'), config: config });
       if (!r) return;

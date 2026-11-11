@@ -216,10 +216,13 @@ test('picker: wrong material, wrong bin, quarantined lot and off-FEFO without a 
   const s = await setup();
   const [l1, l2] = (await stations.pickView(s.job.floorJobId)).lines;
   await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: s.bLot.bin, barcode: s.bLot.barcode }, picker), /Wrong material/);
+  // FLOOR-LOT-STOP-1: a wrong lot also stops the line; a supervisor resumes it (floor-claims.test.ts).
+  await stations.clearStop(s.job.floorJobId, { reason: 'wrong drum put back' }, admin);
   await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: 'NOPE', barcode: s.aSoon.barcode }, picker), /Wrong bin/);
   await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: s.aLate.bin, barcode: s.aLate.barcode }, picker), /first \(it expires first/);
   const q = await lot(s.a.id, 1000, { result: 'REJECT' });
-  await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: q.bin, barcode: q.barcode }, picker), /cannot be picked/);
+  await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: q.bin, barcode: q.barcode }, picker), /not released by QC|rejected/);
+  await stations.clearStop(s.job.floorJobId, { reason: 'rejected lot put back' }, admin);
   await assert.rejects(() => stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: s.aSmall.bin, barcode: s.aSmall.barcode }, picker), /does not hold enough/);
   // with a reason the off-FEFO lot is taken and the reason kept
   const r = await stations.pickLine(s.job.floorJobId, l1!.floorLineId, { bin: s.aLate.bin, barcode: s.aLate.barcode, reason: 'drum seal broken' }, picker);

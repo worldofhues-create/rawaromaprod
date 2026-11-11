@@ -9,6 +9,7 @@ import { DevicesService } from './devices.service.js';
 import { MacerationService } from './maceration.service.js';
 import { PrintService } from './print.service.js';
 import { CourierService } from './courier.service.js';
+import { TemperatureService } from './temperature.service.js';
 
 @Injectable()
 export class FloorSweepService {
@@ -19,6 +20,7 @@ export class FloorSweepService {
     private readonly print: PrintService,
     private readonly maceration: MacerationService,
     private readonly couriers: CourierService,
+    private readonly temps: TemperatureService,
   ) {}
 
   private devicesRunning = false;
@@ -40,6 +42,8 @@ export class FloorSweepService {
         ['print', () => this.print.sweepStale()],
         ['maceration', () => this.maceration.sweepAlarms()],
         ['couriers', () => this.couriers.syncAll()],
+        // FLOOR-TEMP-1: a zone not logged within its interval raises TEMP_LOG_OVERDUE.
+        ['temperature', () => this.temps.sweepOverdue()],
       ] as const) {
         try { await fn(); } catch (e) { this.log.warn(`${name} sweep failed: ${(e as Error).message}`); }
       }

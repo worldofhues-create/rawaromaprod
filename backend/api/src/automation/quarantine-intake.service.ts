@@ -81,15 +81,19 @@ export class QuarantineIntakeService implements OnModuleInit, OnModuleDestroy {
         // this is also what makes the rule safe under true concurrent duplicate delivery: the
         // UPDATE re-reads committed state at statement start, so only ONE concurrent caller's
         // WHERE status='ACTIVE' actually matches.
+        // FLOOR-QC-IN-1: a lot is now born QUARANTINE (cluster-inventory batch/lot-qc.ts), so this rule
+        // no longer does the quarantining; it opens the inspection. ACTIVE is still accepted for a lot
+        // recorded before that change. Either way only once: a lot with an inspection already is skipped.
         const updated = (await tx`
           update inventory.rm_batch_master
              set status = 'QUARANTINE', updated_by = ${SYSTEM_ACTOR}
-           where rm_batch_id = ${rmBatchId} and status = 'ACTIVE'
+           where rm_batch_id = ${rmBatchId} and status in ('ACTIVE', 'QUARANTINE')
+             and not exists (select 1 from quality.qc_inspections q where q.rm_batch_id = ${rmBatchId})
            returning rm_batch_id, material_id
         `) as unknown as Array<{ rm_batch_id: string; material_id: string | null }>;
 
         if (updated.length === 0) {
-          return { decision: 'SKIPPED', reason: 'RM batch is not in ACTIVE status (already progressed by another flow)' };
+          return { decision: 'SKIPPED', reason: 'RM batch already has an inspection, or has progressed past quarantine' };
         }
 
         const qcInspectionId = uuidv7();

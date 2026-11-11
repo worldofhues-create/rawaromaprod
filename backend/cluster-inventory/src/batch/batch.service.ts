@@ -22,6 +22,7 @@ import type {
   ReleaseRmBatch,
 } from '../cluster-inventory.dtos.js';
 import { ensure, paginate } from '../_helpers.js';
+import { BORN_STATUS, recordLotQcEvent, rmLotQcRefusal } from './lot-qc.js';
 
 const {
   rmBatchMaster,
@@ -39,27 +40,32 @@ export class BatchService {
   /* ── rm_batch_master ────────────────────────────────────────────────── */
 
   async createRmBatch(body: CreateRmBatch, principal: AuthPrincipal) {
-    return ensure(
-      (
-        await this.db
-          .insert(rmBatchMaster)
-          .values({
-            grnItemId: body.grnItemId ?? null,
-            materialId: body.materialId ?? null,
-            // lane/j2: random tail, not the uuidv7 timestamp head (see grn.service.ts shortId).
-            batchNumber: body.batchNumber ?? `RMB-${uuidv7().replace(/-/g, '').slice(-12).toUpperCase()}`,
-            manufacturingDate: body.manufacturingDate ?? null,
-            expiryDate: body.expiryDate ?? null,
-            receivedQty: body.receivedQty != null ? String(body.receivedQty) : null,
-            uomId: body.uomId ?? null,
-            storageLocationId: body.storageLocationId ?? null,
-            status: 'ACTIVE',
-            createdBy: principal.userId,
-            updatedBy: principal.userId,
-          })
-          .returning()
-      )[0],
-    );
+    return this.db.transaction(async (tx) => {
+      const row = ensure(
+        (
+          await tx
+            .insert(rmBatchMaster)
+            .values({
+              grnItemId: body.grnItemId ?? null,
+              materialId: body.materialId ?? null,
+              // lane/j2: random tail, not the uuidv7 timestamp head (see grn.service.ts shortId).
+              batchNumber: body.batchNumber ?? `RMB-${uuidv7().replace(/-/g, '').slice(-12).toUpperCase()}`,
+              manufacturingDate: body.manufacturingDate ?? null,
+              expiryDate: body.expiryDate ?? null,
+              receivedQty: body.receivedQty != null ? String(body.receivedQty) : null,
+              uomId: body.uomId ?? null,
+              storageLocationId: body.storageLocationId ?? null,
+              // FLOOR-QC-IN-1: a raw lot is born in quarantine (lot-qc.ts).
+              status: BORN_STATUS,
+              createdBy: principal.userId,
+              updatedBy: principal.userId,
+            })
+            .returning()
+        )[0],
+      );
+      await recordLotQcEvent(tx, row.rmBatchId, 'QUARANTINED', 'raw lot recorded: held for incoming QC', principal.userId);
+      return row;
+    });
   }
 
   async listRmBatches(query: ListQuery): Promise<Page<Record<string, unknown>>> {
@@ -215,6 +221,10 @@ export class BatchService {
       if (String(rmBatch.status ?? '').toUpperCase() === 'RELEASED') {
         throw new ConflictException(`RM batch ${rmBatch.batchNumber ?? id} is already released to stock.`);
       }
+      // FLOOR-QC-IN-1: "Release to stock" put any lot on the shelf, QC or not -- it only refused a
+      // second release. Only a lot QC has accepted goes to stock.
+      const refused = await rmLotQcRefusal(tx, id);
+      if (refused) throw new ConflictException(`${refused} Release to stock waits for QC to accept it.`);
 
       const quantity =
         body.quantity != null
@@ -295,6 +305,7 @@ export class BatchService {
         .update(rmBatchMaster)
         .set({ status: 'RELEASED', updatedBy: principal.userId })
         .where(eq(rmBatchMaster.rmBatchId, id));
+      await recordLotQcEvent(tx, id, 'RELEASED', 'released to stock after incoming QC accepted it', principal.userId);
 
       return { inventoryBatch: invBatch, transaction: txn, history };
     });

@@ -30,12 +30,16 @@ test('every kind the code allows is allowed by the migrated table; rollback and 
       values (${randomUUID()}::uuid, ${kind}, 'JT-156', 'probe', 'active', '{}'::jsonb)`;
   await assert.rejects(sql.begin(async (tx) => {
     await tx`create table if not exists public.schema_migrations (id text primary key, applied_at timestamptz default now())`;
+    // FLOOR-TEMP-1: a temp_sensor row (a later migration's kind) would stop this older rollback narrowing the check.
+    for (const t of ['device_pairing', 'device_token']) await tx.unsafe(`delete from platform.${t} where device_id in (select device_id from platform.device_master where kind = 'temp_sensor')`);
+    await tx`delete from platform.device_master where kind = 'temp_sensor'`;
     await tx.unsafe(down);
     await tx`savepoint s`;
     await assert.rejects(() => insert(tx as never, 'scanner'), /device_master_kind_check/);
     await tx`rollback to savepoint s`;
     await tx.unsafe(up);
-    for (const k of DEVICE_KINDS) await insert(tx as never, k);
+    // temp_sensor is widened by the later 2026-11-11-floor-claims migration (FLOOR-TEMP-1), asserted there.
+    for (const k of DEVICE_KINDS.filter((x) => x !== 'temp_sensor')) await insert(tx as never, k);
     await tx`savepoint s2`;
     await assert.rejects(() => insert(tx as never, 'webcam'), /device_master_kind_check/);
     await tx`rollback to savepoint s2`;

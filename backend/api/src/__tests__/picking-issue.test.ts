@@ -47,8 +47,12 @@ async function freshOrderWithPickList() {
   await sql`insert into production.production_order (production_order_id, order_qty, status)
     values (${orderId}, 10, 'INPROGRESS')`;
 
-  await sql`insert into inventory.inventory_batch (inventory_batch_id, material_id, quantity_on_hand, status)
-    values (${inventoryBatchId}, ${materialId}, 10, 'ACTIVE')`;
+  // FLOOR-QC-IN-1: a lot is issuable only once QC has released its raw lot.
+  const rmBatchId = crypto.randomUUID();
+  await sql`insert into inventory.rm_batch_master (rm_batch_id, material_id, batch_number, status) values (${rmBatchId}, ${materialId}, ${'RMB-' + rmBatchId.slice(0, 8)}, 'RELEASED')`;
+  await sql`insert into quality.qc_inspections (qc_inspection_id, rm_batch_id, overall_result) values (${crypto.randomUUID()}, ${rmBatchId}, 'ACCEPT')`;
+  await sql`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, material_id, quantity_on_hand, status)
+    values (${inventoryBatchId}, ${rmBatchId}, ${materialId}, 10, 'ACTIVE')`;
 
   const pickListId = crypto.randomUUID();
   await sql`insert into production.material_pick_list (material_pick_list_id, production_order_id, status)

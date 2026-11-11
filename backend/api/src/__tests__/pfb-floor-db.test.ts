@@ -196,6 +196,7 @@ test('lot hold: a faulty raw lot is frozen, recall lists its batches and shipped
   const s = sql();
   const rm = randomUUID(), ib = randomUUID(), order = randomUUID(), oil = randomUUID(), fg = randomUUID(), pko = randomUUID(), so = randomUUID(), disp = randomUUID(), mi = randomUUID();
   await s`insert into inventory.rm_batch_master (rm_batch_id, batch_number, received_qty, uom_id, status, expiry_date) values (${rm}, ${'RMB-' + rm.slice(0, 8)}, 5, ${kg}, 'ACTIVE', '2099-01-01')`;
+  await s`insert into quality.qc_inspections (qc_inspection_id, rm_batch_id, overall_result) values (${randomUUID()}, ${rm}, 'ACCEPT')`; // FLOOR-QC-IN-1: QC released it
   await s`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, quantity_on_hand, status) values (${ib}, ${rm}, 5, 'ACTIVE')`;
   await s`insert into production.production_order (production_order_id, status) values (${order}, 'ACTIVE')`;
   await s`insert into production.material_issue (material_issue_id, production_order_id, status) values (${mi}, ${order}, 'ACTIVE')`;

@@ -353,6 +353,19 @@ export class PickingService {
             on h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null
             where ib.inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as unknown[];
           if (held.length) throw new ConflictException('That lot is on hold and cannot be issued. Choose another lot.');
+          // FLOOR-QC-IN-1: issuing is consuming. Only a lot QC has released goes into a batch: the latest
+          // incoming inspection ACCEPT/PASS and the raw lot not QUARANTINE/REJECTED/HOLD. A stock row with
+          // no raw lot has no QC result, so it is refused too (fail closed). Same rule as
+          // cluster-inventory batch/lot-qc.ts, which this cluster does not import.
+          const qc = ((await tx.execute(sql`select rb.batch_number, upper(coalesce(rb.status, '')) as status,
+              (select upper(coalesce(q.overall_result, '')) from quality.qc_inspections q where q.rm_batch_id = rb.rm_batch_id order by q.created_dt desc nulls last limit 1) as result
+            from inventory.inventory_batch ib left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
+            where ib.inventory_batch_id = ${item.inventoryBatchId}::uuid`)) as unknown as Array<{ batch_number: string | null; status: string | null; result: string | null }>)[0];
+          if (!qc?.status && !qc?.batch_number) throw new ConflictException('That lot has no raw-lot record, so it is not released by QC. Choose another lot.');
+          if (['QUARANTINE', 'REJECTED', 'HOLD'].includes(String(qc.status)) || !['ACCEPT', 'PASS'].includes(String(qc.result ?? ''))) {
+            const why = qc.status === 'QUARANTINE' ? 'is in quarantine' : qc.status === 'REJECTED' || qc.result === 'REJECT' ? 'was rejected by QC' : 'is not released by QC';
+            throw new ConflictException(`Lot ${qc.batch_number ?? ''} ${why} and cannot be issued: it is not released by QC. Choose another lot.`);
+          }
           // STOCK-UNITS: the debit converts this line to the lot's unit. If it cannot, say so here,
           // to the person issuing, rather than leave an issue the consumer will only refuse later.
           const units = (await tx.execute(sql`select i.picked_qty::text as qty, pu.uom_code as pick_uom, lu.uom_code as lot_uom,

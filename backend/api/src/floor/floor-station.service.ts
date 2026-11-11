@@ -24,6 +24,11 @@
  *     over the pick, the reading is held until a supervisor records why, because more left the lot
  *     than the pick allowed. A supervisor cannot widen the tolerance: outside it stays refused. A
  *     reading the lot's unit cannot hold exactly is refused too, and is never rounded;
+ *   - FLOOR-LOT-STOP-1: a wrong lot stops the line. A scan of an unknown label, a lot of another material,
+ *     or a lot QC has not released (quarantined, rejected, held, expired) is refused AND opens a stop on
+ *     the job (production.floor_line_stop). While it is open every station write on the job is refused,
+ *     the right lot included. A supervisor who is not the person who scanned resumes it with a reason;
+ *     the row keeps both. An off-FEFO lot of the right material is not a wrong lot: it needs a reason;
  *   - separation of duties: nobody verifies a pick they made, nobody mixes a job they verified;
  *   - two kiosks cannot work the same job at once (the job row is locked for each write).
  *
@@ -108,6 +113,17 @@ interface LineRow {
   over_by: string | null;
 }
 
+/** FLOOR-LOT-STOP-1: what stopped a line. */
+export type StopKind = 'WRONG_MATERIAL' | 'UNKNOWN_LOT' | 'LOT_NOT_RELEASED' | 'LOT_ON_HOLD' | 'LOT_EXPIRED';
+const STOP_TITLE: Record<StopKind, string> = {
+  WRONG_MATERIAL: 'wrong material scanned', UNKNOWN_LOT: 'unknown lot label', LOT_NOT_RELEASED: 'lot not released by QC',
+  LOT_ON_HOLD: 'lot on hold', LOT_EXPIRED: 'expired lot',
+};
+export interface LineStop {
+  floorLineStopId: string; kind: StopKind; scanned: string; expected: string | null; detail: string;
+  lineSeq: number | null; stoppedBy: string; stoppedDt: string;
+}
+
 /** A pickable lot of a material, FEFO then FIFO by receipt. Fail closed: a lot with no RM batch has
  *  no QC result and no lot number to recall by, so it is not pickable. */
 const PICKABLE_LOTS = (sql: Sql | TransactionSql, materialId: string) => sql<{
@@ -122,6 +138,11 @@ const PICKABLE_LOTS = (sql: Sql | TransactionSql, materialId: string) => sql<{
     join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
    where ib.material_id = ${materialId} and ib.quantity_on_hand > 0
      and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS')
+     -- FLOOR-QC-IN-1: QC's latest word is not enough while the raw lot itself is quarantined, rejected or
+     -- held. A temperature excursion (FLOOR-TEMP-1) or a recall holds the lot, and a held lot was still
+     -- directed here: only the issue refused it, after the picker had walked to the bin.
+     and upper(coalesce(rb.status, '')) not in ('QUARANTINE', 'REJECTED', 'HOLD')
+     and not exists (select 1 from inventory.lot_hold h where h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null)
      and (rb.expiry_date is null or rb.expiry_date >= current_date)
    order by rb.expiry_date asc nulls last, rb.created_dt asc, rb.batch_number asc nulls last`;
 
@@ -269,6 +290,58 @@ export class FloorStationService {
     }
   }
 
+  /* ── FLOOR-LOT-STOP-1: the line stop ─────────────────────────────────────────────────── */
+
+  /** The job's open stop, if any: what was scanned, what the line needed, who scanned it and when. */
+  async openStop(sql: Sql | TransactionSql, jobId: string): Promise<LineStop | null> {
+    const [r] = await sql<{ id: string; kind: StopKind; scanned: string; expected: string | null; detail: string; stopped_by: string; stopped_dt: string; seq: number | null; who: string | null }[]>`
+      select s.floor_line_stop_id::text as id, s.kind, s.scanned, s.expected, s.detail, s.stopped_by, s.stopped_dt::text, l.seq,
+             coalesce(u.user_name, u.email) as who
+        from production.floor_line_stop s
+        left join production.floor_line l on l.floor_line_id = s.floor_line_id
+        left join iam.user_master u on u.user_id::text = s.stopped_by
+       where s.floor_job_id = ${jobId} and s.cleared_dt is null`;
+    return r ? { floorLineStopId: r.id, kind: r.kind, scanned: r.scanned, expected: r.expected, detail: r.detail, lineSeq: r.seq, stoppedBy: r.who ?? r.stopped_by, stoppedDt: r.stopped_dt } : null;
+  }
+
+  /** Every station write on a job calls this first: an open stop refuses it, whatever it is. */
+  private async assertRunning(tx: TransactionSql, j: JobRow): Promise<void> {
+    const stop = await this.openStop(tx, j.floor_job_id);
+    if (stop) throw new ConflictException(`${j.job_no}: the line is stopped (${stop.detail}). A supervisor must resume it, with a reason, before anything on this job moves.`);
+  }
+
+  /** Records the stop in its own transaction, so it stands although the scan that caused it is refused. */
+  private async stopLine(j: JobRow, l: LineRow, kind: StopKind, scanned: string, expected: string | null, detail: string, principal: AuthPrincipal): Promise<never> {
+    await this.sql.begin(async (tx) => {
+      await tx`insert into production.floor_line_stop (floor_job_id, floor_line_id, station, kind, scanned, expected, detail, stopped_by)
+        values (${j.floor_job_id}, ${l.floor_line_id}, 'PICK', ${kind}, ${scanned}, ${expected}, ${detail}, ${principal.userId})
+        on conflict (floor_job_id) where cleared_dt is null do nothing`;
+      await raiseAlert(tx as unknown as Sql, {
+        kind: 'LINE_STOPPED', station: 'Floor', subjectType: 'FLOOR_JOB', subjectId: j.floor_job_id,
+        title: `${j.job_no} stopped at pick: ${STOP_TITLE[kind]}`,
+        body: `${detail} Line ${l.seq}, scanned ${scanned}. Next: a supervisor checks the lot and resumes the line with a reason.`,
+        dedupeKey: `line_stop:${j.floor_job_id}`,
+      }, new Date());
+    });
+    throw new ConflictException(`${detail} The line is stopped: a supervisor must resume it with a reason.`);
+  }
+
+  /** A supervisor resumes a stopped job: a reason, and never the person whose scan stopped it. */
+  async clearStop(jobId: string, body: { reason?: unknown }, principal: AuthPrincipal) {
+    const reason = String(body.reason ?? '').trim().slice(0, 500);
+    if (!reason) throw new BadRequestException('Give the reason the line can resume: what was wrong and what was done.');
+    return this.sql.begin(async (tx) => {
+      const j = await this.lockJob(tx, jobId);
+      const [s] = await tx<{ id: string; stopped_by: string }[]>`
+        select floor_line_stop_id::text as id, stopped_by from production.floor_line_stop where floor_job_id = ${jobId} and cleared_dt is null for update`;
+      if (!s) throw new ConflictException(`${j.job_no} is not stopped.`);
+      if (s.stopped_by === principal.userId) throw new ForbiddenException('Your scan stopped this line, so someone else must resume it.');
+      await tx`update production.floor_line_stop set cleared_by = ${principal.userId}, cleared_dt = clock_timestamp(), clear_reason = ${reason} where floor_line_stop_id = ${s.id}`;
+      await clearAlert(tx as unknown as Sql, `line_stop:${jobId}`, new Date());
+      return { floorJobId: jobId, jobNo: j.job_no, resumed: true, floorLineStopId: s.id };
+    });
+  }
+
   /* ── 1 Picker ────────────────────────────────────────────────────────────────────────── */
 
   /** The picker's checklist: coded lines, the lot to take (FEFO) and where it is. No grams. */
@@ -286,7 +359,7 @@ export class FloorStationService {
         waiting: !l.picked_batch_id && !lot ? `No released lot of ${fc?.code ?? 'this code'} is large enough, or kept finely enough, for this line` : null,
       });
     }
-    return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, lines: out };
+    return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, stop: await this.openStop(this.sql, jobId), lines: out };
   }
 
   /** STOCK2-2: what this job's other lines have already picked from a lot. On-hand does not show it
@@ -319,25 +392,39 @@ export class FloorStationService {
       const l = ls.find((x) => x.floor_line_id === lineId);
       if (!l) throw new NotFoundException('That line is not on this job.');
       if (l.picked_batch_id) throw new ConflictException(`Line ${l.seq} is already picked.`);
+      await this.assertRunning(tx, j);
       const fc = await this.codes.codeFor(l.material_id);
-      const [scan] = await tx<{ inventory_batch_id: string; material_id: string | null }[]>`
-        select ib.inventory_batch_id::text, ib.material_id::text from inventory.lot_barcode lb
-          join inventory.inventory_batch ib on ib.inventory_batch_id = lb.inventory_batch_id where lb.barcode = ${barcode}`;
-      if (!scan) throw new BadRequestException('That lot label is not known here.');
+      const [scan] = await tx<{ inventory_batch_id: string; material_id: string | null; rm_batch_id: string | null; expired: boolean; qty: string | null }[]>`
+        select ib.inventory_batch_id::text, ib.material_id::text, ib.rm_batch_id::text, coalesce(rb.expiry_date < current_date, false) as expired, ib.quantity_on_hand::text as qty
+          from inventory.lot_barcode lb
+          join inventory.inventory_batch ib on ib.inventory_batch_id = lb.inventory_batch_id
+          left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
+         where lb.barcode = ${barcode}`;
+      const directedFirst = await this.directedLot(tx, l, ls);
+      const expect = directedFirst ? `${fc?.code ?? 'this line'}: lot ${directedFirst.batchNumber ?? directedFirst.barcode}` : (fc?.code ?? null);
+      // FLOOR-LOT-STOP-1: each of these is a wrong lot. Refused, and the line stops (stopLine commits the
+      // stop on its own; this transaction is left by the throw and writes nothing).
+      if (!scan) return this.stopLine(j, l, 'UNKNOWN_LOT', barcode, expect, 'That lot label is not known here.', principal);
       if (scan.material_id !== l.material_id) {
         const other = scan.material_id ? await this.codes.codeFor(scan.material_id) : null;
-        throw new BadRequestException(`Wrong material: that lot is ${other?.code ?? 'another code'}, this line needs ${fc?.code ?? 'its own code'}. Put it back.`);
+        return this.stopLine(j, l, 'WRONG_MATERIAL', barcode, expect, `Wrong material: that lot is ${other?.code ?? 'another code'}, this line needs ${fc?.code ?? 'its own code'}. Put it back.`, principal);
       }
       const lots = await PICKABLE_LOTS(tx, l.material_id);
       const scanned = lots.find((x) => x.inventory_batch_id === scan.inventory_batch_id);
-      if (!scanned) throw new BadRequestException('That lot cannot be picked: it is not released by QC, has expired, or is empty.');
+      if (!scanned) {
+        if (scan.expired) return this.stopLine(j, l, 'LOT_EXPIRED', barcode, expect, 'That lot is past its expiry date and cannot be picked.', principal);
+        const [h] = scan.rm_batch_id ? await tx<{ reason: string }[]>`select reason from inventory.lot_hold where subject_type = 'RM_LOT' and subject_id = ${scan.rm_batch_id} and released_dt is null` : [];
+        if (h) return this.stopLine(j, l, 'LOT_ON_HOLD', barcode, expect, `That lot is on hold and cannot be picked: ${h.reason}`, principal);
+        if (Number(scan.qty ?? 0) > 0) return this.stopLine(j, l, 'LOT_NOT_RELEASED', barcode, expect, 'That lot is not released by QC: it is in quarantine, rejected, or has no QC result.', principal);
+        throw new BadRequestException('That lot is empty. Take the lot the screen names.');
+      }
       const mg = qtyToMg(scanned.qty, scanned.uom_code);
       if (mg === null || mg - this.takenOnJob(ls, l, scan.inventory_batch_id) < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line. Take the lot the screen names.');
       if (mgToQty(Number(l.target_mg), scanned.uom_code) === null) throw new BadRequestException(`A lot kept in ${scanned.uom_code} cannot hold this line's weight exactly, so it cannot be debited. Take a lot kept in g, or ask the supervisor.`);
       if (scanned.bin_code && bin.toUpperCase() !== scanned.bin_code.toUpperCase()) {
         throw new BadRequestException(bin ? `Wrong bin: that lot is in ${scanned.bin_code}, you scanned ${bin}.` : `Scan the bin first: that lot is in ${scanned.bin_code}.`);
       }
-      const directed = await this.directedLot(tx, l, ls);
+      const directed = directedFirst;
       const reason = String(body.reason ?? '').trim();
       if (directed && directed.inventoryBatchId !== scan.inventory_batch_id && !reason) {
         throw new ConflictException(`Take lot ${directed.batchNumber ?? directed.barcode} first (it expires first${directed.expiry ? `, ${directed.expiry}` : ''}). To take this one instead, give a reason.`);
@@ -355,6 +442,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'PICK', 'finish picking');
+      await this.assertRunning(tx, j);
       const ls = await this.lines(tx, jobId);
       const open = ls.filter((l) => !l.picked_batch_id);
       if (open.length) throw new ConflictException(`${open.length} line(s) still open: ${open.map((l) => l.seq).join(', ')}.`);
@@ -387,7 +475,7 @@ export class FloorStationService {
         heldOverMg: l.actual_mg === null && l.over_mg !== null ? Number(l.over_mg) : null,
       });
     }
-    return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, lines: out };
+    return { floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, stop: await this.openStop(this.sql, jobId), lines: out };
   }
 
   private assertNotPicker(j: JobRow, ls: LineRow[], principal: AuthPrincipal) {
@@ -419,6 +507,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'VERIFY', 'verify');
+      await this.assertRunning(tx, j);
       const ls = await this.lines(tx, jobId);
       this.assertNotPicker(j, ls, principal);
       const l = ls.find((x) => x.floor_line_id === lineId);
@@ -519,6 +608,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, own.floor_job_id);
       this.assertStage(j, 'VERIFY', 'verify');
+      await this.assertRunning(tx, j);
       const ls = await this.lines(tx, j.floor_job_id);
       const l = ls.find((x) => x.floor_line_id === lineId)!;
       if (l.actual_mg !== null || l.over_mg === null) throw new ConflictException(`Line ${l.seq} has no reading held over the pick.`);
@@ -536,6 +626,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'VERIFY', 'finish verifying');
+      await this.assertRunning(tx, j);
       const ls = await this.lines(tx, jobId);
       this.assertNotPicker(j, ls, principal);
       const open = ls.filter((l) => l.actual_mg === null);
@@ -555,6 +646,7 @@ export class FloorStationService {
     const next = steps.find((s) => !s.done_dt);
     return {
       floorJobId: j.floor_job_id, jobNo: j.job_no, stage: j.stage, orderRef: j.order_ref, tote: j.tote, batchNo: j.batch_no,
+      stop: await this.openStop(this.sql, jobId),
       steps: steps.map((s) => ({ seq: s.seq, instruction: s.instruction, done: !!s.done_dt, doneDt: s.done_dt, next: next?.seq === s.seq })),
     };
   }
@@ -567,6 +659,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'MIX', 'mix');
+      await this.assertRunning(tx, j);
       this.assertNotVerifier(j, principal);
       const steps = await tx<{ seq: number; instruction: string; done_dt: string | null }[]>`
         select seq, instruction, done_dt::text from production.floor_mix_step where floor_job_id = ${jobId} order by seq`;
@@ -587,6 +680,7 @@ export class FloorStationService {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'MIX', 'finish mixing');
+      await this.assertRunning(tx, j);
       this.assertNotVerifier(j, principal);
       const open = await tx<{ seq: number }[]>`select seq from production.floor_mix_step where floor_job_id = ${jobId} and done_dt is null order by seq`;
       if (open.length) throw new ConflictException(`${open.length} step(s) still open: ${open.map((s) => s.seq).join(', ')}.`);

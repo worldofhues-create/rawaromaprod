@@ -24,7 +24,9 @@ import { FLOOR_CLOCK } from './floor.tokens.js';
 import { scaleConfig } from './scale.service.js';
 import { iso, newDeviceToken, sha256, sixDigitCode, systemClock, text, type Clock } from './floor-util.js';
 
-export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale', 'scanner'] as const;
+// FLOOR-TEMP-1: temp_sensor -- a thermometer / data logger that pairs like a scale and posts readings
+// for the one zone its config names (POST /v1/device-agent/temperature-readings).
+export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale', 'scanner', 'temp_sensor'] as const;
 /** SCAN-4: what a scanner can be recorded as reading (the BarcodeDetector names, so one vocabulary). */
 export const SYMBOLOGIES = ['qr_code', 'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'data_matrix', 'pdf417', 'aztec'] as const;
 /** A wedge / Bluetooth scanner types into the station's screen: nothing to pair, no heartbeat. */
@@ -55,7 +57,7 @@ export interface PairedDevice {
   config: Record<string, unknown>;
 }
 
-const KIND_WORD: Record<DeviceKind, string> = { label_printer: 'Printer', display: 'Display', kiosk: 'Kiosk', scale: 'Scale', scanner: 'Scanner' };
+const KIND_WORD: Record<DeviceKind, string> = { label_printer: 'Printer', display: 'Display', kiosk: 'Kiosk', scale: 'Scale', scanner: 'Scanner', temp_sensor: 'Temperature sensor' };
 
 @Injectable()
 export class DevicesService {
@@ -82,6 +84,7 @@ export class DevicesService {
     let config = body.config && typeof body.config === 'object' && !Array.isArray(body.config) ? (body.config as Record<string, unknown>) : {};
     if (kind === 'scanner') config = scannerConfig(config);
     if (kind === 'scale') config = scaleConfig(config); // FLOOR-FIX-4: category precision default
+    if (kind === 'temp_sensor') config = await this.sensorConfig(config);
     if (JSON.stringify(config).length > 4000) throw new BadRequestException('config is too large.');
     const deviceId = uuidv7();
     const unpaired = UNPAIRED.includes(kind);
@@ -93,6 +96,21 @@ export class DevicesService {
       returning *`;
     const pairing = unpaired ? null : await this.issueCode(deviceId, principal);
     return { device: this.shape(row!), pairing };
+  }
+
+  /** FLOOR-TEMP-1: a sensor serves exactly one zone, and a zone has at most one live sensor. */
+  private async sensorConfig(config: Record<string, unknown>, self: string | null = null): Promise<Record<string, unknown>> {
+    // By id, or by the zone code the Devices form types.
+    const ref = String(config.zoneId ?? config.zoneCode ?? '').trim();
+    if (!ref) throw new BadRequestException('A temperature sensor names the zone it reads (its zone code).');
+    const [z] = /^[0-9a-f-]{36}$/i.test(ref)
+      ? await this.sql`select zone_id::text, zone_code from quality.storage_zone where zone_id = ${ref}::uuid and status = 'ACTIVE'`
+      : await this.sql`select zone_id::text, zone_code from quality.storage_zone where zone_code = ${ref.toUpperCase()} and status = 'ACTIVE'`;
+    if (!z) throw new BadRequestException(`No zone ${ref} in use. Set the zone up on the Temperatures screen first.`);
+    const zoneId = String(z.zone_id);
+    const [other] = await this.sql`select name from platform.device_master where kind = 'temp_sensor' and status <> 'revoked' and config->>'zoneId' = ${zoneId} and device_id::text <> ${self ?? ''}`;
+    if (other) throw new ConflictException(`Zone ${z.zone_code} already has a sensor (${other.name}). Revoke it first.`);
+    return { zoneId };
   }
 
   /** A fresh code for a device (re-pair, or the first code expired). Older open codes stop working. */
@@ -229,6 +247,7 @@ export class DevicesService {
       const [k] = await this.sql`select kind from platform.device_master where device_id = ${deviceId}::uuid`;
       if (k?.kind === 'scanner') config = scannerConfig(config);
       if (k?.kind === 'scale') config = scaleConfig(config); // FLOOR-FIX-4: an admin's per-device override
+      if (k?.kind === 'temp_sensor') config = await this.sensorConfig(config, deviceId);
     }
     const [dev] = await this.sql`
       update platform.device_master

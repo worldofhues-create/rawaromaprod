@@ -320,7 +320,11 @@ test('quality InspectionsService.dispose: QcStatusChanged never fires for RM QC 
   // per-row lookup outcome. No db-side check applies (there is nothing to look up); the call
   // simply must not throw.
   const svc = new InspectionsService(qualityDb());
-  const insp = await svc.createInspection({ rmBatchId: crypto.randomUUID() }, principal());
+  const rmId = crypto.randomUUID();
+  const insp = await svc.createInspection({ rmBatchId: rmId }, principal());
+  // FLOOR-QC-IN-1: an incoming ACCEPT needs a recorded result and a retained sample.
+  await svc.addResults(insp.qcInspectionId, { results: [{ result: 'PASS' }] }, principal());
+  await testClient()`insert into quality.qc_sample_retention (qc_inspection_id, rm_batch_id, sample_code, retained_dt) values (${insp.qcInspectionId}, ${rmId}, 'S-BRIDGE', now())`;
   await svc.dispose(insp.qcInspectionId, { dispositionCode: 'ACCEPT' }, principal());
 });
 

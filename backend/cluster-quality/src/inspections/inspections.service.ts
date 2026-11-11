@@ -189,6 +189,19 @@ export class InspectionsService {
     }
 
     return this.db.transaction(async (tx) => {
+      // FLOOR-QC-IN-1: "QC samples every incoming lot". ACCEPT on a raw lot needs at least one result
+      // recorded against this inspection -- the sample's reading or observation. An accept with no result
+      // on file released a lot nobody had tested. REJECT, HOLD and REWORK never need one.
+      if (body.dispositionCode === 'ACCEPT' && (inspection as { rmBatchId?: string | null }).rmBatchId) {
+        const sampled = (await tx.execute(sql`select 1 from quality.qc_result_details d where d.qc_inspection_id = ${inspectionId}
+            and (d.result is not null or d.observed_value is not null or d.observed_text is not null) limit 1`)) as unknown as unknown[];
+        if (!sampled.length) throw new ConflictException('Record the sample result first: an incoming lot is accepted only on a sample tested and on file.');
+        // The sample itself: drawn and retained (sample code, who, when, where), for this inspection or lot.
+        const rmId = (inspection as { rmBatchId?: string | null }).rmBatchId!;
+        const drawn = (await tx.execute(sql`select 1 from quality.qc_sample_retention r where (r.qc_inspection_id = ${inspectionId} or r.rm_batch_id = ${rmId})
+            and r.sample_code is not null and r.retained_dt is not null limit 1`)) as unknown as unknown[];
+        if (!drawn.length) throw new ConflictException('Record the retained sample first (sample code, retained date): an incoming lot is accepted only on a sample drawn and kept.');
+      }
       const disposition = (
         await tx
           .insert(qcDisposition)

@@ -1491,6 +1491,12 @@ async function ensureReceivingAndQc(ctx: Ctx, users: DemoUsers, pos: PoRecord[],
           result: outcome === 'FAIL' ? 'Out of specification' : 'Within specification',
         }],
       }, qcActor);
+      // FLOOR-QC-IN-1: an incoming ACCEPT needs the retained sample on file (demo data, dev only).
+      if (outcome === 'PASS') {
+        await ctx.sql`insert into quality.qc_sample_retention (qc_inspection_id, rm_batch_id, sample_code, retained_dt, created_by)
+          select ${inspectionId}, ${b.rmBatchId}, ${'DEMO-RS-' + String(b.rmBatchId).slice(-8)}, now(), 'demo-seed'
+           where not exists (select 1 from quality.qc_sample_retention where qc_inspection_id = ${inspectionId})`;
+      }
       await ctx.svc.inspectionsService.dispose(inspectionId, {
         dispositionCode: outcome === 'PASS' ? 'ACCEPT' : outcome === 'FAIL' ? 'REJECT' : 'HOLD',
         dispositionReason: outcome === 'FAIL'

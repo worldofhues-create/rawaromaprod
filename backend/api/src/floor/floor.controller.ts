@@ -144,6 +144,14 @@ export class FloorController {
     return this.stations.verifyLine(id, line, { actualMg: b?.actualMg, source: s(b?.source), scaleRef: b?.scaleRef ? s(b.scaleRef) : undefined }, p);
   }
 
+  // FLOOR-LOT-STOP-1: the supervisor's permission (the one that answers for a held reading) resumes a
+  // stopped line. The service refuses the person whose scan stopped it.
+  @Permissions('production:floor_job:write')
+  @Post('v1/floor/jobs/:id/stop/resume')
+  resumeLine(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
+    return this.stations.clearStop(id, { reason: b?.reason }, p);
+  }
+
   // STOCK2-1: the permission that puts a job on the floor is the one that answers for a held reading.
   @Permissions('production:floor_job:write')
   @Post('v1/floor/lines/:line/over-pick')

@@ -320,6 +320,12 @@ export const RA_PERMISSIONS: string[] = [
   // and F7 FG rack zone colours + initials (backend/api/src/shelf/fg-zone.service.ts).
   'inventory:lot_split:write',
   'location:fg_zone:write',
+  // FLOOR-TEMP-1 (2026-11-11): temperature zones, readings and sourced per-material limits
+  // (backend/api/src/floor-ops/temperature.controller.ts). qc holds all four through quality:*.
+  'quality:temperature:read',
+  'quality:temperature:write',
+  'quality:storage_zone:write',
+  'quality:temperature_limit:write',
   // Lane pf-c (production floor P3/P4): scripts/pfc-grants.ts.
   ...PFC_PERMISSIONS,
   // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.

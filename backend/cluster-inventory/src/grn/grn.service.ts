@@ -23,6 +23,7 @@ import type {
   CreateGrnItem,
 } from '../cluster-inventory.dtos.js';
 import { ensure, paginate } from '../_helpers.js';
+import { BORN_STATUS, recordLotQcEvent } from '../batch/lot-qc.js';
 
 const {
   grnMaster,
@@ -185,7 +186,8 @@ export class GrnService {
                 receivedQty: it.receivedQty != null ? String(it.receivedQty) : null,
                 uomId: it.uomId ?? null,
                 storageLocationId: it.storageLocationId ?? null,
-                status: 'ACTIVE',
+                // FLOOR-QC-IN-1: born in quarantine, not ACTIVE-until-the-poller-runs (batch/lot-qc.ts).
+                status: BORN_STATUS,
                 createdBy: principal.userId,
                 updatedBy: principal.userId,
               })
@@ -193,6 +195,7 @@ export class GrnService {
           )[0],
         );
         batches.push(batch);
+        await recordLotQcEvent(tx, rmBatchId, 'QUARANTINED', `received on GRN ${master.grnNumber}: held for incoming QC`, principal.userId);
 
         for (const container of lineContainers) {
           const mapping = ensure(

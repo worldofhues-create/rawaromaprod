@@ -39,6 +39,8 @@ export interface QueueJob {
   waitingOn: string[];
   /** ORDER (a customer order, the default) or SUGGESTED (an approved cover suggestion). */
   source?: 'ORDER' | 'SUGGESTED';
+  /** FLOOR-LOT-STOP-1: why the line is stopped, or null. */
+  stopped?: string | null;
 }
 
 export interface RankedJob extends QueueJob {
@@ -165,12 +167,19 @@ export class FloorQueueService {
               left join platform.uom_master u on u.uom_id = ib.uom_id
               join lateral (select overall_result from quality.qc_inspections q where q.rm_batch_id = ib.rm_batch_id order by created_dt desc limit 1) qc on true
              where ib.material_id = ${l.material_id} and ib.quantity_on_hand > 0 and upper(coalesce(qc.overall_result, '')) in ('ACCEPT', 'PASS')
+               -- FLOOR-QC-IN-1: the same lots the pick station will take (floor-station.service PICKABLE_LOTS).
+               and upper(coalesce(rb.status, '')) not in ('QUARANTINE', 'REJECTED', 'HOLD')
+               and not exists (select 1 from inventory.lot_hold h where h.subject_type = 'RM_LOT' and h.subject_id = ib.rm_batch_id and h.released_dt is null)
                and (rb.expiry_date is null or rb.expiry_date >= current_date)`;
           const enough = lots.some((x) => (qtyToMg(x.qty, x.uom_code) ?? -1) >= Number(l.target_mg) && mgToQty(Number(l.target_mg), x.uom_code) !== null);
           if (!enough) waitingOn.push((await this.codes.codeFor(l.material_id))?.code ?? 'an uncoded line');
         }
       }
+      // FLOOR-LOT-STOP-1: a stopped job stays openable (its screen is the stop and the supervisor's
+      // resume), and says it is stopped wherever it is listed.
+      const [stop] = await this.sql<{ detail: string }[]>`select detail from production.floor_line_stop where floor_job_id = ${r.floor_job_id} and cleared_dt is null`;
       out.push({
+        stopped: stop ? stop.detail : null,
         floorJobId: r.floor_job_id, jobNo: r.job_no, stage: r.stage, orderRef: r.order_ref, tote: r.tote, promiseDt: r.promise_dt,
         createdDt: r.created_dt, expedite: r.expedite, channel: r.channel, customerTier: r.customer_tier,
         ready: waitingOn.length === 0, waitingOn, source: r.source === 'SUGGESTED' ? 'SUGGESTED' : 'ORDER',

@@ -23,6 +23,7 @@ test('putaway queues one raw-lot print job: QR and Code 128 carry the same lot c
   const kg = u?.id ?? String((await s`insert into platform.uom_master (uom_code, uom_name, status) values ('KG', 'Kilogram', 'ACTIVE') returning uom_id::text as id`)[0]!.id);
   const rm = randomUUID(), ib = randomUUID(), bin = randomUUID(), binCode = 'B-' + bin.slice(0, 6).toUpperCase();
   await s`insert into inventory.rm_batch_master (rm_batch_id, batch_number, received_qty, uom_id, status, expiry_date) values (${rm}, ${'RMB-' + rm.slice(0, 8)}, 5, ${kg}, 'ACTIVE', '2099-01-01')`;
+  await s`insert into quality.qc_inspections (qc_inspection_id, rm_batch_id, overall_result) values (${randomUUID()}, ${rm}, 'ACCEPT')`; // FLOOR-QC-IN-1: QC released it
   await s`insert into inventory.inventory_batch (inventory_batch_id, rm_batch_id, quantity_on_hand, status) values (${ib}, ${rm}, 5, 'ACTIVE')`;
   await s`insert into location.storage_location_master (storage_location_id, storage_location_code, status) values (${bin}, ${binCode}, 'ACTIVE')`;
   const print = new PrintService(s, new DevicesService(s));

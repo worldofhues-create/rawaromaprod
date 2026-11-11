@@ -197,7 +197,7 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 306 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 310 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
@@ -208,7 +208,9 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
   // 304: + lane pf-d's 6 order-intelligence and QC review permissions (scripts/pfd-grants.ts),
   //      both review signatures included (the owner is still one person: confirm needs another).
   // 306: + lane floor-gaps' inventory:lot_split:write (R8) and location:fg_zone:write (F7).
-  assert.equal(ownerGrant.length, 306);
+  // 310: + FLOOR-TEMP-1's quality:temperature:read|write, quality:storage_zone:write, quality:temperature_limit:write.
+  assert.equal(ownerGrant.length, 310);
+  for (const p of ['quality:temperature:read', 'quality:temperature:write', 'quality:storage_zone:write', 'quality:temperature_limit:write']) assert.ok(ownerGrant.includes(p), p);
   // Named, so a different 29 cannot stand in for these: each must be the owner's.
   for (const p of ['platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_code:read',
     'masterdata:floor_code:write', 'masterdata:floor_family:write', 'inventory:lot_barcode:resolve', 'inventory:lot_barcode:write',

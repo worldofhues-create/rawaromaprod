@@ -122,6 +122,7 @@ export async function releasedStock(qty: number) {
   const { qcParam } = await master();
   const lot = await receivedLot(qty);
   await must('qc', 'POST', `/v1/qc-inspections/${lot.insp}/results`, { results: [{ qcParameterId: qcParam, observedValue: 1.47, result: 'PASS' }] });
+  await must('qc', 'POST', '/v1/qc-sample-retentions', { qcInspectionId: lot.insp, rmBatchId: lot.rmBatch, sampleCode: `RS-${lot.batchNumber}`, retainedDt: new Date().toISOString() }); // FLOOR-QC-IN-1: the sample drawn and kept
   await must('qc', 'POST', `/v1/qc-inspections/${lot.insp}/disposition`, { dispositionCode: 'ACCEPT', dispositionReason: 'within spec' });
   const inv = await until('released stock', () => find('warehouse', '/v1/inventory-batches', (b) => b.rmBatchId === lot.rmBatch));
   return { ...lot, invBatch: inv.inventoryBatchId as string };
