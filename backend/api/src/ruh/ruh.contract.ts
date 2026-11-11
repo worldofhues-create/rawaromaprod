@@ -28,7 +28,9 @@ export const RUH_REASON_MIN = 8;
 export const RUH_REASON_MAX = 1000;
 
 /** Who sees every insight regardless of audience (as the produce alert feed). */
-export const SEES_ALL_ROLES = ['owner', 'super_admin'];
+/* ALERT-ROUTING (owner, 2026-11-12): every alert reaches every admin -- `admin` and
+   `platform_super_admin` join the owner (notify/alert-routing.ts RAWPROD_ADMIN_ROLES). */
+export const SEES_ALL_ROLES = ['owner', 'super_admin', 'admin', 'platform_super_admin'];
 /** Who hears about every override (owner ruling: "every override alerts admins"). */
 export const OVERRIDE_AUDIENCE = ['owner', 'admin'];
 

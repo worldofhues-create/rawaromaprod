@@ -37,7 +37,7 @@ export async function clearAlert(sql: Sql, dedupeKey: string, at: Date): Promise
 
 export async function openAlerts(sql: Sql, station?: string | null) {
   const rows = await sql`
-    select floor_alert_id, kind, station, subject_type, subject_id, title, body, raised_at, acked_at
+    select floor_alert_id, kind, station, subject_type, subject_id, title, body, dedupe_key, raised_at, acked_at
       from platform.floor_alert
      where cleared_at is null ${station ? sql`and (station = ${station} or station = ${GENERAL_STATION} or station is null)` : sql``}
      order by raised_at desc
@@ -50,6 +50,8 @@ export async function openAlerts(sql: Sql, station?: string | null) {
     subjectId: (r.subject_id as string | null) ?? null,
     title: String(r.title),
     body: (r.body as string | null) ?? null,
+    /* ALERT-ROUTING: the Ruh insight for the admins keys on it (notify/alert-routing.ts). */
+    dedupeKey: String(r.dedupe_key),
     raisedAt: iso(r.raised_at),
     ackedAt: iso(r.acked_at),
   }));

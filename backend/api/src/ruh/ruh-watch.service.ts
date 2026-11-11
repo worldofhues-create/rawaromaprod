@@ -28,6 +28,8 @@ import { RuhFactsService } from './ruh-facts.service.js';
 import { RuhInsightsService, type SyncResult } from './ruh-insights.service.js';
 import { RuhSettingsService } from './ruh-settings.service.js';
 import { RuhSignalService } from './ruh-signal.service.js';
+import { detectFloorAlerts } from '../notify/alert-routing.js';
+import { openAlerts } from '../floor-ops/floor-alerts.js';
 
 export const RUH_VAULT_CURSOR_ID = 'ruh_overrides';
 /** The Vault-related insights this box can tell without asking the Vault. */
@@ -127,6 +129,8 @@ export class RuhWatchService implements OnModuleDestroy {
       await group('shelf', async () => detectShelf(await this.facts.shelf(now), s));
       await group('materials', async () => detectMaterials(await this.facts.materials(s), s, now));
       await group('bridge', async () => detectBridge(await this.facts.bridge(), s, now));
+      /* ALERT-ROUTING: every open station alert, as an insight for the admins and a C3 signal for ALEMBIC's. */
+      await group('floor', async () => detectFloorAlerts(await openAlerts(this.sql)));
 
       const scope = [...ran.flatMap((g) => [...DETECTOR_KINDS[g]]), ...partial];
       const sync = await this.insights.sync(scope, drafts, now.toISOString());

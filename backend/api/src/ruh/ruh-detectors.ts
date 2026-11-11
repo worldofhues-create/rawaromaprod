@@ -22,6 +22,7 @@ import {
   type InsightDraft, type RuhPrediction, type RuhSeverity,
 } from './ruh.contract.js';
 import type { RuhSettings } from './ruh-settings.service.js';
+import { FLOOR_INSIGHT_KINDS } from '../notify/alert-routing.js';
 
 /* ── facts ─────────────────────────────────────────────────────────────────────────────── */
 
@@ -114,6 +115,8 @@ export const DETECTOR_KINDS = {
   shelf: ['shelf.tasks_overdue', 'shelf.bin_full', 'inventory.quarantine', 'shelf.pick_light_parked'],
   materials: ['masterdata.no_floor_code', 'inventory.low_stock', 'inventory.not_totalled'],
   bridge: ['bridge.failing', 'bridge.not_connected', 'bridge.catalogue_stale', 'ruh.signals_stuck'],
+  /* ALERT-ROUTING: the station alerts, for the admins (notify/alert-routing.ts). */
+  floor: FLOOR_INSIGHT_KINDS,
 } as const;
 export type DetectorGroup = keyof typeof DETECTOR_KINDS;
 
