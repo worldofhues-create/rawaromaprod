@@ -26,7 +26,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 // @ts-expect-error plain ESM, no types
-import { verify, isReusableProof, LOCAL_GATES } from '../../../../infra/aws/ship-evidence.mjs';
+import { verify, isReusableProof, lastDeployed, LOCAL_GATES } from '../../../../infra/aws/ship-evidence.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const SHIP = join(ROOT, 'infra/aws/ship.sh');
@@ -64,12 +64,16 @@ if (a[0] === 'ssm' && a[1] === 'send-command') {
   process.stdout.write('cmd-' + kind + '\\n');
 } else if (a[0] === 'ssm' && a[1] === 'get-command-invocation') {
   const kind = arg('--command-id').replace('cmd-', ''), q = arg('--query');
-  const deployed = sent().some((c) => c.op === 'send' && c.kind === 'deploy') ? head : base;
+  const was = sent().some((c) => c.op === 'send' && c.kind === 'deploy') ? head : base;
+  // After a rollback the box names the commit it returned to, whatever it was told to say before.
+  const rolled = sent().some((c) => c.op === 'send' && c.kind === 'rollback') && reply('rollback.status', 'Success') === 'Success';
+  const deployed = rolled ? reply('rollback_to', reply('previous', 'none')) : reply('deployed', was);
   const out = {
-    status: 'deployed=' + reply('deployed', deployed) + '\\nprevious=none\\ncheckout=' + deployed + '\\nmem_available_mb=' + reply('mem', '2400') + '\\nship_lock=' + reply('ship_lock', 'free') + '\\ndeploy_flock=' + reply('deploy_flock', 'free'),
+    status: 'deployed=' + deployed + '\\nprevious=' + reply('previous', 'none') + '\\ncheckout=' + (rolled ? deployed : reply('checkout', deployed)) + '\\nmem_available_mb=' + reply('mem', '2400') + '\\nship_lock=' + reply('ship_lock', 'free') + '\\ndeploy_flock=' + reply('deploy_flock', 'free'),
+    rollback: 'wrapper=x version=3\\n==> rolling back\\nROLLED BACK TO it.\\nlog=/var/log/rawprod-ship/r.log\\nrollback_exit=0',
     'lock-take': 'locked=yes',
     'lock-release': 'released=yes',
-    unlock: 'removed=system=alembic',
+    unlock: 'removed=system=other',
     backup: 'rawprod-backup OK bucket=b key=rawprod/pg_dump/' + reply('backup_stamp', '99991231T235959Z') + '.dump bytes=1800000 sha256=abc entries=40 tables=12',
     deploy: 'wrapper=x\\n==> DEPLOYED\\nlog=/var/log/rawprod-ship/x.log\\ndeploy_exit=0',
     static: 'published /var/www/rawprod-cf/factory\\npublished /var/www/rawprod-cf/platform\\npublished /var/www/rawprod-cf/vault',
@@ -124,7 +128,10 @@ function rig(opt: { pushHead?: boolean; lockInDeploy?: boolean } = {}) {
 
   stub(bin, 'aws', AWS_STUB);
   stub(bin, 'pnpm', `echo "pnpm $*" >> "${join(state, 'pnpm.log')}"`);
-  stub(bin, 'curl', `printf '%s' "$(cat "${join(state, 'reply', 'curl')}" 2>/dev/null || echo 200)"`);
+  // -o <file> gets a body, the way a console's page would arrive; the status goes to stdout.
+  stub(bin, 'curl', `out=""; while [ $# -gt 0 ]; do case "$1" in -o) out="$2"; shift ;; esac; shift; done
+if [ -n "$out" ] && [ "$out" != /dev/null ]; then cat "${join(state, 'reply', 'curl.body')}" 2>/dev/null > "$out" || printf '<!doctype html><html><body>console</body></html>' > "$out"; fi
+printf '%s' "$(cat "${join(state, 'reply', 'curl')}" 2>/dev/null || echo 200)"`);
   stub(bin, 'sleep', '');
 
   const env = {
@@ -137,9 +144,11 @@ function rig(opt: { pushHead?: boolean; lockInDeploy?: boolean } = {}) {
     SHIP_HEALTH_RETRY_S: '0',
     SHIP_MIN_FREE_GB: '0',
     RAWPROD_SHIP_EVIDENCE: join(dir, 'evidence'),
+    // A dry run asks AWS nothing, so it is told what production runs. Tests of the refusal blank this.
+    RAWPROD_DEPLOYED_SHA: base,
   };
-  const run = (args: string[]) => {
-    const r = spawnSync('bash', [SHIP, ...args], { encoding: 'utf8', env });
+  const run = (args: string[], extra: Record<string, string> = {}) => {
+    const r = spawnSync('bash', [SHIP, ...args], { encoding: 'utf8', env: { ...env, ...extra } });
     return { code: r.status, out: `${r.stdout}${r.stderr}` };
   };
   const calls = (): Call[] => readFileSync(join(state, 'calls.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Call);
@@ -150,8 +159,8 @@ function rig(opt: { pushHead?: boolean; lockInDeploy?: boolean } = {}) {
     assert.ok(f, `no ${kind} script was sent`);
     return readFileSync(join(state, 'sent', f!), 'utf8');
   };
-  const evidence = () => {
-    const d = join(dir, 'evidence', head);
+  const evidence = (of: string = head) => {
+    const d = join(dir, 'evidence', of);
     if (!existsSync(d)) return [];
     return readdirSync(d).sort().map((run) => JSON.parse(readFileSync(join(d, run, 'ship.json'), 'utf8')) as {
       verdict: string; mode: string; sha: string; base: string; local_proof: string; seal: string; finished: string;
@@ -165,11 +174,13 @@ function rig(opt: { pushHead?: boolean; lockInDeploy?: boolean } = {}) {
 
 // ── a dry run changes nothing ───────────────────────────────────────────────────────────────────────
 
-test('a dry run proves the commit locally, reads the box once, and sends nothing that changes it', () => {
+test('a dry run proves the commit locally and makes no AWS call of any kind: nothing sent, nothing read', () => {
   const r = rig();
-  const x = r.run([r.head]);
+  const x = r.run([r.head, '--base', r.base]);
   assert.equal(x.code, 0, x.out);
-  assert.deepEqual(r.order(), ['status'], 'one read-only SSM command, the status read');
+  assert.deepEqual(r.calls(), [], 'not a command to the box, not a status read, not an S3 or RDS call');
+  assert.match(x.out, /unread\s+host lock .*dry run: the box was not asked\. --apply reads both locks and takes the ship lock/);
+  assert.match(x.out, /dry run: production was not read\. The base is --base/);
   assert.match(x.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: take the ship lock/);
   assert.match(x.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: pg_dump -Fc of rawprod/);
   assert.match(x.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: install [0-9a-f]{8}'s own deploy\.sh/);
@@ -184,17 +195,34 @@ test('a dry run proves the commit locally, reads the box once, and sends nothing
   assert.equal(r.worktrees(), 1, 'the worktree is removed after a pass');
 });
 
-test('--offline makes no AWS call at all, and needs to be told what production runs', () => {
+test('a dry run has to be told what production runs, or to have seen it: it refuses rather than guess or ask', () => {
   const r = rig();
-  const x = r.run([r.head, '--offline', '--base', r.base]);
-  assert.equal(x.code, 0, x.out);
-  assert.deepEqual(r.calls(), []);
-  assert.match(x.out, /host lock .*--offline: the box was not asked/);
-  const noBase = r.run([r.head, '--offline']);
+  const blank = { RAWPROD_DEPLOYED_SHA: '' };
+  const noBase = r.run([r.head], blank);
   assert.notEqual(noBase.code, 0);
-  assert.match(noBase.out, /--offline cannot read what production runs/);
+  assert.match(noBase.out, /a dry run makes no AWS call, so it cannot ask i-04e7dc4e5edcc1ff7 what production runs/);
+  assert.match(noBase.out, /--base <deployed sha>/);
+  assert.equal(r.pnpm(), '', 'nothing was built against a base nobody named');
+  // --offline is what a dry run already is. It is still accepted, and still cannot deploy.
+  assert.equal(r.run([r.head, '--offline', '--base', r.base], blank).code, 0);
   assert.notEqual(r.run([r.head, '--offline', '--base', r.base, '--apply']).code, 0, '--offline cannot deploy');
   assert.deepEqual(r.calls(), []);
+
+  // After a green ship from this laptop, the next dry run knows what production runs without asking.
+  const g = rig();
+  assert.equal(g.run([g.head, '--apply']).code, 0);
+  const before = g.calls().length;
+  g.put('web/index.html', '<html>three</html>\n');
+  g.g(g.clone, 'commit', '--quiet', '-am', 'next');
+  const next = g.g(g.clone, 'rev-parse', 'HEAD');
+  g.g(g.clone, 'push', '--quiet', 'origin', 'HEAD:main');
+  const dry = g.run([next], blank);
+  assert.equal(dry.code, 0, dry.out);
+  assert.match(dry.out, /The base is this laptop's last green ship for --role main/);
+  assert.equal(g.evidence(next).pop()!.base, g.head);
+  assert.equal(g.calls().length, before, 'and still asked AWS nothing');
+  assert.equal(lastDeployed(join(g.dir, 'evidence'), 'main'), g.head);
+  assert.equal(lastDeployed(join(g.dir, 'evidence'), 'vault'), '', 'a ship to the other box says nothing about this one');
 });
 
 test('every run leaves a sealed evidence file, a failed one included', () => {
@@ -211,7 +239,7 @@ test('every run leaves a sealed evidence file, a failed one included', () => {
   assert.equal(verify({ ...e, verdict: 'DEPLOYED GREEN' }), false, 'an edited file no longer verifies');
 
   const bad = rig();
-  bad.reply('ship_lock', 'system=alembic role=main sha=abc started=2026-11-12T08:00:00Z by=op@laptop');
+  bad.reply('ship_lock', 'system=other role=main sha=abc started=2026-11-12T08:00:00Z by=op@laptop');
   assert.notEqual(bad.run([bad.head, '--apply']).code, 0);
   const [f] = bad.evidence();
   assert.match(f!.verdict, /^FAILED at local: REFUSED/);
@@ -220,14 +248,19 @@ test('every run leaves a sealed evidence file, a failed one included', () => {
 
 // ── one deploy per host ─────────────────────────────────────────────────────────────────────────────
 
-test('--apply refuses while an Alembic ship holds the lock, names the holder, and touches nothing', () => {
+test('--apply refuses while another ship holds the lock, names the holder and its age, and touches nothing', () => {
   const r = rig();
-  r.reply('ship_lock', 'system=alembic role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
+  r.reply('ship_lock', 'system=other role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
   const x = r.run([r.head, '--apply']);
   assert.notEqual(x.code, 0);
-  assert.match(x.out, /REFUSED: the ship lock on i-04e7dc4e5edcc1ff7 is held: system=alembic role=main sha=0123abcd started=2026-11-12T08:00:00Z/);
+  assert.match(x.out, /REFUSED: the ship lock on i-04e7dc4e5edcc1ff7 is held: system=other role=main sha=0123abcd started=2026-11-12T08:00:00Z/);
   assert.match(x.out, /One deploy per host/);
+  assert.match(x.out, /that lock was taken \d+ min ago\. A ship holds it for at most about 100 min, so this one is STALE unless a deploy is running/);
+  assert.match(x.out, /ship\.sh --unlock --role main --apply/);
   assert.deepEqual(r.order(), ['status'], 'no lock, no backup, no deploy was sent');
+  const fresh = rig();
+  fresh.reply('ship_lock', `system=other role=main sha=0123abcd started=${new Date().toISOString().replace(/\.\d+Z$/, 'Z')} by=op@laptop`);
+  assert.match(fresh.run([fresh.head, '--apply']).out, /taken \d+ min ago\. A ship can hold it for about 100 min: that one is probably still alive/);
   assert.equal(r.pnpm(), '', 'and the laptop did not spend ten minutes building first');
 });
 
@@ -242,22 +275,22 @@ test('--apply refuses while a deploy process holds the kernel lock, whichever sy
   }
 });
 
-test('a dry run under a held lock still proves the commit, and says --apply would be refused', () => {
+test('a dry run does not read the lock: held or free, it proves the commit and leaves the question to --apply', () => {
   const r = rig();
-  r.reply('ship_lock', 'system=alembic role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
+  r.reply('ship_lock', 'system=other role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
   const x = r.run([r.head]);
   assert.equal(x.code, 0, x.out);
-  assert.match(x.out, /HELD\s+host lock/);
-  assert.match(x.out, /--apply would be REFUSED right now: the ship lock on .* is held: system=alembic/);
+  assert.match(x.out, /unread\s+host lock/);
+  assert.deepEqual(r.calls(), []);
 });
 
 test('two ships that both saw a free lock: the one the box refuses stops before the backup', () => {
   const r = rig();
   r.reply('lock-take.status', 'Failed');
-  r.reply('lock-take.out', 'REFUSED: the ship lock is held: system=alembic role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
+  r.reply('lock-take.out', 'REFUSED: the ship lock is held: system=other role=main sha=0123abcd started=2026-11-12T08:00:00Z by=op@laptop');
   const x = r.run([r.head, '--apply']);
   assert.notEqual(x.code, 0);
-  assert.match(x.out, /REFUSED: the ship lock is held: system=alembic.*One deploy per host\. Nothing on i-04e7dc4e5edcc1ff7 was changed/);
+  assert.match(x.out, /REFUSED: the ship lock is held: system=other.*One deploy per host\. Nothing on i-04e7dc4e5edcc1ff7 was changed/);
   assert.deepEqual(r.order(), ['status', 'lock-take'], 'no backup, no deploy, and no release of a lock that was never ours');
 });
 
@@ -295,13 +328,13 @@ sys.exit(subprocess.call(sys.argv[3:]))
   const ours = readFileSync(ship, 'utf8').trim();
   assert.match(ours, new RegExp(`^system=rawprod role=main sha=${r.head} started=\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ by=\\S+$`), 'the lock says who, what and since when');
 
-  const second = local('lock-take', 'system=alembic role=main sha=feed started=now by=other');
+  const second = local('lock-take', 'system=other role=main sha=feed started=now by=other');
   assert.equal(second.code, 75);
   assert.match(second.out, new RegExp(`REFUSED: the ship lock is held: system=rawprod role=main sha=${r.head}`));
   assert.equal(readFileSync(ship, 'utf8').trim(), ours, 'the loser did not overwrite the holder');
 
   // Somebody else's release leaves our lock alone; ours removes it and writes the box log.
-  assert.match(local('lock-release', 'system=alembic role=main sha=feed started=now by=other').out, /released=not-ours/);
+  assert.match(local('lock-release', 'system=other role=main sha=feed started=now by=other').out, /released=not-ours/);
   assert.ok(existsSync(ship));
   assert.match(local('lock-release').out, /released=yes/);
   assert.equal(existsSync(ship), false);
@@ -347,15 +380,17 @@ test('--unlock is the manual override: it shows the lock, refuses while a deploy
   r.reply('ship_lock', 'system=rawprod role=main sha=dead started=2026-11-11T08:00:00Z by=gone@laptop');
   const dry = r.run(['--unlock']);
   assert.equal(dry.code, 0, dry.out);
-  assert.match(dry.out, /ship lock on i-04e7dc4e5edcc1ff7 : system=rawprod role=main sha=dead/);
+  assert.match(dry.out, /WOULD READ on i-04e7dc4e5edcc1ff7: \/run\/lock\/raw-host-ship\.lock/);
   assert.match(dry.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: remove \/run\/lock\/raw-host-ship\.lock/);
-  assert.deepEqual(r.order(), ['status']);
+  assert.deepEqual(r.calls(), [], 'without --apply the box is not even read');
 
   r.reply('deploy_flock', 'held by alembic pid 42 since then');
   const busy = r.run(['--unlock', '--apply']);
   assert.notEqual(busy.code, 0);
+  assert.match(busy.out, /ship lock on i-04e7dc4e5edcc1ff7 : system=rawprod role=main sha=dead/);
+  assert.match(busy.out, /the lock was taken \d+ min ago\..* STALE unless a deploy is running/);
   assert.match(busy.out, /a deploy is running .* The lock is not stale/);
-  assert.deepEqual(r.order(), ['status', 'status'], 'nothing was removed');
+  assert.deepEqual(r.order(), ['status'], 'nothing was removed');
 
   r.reply('deploy_flock', 'free');
   const done = r.run(['--unlock', '--apply']);
@@ -465,6 +500,18 @@ test('green is said only when the box runs the commit and all three hosts answer
   assert.match(a.out, /rawprod-deploy --rollback/);
   assert.equal(red.order().pop(), 'lock-release');
 
+  // /health is the API behind each host. A console root left empty answers it with 200 all day.
+  const blank = rig();
+  blank.reply('curl.body', 'ok');
+  const p = blank.run([blank.head, '--apply']);
+  assert.notEqual(p.code, 0);
+  assert.match(p.out, /DEPLOYED BUT NOT GREEN: https:\/\/rawfactory\.huecycle\.in\/ answered 200 with no page in it/);
+  assert.match(p.out, /ship\.sh --rollback --role main --apply/);
+  const ok = rig();
+  const q = ok.run([ok.head, '--apply']);
+  assert.match(q.out, /https:\/\/rawvault\.huecycle\.in\/ +: 200, a page/);
+  assert.match(ok.evidence().pop()!.gates.find((g) => g.name === 'health')!.detail, /\/health and \/ answer 200/);
+
   const stale = rig();
   // deploy.sh "succeeded" but the box still reports the old commit.
   stale.reply('static.status', 'Failed');
@@ -481,6 +528,140 @@ test('green is said only when the box runs the commit and all three hosts answer
   assert.match(c.out, /DEPLOYED BUT NOT GREEN: DEPLOYED_SHA on the box is [0-9a-f]{40}, not [0-9a-f]{8}/);
 });
 
+// ── going back ──────────────────────────────────────────────────────────────────────────────────────
+
+const OLDER = 'a'.repeat(40);
+
+test('--rollback without --apply says what it would do and asks AWS nothing', () => {
+  const r = rig();
+  const x = r.run(['--rollback']);
+  assert.equal(x.code, 0, x.out);
+  assert.match(x.out, /The DATABASE does not move/);
+  assert.match(x.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: RAWPROD_ROLE=main \/usr\/local\/sbin\/rawprod-deploy --rollback/);
+  assert.match(x.out, /WOULD RUN on i-04e7dc4e5edcc1ff7: infra\/aws\/nginx\/install-static\.sh prod/);
+  assert.match(x.out, /VERDICT: DRY RUN: nothing was read and nothing was sent/);
+  assert.deepEqual(r.calls(), []);
+  assert.equal(r.pnpm(), '');
+  const named = r.run([r.base, '--rollback', '--apply']);
+  assert.equal(named.code, 2);
+  assert.match(named.out, /--rollback takes no commit/);
+  assert.deepEqual(r.calls(), [], 'a named commit is a deploy, and a deploy needs its proof');
+});
+
+test('--rollback --apply after a finished deploy: lock, the wrapper\'s own rollback to previous-sha, the consoles, the checks, release', () => {
+  const r = rig();
+  r.reply('deployed', r.head);
+  r.reply('previous', r.base);
+  const x = r.run(['--rollback', '--apply']);
+  assert.equal(x.code, 0, x.out);
+  assert.deepEqual(r.order(), ['status', 'lock-take', 'rollback', 'static', 'status', 'lock-release']);
+  assert.match(x.out, /the last deploy finished: back is previous-sha/);
+  assert.match(x.out, /VERDICT: ROLLED BACK GREEN: [0-9a-f]{8} on i-04e7dc4e5edcc1ff7 \(main\), was [0-9a-f]{8}\. The database was not touched/);
+  assert.equal(r.pnpm(), '', 'a rollback builds nothing here');
+
+  const sent = r.sent('rollback');
+  assert.match(sent, new RegExp(`^SHA=${r.base}$`, 'm'), 'the box is told which commit the operator agreed to');
+  // The wrapper that runs is the one beside this ship.sh, byte for byte, checked before it is installed.
+  const wrapper = readFileSync(join(ROOT, 'infra/aws/deploy.sh'));
+  assert.match(sent, new RegExp(`^WANT_ROLLBACK_SHA256=${sha256(wrapper)}$`, 'm'));
+  assert.equal(Buffer.from(/^DEPLOY_B64=(\S+)$/m.exec(sent)![1]!, 'base64').toString('utf8'), wrapper.toString('utf8'));
+  const at = (t: string) => { const i = sent.indexOf(t); assert.ok(i > 0, `the rollback script has no "${t}"`); return i; };
+  const order = [at('[ "$got" = "$WANT_ROLLBACK_SHA256" ] ||'), at('[ "$ver" -ge 3 ] ||'), at('[ "$want" = "$SHA" ] ||'),
+    at('/usr/local/sbin/rawprod-deploy; rm -f'), at('RAWPROD_ROLE="$ROLE" /usr/local/sbin/rawprod-deploy --rollback')];
+  assert.deepEqual([...order].sort((a, b) => a - b), order, 'hash, version, target, install, run: in that order');
+  // It sends the wrapper's flag and nothing that touches a schema or a unit.
+  assert.doesNotMatch(sent, /pnpm|db:|psql|systemctl|migrate/);
+  // The consoles published are the ones of the commit it returned to.
+  assert.match(r.sent('static'), new RegExp(`^SHA=${r.base}$`, 'm'));
+
+  const e = r.evidence(r.base).pop()!;
+  assert.match(e.verdict, /^ROLLED BACK GREEN/);
+  assert.equal(e.mode, 'rollback-apply');
+  assert.equal(verify(e), true);
+  assert.equal(isReusableProof(e, { sha: r.base, base: r.base, role: 'main', tool: sha256(readFileSync(SHIP)) }), false, 'a rollback proves nothing a deploy may reuse');
+  assert.equal(lastDeployed(join(r.dir, 'evidence'), 'main'), r.base, 'the next dry run diffs against what is live now');
+});
+
+test('--rollback --apply after a deploy that did not finish goes to the commit that last passed health, not one further back', () => {
+  // A failed build or a failed health check: the checkout is at the new commit, DEPLOYED_SHA still names
+  // the last good one, and previous-sha is one release behind that.
+  const r = rig();
+  r.reply('deployed', r.base);
+  r.reply('checkout', r.head);
+  r.reply('previous', OLDER);
+  r.reply('rollback_to', r.base);
+  const x = r.run(['--rollback', '--apply']);
+  assert.equal(x.code, 0, x.out);
+  assert.match(x.out, /the last deploy did NOT finish \(the checkout is at [0-9a-f]{8}\): back is the commit that last passed health/);
+  assert.match(r.sent('rollback'), new RegExp(`^SHA=${r.base}$`, 'm'));
+  assert.doesNotMatch(r.sent('rollback'), new RegExp(`^SHA=${OLDER}$`, 'm'));
+  // And the box decides the same way before it installs anything.
+  assert.match(r.sent('rollback'), /if \[ -n "\$deployed" \] && \[ "\$deployed" != "\$checkout" \]; then want=\$deployed; fi/);
+});
+
+test('--rollback --apply: a rollback the wrapper refuses publishes nothing, says fix forward, and releases the lock', () => {
+  const r = rig();
+  r.reply('deployed', r.head);
+  r.reply('previous', r.base);
+  r.reply('rollback.status', 'Failed');
+  r.reply('rollback.out', 'REFUSED: THIS IS NOT A ROLLBACK THAT IS SAFE TO DO.\nrollback_exit=3');
+  const x = r.run(['--rollback', '--apply']);
+  assert.notEqual(x.code, 0);
+  assert.match(x.out, /THIS IS NOT A ROLLBACK THAT IS SAFE TO DO/, 'the wrapper\'s own words are shown');
+  assert.match(x.out, /fix forward/);
+  assert.deepEqual(r.order(), ['status', 'lock-take', 'rollback', 'lock-release']);
+  assert.match(r.evidence(r.base).pop()!.verdict, /^ROLLBACK FAILED/);
+});
+
+test('--rollback --apply refuses with nothing to go back to, under a held host, and is not green on a red check', () => {
+  const none = rig();
+  none.reply('deployed', none.head);
+  const a = none.run(['--rollback', '--apply']);
+  assert.notEqual(a.code, 0);
+  assert.match(a.out, /records no previous commit \(none\), so there is nothing to go back to/);
+  assert.deepEqual(none.order(), ['status']);
+
+  const same = rig();
+  same.reply('deployed', same.head);
+  same.reply('previous', same.head);
+  assert.match(same.run(['--rollback', '--apply']).out, /both the deployed and the previous commit/);
+  assert.deepEqual(same.order(), ['status']);
+
+  const held = rig();
+  held.reply('deployed', held.head);
+  held.reply('previous', held.base);
+  held.reply('deploy_flock', 'held by alembic pid 4242 since 2026-11-12T08:00:00Z');
+  const b = held.run(['--rollback', '--apply']);
+  assert.notEqual(b.code, 0);
+  assert.match(b.out, /REFUSED: a deploy is running on i-04e7dc4e5edcc1ff7 right now/);
+  assert.deepEqual(held.order(), ['status']);
+
+  const red = rig();
+  red.reply('deployed', red.head);
+  red.reply('previous', red.base);
+  red.reply('curl', '502');
+  const c = red.run(['--rollback', '--apply']);
+  assert.notEqual(c.code, 0);
+  assert.match(c.out, /ROLLED BACK BUT NOT GREEN: https:\/\/rawfactory\.huecycle\.in\/health answered 502/);
+  assert.equal(red.order().pop(), 'lock-release');
+});
+
+test('nothing here, and nothing the box is sent, runs a down migration', () => {
+  // Locally the rehearsal only ever runs these three, and only against 127.0.0.1.
+  const scripts = [...new Set([...src.matchAll(/pnpm db:([a-z:-]+)/g)].map((m) => m[1]))].sort();
+  assert.deepEqual(scripts, ['migrate', 'seed', 'validate']);
+  assert.match(src, /pg_url\(\) \{ echo "postgres:\/\/ship@127\.0\.0\.1:\$PG_PORT\/\$1"; \}/);
+  // No script sent to the box names pnpm, a db: script, psql or a migration at all.
+  const remote = src.slice(src.indexOf('remote_head() {'), src.indexOf('sha256_of() {'));
+  assert.doesNotMatch(remote.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n'), /pnpm|db:|psql|\bdown\b/);
+  // And the wrapper the box runs has one migration command: its migrate unit, which runs db:migrate.
+  const wrapper = read('infra/aws/deploy.sh').split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(wrapper, /db:migrate:down|migrate:down|db:rollback|db:reset|db:drop/);
+  assert.match(read('infra/aws/systemd/rawprod-migrate.service'), /^ExecStart=\/usr\/bin\/env pnpm db:migrate$/m);
+  const pkg = JSON.parse(read('package.json')) as { scripts: Record<string, string> };
+  assert.deepEqual(Object.keys(pkg.scripts).filter((k) => /^db:.*(down|rollback|reset|drop)/.test(k)), [], 'there is no down script to run by mistake');
+});
+
 // ── what may be shipped at all ──────────────────────────────────────────────────────────────────────
 
 test('a commit that is not on origin is refused with the push command, before anything is read', () => {
@@ -494,10 +675,15 @@ test('a commit that is not on origin is refused with the push command, before an
 test('a deployed commit this clone has never seen is refused, not diffed against nothing', () => {
   const r = rig();
   r.reply('deployed', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef');
-  const x = r.run([r.head]);
+  const x = r.run([r.head, '--apply']);
   assert.notEqual(x.code, 0);
   assert.match(x.out, /production runs deadbeefdeadbeefdeadbeefdeadbeefdeadbeef, and that commit is not in this clone/);
   assert.equal(r.pnpm(), '');
+  assert.deepEqual(r.order(), ['status'], 'read, and nothing sent after it');
+  // The same on a dry run, where the base is somebody's word.
+  const y = r.run([r.head, '--base', 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef']);
+  assert.notEqual(y.code, 0);
+  assert.match(y.out, /that commit is not in this clone/);
 });
 
 test('a commit that does not descend from production is refused: that is a rollback, and deploy.sh guards those', () => {
@@ -509,9 +695,10 @@ test('a commit that does not descend from production is refused: that is a rollb
 
 test('--base that contradicts the box is refused', () => {
   const r = rig();
-  const x = r.run([r.head, '--base', r.head]);
+  const x = r.run([r.head, '--base', r.head, '--apply']);
   assert.notEqual(x.code, 0);
   assert.match(x.out, /--base says production runs [0-9a-f]{8}, the box says [0-9a-f]{8}/);
+  assert.deepEqual(r.order(), ['status']);
 });
 
 test('a commit whose deploy.sh does not take the host lock is not shipped', () => {
@@ -662,7 +849,16 @@ test('every SSM command goes through ssm_read or ssm_apply, and only ssm_apply c
   const reads = [...code.matchAll(/ssm_read (\S+) /g)].map((m) => m[1]);
   assert.deepEqual([...new Set(reads)], ['status'], 'the only read-only command is the status read');
   const applies = [...code.matchAll(/ssm_apply (\S+) /g)].map((m) => m[1]);
-  assert.deepEqual(applies.sort(), ['backup', 'deploy', 'lock-take', 'static', 'unlock']);
+  assert.deepEqual([...new Set(applies)].sort(), ['backup', 'deploy', 'lock-take', 'rollback', 'static', 'unlock']);
+  // Both kinds need --apply: ssm_send itself refuses on a dry run, before it builds a command.
+  const send = src.slice(src.indexOf('ssm_send() {'), src.indexOf('ssm_read() {'));
+  assert.ok(send.indexOf('[ "$APPLY" = 1 ] || die') > 0 && send.indexOf('[ "$APPLY" = 1 ] || die') < send.indexOf('aws ssm send-command'));
+  // Every other AWS call sits in a branch that tested --apply.
+  const lines = src.replace(send, '').split('\n');
+  const outside = lines.map((l, i) => [l, lines.slice(Math.max(0, i - 8), i).join('\n')] as const)
+    .filter(([l]) => /\baws (s3api|s3|rds|sns|ssm|ec2|sts) /.test(l) && !/^\s*(#|echo |note |die )/.test(l));
+  assert.equal(outside.length, 2, outside.map(([l]) => l).join('\n'));
+  for (const [l, before] of outside) assert.match(before, /if \[ "\$APPLY" = 1 \]; then/, `not behind --apply: ${l}`);
   // And the status script changes nothing: it reads files and probes the flock.
   const status = src.slice(src.indexOf('remote_status() {'), src.indexOf('remote_lock_take() {'));
   assert.doesNotMatch(status, /\brm\b|>>|install |mkdir|printf '%s\\n' "\$LOCK_LINE" >/);
@@ -670,8 +866,16 @@ test('every SSM command goes through ssm_read or ssm_apply, and only ssm_apply c
 
 test('the lock is taken before the backup, the backup before the deploy, the consoles and health after it', () => {
   const at = (s: string) => { const i = src.indexOf(s); assert.ok(i > 0, `ship.sh has no "${s}"`); return i; };
-  const order = [at('ssm_apply lock-take'), at('ssm_apply backup'), at('ssm_apply deploy'), at('ssm_apply static'), at('gate health ok')];
+  // The deploy, from the line that opens it. (The rollback block above it has its own order, below.)
+  const from = at('say "production: $INSTANCE ($ROLE)"');
+  const after = (t: string) => { const i = src.indexOf(t, from); assert.ok(i > 0, `the deploy has no "${t}"`); return i; };
+  const order = [after('ssm_apply lock-take'), after('ssm_apply backup'), after('ssm_apply deploy'), after('ssm_apply static'), after('outside_checks "$FULL"'), after('gate health ok')];
   assert.deepEqual([...order].sort((a, b) => a - b), order);
+  const back = src.slice(at('if [ "$ROLLBACK" = 1 ]; then\n  STAGE=rollback'), from);
+  const rb = ['ssm_read status', 'ssm_apply lock-take', 'ssm_apply rollback', 'ssm_apply static', 'outside_checks "$FULL"'].map((t) => back.indexOf(t));
+  assert.ok(rb.every((i) => i > 0), `the rollback is missing a step: ${rb}`);
+  assert.deepEqual([...rb].sort((a, b) => a - b), rb);
+  assert.doesNotMatch(back, /ssm_apply (backup|deploy) /, 'a rollback is not a deploy and moves no schema');
   assert.match(src, /SHIP_LOCK=\/run\/lock\/raw-host-ship\.lock/);
   assert.match(src, /DEPLOY_LOCK=\/run\/lock\/raw-host-deploy\.lock/, 'the flock deploy.sh and Alembic\'s deploy-sha.sh take');
   assert.match(readFileSync(join(ROOT, 'infra/aws/deploy.sh'), 'utf8'), /\/run\/lock\/raw-host-deploy\.lock/);

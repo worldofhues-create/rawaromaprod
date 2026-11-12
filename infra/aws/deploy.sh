@@ -30,7 +30,7 @@
 # scripts/db-migrate.ts's own `${file}#${blockIndex}#${target}`.
 set -euo pipefail
 
-RAWPROD_DEPLOY_WRAPPER_VERSION="2"
+RAWPROD_DEPLOY_WRAPPER_VERSION="3"
 ROLE="${RAWPROD_ROLE:-main}"
 
 APP="${RAWPROD_APP_DIR:-/srv/rawprod/app}"
@@ -265,8 +265,8 @@ EOM
     mkdir -p "$(dirname "$STATE")"
     echo "$full" > "$STATE"
   else
-    echo "HEALTH CHECK FAILED. The previous commit is still in $PREV;" >&2
-    echo "run '$0 --rollback' to return to it." >&2
+    echo "HEALTH CHECK FAILED. The commit that last passed this check is still in $STATE;" >&2
+    echo "run '$0 --rollback' to return to it (from the laptop: infra/aws/ship.sh --rollback --apply)." >&2
     exit 1
   fi
 }
@@ -276,9 +276,17 @@ case "${1:-}" in
   --status)   status ;;
   --rollback)
     take_host_lock
-    [ -s "$PREV" ] || die "no previous SHA recorded"
-    say "rolling back to $(cat "$PREV")"
-    deploy "$(cat "$PREV")" yes
+    # SHIP-RP (wrapper version 3). A deploy that died after the checkout (a failed build, failed
+    # migrations, a failed health check) leaves DEPLOYED_SHA naming the commit that last passed health,
+    # and that is where a rollback belongs. previous-sha is one release further back: going there
+    # skipped the last good commit. Alembic's ops/deploy/deploy-sha.sh learned the same on 2026-11-07.
+    target=$(cat "$PREV" 2>/dev/null || true)
+    if [ -s "$STATE" ] && [ "$(cat "$STATE")" != "$(sudo -u rawprod git -C "$APP" rev-parse HEAD 2>/dev/null)" ]; then
+      target=$(cat "$STATE")
+    fi
+    [ -n "$target" ] || die "no previous SHA recorded"
+    say "rolling back to $target"
+    deploy "$target" yes
     ;;
   "")         die "usage: $0 <sha> | --rollback | --status | --version   (RAWPROD_ROLE=main|vault)" ;;
   -*)         die "unknown option $1" ;;

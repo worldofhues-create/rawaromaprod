@@ -10,6 +10,11 @@
 //   find-proof --dir <evidence/<sha>> --sha <full> --base <full> --role main|vault --tool <sha256> [--max-age-hours 24]
 //                                               print the newest ship.json whose LOCAL proof passed for
 //                                               exactly this commit, base, role and ship.sh; nothing if none
+//   last-deployed --root <evidence> --role main|vault
+//                                               print the commit of the newest sealed run that ended
+//                                               DEPLOYED GREEN or ROLLED BACK GREEN on that box; nothing
+//                                               if none. A dry run makes no AWS call, so this is how it
+//                                               knows what production runs when nobody tells it
 //
 // The seal is a sha256 over the content. It is not a signature: it catches an evidence file edited after
 // the fact, not an operator who rewrites it on purpose. "One proof per commit" rests on it: an --apply
@@ -44,6 +49,28 @@ export function isReusableProof(doc, { sha, base, role, tool, maxAgeHours = 24, 
   if (doc.local_proof !== 'ok') return false;
   const age = now - Date.parse(doc.finished);
   return Number.isFinite(age) && age >= 0 && age <= maxAgeHours * 3600 * 1000;
+}
+
+/** The commit this laptop last saw go green on a box. Not the box's word: --apply asks the box. */
+export function lastDeployed(root, role) {
+  if (!root || !existsSync(root)) return '';
+  let best = null;
+  for (const sha of readdirSync(root)) {
+    let runs = [];
+    try { runs = readdirSync(join(root, sha)); } catch { continue; }
+    for (const run of runs) {
+      const file = join(root, sha, run, 'ship.json');
+      if (!existsSync(file)) continue;
+      try {
+        const doc = JSON.parse(readFileSync(file, 'utf8'));
+        if (!verify(doc) || doc.role !== role) continue;
+        if (!/^(DEPLOYED GREEN|ROLLED BACK GREEN)/.test(String(doc.verdict))) continue;
+        if (!/^[0-9a-f]{40}$/.test(String(doc.sha))) continue;
+        if (!best || String(doc.finished) > String(best.finished)) best = doc;
+      } catch { /* half written, or not ours: says nothing */ }
+    }
+  }
+  return best ? best.sha : '';
 }
 
 function readWork(work) {
@@ -102,7 +129,12 @@ function main(argv) {
     if (found.length) process.stdout.write(`${found[found.length - 1][1]}\n`);
     return 0;
   }
-  process.stderr.write('usage: ship-evidence.mjs write|verify|find-proof ...\n');
+  if (cmd === 'last-deployed') {
+    const sha = lastDeployed(o.root, o.role);
+    if (sha) process.stdout.write(`${sha}\n`);
+    return 0;
+  }
+  process.stderr.write('usage: ship-evidence.mjs write|verify|find-proof|last-deployed ...\n');
   return 2;
 }
 

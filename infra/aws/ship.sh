@@ -2,16 +2,20 @@
 # SHIP-RP: one command from a pushed RawProd commit to production, with the checks that protect the data.
 #
 #   infra/aws/ship.sh <sha> [--role main|vault] [--apply]
+#   infra/aws/ship.sh --rollback [--role main|vault] [--apply]
 #
-# Run on the operator's laptop. WITHOUT --apply it is a dry run: every local step runs for real, and each
-# thing it would do to production is printed as "WOULD RUN" and not done. With --apply it deploys.
+# Run on the operator's laptop. WITHOUT --apply it is a dry run: every local step runs for real, each
+# thing it would do to production is printed as "WOULD RUN" and not done, and NO AWS CALL OF ANY KIND IS
+# MADE: not a command to the box, not a read of it. With --apply it deploys.
 #
 # Until this script a RawProd deploy was a person typing into an SSM session: fetch, deploy.sh, then
 # remember install-static.sh for the consoles, with no backup first and nothing written down afterwards.
 # The steps are the plan's (Alembic docs/plan/program/fast-deploy-and-new-host.md, 1.4):
 #
 #   (a) pushed commit      the commit is on origin (the box can fetch it), descends from what production
-#                          runs, and is built in a fresh worktree: the verdict is about a commit
+#                          runs, and is built in a fresh worktree: the verdict is about a commit. What
+#                          production runs is read from the box with --apply; a dry run takes --base,
+#                          RAWPROD_DEPLOYED_SHA or this laptop's last green ship, and says which
 #   (b) build              pnpm install --frozen-lockfile, pnpm typecheck, and the build the box runs
 #   (c) touched tests      scripts/touched-tests.mjs: the always-on contract tests plus the tests the
 #                          change touches; the whole suite when a sensitive path changed
@@ -23,8 +27,14 @@
 #   (f) deploy             the commit's OWN infra/aws/deploy.sh, installed on the box and compared by
 #                          sha256, run with RAWPROD_ROLE. Then, on main, install-static.sh prod: deploy.sh
 #                          does not publish the consoles, so a web change used to need a second step
-#   (g) health             DEPLOYED_SHA on the box equals the commit; /health answers 200 from outside on
-#                          rawfactory, rawplatform and rawvault
+#   (g) health and smoke   DEPLOYED_SHA on the box equals the commit; /health answers 200 from outside on
+#                          rawfactory, rawplatform and rawvault; and each console answers 200 at / with a
+#                          page, which is the one check that the publish reached the public
+#   rollback               --rollback --apply runs the installed wrapper's own `rawprod-deploy --rollback`
+#                          under the same lock, publishes the consoles of the commit it returned to, and
+#                          runs (g) again. THE APPLICATION GOES BACK, NEVER THE DATABASE: nothing here or
+#                          in deploy.sh runs a down migration, and deploy.sh refuses (exit 3) when the
+#                          ledger holds a migration the previous commit lacks
 #   evidence               ~/.rawprod/ship-evidence/<sha>/<stamp>-<role>-<mode>/ship.json, sealed, with a
 #                          log per gate. Written on every exit, a failure included
 #
@@ -46,19 +56,28 @@
 #                                    Under /run, so a reboot clears it; a ship that died leaves it, and
 #                                    `ship.sh --unlock` removes it once no deploy holds the flock.
 #
-# Alembic's ops/scripts/ship.sh takes the same file with system=alembic. The vault box is another host
-# with its own /run, so `--role vault` locks there and does not block a deploy on the main box.
+# Alembic's ops/scripts/ship.sh READS both files in its status read and refuses while either is held. It
+# does not write the second: after its backup everything it does to the box is its wrapper, which holds
+# the flock, and lock-take below refuses while that flock is held. So between the two systems the kernel
+# flock is the exclusion and this file is the early answer. The vault box is another host with its own
+# /run, so `--role vault` locks there and does not block a deploy on the main box.
+#
+# A STALE LOCK. A ship holds the lock for at most about 100 minutes (the backup, the build on the box, the
+# publish, the health check, each with its own timeout). A refusal prints how old the lock is and says so
+# when it is older than that. Nothing removes it automatically: `ship.sh --unlock --apply` does, after the
+# box confirms no deploy holds the flock.
 #
 # ── OTHER OPTIONS ────────────────────────────────────────────────────────────────────────────────────
-#   --base <sha>          what production runs, when it is already known. Without it ship.sh reads
-#                         /srv/rawprod/DEPLOYED_SHA over SSM (one read-only command)
-#   --offline             make no AWS call at all. Dry run only, and needs --base
+#   --base <sha>          what production runs, for a dry run. With --apply the box is read and --base
+#                         must agree with it
+#   --offline             what a dry run already is: no AWS call at all. Kept so older commands still work
 #   --tests '<glob>'      add test files by hand (repeatable)
 #   --force-migrations    run step (d) even though no migration changed
 #   --reprove             do not reuse an earlier proof of this commit; run (a) to (d) again
 #   --allow-row-loss      step (d): accept a migration after which a seeded table holds fewer rows
 #   --unlock              remove a stale /run/lock/raw-host-ship.lock (with --apply; refuses while a
 #                         deploy holds the flock)
+#   --rollback            go back one release (with --apply). Takes no commit: the box names it
 set -euo pipefail
 
 SHIP_VERSION=1
@@ -89,10 +108,12 @@ MIN_BUILD_MEM_MB=1800                                 # deploy.sh's floor on the
 SHIP_LOCK=/run/lock/raw-host-ship.lock
 DEPLOY_LOCK=/run/lock/raw-host-deploy.lock
 
-ROLE=main; APPLY=0; SHA_ARG=""; BASE_ARG=""; OFFLINE=0; FORCE_MIG=0; REPROVE=0; UNLOCK=0; ALLOW_ROW_LOSS=0
+ROLE=main; APPLY=0; SHA_ARG=""; BASE_ARG=""; OFFLINE=0; FORCE_MIG=0; REPROVE=0; UNLOCK=0; ROLLBACK=0; ALLOW_ROW_LOSS=0
+# backup 900 + deploy 3600 + publish 300 + three waits of 180 and the health check: no ship lives longer.
+SHIP_LOCK_MAX_AGE_MIN=100
 EXTRA_TESTS=()
 
-usage() { sed -n '2,7p;/^# ── OTHER OPTIONS/,/^set -euo/p' "$SELF" | sed -e '$d' -e 's/^# \{0,1\}//'; }
+usage() { sed -n '2,9p;/^# ── OTHER OPTIONS/,/^set -euo/p' "$SELF" | sed -e '$d' -e 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -105,6 +126,7 @@ while [ $# -gt 0 ]; do
     --reprove) REPROVE=1 ;;
     --allow-row-loss) ALLOW_ROW_LOSS=1 ;;
     --unlock) UNLOCK=1 ;;
+    --rollback) ROLLBACK=1 ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "FATAL: unknown option $1" >&2; exit 2 ;;
     *) [ -z "$SHA_ARG" ] || { echo "FATAL: one commit at a time (got $SHA_ARG and $1)" >&2; exit 2; }; SHA_ARG="$1" ;;
@@ -113,14 +135,19 @@ while [ $# -gt 0 ]; do
 done
 
 case "$ROLE" in main) INSTANCE="$MAIN_INSTANCE" ;; vault) INSTANCE="$VAULT_INSTANCE" ;; *) echo "FATAL: --role is main or vault" >&2; exit 2 ;; esac
-[ "$UNLOCK" = 1 ] || [ -n "$SHA_ARG" ] || { usage >&2; exit 2; }
+[ "$UNLOCK" = 1 ] || [ "$ROLLBACK" = 1 ] || [ -n "$SHA_ARG" ] || { usage >&2; exit 2; }
+if [ "$ROLLBACK" = 1 ]; then
+  # The box knows which commit it ran before this one. A commit named here would be a deploy of that
+  # commit under the word rollback, without the proof a deploy needs.
+  [ -z "$SHA_ARG" ] || { echo "FATAL: --rollback takes no commit: the box returns to the one it ran before. To put a named commit live, ship it" >&2; exit 2; }
+  [ "$UNLOCK" = 0 ] || { echo "FATAL: --rollback and --unlock are two commands" >&2; exit 2; }
+fi
 if [ "$OFFLINE" = 1 ]; then
   [ "$APPLY" = 0 ] || { echo "FATAL: --offline makes no AWS call, so it cannot --apply" >&2; exit 2; }
-  [ "$UNLOCK" = 0 ] || { echo "FATAL: --unlock reads the box, so it cannot be --offline" >&2; exit 2; }
-  [ -n "$BASE_ARG" ] || { echo "FATAL: --offline cannot read what production runs; name it with --base <sha>" >&2; exit 2; }
 fi
 
 MODE=$([ "$APPLY" = 1 ] && echo apply || echo dry-run)
+[ "$ROLLBACK" = 0 ] || MODE="rollback-$MODE"
 STAMP=$(date -u +%Y%m%dT%H%M%SZ)
 STARTED=$(date -u +%FT%TZ)
 START_EPOCH=$(date +%s)
@@ -130,7 +157,7 @@ WORK=$(mktemp -d "${TMP_ROOT%/}/rawprod-ship.XXXXXX")
 LOGS="$WORK/logs"; mkdir -p "$LOGS"
 : > "$WORK/gates.tsv"; : > "$WORK/notes"; : > "$WORK/meta"
 
-STAGE=preflight        # preflight | local | lock | backup | deploy | static | health | done
+STAGE=preflight        # preflight | local | lock | backup | deploy | rollback | static | health | done
 VERDICT=""
 FULL=""; BASE=""; SHORT=""
 PG_PID=""; PGDATA=""
@@ -183,11 +210,14 @@ evidence_path() { # where a work-directory file will be once the evidence is wri
 }
 
 # ── SSM ──────────────────────────────────────────────────────────────────────────────────────────────
-# Every command sent to a box goes through ssm_read (read-only, both modes) or ssm_apply (changes
-# something: sent only with --apply, printed as WOULD RUN otherwise). Nothing else calls ssm_send.
+# Every command sent to a box goes through ssm_read (read-only) or ssm_apply (changes something;
+# printed as WOULD RUN on a dry run). BOTH need --apply: a dry run sends nothing and reads nothing, and
+# ssm_send refuses without it whoever the caller is. Nothing else calls ssm_send.
 ssm_send() { # kind, timeout seconds; the script on stdin. Output in SSM_OUT. Non-zero unless Success.
   local kind="$1" timeout="$2" script blob id st
   script=$(cat)
+  # The last line of defence for "a dry run makes no AWS call": whoever calls this, it does not send.
+  [ "$APPLY" = 1 ] || die "ship.sh tried to reach AWS on a dry run ($kind). That is a defect in this script"
   blob=$(printf '%s\n' "$script" | base64 | tr -d '\n')
   SSM_N=$((SSM_N + 1))
   node -e '
@@ -311,6 +341,40 @@ echo "deploy_exit=$rc"
 exit "$rc"
 REMOTE
 }
+remote_rollback() { remote_head
+  # The wrapper that goes with THIS ship.sh, delivered the way the backup script is. The one installed
+  # on the box belongs to whatever commit was shipped last, and before wrapper version 3 its --rollback
+  # went to previous-sha even when the last deploy had not finished: one release behind the last good one.
+  printf 'DEPLOY_B64=%q\nWANT_ROLLBACK_SHA256=%q\n' "$(base64 < "$TOOLS/infra/aws/deploy.sh" | tr -d '\n')" "$(sha256_of "$TOOLS/infra/aws/deploy.sh")"
+  cat <<'REMOTE'
+install -d -m 750 /var/log/rawprod-ship
+LOG=/var/log/rawprod-ship/$STAMP-rollback-${SHA:0:8}-$ROLE.log
+tmp=$(mktemp)
+printf '%s' "$DEPLOY_B64" | base64 -d > "$tmp"
+got=$(sha256sum "$tmp" | cut -d' ' -f1)
+[ "$got" = "$WANT_ROLLBACK_SHA256" ] || { rm -f "$tmp"; echo "REFUSED: the wrapper arrived as $got, not $WANT_ROLLBACK_SHA256"; exit 1; }
+ver=$(bash "$tmp" --version 2>/dev/null | sed -n 's/^rawprod deploy wrapper version //p')
+case "$ver" in ''|*[!0-9]*) ver=0 ;; esac
+[ "$ver" -ge 3 ] || { rm -f "$tmp"; echo "REFUSED: the wrapper sent is version $ver; a rollback needs version 3, which returns to the commit that last passed health"; exit 1; }
+# Where "back" is, by the box's own files, must be the commit the laptop was shown and took the lock
+# for. If it is not, a deploy landed in between and the operator agreed to something else.
+deployed=$(cat /srv/rawprod/DEPLOYED_SHA 2>/dev/null || true)
+checkout=$(sudo -u rawprod git -C /srv/rawprod/app rev-parse HEAD 2>/dev/null || true)
+want=$(cat /etc/rawprod/previous-sha 2>/dev/null || true)
+if [ -n "$deployed" ] && [ "$deployed" != "$checkout" ]; then want=$deployed; fi
+[ "$want" = "$SHA" ] || { rm -f "$tmp"; echo "REFUSED: the box would now go back to ${want:-nothing}, not $SHA"; exit 1; }
+install -m 755 -o root -g root "$tmp" /usr/local/sbin/rawprod-deploy; rm -f "$tmp"
+echo "wrapper=$got version=$ver"
+# The wrapper's OWN flag and nothing else. It checks the migration ledger against the commit it returns
+# to and refuses (exit 3) when the schema is ahead of it. It never runs a down migration; nor does this.
+rc=0
+RAWPROD_ROLE="$ROLE" /usr/local/sbin/rawprod-deploy --rollback > "$LOG" 2>&1 || rc=$?
+tail -40 "$LOG"
+echo "log=$LOG"
+echo "rollback_exit=$rc"
+exit "$rc"
+REMOTE
+}
 remote_static() { remote_head; cat <<'REMOTE'
 APP=/srv/rawprod/app
 # Only after deploy.sh's own health check passed: it writes DEPLOYED_SHA last, and only when green.
@@ -351,6 +415,57 @@ pg_stop() { # by PID, on every exit path
   [ -n "$PG_PID" ] || return 0
   "$PG_BIN/pg_ctl" -D "$PGDATA" -m immediate -w -t 30 stop > /dev/null 2>&1 || kill "$PG_PID" 2>/dev/null || true
   PG_PID=""
+}
+
+# ── how old a held ship lock is, in words ────────────────────────────────────────────────────────────
+lock_age() { # the lock line -> "taken N min ago" and whether a ship can still be alive at that age
+  node -e '
+    const m = /started=(\S+)/.exec(process.argv[1] || ""), max = Number(process.argv[2]);
+    const t = m ? Date.parse(m[1]) : NaN;
+    if (!Number.isFinite(t)) { console.log("its start time cannot be read"); process.exit(0); }
+    const min = Math.round((Date.now() - t) / 60000);
+    console.log(min > max
+      ? `taken ${min} min ago. A ship holds it for at most about ${max} min, so this one is STALE unless a deploy is running`
+      : `taken ${min} min ago. A ship can hold it for about ${max} min: that one is probably still alive`);
+  ' "$1" "$SHIP_LOCK_MAX_AGE_MIN"
+}
+
+# ── (g) health and smoke, from outside ───────────────────────────────────────────────────────────────
+probe() { # url, where to keep the body -> the HTTP status, after up to five tries
+  local code=000
+  for _ in 1 2 3 4 5; do
+    code=$(curl -s -o "$2" -w '%{http_code}' --max-time 15 "$1" || echo 000)
+    [ "$code" = 200 ] && break
+    sleep "${SHIP_HEALTH_RETRY_S:-6}"
+  done
+  echo "$code"
+}
+outside_checks() { # the commit the box must say it runs. Sets RED: empty when everything is green
+  local want="$1" host code
+  RED=""
+  ssm_read status 60 <<< "$(remote_status)" || RED="$RED; the box could not be read"
+  NOW_DEPLOYED=$(kv deployed)
+  [ "$NOW_DEPLOYED" = "$want" ] || RED="$RED; DEPLOYED_SHA on the box is ${NOW_DEPLOYED:-unread}, not ${want:0:8}"
+  for host in "$FACTORY_HOST" "$PLATFORM_HOST" "$VAULT_HOST"; do
+    code=$(probe "https://$host/health" /dev/null)
+    echo "    https://$host/health : $code"
+    [ "$code" = 200 ] || RED="$RED; https://$host/health answered $code"
+  done
+  # THE SMOKE. /health is the API behind each host. The consoles are static roots install-static.sh has
+  # just swapped, and nothing above asks for one: a root left empty or unreadable answers /health with
+  # 200 all day. So each console's own page is fetched through the public door and must be a page.
+  for host in "$FACTORY_HOST" "$PLATFORM_HOST" "$VAULT_HOST"; do
+    code=$(probe "https://$host/" "$WORK/console-$host.html")
+    if [ "$code" = 200 ] && grep -qi '<html' "$WORK/console-$host.html" 2>/dev/null; then
+      echo "    https://$host/        : 200, a page"
+    elif [ "$code" = 200 ]; then
+      echo "    https://$host/        : 200, but not a page"
+      RED="$RED; https://$host/ answered 200 with no page in it"
+    else
+      echo "    https://$host/        : $code"
+      RED="$RED; https://$host/ answered $code"
+    fi
+  done
 }
 
 # ── the end of every run ─────────────────────────────────────────────────────────────────────────────
@@ -403,7 +518,7 @@ command -v node >/dev/null 2>&1 || die "no node on PATH. Node 22: export PATH=\$
 NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 [ "$NODE_MAJOR" = 22 ] || die "node is $(node -v), and the box runs 22. export PATH=\$HOME/.nvm/versions/node/v22.22.2/bin:\$PATH"
 command -v pnpm >/dev/null 2>&1 || die "no pnpm on PATH"
-[ "$OFFLINE" = 1 ] || command -v aws >/dev/null 2>&1 || die "no aws CLI on PATH (or run a dry run with --offline --base <sha>)"
+[ "$APPLY" = 0 ] || command -v aws >/dev/null 2>&1 || die "no aws CLI on PATH, and --apply reaches the box through it"
 git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1 || die "$REPO is not a git checkout"
 TOOL_SHA256=$(sha256_of "$SELF")
 meta ship_sh_version "$SHIP_VERSION"
@@ -414,14 +529,104 @@ meta role "$ROLE"; meta mode "$MODE"; meta started "$STARTED"; meta operator "$B
 # ── --unlock: the manual override for a ship that died holding the lock ──────────────────────────────
 if [ "$UNLOCK" = 1 ]; then
   STAGE=lock
+  if [ "$APPLY" = 0 ]; then
+    # Reading the lock is a command to the box, and a dry run sends none.
+    echo "    WOULD READ on $INSTANCE: $SHIP_LOCK, and whether a deploy holds $DEPLOY_LOCK"
+    echo "    WOULD RUN on $INSTANCE: remove $SHIP_LOCK, only if no deploy holds the flock (the box checks again itself)"
+    VERDICT="DRY RUN: nothing was read and nothing was sent. Clear a dead ship's lock with: infra/aws/ship.sh --unlock --role $ROLE --apply"
+    STAGE=done; exit 0
+  fi
   ssm_read status 60 <<< "$(remote_status)" || die "could not read $INSTANCE over SSM"
   held=$(kv ship_lock); flock_state=$(kv deploy_flock)
   echo "    ship lock on $INSTANCE : $held"
   echo "    deploy flock          : $flock_state"
   if [ "$held" = free ]; then VERDICT="NOTHING TO UNLOCK"; STAGE=done; exit 0; fi
+  echo "    the lock was $(lock_age "$held")"
   [ "$flock_state" = free ] || die "a deploy is running on $INSTANCE ($flock_state). The lock is not stale; wait for it"
   ssm_apply unlock 60 "remove $SHIP_LOCK ($held)" <<< "$(remote_unlock)" || die "the unlock was refused: $SSM_OUT"
-  [ "$APPLY" = 1 ] && { echo "    $SSM_OUT"; VERDICT="UNLOCKED"; } || VERDICT="DRY RUN: would remove the ship lock"
+  echo "    $SSM_OUT"; VERDICT="UNLOCKED"
+  STAGE=done; exit 0
+fi
+
+# ── --rollback: the way back, as a command and not as a sentence ─────────────────────────────────────
+# Until this mode the way back from a red deploy was a line of text to type into an SSM session, and
+# the consoles stayed at the commit that had just failed. This runs the installed wrapper's own
+# --rollback under the same lock a deploy takes, publishes the consoles of the commit it returned to,
+# and runs the same checks from outside. It takes no backup: a rollback moves no schema.
+if [ "$ROLLBACK" = 1 ]; then
+  STAGE=rollback
+  echo "    The APPLICATION returns to the commit $INSTANCE ran before this one. The DATABASE does not move:"
+  echo "    nothing here or in deploy.sh runs a down migration. deploy.sh refuses (exit 3) when the ledger"
+  echo "    holds a migration the previous commit lacks; the answer then is a forward fix."
+  if [ "$APPLY" = 0 ]; then
+    echo "    WOULD READ on $INSTANCE: DEPLOYED_SHA, previous-sha, the ship lock and the deploy flock"
+    echo "    WOULD RUN on $INSTANCE: take the ship lock $SHIP_LOCK (refuses if a deploy or another ship holds the host)"
+    echo "    WOULD RUN on $INSTANCE: RAWPROD_ROLE=$ROLE /usr/local/sbin/rawprod-deploy --rollback"
+    [ "$ROLE" = main ] && echo "    WOULD RUN on $INSTANCE: infra/aws/nginx/install-static.sh prod, from the commit it returned to"
+    echo "    WOULD CHECK: DEPLOYED_SHA is the previous commit; /health and / answer on $FACTORY_HOST, $PLATFORM_HOST, $VAULT_HOST"
+    VERDICT="DRY RUN: nothing was read and nothing was sent. Roll back with: infra/aws/ship.sh --rollback --role $ROLE --apply"
+    STAGE=done; exit 0
+  fi
+  ssm_read status 60 <<< "$(remote_status)" || die "could not read $INSTANCE over SSM (profile $PROFILE, region $REGION). The agent is the only way in"
+  DEPLOYED=$(kv deployed); PREVIOUS=$(kv previous); CHECKOUT=$(kv checkout); HOST_FLOCK=$(kv deploy_flock); HOST_SHIP_LOCK=$(kv ship_lock)
+  echo "    DEPLOYED_SHA : $DEPLOYED   (the commit that last passed deploy.sh's health check)"
+  echo "    previous-sha : $PREVIOUS"
+  echo "    checkout     : $CHECKOUT"
+  [ "$HOST_FLOCK" = free ] || die "REFUSED: a deploy is running on $INSTANCE right now ($HOST_FLOCK). One deploy per host; wait for it"
+  [ "$HOST_SHIP_LOCK" = free ] || die "REFUSED: the ship lock on $INSTANCE is held: $HOST_SHIP_LOCK ($(lock_age "$HOST_SHIP_LOCK")). If that ship is dead: infra/aws/ship.sh --unlock --role $ROLE --apply"
+  # WHERE BACK IS. A deploy that finished left the checkout at DEPLOYED_SHA, and back is previous-sha.
+  # A deploy that did NOT finish (a failed build, a failed health check) left the checkout at the new
+  # commit and DEPLOYED_SHA at the last one that passed: back is DEPLOYED_SHA, and previous-sha is one
+  # release too far. Wrapper version 3 decides the same way, and the box checks the two agree.
+  is_commit() { case "$1" in *[!0-9a-f]*|'') return 1 ;; esac; [ "${#1}" = 40 ]; }
+  if [ "$CHECKOUT" = "$DEPLOYED" ]; then
+    is_commit "$PREVIOUS" || die "$INSTANCE records no previous commit ($PREVIOUS), so there is nothing to go back to. Fix forward: infra/aws/ship.sh <sha> --apply"
+    [ "$PREVIOUS" != "$DEPLOYED" ] || die "$INSTANCE names ${DEPLOYED:0:8} as both the deployed and the previous commit, so going back would redeploy what is running. Fix forward"
+    FULL="$PREVIOUS"; LEAVING="$DEPLOYED"
+    echo "    the last deploy finished: back is previous-sha, ${FULL:0:8}"
+  else
+    is_commit "$DEPLOYED" || die "$INSTANCE's DEPLOYED_SHA is '$DEPLOYED', not a commit, so nothing says which one last passed health"
+    FULL="$DEPLOYED"; LEAVING="$CHECKOUT"
+    echo "    the last deploy did NOT finish (the checkout is at ${CHECKOUT:0:8}): back is the commit that last passed health, ${FULL:0:8}"
+  fi
+  SHORT=${FULL:0:8}
+  meta sha "$FULL"; meta rolled_back_from "$LEAVING"; meta local_proof "not applicable: a rollback proves nothing locally"
+  LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$STARTED by=$BY action=rollback"
+  meta lock_line "$LOCK_LINE"
+  STAGE=lock; T0=$SECONDS
+  if ssm_apply lock-take 60 "take the ship lock" <<< "$(remote_lock_take)"; then LOCK_TAKEN=1; gate "ship lock" ok "$((SECONDS - T0))" "$LOCK_LINE"
+  else gate "ship lock" REFUSED "$((SECONDS - T0))" "$(printf '%s' "$SSM_OUT" | tail -1)"; die "$(printf '%s' "$SSM_OUT" | tail -1). One deploy per host. Nothing on $INSTANCE was changed"; fi
+  STAGE=rollback; T0=$SECONDS
+  [ -f "$TOOLS/infra/aws/deploy.sh" ] || die "no infra/aws/deploy.sh beside this ship.sh, so there is no wrapper to roll back with"
+  if ssm_apply rollback 3600 "rawprod-deploy --rollback" <<< "$(remote_rollback)"; then
+    printf '%s\n' "$SSM_OUT" | tail -12 | sed 's/^/        /'
+    gate rollback ok "$((SECONDS - T0))" "rawprod-deploy --rollback to $SHORT, $(kv log)"
+  else
+    printf '%s\n' "$SSM_OUT" | tail -25 | sed 's/^/        /' >&2
+    gate rollback FAILED "$((SECONDS - T0))" "rawprod-deploy --rollback exit $(kv rollback_exit)"
+    VERDICT="ROLLBACK FAILED on $INSTANCE: read the wrapper's last lines above. Exit 3 is its refusal: the schema is ahead of $SHORT and going back is not safe"
+    die "rawprod-deploy --rollback did not go back on $INSTANCE. If it refused, fix forward: infra/aws/ship.sh <sha> --apply"
+  fi
+  STAGE=static; T0=$SECONDS
+  if [ "$ROLE" = main ]; then
+    if ssm_apply static 300 "install-static.sh prod" <<< "$(remote_static)"; then gate "publish consoles" ok "$((SECONDS - T0))" "$(printf '%s\n' "$SSM_OUT" | grep -c '^published ') roots published, from $SHORT"
+    else
+      gate "publish consoles" FAILED "$((SECONDS - T0))" "$(printf '%s' "$SSM_OUT" | tail -1)"
+      VERDICT="ROLLED BACK BUT NOT GREEN: the API runs $SHORT and its consoles were not published"
+      die "install-static.sh failed after the rollback: $(printf '%s' "$SSM_OUT" | tail -2)"
+    fi
+  else
+    gate "publish consoles" skipped 0 "the vault console's static root is on the main box"
+  fi
+  STAGE=health; T0=$SECONDS
+  outside_checks "$FULL"
+  if [ -n "$RED" ]; then
+    gate health FAILED "$((SECONDS - T0))" "${RED#; }"
+    VERDICT="ROLLED BACK BUT NOT GREEN: ${RED#; }"
+    die "ROLLED BACK BUT NOT GREEN: ${RED#; }. The previous commit is running and something still fails, so the fault is not only in the commit you left"
+  fi
+  gate health ok "$((SECONDS - T0))" "DEPLOYED_SHA is $SHORT; /health and / answer 200 on $FACTORY_HOST, $PLATFORM_HOST, $VAULT_HOST"
+  VERDICT="ROLLED BACK GREEN: $SHORT on $INSTANCE ($ROLE), was ${LEAVING:0:8}. The database was not touched"
   STAGE=done; exit 0
 fi
 
@@ -438,9 +643,10 @@ meta sha "$FULL"
 ON_ORIGIN=$(git -C "$REPO" branch -r --contains "$FULL" 2>/dev/null | sed 's/^ *//' | grep '^origin/' | grep -v ' -> ' | head -3 | tr '\n' ' ' || true)
 [ -n "$ON_ORIGIN" ] || die "commit $SHORT is on no branch of origin, so the box cannot fetch it. Push it first: git push origin $FULL:refs/heads/<branch>"
 
-# What production runs. One read-only SSM command, which also reads both locks.
+# What production runs. With --apply: one read-only SSM command, which also reads both locks. On a dry
+# run: nothing is asked of the box, and the base is the operator's word or this laptop's own record.
 STATUS_READ=0
-if [ "$OFFLINE" = 0 ]; then
+if [ "$APPLY" = 1 ]; then
   ssm_read status 60 <<< "$(remote_status)" || die "could not read $INSTANCE over SSM (profile $PROFILE, region $REGION). The agent is the only way in"
   STATUS_READ=1
   DEPLOYED=$(kv deployed); HOST_FLOCK=$(kv deploy_flock); HOST_SHIP_LOCK=$(kv ship_lock); HOST_MEM=$(kv mem_available_mb)
@@ -450,10 +656,8 @@ if [ "$OFFLINE" = 0 ]; then
   [ "$HOST_SHIP_LOCK" = free ] || LOCK_STATE="the ship lock on $INSTANCE is held: $HOST_SHIP_LOCK"
   if [ "$LOCK_STATE" != free ]; then
     gate "host lock" HELD 0 "$LOCK_STATE"
-    if [ "$APPLY" = 1 ]; then
-      die "REFUSED: $LOCK_STATE. One deploy per host: the box ran out of memory when two built together. If that ship is dead and no deploy is running: infra/aws/ship.sh --unlock --role $ROLE --apply"
-    fi
-    note "host lock: --apply would be REFUSED right now: $LOCK_STATE"
+    [ "$HOST_SHIP_LOCK" = free ] || echo "    that lock was $(lock_age "$HOST_SHIP_LOCK")" >&2
+    die "REFUSED: $LOCK_STATE. One deploy per host: the box ran out of memory when two built together. If that ship is dead and no deploy is running: infra/aws/ship.sh --unlock --role $ROLE --apply"
   else
     gate "host lock" ok 0 "free on $INSTANCE: no deploy running, no ship in progress"
   fi
@@ -466,8 +670,15 @@ if [ "$OFFLINE" = 0 ]; then
   fi
   BASE_ARG="$DEPLOYED"
 else
-  gate "host lock" unread 0 "--offline: the box was not asked. --apply reads and takes the lock"
-  note "offline: production was not read. The base is the operator's word (--base $BASE_ARG)"
+  if [ -n "$BASE_ARG" ]; then BASE_FROM="--base"
+  elif [ -n "${RAWPROD_DEPLOYED_SHA:-}" ]; then BASE_ARG="$RAWPROD_DEPLOYED_SHA"; BASE_FROM="RAWPROD_DEPLOYED_SHA"
+  else
+    BASE_ARG=$(node "$TOOLS/infra/aws/ship-evidence.mjs" last-deployed --root "$EVIDENCE_ROOT" --role "$ROLE" 2>/dev/null || true)
+    BASE_FROM="this laptop's last green ship for --role $ROLE"
+    [ -n "$BASE_ARG" ] || die "a dry run makes no AWS call, so it cannot ask $INSTANCE what production runs, and this laptop has no record of a green ship for --role $ROLE. Name it: infra/aws/ship.sh $SHA_ARG --base <deployed sha>   (--apply reads it from the box)"
+  fi
+  gate "host lock" unread 0 "dry run: the box was not asked. --apply reads both locks and takes the ship lock"
+  note "dry run: production was not read. The base is $BASE_FROM ($BASE_ARG). --apply reads it from the box, and proves again if it differs"
 fi
 # Review focus 1 of the plan: a deployed commit this clone has never seen must refuse, not diff against nothing.
 BASE=$(git -C "$REPO" rev-parse --verify --quiet "${BASE_ARG}^{commit}") \
@@ -564,13 +775,14 @@ else
         echo "== the deployed commit: db:seed (rows for the migration to meet) =="
         ( cd "$BASE_WT" && env "DATABASE_URL=$url" "BOOTSTRAP_OWNER_PASSWORD=$(node -p 'require("crypto").randomBytes(24).toString("hex")')" pnpm db:seed )
       fi
-      pg_sql "select id from public.schema_migrations order by 1" ship_migrate > "$WORK/ledger.before"
+      # comm wants both files in the shell's byte order, which is not always the database's collation.
+      pg_sql "select id from public.schema_migrations" ship_migrate | LC_ALL=C sort > "$WORK/ledger.before"
       pg_sql "$COUNTS" ship_migrate > "$WORK/rows.before"
       echo "== this commit $SHORT: db:migrate =="
       ( cd "$HEAD_WT" && "${menv[@]}" pnpm db:migrate )
-      pg_sql "select id from public.schema_migrations order by 1" ship_migrate > "$WORK/ledger.after"
+      pg_sql "select id from public.schema_migrations" ship_migrate | LC_ALL=C sort > "$WORK/ledger.after"
       pg_sql "$COUNTS" ship_migrate > "$WORK/rows.after"
-      local lost; lost=$(comm -23 "$WORK/ledger.before" "$WORK/ledger.after" | head -5)
+      local lost; lost=$(LC_ALL=C comm -23 "$WORK/ledger.before" "$WORK/ledger.after" | head -5)
       [ -z "$lost" ] || { echo "LEDGER ROWS LOST by the migration: $lost"; return 1; }
       echo "== this commit, again: a second db:migrate must apply nothing =="
       ( cd "$HEAD_WT" && "${menv[@]}" pnpm db:migrate ) > "$WORK/migrate.second" 2>&1 || { cat "$WORK/migrate.second"; return 1; }
@@ -658,7 +870,7 @@ fi
 # ── (f) deploy ───────────────────────────────────────────────────────────────────────────────────────
 STAGE=deploy
 T0=$SECONDS
-ROLLBACK="aws ssm start-session --target $INSTANCE --profile $PROFILE --region $REGION   then: sudo RAWPROD_ROLE=$ROLE /usr/local/sbin/rawprod-deploy --rollback"
+WAY_BACK="infra/aws/ship.sh --rollback --role $ROLE --apply   (the wrapper's own rawprod-deploy --rollback, the consoles, then these checks; it refuses when the schema is ahead of the previous commit)"
 if ssm_apply deploy 3600 "install $SHORT's own deploy.sh as /usr/local/sbin/rawprod-deploy (sha256 ${DEPLOY_SHA256:0:12}...), then RAWPROD_ROLE=$ROLE rawprod-deploy $FULL" <<< "$(remote_deploy)"; then
   if [ "$APPLY" = 1 ]; then
     printf '%s\n' "$SSM_OUT" | tail -12 | sed 's/^/        /'
@@ -670,7 +882,7 @@ else
   printf '%s\n' "$SSM_OUT" | tail -25 | sed 's/^/        /' >&2
   gate deploy FAILED "$((SECONDS - T0))" "deploy.sh exit $(kv deploy_exit)"
   VERDICT="DEPLOY FAILED on $INSTANCE: read deploy.sh's last lines above. A failed build left the old process running; a failed health check means the new one is up and unwell"
-  die "deploy.sh failed on $INSTANCE. To go back: $ROLLBACK"
+  die "deploy.sh failed on $INSTANCE. To go back: $WAY_BACK"
 fi
 
 # ── publish the consoles (main only: all three static roots live on the main box) ───────────────────
@@ -683,7 +895,7 @@ if [ "$ROLE" = main ]; then
   else
     gate "publish consoles" FAILED "$((SECONDS - T0))" "$(printf '%s' "$SSM_OUT" | tail -1)"
     VERDICT="DEPLOYED BUT NOT GREEN: the API runs $SHORT and the consoles were not published"
-    die "install-static.sh failed after the API was deployed: $(printf '%s' "$SSM_OUT" | tail -2). To go back: $ROLLBACK"
+    die "install-static.sh failed after the API was deployed: $(printf '%s' "$SSM_OUT" | tail -2). To go back: $WAY_BACK"
   fi
 else
   gate "publish consoles" skipped 0 "the vault console's static root is on the main box; a --role main ship publishes it"
@@ -693,32 +905,20 @@ fi
 STAGE=health
 T0=$SECONDS
 if [ "$APPLY" = 1 ]; then
-  RED=""
-  ssm_read status 60 <<< "$(remote_status)" || RED="$RED; the box could not be read"
-  NOW_DEPLOYED=$(kv deployed)
-  [ "$NOW_DEPLOYED" = "$FULL" ] || RED="$RED; DEPLOYED_SHA on the box is ${NOW_DEPLOYED:-unread}, not $SHORT"
-  for host in "$FACTORY_HOST" "$PLATFORM_HOST" "$VAULT_HOST"; do
-    code=000
-    for _ in 1 2 3 4 5; do
-      code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 15 "https://$host/health" || echo 000)
-      [ "$code" = 200 ] && break
-      sleep "${SHIP_HEALTH_RETRY_S:-6}"
-    done
-    echo "    https://$host/health : $code"
-    [ "$code" = 200 ] || RED="$RED; https://$host/health answered $code"
-  done
+  outside_checks "$FULL"
   if [ -n "$RED" ]; then
     gate health FAILED "$((SECONDS - T0))" "${RED#; }"
     VERDICT="DEPLOYED BUT NOT GREEN: ${RED#; }"
-    die "DEPLOYED BUT NOT GREEN: ${RED#; }. To go back: $ROLLBACK"
+    die "DEPLOYED BUT NOT GREEN: ${RED#; }. To go back: $WAY_BACK"
   fi
-  gate health ok "$((SECONDS - T0))" "DEPLOYED_SHA is $SHORT; /health 200 on $FACTORY_HOST, $PLATFORM_HOST, $VAULT_HOST"
+  gate health ok "$((SECONDS - T0))" "DEPLOYED_SHA is $SHORT; /health and / answer 200 on $FACTORY_HOST, $PLATFORM_HOST, $VAULT_HOST"
   VERDICT="DEPLOYED GREEN: $SHORT on $INSTANCE ($ROLE)"
 else
   echo "    WOULD CHECK: /srv/rawprod/DEPLOYED_SHA on $INSTANCE equals $FULL"
   echo "    WOULD CHECK: https://$FACTORY_HOST/health, https://$PLATFORM_HOST/health, https://$VAULT_HOST/health answer 200"
+  echo "    WOULD CHECK: https://$FACTORY_HOST/, https://$PLATFORM_HOST/, https://$VAULT_HOST/ each answer 200 with a page (the consoles as the public gets them)"
   echo "    WOULD RUN on $INSTANCE: release the ship lock, append one line to /etc/rawprod/ship-log.jsonl"
-  gate health would 0 "DEPLOYED_SHA and /health on three hosts"
+  gate health would 0 "DEPLOYED_SHA, /health and / on three hosts"
   VERDICT="DRY RUN PASSED: $SHORT is proven locally; nothing was sent to change $INSTANCE. Deploy with: infra/aws/ship.sh $SHORT --role $ROLE --apply"
 fi
 STAGE=done
