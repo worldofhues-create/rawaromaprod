@@ -327,7 +327,7 @@ sys.exit(subprocess.call(sys.argv[3:]))
   const first = local('lock-take');
   assert.equal(first.code, 0, first.out);
   const ours = readFileSync(ship, 'utf8').trim();
-  assert.match(ours, new RegExp(`^system=rawprod role=main sha=${r.head} started=\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ by=\\S+$`), 'the lock says who, what and since when');
+  assert.match(ours, new RegExp(`^system=rawprod role=main sha=${r.head} started=\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\dZ by=\\S+ pid=\\d+$`), 'the lock says who, what, since when and which process');
 
   const second = local('lock-take', 'system=other role=main sha=feed started=now by=other');
   assert.equal(second.code, 75);
@@ -370,6 +370,13 @@ time.sleep(60)
     holder.kill();
     await gone;
   }
+  // The box removes only the line the operator was shown: a ship that took the host since then keeps it.
+  writeFileSync(ship, 'system=rawprod role=main sha=newer started=now by=someone pid=1\n');
+  const moved = local('unlock');
+  assert.equal(moved.code, 75);
+  assert.match(moved.out, /REFUSED: the lock changed since it was read: system=rawprod role=main sha=newer/);
+  assert.ok(existsSync(ship));
+  writeFileSync(ship, 'system=rawprod role=main sha=dead started=then by=gone\n');
   const cleared = local('unlock');
   assert.equal(cleared.code, 0, cleared.out);
   assert.match(cleared.out, /removed=system=rawprod role=main sha=dead/);
@@ -398,6 +405,38 @@ test('--unlock is the manual override: it shows the lock, refuses while a deploy
   assert.equal(done.code, 0, done.out);
   assert.deepEqual(r.order().slice(-2), ['status', 'unlock']);
   assert.match(r.sent('unlock'), /flock -n "\$DEPLOY_LOCK" true \|\| \{ echo "REFUSED/, 'the box checks again before removing');
+  assert.match(r.sent('unlock'), /^LOCK_LINE=.*sha=dead/m, 'and is told which line it may remove');
+});
+
+test('--unlock leaves a young lock alone unless this laptop took it and that ship is dead: a free flock is not a dead ship', () => {
+  // Between its backup, its publish and its health check a live ship holds no flock.
+  const now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+  const me = execFileSync('bash', ['-c', `printf '%s@%s' "$(id -un)" "$(hostname -s 2>/dev/null || echo laptop)" | tr -c 'A-Za-z0-9._@-' '_'`], { encoding: 'utf8' });
+
+  const theirs = rig();
+  theirs.reply('ship_lock', `system=rawprod role=main sha=live started=${now} by=colleague@other-laptop pid=4242`);
+  const a = theirs.run(['--unlock', '--apply']);
+  assert.notEqual(a.code, 0);
+  assert.match(a.out, /taken by colleague@other-laptop from another laptop.*probably a deploy in progress/);
+  assert.deepEqual(theirs.order(), ['status'], 'nothing was removed');
+
+  const alive = rig();
+  // `; :` keeps bash from exec'ing sleep in its place, so ps shows the ship.sh name the check looks for.
+  const holder = spawn('bash', ['-c', 'sleep 30; :', 'infra/aws/ship.sh'], { stdio: 'ignore' });
+  try {
+    alive.reply('ship_lock', `system=rawprod role=main sha=live started=${now} by=${me} pid=${holder.pid}`);
+    const b = alive.run(['--unlock', '--apply']);
+    assert.notEqual(b.code, 0);
+    assert.match(b.out, new RegExp(`its ship is still running on this laptop \\(pid ${holder.pid}\\)`));
+    assert.deepEqual(alive.order(), ['status']);
+  } finally { holder.kill(); }
+
+  const dead = rig();
+  dead.reply('ship_lock', `system=rawprod role=main sha=gone started=${now} by=${me} pid=999999`);
+  const c = dead.run(['--unlock', '--apply']);
+  assert.equal(c.code, 0, c.out);
+  assert.match(c.out, /pid 999999, which is no longer running: the ship that held it is dead/);
+  assert.deepEqual(dead.order(), ['status', 'unlock']);
 });
 
 // ── the order of a deploy ───────────────────────────────────────────────────────────────────────────

@@ -62,10 +62,13 @@
 # flock is the exclusion and this file is the early answer. The vault box is another host with its own
 # /run, so `--role vault` locks there and does not block a deploy on the main box.
 #
-# A STALE LOCK. A ship holds the lock for at most about 100 minutes (the backup, the build on the box, the
-# publish, the health check, each with its own timeout). A refusal prints how old the lock is and says so
-# when it is older than that. Nothing removes it automatically: `ship.sh --unlock --apply` does, after the
-# box confirms no deploy holds the flock.
+# A STALE LOCK. A ship holds the lock for at most about 100 minutes from when it takes it (the backup, the
+# build on the box, the publish, the health check, each with its own timeout). A refusal prints how old the
+# lock is and says so when it is older than that. Nothing removes it automatically: `ship.sh --unlock
+# --apply` does, and only (1) while no deploy holds the flock, (2) when the lock is older than that, or was
+# taken from this laptop by a process that is no longer running (the line carries by= and pid=), and (3)
+# when the line on the box is still the one it read. A free flock alone is not a dead ship: between its
+# backup, its publish and its health check a live ship holds no flock.
 #
 # ── OTHER OPTIONS ────────────────────────────────────────────────────────────────────────────────────
 #   --base <sha>          what production runs, for a dry run. With --apply the box is read and --base
@@ -327,6 +330,9 @@ REMOTE
 remote_unlock() { remote_head; cat <<'REMOTE'
 [ -e "$SHIP_LOCK" ] || { echo "unlocked=nothing-to-remove"; exit 0; }
 flock -n "$DEPLOY_LOCK" true || { echo "REFUSED: a deploy holds the host lock right now: $(tail -1 "$DEPLOY_LOCK" 2>/dev/null)"; exit 75; }
+# Only the lock the operator was shown. A ship that took the host after that read holds a new line, and
+# removing it would let a third ship in beside a live one.
+[ "$(cat "$SHIP_LOCK" 2>/dev/null)" = "$LOCK_LINE" ] || { echo "REFUSED: the lock changed since it was read: $(cat "$SHIP_LOCK" 2>/dev/null)"; exit 75; }
 echo "removed=$(cat "$SHIP_LOCK")"
 rm -f "$SHIP_LOCK"
 REMOTE
@@ -452,6 +458,11 @@ lock_age() { # the lock line -> "taken N min ago" and whether a ship can still b
       ? `taken ${min} min ago. A ship holds it for at most about ${max} min, so this one is STALE unless a deploy is running`
       : `taken ${min} min ago. A ship can hold it for about ${max} min: that one is probably still alive`);
   ' "$1" "$SHIP_LOCK_MAX_AGE_MIN"
+}
+
+lock_minutes() { # the lock line -> its age in whole minutes; -1 when it carries no readable start time
+  node -e 'const m = /started=(\S+)/.exec(process.argv[1] || ""); const t = m ? Date.parse(m[1]) : NaN;
+    console.log(Number.isFinite(t) ? Math.max(0, Math.round((Date.now() - t) / 60000)) : -1)' "$1"
 }
 
 # ── (g) health and smoke, from outside ───────────────────────────────────────────────────────────────
@@ -588,7 +599,7 @@ if [ "$UNLOCK" = 1 ]; then
   if [ "$APPLY" = 0 ]; then
     # Reading the lock is a command to the box, and a dry run sends none.
     echo "    WOULD READ on $INSTANCE: $SHIP_LOCK, and whether a deploy holds $DEPLOY_LOCK"
-    echo "    WOULD RUN on $INSTANCE: remove $SHIP_LOCK, only if no deploy holds the flock (the box checks again itself)"
+    echo "    WOULD RUN on $INSTANCE: remove $SHIP_LOCK, only if no deploy holds the flock, the lock is older than $SHIP_LOCK_MAX_AGE_MIN min or its ship on this laptop is dead, and the line is still the one read"
     VERDICT="DRY RUN: nothing was read and nothing was sent. Clear a dead ship's lock with: infra/aws/ship.sh --unlock --role $ROLE --apply"
     STAGE=done; exit 0
   fi
@@ -599,6 +610,19 @@ if [ "$UNLOCK" = 1 ]; then
   if [ "$held" = free ]; then VERDICT="NOTHING TO UNLOCK"; STAGE=done; exit 0; fi
   echo "    the lock was $(lock_age "$held")"
   [ "$flock_state" = free ] || die "a deploy is running on $INSTANCE ($flock_state). The lock is not stale; wait for it"
+  # A free flock is not a dead ship: between its backup, its publish and its health check a live ship
+  # holds no flock. So a lock younger than a ship can live is removed only when this laptop took it and
+  # the process that took it is gone. Anyone else's young lock is somebody's deploy in progress.
+  age=$(lock_minutes "$held")
+  if [ "$age" -ge 0 ] && [ "$age" -le "$SHIP_LOCK_MAX_AGE_MIN" ]; then
+    lock_by=$(printf '%s' "$held" | sed -n 's/.* by=\([^ ]*\).*/\1/p'); lock_pid=$(printf '%s' "$held" | sed -n 's/.* pid=\([0-9]*\).*/\1/p')
+    [ "$lock_by" = "$BY" ] && [ -n "$lock_pid" ] || die "that lock is $age min old and was taken by ${lock_by:-somebody} from another laptop, and a ship can hold it for about $SHIP_LOCK_MAX_AGE_MIN min: it is probably a deploy in progress. Ask them, or run --unlock again once it is older than $SHIP_LOCK_MAX_AGE_MIN min"
+    if ps -p "$lock_pid" -o command= 2>/dev/null | grep -q 'ship\.sh'; then
+      die "that lock is $age min old and its ship is still running on this laptop (pid $lock_pid). Let it finish"
+    fi
+    echo "    taken from this laptop by pid $lock_pid, which is no longer running: the ship that held it is dead"
+  fi
+  LOCK_LINE="$held"
   ssm_apply unlock 60 "remove $SHIP_LOCK ($held)" <<< "$(remote_unlock)" || die "the unlock was refused: $SSM_OUT"
   echo "    $SSM_OUT"; VERDICT="UNLOCKED"
   STAGE=done; exit 0
@@ -647,7 +671,7 @@ if [ "$ROLLBACK" = 1 ]; then
   fi
   SHORT=${FULL:0:8}
   meta sha "$FULL"; meta rolled_back_from "$LEAVING"; meta local_proof "not applicable: a rollback proves nothing locally"
-  LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$STARTED by=$BY action=rollback"
+  LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$(date -u +%FT%TZ) by=$BY pid=$$ action=rollback"
   meta lock_line "$LOCK_LINE"
   STAGE=lock; T0=$SECONDS
   if ssm_apply lock-take 60 "take the ship lock" <<< "$(remote_lock_take)"; then LOCK_TAKEN=1; gate "ship lock" ok "$((SECONDS - T0))" "$LOCK_LINE"
@@ -890,7 +914,10 @@ fi
 
 # ── production ───────────────────────────────────────────────────────────────────────────────────────
 say "production: $INSTANCE ($ROLE)"
-LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$STARTED by=$BY"
+# started= is when the LOCK is taken, not when this run began: the local proof before it can take half an
+# hour, and an age counted from the run's start would call a live ship's lock stale that much sooner.
+# pid= lets --unlock on this same laptop tell a dead ship from a live one.
+LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$(date -u +%FT%TZ) by=$BY pid=$$"
 meta lock_line "$LOCK_LINE"
 
 # The lock, taken atomically on the box. The read above was a courtesy; this is the exclusion.
