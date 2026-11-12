@@ -229,7 +229,7 @@ test('a maskable icon keeps the whole fluke inside the 80 % safe zone', () => {
 
 // ── every page, manifest and service worker names the family ─────────────────────────────────────────────────────
 
-const PAGES = ['web/index.html', 'web-platform/index.html', 'web-vault/index.html'];
+const PAGES = ['web/index.html', 'web/pair.html', 'web-platform/index.html', 'web-vault/index.html'];
 const LINKS = [
   '<link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">',
   '<link rel="icon" href="/favicon-32.png" sizes="32x32" type="image/png">',
