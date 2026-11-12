@@ -1,0 +1,69 @@
+# SHIP-RP: what infra/aws/ship.sh always runs, and what sends a change to the whole suite.
+#
+# Read by scripts/touched-tests.mjs. Two kinds of line, each with its reason after the #. A line with no
+# reason is refused when the list is read, and a change that deletes a `test` file listed here is refused
+# by ship.sh: this list is the floor under every fast deploy, so it shrinks only in a reviewed commit.
+#
+#   test <path>        runs on every ship, whatever changed
+#   sensitive <glob>   a change under it runs the whole suite (`pnpm test`) before the deploy
+#
+# The rest of the rule (which tests a changed file selects) is in scripts/touched-tests.mjs and in
+# infra/aws/DEPLOY_AWS.md section 7a.
+
+# ── the bridge with Alembic, and the signed assertion staff arrive on ───────────────────────────────
+test backend/api/src/bridge/bridge.contract.test.ts                                  # the wire shapes Alembic sends and reads; a drift here breaks orders in the other system
+test backend/api/src/aria/aria-bridge.test.ts                                        # Ruh's answers reach Alembic over the bridge
+test backend/api/src/facts/facts.contract.test.ts                                    # the facts Alembic reads from RawProd, field for field
+test backend/api/src/__tests__/contract-guard-alembic-mirror.test.ts                 # the copy of the contract held here still matches Alembic's
+test backend/api/src/__tests__/contract-guard-qty-kg.test.ts                         # quantities cross the bridge in kg
+test backend/api/src/__tests__/contract-guard-unit-refusal.test.ts                   # an unknown unit is refused, never guessed
+test backend/api/src/__tests__/contract-guard-rac-codes.test.ts                      # RAC codes are the join key between the two systems
+test backend/api/src/__tests__/contract-guard-qc-batch-no.test.ts                    # the QC batch number Alembic prints is the one on the floor
+test backend/backend-kernel/src/edge/__tests__/internal-bridge-signing.test.ts       # the internal bridge signature
+test backend/backend-kernel/src/edge/__tests__/internal-bridge.guard.test.ts         # an unsigned internal call is refused
+test backend/backend-kernel/src/edge/__tests__/internal-bridge-nonce.test.ts         # a replayed internal call is refused
+
+# ── sign-in and the session ─────────────────────────────────────────────────────────────────────────
+test backend/api/src/__tests__/session-cookie.test.ts                                # the session cookie is the sign-in on all three consoles
+test backend/api/src/__tests__/console-sign-in.test.ts                               # the sign-in card each console draws
+
+# ── the vault boundary ──────────────────────────────────────────────────────────────────────────────
+test backend/api/src/__tests__/vault-boundary.test.ts                                # formula plaintext never leaves the vault process
+test backend/api/src/__tests__/main-box-no-formula-db.test.ts                        # the main box holds no formula database URL
+
+# ── labels and brand: what is printed and stuck on a drum ───────────────────────────────────────────
+test backend/api/src/__tests__/pfc-label-render.test.ts                              # the label a printer receives
+test backend/api/src/__tests__/shell-fluke.test.ts                                   # the brand lockup on every console
+
+# ── the deploy itself ───────────────────────────────────────────────────────────────────────────────
+test backend/api/src/__tests__/host-lock.test.ts                                     # deploy.sh takes the host lock and the memory floor; both deploying at once took the storefront down
+test backend/api/src/__tests__/infra-ops-green.test.ts                               # env rendering and the deploy health check
+test backend/api/src/__tests__/infra-live-capture.test.ts                            # nginx and install-static.sh as recorded from the live box
+test backend/api/src/__tests__/db-migrate-split.test.ts                              # a migration block goes to the right database
+test backend/api/src/__tests__/ci-unit-tests.test.ts                                 # CI still runs the unit suite on a push
+test backend/api/src/__tests__/ship-rp.test.ts                                       # ship.sh: lock, backup before deploy, dry run sends nothing
+test backend/api/src/__tests__/touched-tests.test.ts                                 # the rule that picks the tests
+
+# ── sensitive paths: the whole suite ────────────────────────────────────────────────────────────────
+sensitive scripts/migrations/**                 # a migration: it changes what every query runs against
+sensitive scripts/db-*.ts                       # the migration runner, the seed and the schema check
+sensitive scripts/gen-schema-migrations.mjs     # generates the schema migrations
+sensitive packages/data-*/**                    # the table definitions every cluster reads
+sensitive scripts/ra-roles.ts                   # who may do what
+sensitive scripts/ra-permissions.ts             # who may do what
+sensitive backend/backend-kernel/**             # sign-in, guards, the permission resolver, the internal bridge
+sensitive backend/cluster-identity/**           # users and roles
+sensitive backend/api/src/bridge/**             # the bridge with Alembic
+sensitive backend/api/src/vault-bridge/**       # the channel from the main box to the vault
+sensitive backend/api/src/relay/**              # the signed relay
+sensitive backend/api/src/crypto/**             # the encrypted console tunnel
+sensitive backend/api/src/idempotency/**        # a retried write must not happen twice
+sensitive backend/cluster-inventory/**          # stock movements
+sensitive backend/cluster-formula/**            # the formula vault
+sensitive backend/api/src/vault-*.ts            # the vault process entry points
+sensitive backend/api/src/main.ts               # boot of the main API
+sensitive backend/api/src/app.module.ts         # which modules the main API composes
+sensitive backend/api/src/worker*.ts            # the outbox worker
+sensitive backend/test-support/**               # the harness every database test stands on
+sensitive package.json                          # scripts and dependency versions
+sensitive pnpm-lock.yaml                        # every dependency version

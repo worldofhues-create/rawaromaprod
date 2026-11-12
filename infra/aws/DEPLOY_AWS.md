@@ -213,6 +213,74 @@ and it hides the result. Run the target's own script:
 `git -C /srv/rawprod/app show <sha>:infra/aws/deploy.sh > /tmp/rawprod-deploy.sh`, then
 `RAWPROD_ROLE=vault bash /tmp/rawprod-deploy.sh <sha>`.
 
+## 7a. `infra/aws/ship.sh`: one command from a pushed commit to production
+
+Section 7 is what runs ON the box. This is what the operator runs on the laptop, and it is the way to
+deploy from now on: it does the steps in a fixed order, refuses when one fails, and writes down what it
+did. You follow what it prints. Where you are sure it is wrong, each refusal names its override.
+
+```
+infra/aws/ship.sh <sha>                       # dry run: every local step for real, production untouched
+infra/aws/ship.sh <sha> --apply               # deploy to the main box
+infra/aws/ship.sh <sha> --role vault --apply  # deploy to the vault box
+infra/aws/ship.sh --unlock --apply            # remove a dead ship's lock (refuses while a deploy runs)
+```
+
+| Step | What runs | Stops the deploy |
+|---|---|---|
+| (a) pushed commit | `git fetch`; the commit is on a branch of `origin`; it descends from `/srv/rawprod/DEPLOYED_SHA` (read over SSM); its own `deploy.sh` takes the host lock; a fresh detached worktree | yes |
+| (b) build | `pnpm install --frozen-lockfile`, `pnpm typecheck`, the box's build (`pnpm -r --workspace-concurrency=1 --filter '!@core/admin-shell' --filter '!@core/api' build`) | yes |
+| (c) touched tests | `scripts/touched-tests.mjs`: the always-on list, plus the tests the change touches; `pnpm test` when a sensitive path changed | yes |
+| (d) migrations forward | throwaway local PostgreSQL: the deployed commit's `db:migrate` and `db:seed`, this commit's `db:migrate` twice (the second must apply nothing), `db:validate`; ledger rows, tables and row counts compared. Runs when `scripts/migrations/**`, `scripts/db-*.ts` or `packages/data-*` changed, or with `--force-migrations` | yes |
+| ship lock | `/run/lock/raw-host-ship.lock` created on the box with `O_EXCL` | yes |
+| (e) backup | main: `infra/aws/backup/rawprod-backup.sh` on the box (`pg_dump -Fc`, `pg_restore --list`, upload to `rawprod/pg_dump/`), then `head-object` from the laptop: same size, and stamped by this run. vault: `vault-pg` `LatestRestorableTime` under 15 minutes old | yes |
+| (f) deploy | the commit's own `infra/aws/deploy.sh`, written to `/usr/local/sbin/rawprod-deploy` and compared by sha256, run with `RAWPROD_ROLE`; then on main `infra/aws/nginx/install-static.sh prod`, only if `DEPLOYED_SHA` is the commit | n/a |
+| (g) health | `DEPLOYED_SHA` equals the commit; `/health` is 200 from outside on rawfactory, rawplatform and rawvault | exits 1, `DEPLOYED BUT NOT GREEN`, prints the rollback command |
+| evidence | `~/.rawprod/ship-evidence/<sha>/<stamp>-<role>-<mode>/ship.json` (sealed) and one log per gate; one line appended to `/etc/rawprod/ship-log.jsonl` on the box | no |
+
+**One deploy per host.** The main box has 3.8 GB and no swap, and it ran out of memory when RawProd
+and Alembic built together. Two locks on the box, both read before anything is sent:
+
+- `/run/lock/raw-host-deploy.lock`, the `flock` of section 7. Held means a build is running now.
+- `/run/lock/raw-host-ship.lock`, one line `system=rawprod role=main sha=<sha> started=<UTC> by=<who>`,
+  from before the backup until after the health check. Alembic's `ops/scripts/ship.sh` takes the same
+  file with `system=alembic`. `ship.sh --apply` refuses while either is held and prints the holder.
+
+A ship that died (laptop closed, network gone) leaves the second lock behind; a reboot clears it, and
+so does `ship.sh --unlock --apply`, which refuses while a deploy holds the `flock`. The vault box is a
+separate host: `--role vault` locks there and does not block the main box.
+
+**The tests a change touches** (`scripts/touched-tests.mjs`, one test per row in
+`backend/api/src/__tests__/touched-tests.test.ts`):
+
+| Changed path | Runs |
+|---|---|
+| anything | the `test` lines of `infra/aws/fast-proof-always.txt` (bridge contract, session cookie, vault boundary, labels, the deploy scripts) |
+| a `sensitive` line of that file matches (migrations, `packages/data-*`, the bridge, `backend-kernel`, stock, the vault, the harness, the lockfile) | the whole suite, `pnpm test` |
+| `backend/**/*.test.ts` | that file |
+| `backend/api/src/<module>` | every test that imports it directly |
+| `backend/<cluster>/**`, `packages/<pkg>/**` | every test that imports that package, by path or by name |
+| `web/**`, `web-platform/**`, `web-vault/**`, `infra/**`, `scripts/**`, `tools/**` | every test whose text names the file, by path or by file name |
+| `e2e/**` | nothing; the evidence says "e2e specs changed, not run" |
+| `*.md`, `docs/**` | nothing more |
+
+A changed source that selects no test is written into the evidence as "has no direct test". A change
+that deletes an always-on test is refused.
+
+**What a fast deploy does not run**, so nobody reads the evidence as more than it is: the whole unit
+suite (unless a sensitive path changed), any browser walk, and a rehearsal against production's rows.
+The rehearsal in (d) runs on PostgreSQL 17, because PostGIS is installed on the laptop only for 17, and
+production is 16.15. `unit-tests.yml` and `browser-suite.yml` still run the full sets in CI.
+
+**"One proof per commit."** `--apply` straight after a dry run reuses the dry run's proof (same
+commit, same deployed commit, same role, same `ship.sh`, under 24 hours old) and goes to the lock.
+`--reprove` runs (a) to (d) again.
+
+**Overrides**, each one printed by the refusal it answers: `--unlock` (a dead ship's lock),
+`--force-migrations`, `--allow-row-loss` (a migration that removes rows on purpose), `--tests '<glob>'`
+(add tests), `--base <sha>` with `--offline` (a dry run with no AWS call), and for going back, on the
+box: `RAWPROD_ROLE=<role> /usr/local/sbin/rawprod-deploy --rollback`.
+
 ## 8. `scripts/migrate/` — PB-02 migration tooling
 
 - `neon-dump.sh <main|formula>` — a consistent (`--serializable-deferrable`), directory-format,
