@@ -92,7 +92,7 @@ DEPLOY_LOCK=/run/lock/raw-host-deploy.lock
 ROLE=main; APPLY=0; SHA_ARG=""; BASE_ARG=""; OFFLINE=0; FORCE_MIG=0; REPROVE=0; UNLOCK=0; ALLOW_ROW_LOSS=0
 EXTRA_TESTS=()
 
-usage() { sed -n '2,6p;/^# ── OTHER OPTIONS/,/^set -euo/p' "$SELF" | sed -e '$d' -e 's/^# \{0,1\}//'; }
+usage() { sed -n '2,7p;/^# ── OTHER OPTIONS/,/^set -euo/p' "$SELF" | sed -e '$d' -e 's/^# \{0,1\}//'; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -141,10 +141,13 @@ SSM_N=0
 SSM_OUT=""
 
 say()  { echo "==> $*"; }
-note() { echo "    $*"; printf '%s\n' "$*" >> "$WORK/notes"; }
-meta() { printf '%s=%s\n' "$1" "$2" >> "$WORK/meta"; }
+# One line each in the work files: a verdict that quotes three lines of a log must not become three
+# records, or a line of the log that happens to hold "=" would become a field of the evidence.
+flat() { printf '%s' "$1" | tr '\n\t' '  '; }
+note() { echo "    $*"; printf '%s\n' "$(flat "$*")" >> "$WORK/notes"; }
+meta() { printf '%s=%s\n' "$1" "$(flat "$2")" >> "$WORK/meta"; }
 gate() { # name status seconds detail
-  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "${4:-}" >> "$WORK/gates.tsv"
+  printf '%s\t%s\t%s\t%s\n' "$1" "$2" "$3" "$(flat "${4:-}")" >> "$WORK/gates.tsv"
   printf '  %-8s %-22s %5ss  %s\n' "$2" "$1" "$3" "${4:-}"
 }
 die() {
@@ -329,13 +332,18 @@ pg_start() {
     die "port $PG_PORT is already listening and this run did not start it. Set SHIP_PG_PORT to a free port"
   fi
   PGDATA="$WORK/pg"
-  "$PG_BIN/initdb" -D "$PGDATA" -U ship --auth=trust -E UTF8 --locale=en_US.UTF-8 > "$LOGS/pg-initdb.log" 2>&1 \
+  # With no locale in the environment (an SSH session, a cron job, an agent) the postmaster on macOS
+  # dies at start: "postmaster became multithreaded during startup ... Set the LC_ALL environment
+  # variable to a valid locale". Name one, for initdb and for the server.
+  local -a pgenv
+  pgenv=(env LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8)
+  "${pgenv[@]}" "$PG_BIN/initdb" -D "$PGDATA" -U ship --auth=trust -E UTF8 --locale=en_US.UTF-8 > "$LOGS/pg-initdb.log" 2>&1 \
     || die "initdb failed: $(tail -3 "$LOGS/pg-initdb.log")"
   # TCP on loopback only; no unix socket (the temp path is too long for one on macOS). fsync off: the
   # cluster is deleted in a few minutes whatever happens to it.
-  "$PG_BIN/pg_ctl" -D "$PGDATA" -w -t 60 -l "$LOGS/postgres.log" \
+  "${pgenv[@]}" "$PG_BIN/pg_ctl" -D "$PGDATA" -w -t 60 -l "$LOGS/postgres.log" \
     -o "-p $PG_PORT -c listen_addresses=127.0.0.1 -c unix_socket_directories='' -c fsync=off -c max_connections=60" start \
-    > "$LOGS/pg-start.log" 2>&1 || die "the throwaway PostgreSQL did not start: $(tail -3 "$LOGS/postgres.log" 2>/dev/null)"
+    > "$LOGS/pg-start.log" 2>&1 || die "the throwaway PostgreSQL did not start: $(grep -m1 -E 'FATAL|HINT' "$LOGS/postgres.log" 2>/dev/null || tail -1 "$LOGS/pg-start.log")"
   PG_PID=$(head -1 "$PGDATA/postmaster.pid")
   meta scratch_postgres "$("$PG_BIN/postgres" --version 2>/dev/null || echo unknown) on 127.0.0.1:$PG_PORT (production is 16.15)"
 }

@@ -406,11 +406,17 @@ test('--apply: lock, backup read back from S3, the commit\'s own deploy.sh, the 
 test('a failed backup stops the ship before the deploy, and the lock is released', () => {
   const r = rig();
   r.reply('backup.status', 'Failed');
-  r.reply('backup.out', 'rawprod-backup FAILED: pg_dump failed');
+  r.reply('backup.out', 'pg_dump: error: connection to server failed\nforged=1\nrawprod-backup FAILED: pg_dump failed');
   const x = r.run([r.head, '--apply']);
   assert.notEqual(x.code, 0);
   assert.match(x.out, /the backup failed, so nothing was deployed/);
   assert.deepEqual(r.order(), ['status', 'lock-take', 'backup', 'lock-release']);
+  // The verdict quotes two lines of the box's output. It stays ONE field of the evidence: a line of a
+  // log that happens to read `key=value` must not become a key of ship.json.
+  const e = r.evidence().pop()! as unknown as Record<string, unknown>;
+  assert.match(String(e.verdict), /^FAILED at backup: the backup failed, so nothing was deployed: forged=1 rawprod-backup FAILED: pg_dump failed$/);
+  assert.equal('forged' in e, false);
+  assert.equal(verify(e), true);
 });
 
 test('a backup that is not this run\'s, or not the size the box dumped, is not a backup', () => {
@@ -684,6 +690,9 @@ test('the migration rehearsal starts from the deployed commit, runs this commit 
   assert.match(read('infra/aws/env/render-env.sh'), /^SKIP_TARGETS=main$/m);
   // It runs because the schema changed (touched-tests.mjs `migrations`), or because it was asked for.
   assert.match(src, /if \[ "\$MIGRATIONS" = 1 \] \|\| \[ "\$FORCE_MIG" = 1 \]; then/);
+  // With no locale in the environment the postmaster on macOS refuses to start; the first real run died there.
+  assert.match(src, /pgenv=\(env LC_ALL=en_US\.UTF-8 LANG=en_US\.UTF-8\)/);
+  assert.equal([...src.matchAll(/"\$\{pgenv\[@\]\}" "\$PG_BIN\/(initdb|pg_ctl)"/g)].length, 2);
   // The throwaway cluster: never adopted, stopped by PID on every exit, never by name.
   assert.match(src, /port \$PG_PORT is already listening and this run did not start it/);
   const finish = src.slice(src.indexOf('finish() {'), src.indexOf('trap finish EXIT'));
