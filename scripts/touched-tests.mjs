@@ -25,7 +25,7 @@
 //        [--always infra/aws/fast-proof-always.txt] [--tests '<glob>']...
 //   prints { files, fullSuite, migrations, notes, refusals, reasons } as JSON; exit 2 on a refusal.
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -227,7 +227,10 @@ function main(argv) {
   if (selection.refusals.length) process.exitCode = 2;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+// Run as a command, compared by real path: macOS reaches /tmp and /var through /private, and a plain
+// string compare made the CLI a silent no-op there, exit 0 and no output (SHIP-RP review).
+const invokedDirectly = () => { try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if (process.argv[1] && invokedDirectly()) {
   try {
     main(process.argv.slice(2));
   } catch (err) {

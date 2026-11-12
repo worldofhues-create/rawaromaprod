@@ -78,6 +78,20 @@
 #   --unlock              remove a stale /run/lock/raw-host-ship.lock (with --apply; refuses while a
 #                         deploy holds the flock)
 #   --rollback            go back one release (with --apply). Takes no commit: the box names it
+#
+# ── WHAT IT REFUSES BEFORE IT SPENDS A MINUTE ────────────────────────────────────────────────────────
+#   a checkout with uncommitted changes      what was looked at in the editor is not the commit shipped
+#   a ship.sh, deploy.sh, backup script, rule or list that differs from this checkout's HEAD
+#                                            they run as root on the box (the wrapper on --rollback, the
+#                                            backup script always), so an edit nobody committed never does
+#   a commit on no branch of origin          the box cannot fetch it
+#   a shell that is not bash                 zsh reads none of BASH_SOURCE, and the paths would be wrong
+#
+# NOTHING LOCAL CAN REACH PRODUCTION. Every *DATABASE_URL* and libpq PG* variable is removed from the
+# environment at start (names written to the evidence, never values), and every local gate runs with
+# the AWS_* variables removed and no AWS config or credentials file. The local rehearsal is told its URL,
+# 127.0.0.1 and the throwaway port, and nothing else exists for it to find.
+[ -n "${BASH_VERSION:-}" ] || { echo "FATAL: infra/aws/ship.sh is a bash script. Run it as infra/aws/ship.sh, or bash infra/aws/ship.sh" >&2; exit 2; }
 set -euo pipefail
 
 SHIP_VERSION=1
@@ -105,6 +119,8 @@ PG_BIN="${SHIP_PG_BIN:-/opt/homebrew/opt/postgresql@17/bin}"
 PG_PORT="${SHIP_PG_PORT:-5417}"
 MIN_FREE_GB="${SHIP_MIN_FREE_GB:-10}"
 MIN_BUILD_MEM_MB=1800                                 # deploy.sh's floor on the main box
+MIN_BACKUP_BYTES="${SHIP_MIN_BACKUP_BYTES:-500000}"   # rawprod-backup.sh's floor; the dump of 2026-11-11 was 1.8 MB
+NIGHTLY_DIR="${RAWPROD_NIGHTLY_DIR:-$HOME/.rawprod/nightly}"
 SHIP_LOCK=/run/lock/raw-host-ship.lock
 DEPLOY_LOCK=/run/lock/raw-host-deploy.lock
 
@@ -192,7 +208,7 @@ run_gate() { # name, detail, command...
   # A subshell with its own `set -e`, and not `cmd || rc=$?`: bash switches errexit off inside a function
   # called on the left of ||, and a gate whose third command failed would run on to its fourth.
   set +e
-  ( set -e; "$@" ) > "$log" 2>&1
+  ( set -e; local_only; "$@" ) > "$log" 2>&1
   rc=$?
   set -e
   if [ "$rc" -ne 0 ]; then
@@ -204,6 +220,14 @@ run_gate() { # name, detail, command...
     die "$name failed (exit $rc). Full output: $(evidence_path "$log")"
   fi
   gate "$name" ok "$((SECONDS - t0))" "$detail"
+}
+env_names() { env | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p' | grep -E "$1" | sort -u | tr '\n' ' ' || true; }
+# A local gate (install, build, tests, the rehearsal) runs here, with no way to AWS: a test that builds an
+# SDK client would otherwise find the operator's profile, and a dry run promises no AWS call of any kind.
+local_only() {
+  local v
+  for v in $(env_names '^AWS_'); do unset "$v"; done
+  export AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null AWS_EC2_METADATA_DISABLED=true
 }
 evidence_path() { # where a work-directory file will be once the evidence is written
   [ -n "$FULL" ] && echo "$EVIDENCE_ROOT/$FULL/$STAMP-$ROLE-$MODE/${1#"$WORK"/}" || echo "$1"
@@ -499,13 +523,16 @@ finish() {
   if [ -n "$FULL" ]; then
     out="$EVIDENCE_ROOT/$FULL/$STAMP-$ROLE-$MODE"
     mkdir -p "$out" && cp -R "$LOGS" "$out/" 2>/dev/null
-    node "$TOOLS/infra/aws/ship-evidence.mjs" write --work "$WORK" --out "$out/ship.json" || out=""
+    # A path to a file that was never written is a claim; the file is checked, not the exit code.
+    { node "$TOOLS/infra/aws/ship-evidence.mjs" write --work "$WORK" --out "$out/ship.json" && [ -s "$out/ship.json" ]; } || out=""
   fi
   rm -rf "$PGDATA" 2>/dev/null
   if [ "$keep" = 0 ] || [ "$STAGE" != local ]; then rm -rf "$WORK"; fi
   echo
   echo "VERDICT: $VERDICT"
-  if [ -n "$out" ]; then echo "evidence: $out/ship.json"; else echo "evidence: none written (the commit was never resolved)"; fi
+  if [ -n "$out" ]; then echo "evidence: $out/ship.json"
+  elif [ -n "$FULL" ]; then echo "evidence: NOT WRITTEN: ship-evidence.mjs failed. Nothing records this run" >&2; [ "$rc" != 0 ] || rc=1
+  else echo "evidence: none written (the commit was never resolved)"; fi
   exit "$rc"
 }
 trap finish EXIT
@@ -520,6 +547,35 @@ NODE_MAJOR=$(node -p 'process.versions.node.split(".")[0]')
 command -v pnpm >/dev/null 2>&1 || die "no pnpm on PATH"
 [ "$APPLY" = 0 ] || command -v aws >/dev/null 2>&1 || die "no aws CLI on PATH, and --apply reaches the box through it"
 git -C "$REPO" rev-parse --git-dir >/dev/null 2>&1 || die "$REPO is not a git checkout"
+
+# Nothing this run starts locally may find a real database. The rehearsal and the tests are handed
+# 127.0.0.1 and the throwaway port by name; whatever the operator's shell held is gone before they start.
+SCRUBBED=$(env_names '(DATABASE_URL|^PG(HOST|HOSTADDR|PORT|DATABASE|USER|PASSWORD|PASSFILE|SERVICE|SERVICEFILE|SSLMODE|SSLROOTCERT|OPTIONS)$)')
+for v in $SCRUBBED; do unset "$v"; done
+meta scrubbed_env "${SCRUBBED:-none}"
+[ -z "$SCRUBBED" ] || note "removed from this run's environment (names only): $SCRUBBED"
+
+# THE INSTRUMENT IS COMMITTED. These files decide what runs, and two of them run as root on the box: the
+# backup script on every --apply, the wrapper beside this file on --rollback. An edit nobody committed
+# would be an unreviewed script on production, and the evidence would name a commit that does not hold it.
+TOOL_FILES="infra/aws/ship.sh infra/aws/ship-evidence.mjs infra/aws/deploy.sh infra/aws/backup/rawprod-backup.sh infra/aws/fast-proof-always.txt scripts/touched-tests.mjs"
+git -C "$TOOLS" rev-parse --git-dir >/dev/null 2>&1 || die "$TOOLS is not a git checkout, so nothing says which version of ship.sh, deploy.sh and the backup script this is"
+# shellcheck disable=SC2086
+DIRTY_TOOLS=$(git -C "$TOOLS" status --porcelain -- $TOOL_FILES | head -10)
+[ -z "$DIRTY_TOOLS" ] || die "these files in $TOOLS differ from its HEAD, and ship.sh runs them or sends them to the box as root:
+$(printf '%s\n' "$DIRTY_TOOLS" | sed 's/^/    /')
+  Commit them, or run ship.sh from a clean checkout. Not git stash: the stash is shared by every worktree"
+# A DIRTY TREE IS REFUSED, for the person and not the proof. The proof builds a fresh worktree and would
+# be clean regardless; but whoever edits, does not commit and ships HEAD has looked at one thing and is
+# about to deploy another, and every gate below would pass, because every gate would be right about the
+# commit. A rollback and an unlock name no commit of this checkout, so only the files above matter to them.
+if [ "$UNLOCK" = 0 ] && [ "$ROLLBACK" = 0 ]; then
+  DIRTY=$(git -C "$REPO" status --porcelain --untracked-files=no | head -10)
+  [ -z "$DIRTY" ] || die "$REPO has uncommitted changes, so what you have been looking at is not the commit you named:
+$(printf '%s\n' "$DIRTY" | sed 's/^/    /')
+  Commit them and ship that commit, or ship from a clean worktree (git worktree add). Not git stash"
+fi
+meta tools_clean yes
 TOOL_SHA256=$(sha256_of "$SELF")
 meta ship_sh_version "$SHIP_VERSION"
 meta ship_sh_sha256 "$TOOL_SHA256"
@@ -729,6 +785,8 @@ else
     node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); for (const r of s.refusals||[]) console.error("    "+r)' "$WORK/selection.json" 2>/dev/null || true
     die "the test selection refused or failed (exit $tt_rc): $(cat "$LOGS/touched-tests.err")"
   fi
+  # Exit 0 and nothing printed is not "no tests": it is a selection that never ran.
+  [ -s "$WORK/selection.json" ] || die "scripts/touched-tests.mjs exited 0 and printed no selection, so nothing says which tests this change needs"
   SEL=$(node -e '
     const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
     require("fs").writeFileSync(process.argv[2], s.files.join("\n") + (s.files.length ? "\n" : ""));
@@ -812,6 +870,24 @@ else
   gate "tree unchanged" ok 0 "no tracked file differs from $SHORT"
 fi
 
+# ── the last nightly run, in front of whoever is about to deploy ─────────────────────────────────────
+# infra/aws/nightly-proof.sh runs what this ship does not (the whole suite, the browser walks) and blocks
+# nothing. This is the one place its verdict is sure to be read. Printed, recorded, never a refusal.
+say "the last nightly run"
+if [ -f "$NIGHTLY_DIR/latest.json" ]; then
+  # The legs, one per line, and the verdict on the last line.
+  NIGHTLY=$(node -e '
+    const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+    for (const l of j.legs || []) console.log(`    ${String(l.status).padEnd(8)} ${l.name}`);
+    console.log(`${j.verdict} ${String(j.sha || "").slice(0, 8)} ${j.finished || ""}`);
+  ' "$NIGHTLY_DIR/latest.json" 2>/dev/null || echo "unreadable")
+  printf '%s\n' "$NIGHTLY" | sed '$d'
+  note "nightly: $(printf '%s\n' "$NIGHTLY" | tail -1)"
+  case "$(printf '%s\n' "$NIGHTLY" | tail -1)" in GREEN*) ;; *) echo "    A red nightly is a defect that is already in production. Fix it through this same command, first thing." ;; esac
+else
+  note "nightly: none recorded under $NIGHTLY_DIR. What this ship leaves out has not been run on this laptop: infra/aws/nightly-proof.sh"
+fi
+
 # ── production ───────────────────────────────────────────────────────────────────────────────────────
 say "production: $INSTANCE ($ROLE)"
 LOCK_LINE="system=rawprod role=$ROLE sha=$FULL started=$STARTED by=$BY"
@@ -841,6 +917,9 @@ if [ "$ROLE" = main ]; then
       S3_BYTES=$(aws s3api head-object --profile "$PROFILE" --region "$REGION" --bucket "$BUCKET" --key "$B_KEY" --query ContentLength --output text) \
         || die "s3://$BUCKET/$B_KEY cannot be read back. No deploy was started"
       [ "$S3_BYTES" = "$B_BYTES" ] || die "s3://$BUCKET/$B_KEY is $S3_BYTES bytes and the box dumped $B_BYTES. No deploy was started"
+      # The box checks a floor too, but that is the box's word about its own run. Non-empty is judged here.
+      case "$S3_BYTES" in ''|*[!0-9]*) die "s3://$BUCKET/$B_KEY has no readable size ('$S3_BYTES'). No deploy was started" ;; esac
+      [ "$S3_BYTES" -ge "$MIN_BACKUP_BYTES" ] || die "s3://$BUCKET/$B_KEY is $S3_BYTES bytes, under the floor of $MIN_BACKUP_BYTES: that is not this database. No deploy was started"
       B_STAMP=$(basename "$B_KEY" .dump)
       [ ! "$B_STAMP" \< "$STAMP" ] || die "the backup object $B_KEY is older than this ship ($STAMP). No deploy was started"
       meta backup "s3://$BUCKET/$B_KEY"; meta backup_line "$LINE"

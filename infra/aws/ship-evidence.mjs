@@ -20,7 +20,7 @@
 // the fact, not an operator who rewrites it on purpose. "One proof per commit" rests on it: an --apply
 // straight after a dry run reuses the dry run's proof and does not build and test the same commit twice.
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -138,4 +138,7 @@ function main(argv) {
   return 2;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) process.exit(main(process.argv.slice(2)));
+// Run as a command, compared by real path: macOS reaches /tmp and /var through /private, and a plain
+// string compare made the CLI a silent no-op there, exit 0 and no output (SHIP-RP review).
+const invokedDirectly = () => { try { return realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if (process.argv[1] && invokedDirectly()) process.exit(main(process.argv.slice(2)));

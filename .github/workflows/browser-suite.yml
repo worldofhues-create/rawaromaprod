@@ -5,6 +5,10 @@ on:
   pull_request:
   push:
     branches: [main]
+  # SHIP-RP: infra/aws/ship.sh runs no browser, so the walks run here every night on main and report.
+  schedule:
+    - cron: '30 20 * * *'
+  workflow_dispatch:
 jobs:
   walks:
     runs-on: ubuntu-latest

