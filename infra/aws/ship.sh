@@ -167,7 +167,10 @@ run_gate() { # name, detail, command...
   set -e
   if [ "$rc" -ne 0 ]; then
     gate "$name" FAILED "$((SECONDS - t0))" "exit $rc"
-    tail -30 "$log" | sed 's/^/        /' >&2
+    # The lines that say what broke, then the end: a recursive pnpm log is mostly the packages that passed.
+    grep -n -i -E 'error|FATAL|^not ok|REFUSED|LOST|NOT IDEMPOTENT' "$log" | head -12 | sed 's/^/        /' >&2 || true
+    echo "        ..." >&2
+    tail -8 "$log" | sed 's/^/        /' >&2
     die "$name failed (exit $rc). Full output: $(evidence_path "$log")"
   fi
   gate "$name" ok "$((SECONDS - t0))" "$detail"
