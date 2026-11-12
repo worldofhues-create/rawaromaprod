@@ -180,6 +180,25 @@ test('every always-on test in the shipped list exists, and every line says why',
   }
 });
 
+test('the shipped sensitive list covers money, auth and stock as well: the three LD-7 names, not only the schema', () => {
+  // LD-7: "the whole API suite still runs when a change touches money, auth, stock, a migration or the
+  // bridge". The first list named stock as one cluster and money not at all.
+  const list = parseAlwaysList(readFileSync(ALWAYS_FILE, 'utf8'));
+  const hit = (p: string) => list.sensitive.some((s: { re: RegExp }) => s.re.test(p));
+  for (const p of [
+    'backend/cluster-procurement/src/vendor/vendor-price.service.ts',
+    'backend/cluster-sales/src/orders/order.service.ts',
+    'backend/cluster-production/src/picking/pick.service.ts',
+    'backend/api/src/fg-stock/fg-stock.service.ts',
+    'backend/api/src/consumption/consumption.service.ts',
+    'backend/api/src/produce/produce-sweep.service.ts',
+    'backend/api/src/inventory-view/stock-position.ts',
+    'backend/api/src/floor/lot-split.service.ts',
+    'backend/api/src/policy/policy-engine.ts',
+    'backend/api/src/masking/mask.ts',
+  ]) assert.ok(hit(p), `${p} must mean the whole suite`);
+});
+
 test('the shipped sensitive list covers migrations, the schema, the bridge, sign-in, stock and the vault', () => {
   const list = parseAlwaysList(readFileSync(ALWAYS_FILE, 'utf8'));
   const hit = (p: string) => list.sensitive.some((s: { re: RegExp }) => s.re.test(p));

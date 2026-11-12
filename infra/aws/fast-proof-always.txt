@@ -59,6 +59,16 @@ sensitive backend/api/src/relay/**              # the signed relay
 sensitive backend/api/src/crypto/**             # the encrypted console tunnel
 sensitive backend/api/src/idempotency/**        # a retried write must not happen twice
 sensitive backend/cluster-inventory/**          # stock movements
+sensitive backend/cluster-production/**         # picking and mixing draw raw stock down; a batch makes finished stock
+sensitive backend/api/src/fg-stock/**           # finished-goods stock
+sensitive backend/api/src/consumption/**        # what a batch consumed, posted against stock
+sensitive backend/api/src/produce/**            # the sweep that turns a finished batch into stock
+sensitive backend/api/src/inventory-view/**     # the stock position every console reads
+sensitive backend/api/src/floor/**              # lot splits and the floor queue move material between lots
+sensitive backend/cluster-procurement/**        # money: vendor prices and purchase orders
+sensitive backend/cluster-sales/**              # money: what is sold, at what price
+sensitive backend/api/src/policy/**             # who may do what: the policy engine behind every guard
+sensitive backend/api/src/masking/**            # what a role may not see of a material
 sensitive backend/cluster-formula/**            # the formula vault
 sensitive backend/api/src/vault-*.ts            # the vault process entry points
 sensitive backend/api/src/main.ts               # boot of the main API
