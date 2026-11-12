@@ -1089,4 +1089,8 @@ test('DEPLOY_AWS.md tells the operator about ship.sh, the lock and the override'
   assert.match(doc, /\/run\/lock\/raw-host-ship\.lock/);
   assert.match(doc, /ship\.sh --unlock/);
   assert.match(doc, /fast-proof-always\.txt/);
+  assert.match(doc, /ship\.sh --rollback --apply/);
+  assert.match(doc, /infra\/aws\/nightly-proof\.sh/);
+  // Alembic's ship.sh reads the ship lock and never writes it (its own header says so).
+  assert.doesNotMatch(doc, /takes the same\s+file with `system=alembic`/);
 });
