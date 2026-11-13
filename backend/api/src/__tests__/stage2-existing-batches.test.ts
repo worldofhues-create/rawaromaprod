@@ -17,7 +17,6 @@ import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import 'reflect-metadata';
-import { sql as dsql } from 'drizzle-orm';
 import { assertNotMacerating, fgPromiseBlockOf, type BridgeEmitTx } from '@core/backend-kernel';
 import { BatchService as ProductionBatchService } from '../../../cluster-production/src/batch/batch.service.js';
 import { BatchService as PackagingBatchService } from '../../../cluster-packaging/src/batch/batch.service.js';

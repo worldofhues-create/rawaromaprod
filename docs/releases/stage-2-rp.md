@@ -223,6 +223,37 @@ Settings are data, on screens:
 **Everyone**
 - The browser tab and the installed app icon are the Shell Fluke.
 
+### What changes on the floor on day one: the batches that already exist
+
+Established by `backend/api/src/__tests__/stage2-existing-batches.test.ts` (8 tests, 8 passed), run on a
+database built at `ee14722` (`pnpm db:migrate`), given one batch in each state production can hold
+(`backend/test-support/fixtures/stage2-legacy-batches.sql`, only columns that exist at `ee14722`), and
+THEN migrated forward with this branch (11 blocks, exit 0), the test finding the rows already there
+(`STAGE2_LEGACY_TAG`). It passes the same way in the ordinary suite. The rest rule in force is `maceration.rest`
+v1: 45 days, 1 day at the least.
+
+| A batch that is... | What the release does to it | What a person sees and must do |
+|---|---|---|
+| **Mixed, nothing decided** (PRODUCED) | Nothing at deploy. Its rest is counted **from the day it is sent into maceration after the deploy**, not from its mix date: a batch mixed ten days earlier shows day 1 of 45 on that day, the ten days are not counted | It cannot be sent to rest, or released, on a typed result. QC takes QC 1 as a round on the product's checkpoints (with the retained reference), then sends it to maceration. Then 45 days, or an early release by two people |
+| **Mixed, QC 1 typed as PASS** | The typed pass is ignored: QC 1 now means an approved round | The refusal says QC 1 must be approved as a round before maceration. QC takes the round again; nothing else is lost |
+| **Resting under a run opened before the deploy** (its formula had a maceration setting) | The run is left as it is. It keeps its **recorded start** and its **own days** (the formula's, for example 14), not 45. Its rest counts from its recorded start | If the rest is served: a typed QC 2 does not release it. QC retains a sample of the batch, takes QC 2 as a round, then releases. If not served: it waits out its own days, or two people release it early with a reason. Alembic is told its own minimum and rule version 0 (a run from before the rule), and is told "early release" when that is what happened |
+| **In maceration with no rest run** (its formula had no setting, so it was never made to rest) | **Treated as never rested.** It is not released: "has not rested. Every batch rests 45 days ... Send it into maceration after QC 1". Its status already says IN_MATURATION, and pressing it again does nothing | The floor must press **Hold**, then send it into maceration again, after QC 1 as a round. The 45 days start that day; the days since it was mixed are not counted. This is the one state with no one-step path |
+| **Released and filled** | Not held. Its finished lot is numbered by the server when the lot is made | The finished-goods lot has no rest and no QC round on its record: the receipt Alembic gets says nothing about them (null), not a made-up one |
+| **A finished-goods batch made before the deploy** | Keeps the lot number that was typed, flagged "not assigned by the server" | Nothing. It is not renumbered |
+| Every oil batch's made quantity | The migration backfills each existing batch's MADE row in the oil ledger | Nothing |
+
+**Can the rest rule apply only to batches mixed after a date? No, the code does not offer it.** A rule must
+say `appliesTo: "every_batch"` (`restRuleProblems` refuses anything else) and carries a number of days,
+no date; the rule in force is read at the moment a batch is sent into maceration. What the Rules screen
+can do today is shorten `minDays` (to 1 at the least) for a stated period. That applies to every batch
+that enters maceration while it is in force, new or old, and not to a run already open (each keeps its own days).
+`qc.reference_required` can be switched off the same way, for every batch. The smallest change that would
+do it, not built: allow `appliesTo: "mixed_on_or_after"` with a `fromDate`, compare it with
+`production.oil_batch_master.produced_dt` where `macerationOnTransition` opens a run (batches older than the date
+rest by their formula's setting only, as before), take the same field in `restRuleProblems` and the Rules screen
+form, and do the same for the reference rule, which the QC gate reads in the same place. It is a change to a
+rule that today refuses it on purpose ("the promise is about every batch"), so it is the owner's call.
+
 ---
 
 ## 7. The ship tooling: exact commands for a dry run
@@ -323,7 +354,7 @@ All on this laptop, 14 Nov 2026, Node 22.22.2, a private PostgreSQL 17.11 with P
 | The deploy's real path | production's schema + `db:migrate` + **only** `stage-2-rp-2026-11-14-permission-grants.sql` (no seed) | 21 roles, 345 permissions, 1,189 grants: identical to a fresh seed of this branch. A second run changes nothing; the stock-fix file then adds nothing |
 | Bridge, against Alembic's real parsers | RawProd's `buildFgBatchReceived` and `costFact` output, parsed by `packages/domain/src` at `origin/lane/stock-e2e-2`, `origin/lane/imports`, `origin/lane/prom` | section 1.2. The repository's own guards (`contract-guard-*.test.ts`, five files) pass in the whole suite; `contract-guard-alembic-mirror.test.ts` pins Alembic's lists by hand, and its pins for the six promise types and for `material.cost.recorded` match `lane/prom` and `lane/imports`, not `lane/stock-e2e-2` |
 | The floor walks named for this release | `flow-raw-labels`, `stock2`, `floor-stations`, `imports` (factory and vault), `flow-finished-labels`, `stk38-mixer-screens`, at 1440 and 375 | all pass. `flow-finished-labels` stopped at the Packing station and two `stock2` padding checks failed at 375 before `5311b31` |
-| The whole browser suite | `pnpm e2e:up`, then `playwright test -c e2e/playwright.config.ts`, fresh stack | exit 1: **278 walks, 260 passed, 18 failed** (7.4 min) at `2417e6e`. The 18 are nine walks at both widths, one cause ("Not done", item 2). The first whole run was 250 of 278; `7f78ab0` and the commit after it are the difference |
+| The whole browser suite | `pnpm e2e:up`, then `playwright test -c e2e/playwright.config.ts`, fresh stack, at `31a46f4` | exit 0: **278 walks, 278 passed, 0 failed** (6.4 min). The nine walks that were red are green at 1440 and 375 (see "Found while proving"). The run before the last fix was 276 of 278: the stock-cover walk |
 
 One correction to the record: the script that ran the migration proofs compared two schemas by a hash of
 an unordered aggregate and reported two false differences (its exit code was 1 for that reason). Both
@@ -337,6 +368,13 @@ comparisons were redone as sorted `diff`s, which is what the table reports.
 - A rollback dropped an index an older migration owns (`9cd3085`).
 - `pnpm boundaries` was red on `ee14722` (`2be25ae`).
 - The form sheet dropped a textarea's given value (`5311b31`).
+- `1a25a36`'s test left an unused import, so `pnpm typecheck` was red on the head the ship tool saw
+  (`stage2-existing-batches.test.ts(20,1): error TS6133`, gate "typecheck", exit 2). Removed; typecheck exit 0.
+- The stock-cover walk (`pfd-floor`, `defaultLeadDays`) passed only while no QC time was measured. Once the nine
+  walks finish real batches, QC days are measured (a round seconds after the mix) and read 0, the rule's
+  `defaultLeadDays` no longer applies, and the product read Covered. The walk's rule now also sets `extraDays`.
+  Open question, not changed: `cover.service.ts` measures QC days from the mix to every APPROVED round, QC 2
+  included, and then adds the formula's maceration days, so a real 45-day rest may be counted twice in a lead time.
 
 ### Not done, or not green
 
@@ -347,24 +385,18 @@ comparisons were redone as sorted `diff`s, which is what the table reports.
    tests and migrations forward) have not run under the tool. Each was run by hand and is in the table
    above. After the push, run the two dry runs in section 7 before `--apply`. Evidence of the refusal:
    `~/.rawprod/ship-evidence/d848c03b9c5e25d0ef9fd97193dff27f7a9e07bb/20261113T202539Z-main-dry-run/ship.json`.
-2. **Nine browser walks are red, at both widths** (18 of 278): `batch-coa`, `factory-defects:63`,
-   `filling-packaging`, `finished-goods` (two), `mixing`, `production-qc-capa`, `sales-dispatch`,
-   `traceability`. One cause: the walk harness (`e2e/harness/chain.ts` `releasedOil`,
-   `releasedFinishedBatch`) and the `mixing` walk still drive the release as it was before the promises:
-   a typed batch number, a typed QC pass, release with no rest. The server refuses the first step
-   (`POST /v1/oil-batches -> 400 The batch number is assigned by the server: leave it out
-   (fill.lot_server_assigned)`). They were red on `lane/promises-rp` itself; that lane did not touch the
-   harness. Making them green means driving the promise process in the chain (a checkpoint set with a
-   REFERENCE checkpoint, a QC 1 round, an early release asked by one person and approved by another, a
-   retained sample, a QC 2 round) and having eight walks read the number the server assigned instead of
-   one they typed. Not done: it is a rewrite of the chain, not a fix, and the screens these walks cover
-   (finished goods, batch certificates, filling, dispatch, traceability) are therefore **not proved in a
-   browser on this branch**. The services behind them pass in the unit suite; the screens are not walked.
+2. **The nine browser walks are green** (it was 18 of 278 red at `2417e6e`). The chain (`e2e/harness/chain.ts`) now drives
+   the process the branch enforces: the number the server assigns; QC 1 as a round on the product's checkpoints
+   (REFERENCE included, `NO_REFERENCE_YET` because the chain product has no retained bottle); the rest ended
+   by the **early release** (QC asks with a reason, the owner approves), with the 45-day rule untouched; a
+   retained sample; QC 2 after the rest; release. No walk waits and no rule is weakened. The SKU states
+   its net content and the fill walk counts whole packs (units are real). See "Found while proving".
 3. **Neither Alembic lane named for this release accepts the six promise facts** (section 1.2). Not a
    defect on this side; a condition of deploying it.
-4. Two answers that name a material are kept in an idempotency store, each for the person who made the
-   request: the lot-label answer of `POST /v1/floor/lots/:id/barcode` (a role that may read names), and the
-   Vault's allergen upload. Neither is the mixer's reveal (that one is now never stored). Not changed.
+4. (Done) The lot-label answer of `POST /v1/floor/lots/:id/barcode` and the Vault's allergen and IFRA upload are
+   `@NoStoredReply` (`f1135b4`); `stage2-no-stored-reply.test.ts` fails without it (proved by restoring the old
+   controller). No stored reply is needed for correctness: the lot route is a get-or-create (a lot has one
+   barcode), the upload a preview or a replace by the same file; the in-flight claim still stops two copies at once.
 5. Open from the rehearsal and not in this release: STK-32 (a bulk lot needs a bill of packaging), STK-39
    (only an admin can sign a typed weight in the console), STK-41 (the product label is a preview).
 6. The finished-goods label is corrected, not redesigned: real codes and the signed QR are a later unit.
