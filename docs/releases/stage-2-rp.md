@@ -340,7 +340,13 @@ comparisons were redone as sorted `diff`s, which is what the table reports.
 
 ### Not done, or not green
 
-1. **The ship tooling's dry run did not run.** SHIP_RESULT
+1. **The ship tooling's dry run did not run.** `infra/aws/ship.sh d848c03b --base ee14722`
+   was run on the commit before this note's last edit and stopped at its first gate, as designed, exit 1:
+   `FATAL: commit d848c03b is on no branch of origin, so the box cannot fetch it. Push it first`. The
+   release build cannot push RawProd, so gates (b) to (d) of the tool (its own install, typecheck, build,
+   tests and migrations forward) have not run under the tool. Each was run by hand and is in the table
+   above. After the push, run the two dry runs in section 7 before `--apply`. Evidence of the refusal:
+   `~/.rawprod/ship-evidence/d848c03b9c5e25d0ef9fd97193dff27f7a9e07bb/20261113T202539Z-main-dry-run/ship.json`.
 2. **Nine browser walks are red, at both widths** (18 of 278): `batch-coa`, `factory-defects:63`,
    `filling-packaging`, `finished-goods` (two), `mixing`, `production-qc-capa`, `sales-dispatch`,
    `traceability`. One cause: the walk harness (`e2e/harness/chain.ts` `releasedOil`,
