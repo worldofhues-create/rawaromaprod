@@ -188,3 +188,43 @@ test('hostile: the grant is the mixer\'s alone, and it is not the everywhere-rev
   assert.deepEqual(new Reflector().get(META_PERMISSIONS, FloorController.prototype.revealLog), ['production:floor_job:write']);
   assert.ok(!grantOf('mixer').includes('production:floor_job:write'));
 });
+
+/* ── STAGE-2-RP (c), STK-38: what the two screens read ────────────────────────────────────────────
+ * The assign and reveal routes had no screen. The supervisor's control needs the people it can name
+ * and who holds the batch now; the mixer's station needs nothing new. */
+test('STK-38: the supervisor\'s control reads who may mix a batch and who holds it, by name, and never a material', async () => {
+  const { job } = await jobAtMix();
+  const before = await stations.mixAssignment(job.floorJobId);
+  assert.equal(before.assigned, null);
+  assert.equal(before.jobNo, job.jobNo);
+  const byId = new Map(before.mixers.map((m) => [m.userId, m]));
+  assert.ok(byId.has(mixerA.userId) && byId.has(mixerB.userId), 'every active mixer is offered');
+  assert.match(byId.get(mixerA.userId)!.name, /^Mixer /);
+  assert.ok(!byId.has(picker.userId) && !byId.has(verifier.userId), 'only people with the mixer role');
+  noNames('the assignment view', before);
+
+  await stations.assignMixer(job.floorJobId, mixerA.userId, admin);
+  const after = await stations.mixAssignment(job.floorJobId);
+  assert.equal(after.assigned?.userId, mixerA.userId);
+  assert.equal(after.assigned?.name, byId.get(mixerA.userId)!.name);
+  assert.ok(after.assigned?.assignedAt, 'when it was assigned');
+  assert.equal(after.mixingStarted, false);
+  await stations.doStep(job.floorJobId, 1, mixerA);
+  assert.equal((await stations.mixAssignment(job.floorJobId)).mixingStarted, true, 'once a step is done the batch stays with its mixer');
+});
+
+test('STK-38: an inactive mixer is not offered', async () => {
+  const { job } = await jobAtMix();
+  const gone = await user('mixer');
+  await sql()`update iam.user_master set is_active = false where user_id = ${gone.userId}`;
+  assert.ok(!(await stations.mixAssignment(job.floorJobId)).mixers.some((m) => m.userId === gone.userId));
+});
+
+test('STK-38: the reveal\'s answer is never kept by the idempotency store (a re-send must run, be checked and be logged again)', async () => {
+  const { META_NO_STORED_REPLY, META_PERMISSIONS } = await import('@core/backend-kernel');
+  const { FloorController } = await import('../floor/floor.controller.js');
+  assert.equal(Reflect.getMetadata(META_NO_STORED_REPLY, FloorController.prototype.revealCurrentStep), true);
+  // and the read the supervisor's control makes is the supervisor's, like the assignment itself
+  assert.deepEqual(Reflect.getMetadata(META_PERMISSIONS, FloorController.prototype.mixAssignment), ['production:floor_job:write']);
+  assert.deepEqual(Reflect.getMetadata(META_PERMISSIONS, FloorController.prototype.assignMixer), ['production:floor_job:write']);
+});

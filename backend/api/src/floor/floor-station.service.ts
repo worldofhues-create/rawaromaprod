@@ -759,6 +759,38 @@ export class FloorStationService {
     });
   }
 
+  /** GET /v1/floor/jobs/:id/mix/assignment — STAGE-2-RP (STK-38): what the supervisor's "Assign mixer"
+   *  control shows: who holds the batch, and the people who may be given it. People only (a user id
+   *  and the name on their account); no material, no step, no code. `cannot` says why a mixer may not
+   *  take THIS batch, in the words assignMixer refuses with, so the control never offers a refusal. */
+  async mixAssignment(jobId: string) {
+    const j = await this.job(jobId);
+    const [a] = await this.sql<{ who: string | null; at: string | null; by: string | null; done: number }[]>`
+      select fj.mixer_assigned_to as who, fj.mixer_assigned_dt::text as at, fj.mixer_assigned_by as by,
+             (select count(*)::int from production.floor_mix_step s where s.floor_job_id = fj.floor_job_id and s.done_dt is not null) as done
+        from production.floor_job fj where fj.floor_job_id = ${jobId}`;
+    const people = await this.sql<{ id: string; name: string | null }[]>`
+      select distinct u.user_id::text as id, u.user_name as name
+        from iam.user_master u join iam.user_role_mapping urm on urm.user_id = u.user_id
+        join iam.role_master r on r.role_id = urm.role_id
+       where lower(r.role_code) = 'mixer' and coalesce(u.is_active, true)
+       order by 2, 1`;
+    const nameOf = (id: string | null) => (id ? people.find((p) => p.id === id)?.name ?? null : null);
+    const assignedName = a?.who
+      ? nameOf(a.who) ?? (await this.sql<{ name: string | null }[]>`select user_name as name from iam.user_master where user_id::text = ${a.who}`)[0]?.name ?? null
+      : null;
+    return {
+      floorJobId: jobId, jobNo: j.job_no, stage: j.stage,
+      assigned: a?.who ? { userId: a.who, name: assignedName, assignedAt: a.at, assignedBy: a.by } : null,
+      /** true once a mixing step is done: the batch then stays with its mixer (assignMixer refuses a change). */
+      mixingStarted: (a?.done ?? 0) > 0,
+      mixers: people.map((p) => ({
+        userId: p.id, name: p.name ?? 'A mixer with no name on their account',
+        cannot: p.id === j.verified_by || p.id === j.picked_by ? 'They picked or verified this job, so they cannot mix it.' : null,
+      })),
+    };
+  }
+
   /** POST /v1/floor/jobs/:id/mix/reveal — the current step's material name, to its assigned mixer. */
   async revealCurrentStep(jobId: string, body: { seq?: number }, principal: AuthPrincipal) {
     // Defence in depth: the route already demands this permission.

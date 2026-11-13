@@ -573,12 +573,37 @@
     var res = await call('/v1/floor/jobs/' + id + '/mix');
     if (res.status >= 400) { V.innerHTML = errBox(err(res, 'This job cannot be opened.')); return; }
     var d = data(res), next = d.steps.filter(function (s) { return !s.done; })[0];
+    /* STAGE-2-RP (STK-38; owner decision D-1): the mixer assigned to this batch may see the NAME of the
+     * material on the step they are doing: one name, beside its floor code, asked for by a press. The
+     * server decides (assigned mixer, current step, a running line) and logs every view. This screen
+     * keeps no copy: the name is text in one element, which goes when the step is confirmed (the view
+     * is drawn again), when the screen is left, or when the tab is hidden. It is never put in a
+     * variable that outlives the press, in browser storage, or on a label. */
+    var showName = can('production:floor_mix:reveal_name');
     V.innerHTML = '<div style="display:flex;flex-direction:column;gap:14px;max-width:880px"><div class="card" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">' + code(d.jobNo) + '<span>tote ' + esc(d.tote || '—') + '</span>' + btn('fl-rpv', 'Reprint VERIFIED', 'sm') + '</div>' +
       '<div class="card" style="display:flex;flex-direction:column;gap:10px">' + d.steps.map(function (s) {
         return '<div style="display:flex;gap:12px;align-items:center;padding:8px 0;border-bottom:1px solid var(--line)' + (s.next ? ';font-weight:600' : '') + '"><b style="font-size:20px">' + s.seq + '</b><span style="flex:1;font-size:18px">' + esc(s.instruction) + '</span>' +
-          (s.done ? chip('g', 'Done') : s.next ? btn('fl-st-' + s.seq, 'Done', 'p', big(' data-step="' + s.seq + '"')) : chip('n', 'Later')) + '</div>';
+          (s.done ? chip('g', 'Done') : s.next ? (showName && /^Add line \d+:/.test(s.instruction) ? btn('fl-rv', 'Show the name', '', big(' data-reveal="' + s.seq + '"')) : '') + btn('fl-st-' + s.seq, 'Done', 'p', big(' data-step="' + s.seq + '"')) : chip('n', 'Later')) + '</div>' +
+          // The name lands here, under the step it belongs to, and nowhere else.
+          (s.next ? '<div id="fl-reveal" role="status" aria-live="polite" style="display:none;padding:10px 0;font-size:20px"></div>' : '');
       }).join('') + '</div><div id="fl-err" role="alert" style="color:var(--red);min-height:20px"></div>' + (next ? '' : btn('fl-mdone', 'Finish and print MIXED', 'p', big())) + '</div>';
     $('fl-rpv').onclick = function () { reprint(id, 'VERIFIED'); };
+    var rv = $('fl-rv');
+    if (rv) {
+      var hide = function () { var box = $('fl-reveal'); if (box) { box.textContent = ''; box.style.display = 'none'; } };
+      var onHidden = function () { if (!$('fl-reveal')) { document.removeEventListener('visibilitychange', onHidden); return; } if (document.hidden) hide(); };
+      document.addEventListener('visibilitychange', onHidden);
+      rv.onclick = async function () {
+        $('fl-err').textContent = '';
+        var r = await call('/v1/floor/jobs/' + id + '/mix/reveal', { method: 'POST', body: { seq: +rv.getAttribute('data-reveal') } });
+        var box = $('fl-reveal'); if (!box) return; // the step was confirmed, or the screen left, while it was asked
+        if (r.status >= 400) { hide(); $('fl-err').textContent = err(r, 'The name was not shown.'); return; }
+        var o = data(r) || {};
+        box.innerHTML = (o.code ? code(o.code) + ' ' : '') + '<b style="font-size:22px">' + esc(o.name || 'No name on file for this material') + '</b>' +
+          '<div style="font-size:14px;color:var(--ink-3)">Shown to you for step ' + esc(o.seq) + ' only, until you press Done. This view is logged.</div>';
+        box.style.display = 'block';
+      };
+    }
     V.querySelectorAll('[data-step]').forEach(function (b) { b.onclick = async function () {
       var r = await call('/v1/floor/jobs/' + id + '/mix/steps/' + b.getAttribute('data-step'), { method: 'POST' });
       if (r.status >= 400) { $('fl-err').textContent = err(r, 'That step was not recorded.'); return; }
@@ -591,6 +616,28 @@
       if (r.status >= 400) { m.disabled = false; $('fl-err').textContent = err(r, 'The mix was not finished.'); return; }
       toast('Mixed: batch ' + data(r).batchNo, 'good'); printLabel(data(r).label); loadView();
     };
+  }
+
+  /* ── STAGE-2-RP (STK-38): assign a batch to one mixer ─────────────────────────────────
+   * The route existed (STK-15: POST /v1/floor/jobs/:id/mix/assign) and nothing called it, so no batch
+   * had a mixer and the mixer's reveal refused everyone. The sheet says who holds the batch now and
+   * offers the people who may take it, by the name on their account; the server keeps every rule
+   * (an active mixer, not the job's picker or verifier, no change once mixing has started). */
+  async function assignMixer(jobId, jobNo, done) {
+    var r = await call('/v1/floor/jobs/' + jobId + '/mix/assignment');
+    if (r.status >= 400) { toast(err(r, 'The mixers did not load. Nothing was changed.'), 'bad'); return; }
+    var a = data(r) || {}, free = (a.mixers || []).filter(function (m) { return !m.cannot; });
+    var now = a.assigned ? 'Assigned to ' + (a.assigned.name || 'a person with no name on their account') + (a.assigned.assignedAt ? ' since ' + localTime(a.assigned.assignedAt) : '') + '.' : 'No mixer is assigned yet.';
+    if (a.mixingStarted) { askForm({ title: 'Mixer for ' + jobNo, submit: 'Close', intro: now + ' Mixing has started, so this batch stays with its mixer.', fields: [], onSubmit: function (v, fail, close) { close(); } }); return; }
+    if (!free.length) { askForm({ title: 'Mixer for ' + jobNo, submit: 'Close', intro: now + ' Nobody can be assigned: no active person holds the mixer role' + ((a.mixers || []).length ? ' other than the people who picked or verified this job' : '') + '. Give someone the mixer role on Platform first.', fields: [], onSubmit: function (v, fail, close) { close(); } }); return; }
+    askForm({ title: 'Assign mixer for ' + jobNo, submit: 'Assign', intro: now + ' Only the assigned mixer moves this batch\'s steps, and only they are shown the name of the material on the step they are doing. Each time a name is shown it is logged.',
+      fields: [{ n: 'userId', l: 'Mixer', t: 'select', req: true, opts: free.map(function (m) { return [m.userId, m.name]; }) }],
+      onSubmit: async function (v, fail, close) {
+        var res = await call('/v1/floor/jobs/' + jobId + '/mix/assign', { method: 'POST', body: { userId: v.userId } });
+        if (res.status >= 400) { fail(err(res, 'The mixer was not assigned.')); return; }
+        var who = free.filter(function (m) { return m.userId === v.userId; })[0];
+        close(); toast(jobNo + ' is assigned to ' + (who ? who.name : 'the mixer') + '.', 'good'); if (done) done();
+      } });
   }
 
   /* ── Floor queue (overview + open a job from a run) ─────────────────────────────────── */
@@ -623,6 +670,9 @@
             (canOpen ? '<div style="margin-top:6px">' + btn('fl-res-' + j.floorJobId, 'Resume the line', 'p', ' data-resume="' + esc(j.floorJobId) + '" data-jobno="' + esc(j.jobNo) + '" data-why="' + esc(j.stopped) + '"') + '</div>' : '') : '') + '</td><td>' + esc(({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage) + '</td><td>' + esc(j.orderRef || '') + '</td><td>' + esc(j.why) + '</td><td>' + fin +
           // SCAN-11: the job ticket (its job number is what the next station's find field takes).
           '<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap">' + SB('fl-jt-' + j.floorJobId, { labelKind: 'floor_job', subjectRef: j.jobNo, code: j.jobNo, title: 'FLOOR JOB', defaultStation: 'Floor', lines: [['Order', j.orderRef], ['Stage', ({ PICK: 'Pick', VERIFY: 'Verify', MIX: 'Mix', DONE: 'Done' })[j.stage] || j.stage]] }) +
+          // STAGE-2-RP (STK-38): a supervisor gives the batch to one mixer, by person. Until a job has a
+          // mixer, nobody is shown a material name on it (the mixer's one-name reveal, on the Mix station).
+          (canOpen && j.stage !== 'DONE' ? btn('fl-as-' + j.floorJobId, 'Assign mixer', 'sm', ' data-assign="' + esc(j.floorJobId) + '" data-jobno="' + esc(j.jobNo) + '"') : '') +
           '</div></td></tr>';
       }).join('') : '<tr><td colspan="6">Nothing on the floor.</td></tr>') + '</tbody></table></div>' +
       ((d.planned || []).length ? '<div class="card" id="fl-planned"><b>Approved stock-cover suggestions (below every customer order)</b>' + d.planned.map(function (s) {
@@ -632,6 +682,9 @@
     V.querySelectorAll('[data-resume]').forEach(function (b) { b.onclick = function () {
       var id = b.getAttribute('data-resume');
       lineStopped(V, id, { jobNo: b.getAttribute('data-jobno'), stop: null }, function () { viewQueue(item, V); }, b.getAttribute('data-why'));
+    }; });
+    V.querySelectorAll('[data-assign]').forEach(function (b) { b.onclick = function () {
+      assignMixer(b.getAttribute('data-assign'), b.getAttribute('data-jobno'), function () { viewQueue(item, V); });
     }; });
     var f = $('fl-new');
     if (f) f.onsubmit = async function (e) {

@@ -5,7 +5,7 @@
  * their own pick.
  */
 import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, NoStoredReply, Permissions, type AuthPrincipal } from '@core/backend-kernel';
 import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService, type LabelKind } from './floor-station.service.js';
 import { FloorQueueService } from './floor-queue.service.js';
@@ -219,10 +219,24 @@ export class FloorController {
     return this.stations.assignMixer(id, String(body?.userId ?? ''), p);
   }
 
+  /** STAGE-2-RP (STK-38): who holds the batch and who may be given it, for the supervisor's control. */
+  @Permissions('production:floor_job:write')
+  @Get('v1/floor/jobs/:id/mix/assignment')
+  mixAssignment(@Param('id', ParseUUIDPipe) id: string) {
+    return this.stations.mixAssignment(id);
+  }
+
   /** STOCK-FIX-RP (STK-15, D-1): the current step's material name, to the assigned mixer only.
-   *  Never cached: the name is for the screen in front of the mixer, for this step. */
+   *  Never cached: the name is for the screen in front of the mixer, for this step.
+   *  STAGE-2-RP (STK-38): and never kept by the idempotency store. The console sends an
+   *  Idempotency-Key with every POST, so without @NoStoredReply the name sat in
+   *  platform.idempotency_key in plain text, and a re-send under the same key was answered from that
+   *  copy: no current-step check, no assigned-mixer check, no line in the reveal log. A re-send now
+   *  runs again, is checked again and is logged again (the route is safe to repeat: it only reads
+   *  and logs). */
   @Permissions('production:floor_mix:reveal_name')
   @Header('Cache-Control', 'no-store')
+  @NoStoredReply()
   @Post('v1/floor/jobs/:id/mix/reveal')
   revealCurrentStep(@Param('id', ParseUUIDPipe) id: string, @Body() body: { seq?: unknown }, @CurrentUser() p: AuthPrincipal) {
     if (body?.seq !== undefined && !(typeof body.seq === 'number' && Number.isInteger(body.seq))) throw new BadRequestException('seq is a step number.');
