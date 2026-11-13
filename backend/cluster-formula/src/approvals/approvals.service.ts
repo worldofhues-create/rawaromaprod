@@ -137,6 +137,27 @@ export class ApprovalsService {
         );
       }
 
+      // STOCK-FIX-RP (STK-5): VAULT.md rule 2, a recipe totals 100 %. The rehearsal committed one at
+      // 99.96 % with a warning and a second person approved it; every batch from it would have been
+      // short of its own size. Summed inside the Vault, exactly (micro-percent); the refusal shows the
+      // total and the difference to the approver, and the audit row records the refusal without them.
+      const total = await this.vault.sealedTotalMicro(tx, versionId);
+      if (total && total.lines > 0 && total.micro !== 100_000_000) {
+        await this.vault.writeStandaloneAudit({
+          actorId: principal.userId,
+          action: 'formula.version.approve.total_refused',
+          entityType: 'formula_version',
+          entityId: versionId,
+          reason: 'sealed shares do not total 100 %',
+          result: 'refuse',
+        });
+        const pct = (m: number) => `${(m / 1_000_000).toFixed(6).replace(/\.?0+$/, '')}%`;
+        const diff = total.micro - 100_000_000;
+        throw new ConflictException(
+          `this version's sealed shares total ${pct(total.micro)}, ${pct(Math.abs(diff))} ${diff < 0 ? 'short of' : 'over'} 100%: a recipe is approved only at exactly 100%. Correct it in a new version.`,
+        );
+      }
+
       const now = new Date();
 
       const approval = (

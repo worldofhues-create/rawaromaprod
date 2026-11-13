@@ -138,7 +138,8 @@ test('a formula sealed via AwsKmsAdapter (mocked KMS) decrypts through a FRESH A
   const version = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 1 }, formulator);
   await formulas.addIngredients(
     version.formulaVersionId,
-    { ingredients: [{ materialId, percentage: 42.5, sequenceNo: 1 }] },
+    // STOCK-FIX-RP (STK-5): approved only at exactly 100 %, so the probe line has a balance line.
+    { ingredients: [{ materialId, percentage: 42.5, sequenceNo: 1 }, { materialId: randomUUID(), percentage: 57.5, sequenceNo: 2 }] },
     formulator,
   );
   await formulas.finalizeVersion(version.formulaVersionId, formulator);
@@ -159,7 +160,7 @@ test('a formula sealed via AwsKmsAdapter (mocked KMS) decrypts through a FRESH A
   });
 
   assert.ok(decrypted, 'decryptVersion returned null — version not approved/locked?');
-  assert.equal(decrypted!.length, 1);
+  assert.equal(decrypted!.length, 2); // the probe line and its balance line (STK-5)
   assert.equal(decrypted![0]!.materialId, materialId);
   assert.equal(decrypted![0]!.percentage, 42.5);
 });

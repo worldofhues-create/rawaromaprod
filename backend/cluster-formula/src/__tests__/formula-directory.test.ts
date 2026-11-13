@@ -60,7 +60,8 @@ before(async () => {
   formulaId = f.formulaId;
   const v = await formulas.createVersion({ formulaId, versionNumber: 3 }, author);
   versionId = v.formulaVersionId;
-  await formulas.addIngredients(versionId, { ingredients: [{ materialId: uuidv7(), percentage: 2.5, sequenceNo: 1 }] }, author);
+  // STOCK-FIX-RP (STK-5): approved only at exactly 100 %, so the probe line has a balance line.
+  await formulas.addIngredients(versionId, { ingredients: [{ materialId: uuidv7(), percentage: 2.5, sequenceNo: 1 }, { materialId: uuidv7(), percentage: 97.5, sequenceNo: 2 }] }, author);
   await approvals.approveVersion(versionId, { remarks: SECRET_REMARK }, approver);
 });
 

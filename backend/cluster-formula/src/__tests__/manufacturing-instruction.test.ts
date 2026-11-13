@@ -74,7 +74,8 @@ async function approvedVersion(percentage: number): Promise<string> {
   const version = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 1 }, author);
   await formulas.addIngredients(
     version.formulaVersionId,
-    { ingredients: [{ materialId: REAL_MATERIAL_ID, percentage, sequenceNo: 1 }] },
+    // STOCK-FIX-RP (STK-5): approved only at exactly 100 %, so the probe line has a balance line.
+    { ingredients: [{ materialId: REAL_MATERIAL_ID, percentage, sequenceNo: 1 }, { materialId: uuidv7(), percentage: 100 - percentage, sequenceNo: 2 }] },
     author,
   );
   await approvals.approveVersion(version.formulaVersionId, {}, approver);
@@ -85,7 +86,7 @@ test('manufacturing instruction: resolves a coded quantity for the batch, never 
   const versionId = await approvedVersion(10); // 10% of the batch
   const instructions = await lookup.resolveManufacturingInstruction(versionId, 50, { actorId: approver.userId });
   assert.ok(instructions);
-  assert.equal(instructions!.length, 1);
+  assert.equal(instructions!.length, 2); // the probe line and its balance line (STK-5)
   const line = instructions![0]!;
   assert.equal(line.code, ALIAS_CODE);
   assert.equal(line.quantity, 5); // 10% of 50kg permitted batch quantity

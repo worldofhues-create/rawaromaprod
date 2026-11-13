@@ -76,7 +76,7 @@ async function newDraftVersion(formulaCode?: string): Promise<{ formulaId: strin
   );
   await formulas.addIngredients(
     version.formulaVersionId,
-    { ingredients: [{ materialId: uuidv7(), percentage: 10 }] },
+    { ingredients: [{ materialId: uuidv7(), percentage: 100 }] }, // STK-5: approved only at 100 %
     principalA,
   );
   return { formulaId: formula.formulaId, versionId: version.formulaVersionId, versionNumber };
@@ -218,11 +218,11 @@ test('lifecycle: a LOCKED version is still decryptable (VaultService accepts APP
 test('lifecycle: approving v2 auto-supersedes v1 (APPROVED prior) with supersededByVersionId set', async () => {
   const formula = await formulas.createFormula({ formulaCode: `LC-${uuidv7()}`, formulaName: 'Supersede test' }, principalA);
   const v1 = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 1 }, principalA);
-  await formulas.addIngredients(v1.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 5 }] }, principalA);
+  await formulas.addIngredients(v1.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 100 }] }, principalA); // STK-5: a whole recipe
   await approvals.approveVersion(v1.formulaVersionId, {}, principalB);
 
   const v2 = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 2 }, principalA);
-  await formulas.addIngredients(v2.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 7 }] }, principalA);
+  await formulas.addIngredients(v2.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 100 }] }, principalA); // STK-5: a whole recipe
   await approvals.approveVersion(v2.formulaVersionId, {}, principalB);
 
   const v1After = await formulas.getVersion(v1.formulaVersionId);
@@ -236,12 +236,12 @@ test('lifecycle: approving v2 auto-supersedes v1 (APPROVED prior) with supersede
 test('lifecycle: auto-supersede also fires when the prior current version was LOCKED', async () => {
   const formula = await formulas.createFormula({ formulaCode: `LC-${uuidv7()}`, formulaName: 'Supersede-locked test' }, principalA);
   const v1 = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 1 }, principalA);
-  await formulas.addIngredients(v1.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 5 }] }, principalA);
+  await formulas.addIngredients(v1.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 100 }] }, principalA); // STK-5: a whole recipe
   await approvals.approveVersion(v1.formulaVersionId, {}, principalB);
   await approvals.lockVersion(v1.formulaVersionId, {}, principalB);
 
   const v2 = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 2 }, principalA);
-  await formulas.addIngredients(v2.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 9 }] }, principalA);
+  await formulas.addIngredients(v2.formulaVersionId, { ingredients: [{ materialId: uuidv7(), percentage: 100 }] }, principalA); // STK-5: a whole recipe
   await approvals.approveVersion(v2.formulaVersionId, {}, principalB);
 
   const v1After = await formulas.getVersion(v1.formulaVersionId);

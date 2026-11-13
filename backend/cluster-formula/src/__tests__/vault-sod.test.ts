@@ -86,7 +86,8 @@ async function newDraftVersion(): Promise<{ formulaId: string; versionId: string
   );
   await formulas.addIngredients(
     version.formulaVersionId,
-    { ingredients: [{ materialId: uuidv7(), percentage: 12.5, sequenceNo: 1 }] },
+    // STOCK-FIX-RP (STK-5): approved only at exactly 100 %, so the probe line has a balance line.
+    { ingredients: [{ materialId: uuidv7(), percentage: 12.5, sequenceNo: 1 }, { materialId: uuidv7(), percentage: 87.5, sequenceNo: 2 }] },
     principalA,
   );
   return { formulaId: formula.formulaId, versionId: version.formulaVersionId };
@@ -169,7 +170,7 @@ test('vault audit: a successful decrypt writes an audit row carrying the caller\
 
   const reason = 'QA investigation — batch mismatch report #4471';
   const result = await formulas.getActualFormula(versionId, reason, principalA);
-  assert.equal(result.ingredients.length, 1);
+  assert.equal(result.ingredients.length, 2); // the probe line and its balance line (STK-5)
   assert.equal(result.ingredients[0]!.percentage, 12.5);
 
   const row = await latestAuditRow(versionId, 'formula.actual.read');

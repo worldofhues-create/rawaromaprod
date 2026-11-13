@@ -136,7 +136,8 @@ async function newApprovedFormula(): Promise<{ formulaId: string; versionId: str
   const version = await formulas.createVersion({ formulaId: formula.formulaId, versionNumber: 1 }, author);
   const materialId = uuidv7();
   const percentage = 12.5;
-  await formulas.addIngredients(version.formulaVersionId, { ingredients: [{ materialId, percentage }] }, author);
+  // STOCK-FIX-RP (STK-5): approved only at exactly 100 %, so the probe line has a balance line.
+  await formulas.addIngredients(version.formulaVersionId, { ingredients: [{ materialId, percentage, sequenceNo: 1 }, { materialId: uuidv7(), percentage: 100 - percentage, sequenceNo: 2 }] }, author);
   await formulas.finalizeVersion(version.formulaVersionId, author);
   // §108 SoD requires a DIFFERENT approver than the author — decryptVersion requires
   // APPROVED/LOCKED, so this must actually be approved, not just finalized.
@@ -179,7 +180,7 @@ test('vault-rewrap: APPLY rewraps encryption_key_ref/vault_location AND preserve
     entityType: 'formula_version',
     entityId: versionId,
   });
-  assert.equal(decrypted?.length, 1);
+  assert.equal(decrypted?.length, 2); // the probe line and its balance line (STK-5)
   assert.equal(decrypted?.[0]?.materialId, materialId);
   assert.equal(decrypted?.[0]?.percentage, percentage);
 });

@@ -228,7 +228,9 @@ test('import preview: matched, unmatched (with suggestions), ambiguous, duplicat
   assert.match(byLine.get(8)!.error!, /no formula shell for product/);
   const recipe = res.recipes.find((x) => x.formulaId === blend.formulaId)!;
   assert.ok(recipe.errors.some((e) => /line 6 repeats the material on line 2/.test(e)));
-  assert.ok(recipe.warnings.some((w) => /add up to 90%, not 100%/.test(w)), recipe.warnings.join(';'));
+  // STOCK-FIX-RP (STK-5): a total other than 100 % is an ERROR now (VAULT.md rule 2), with the difference.
+  // This line asserted it was a warning, which is the defect the rehearsal found (99.96 % committed).
+  assert.ok(recipe.errors.some((e) => /add up to 90%, 10% short of 100%/.test(e)), recipe.errors.join(';'));
   assert.ok(res.errorCount >= 5);
 
   // Committing the same file writes nothing either: any blocking problem stops the whole upload.
@@ -236,6 +238,25 @@ test('import preview: matched, unmatched (with suggestions), ambiguous, duplicat
   assert.equal(refused.committed, false);
   const after = await db.select().from(formulaIngredients).where(eq(formulaIngredients.formulaVersionId, blend.latestVersion!.formulaVersionId));
   assert.equal(after.length, before.length);
+});
+
+test('STK-5: a recipe at 99.96 % is refused at commit, with the difference, and nothing is sealed', async () => {
+  const shell = (await setup.ensureShells({ products: [product('T96', 'blend')] }, ruh)).results[0]!;
+  const csv = [
+    'product_code,material_code,percentage',
+    `${shell.productCode},${M.linalool.materialCode},50`,
+    `${shell.productCode},${M.iso.materialCode},49.96`,
+  ].join('\n');
+  const before = await db.select().from(formulaIngredients).where(eq(formulaIngredients.formulaVersionId, shell.latestVersion!.formulaVersionId));
+  const res = await setup.importRecipes({ csv, commit: true, submit: true }, formulator);
+  assert.equal(res.committed, false);
+  const recipe = res.recipes.find((x) => x.formulaId === shell.formulaId)!;
+  assert.ok(recipe.errors.some((e) => /add up to 99\.96%, 0\.04% short of 100%/.test(e)), recipe.errors.join(';'));
+  const after = await db.select().from(formulaIngredients).where(eq(formulaIngredients.formulaVersionId, shell.latestVersion!.formulaVersionId));
+  assert.equal(after.length, before.length);
+  // Over is refused the same way.
+  const over = await setup.importRecipes({ csv: csv.replace(',49.96', ',50.04'), commit: true, submit: true }, formulator);
+  assert.ok(over.recipes.find((x) => x.formulaId === shell.formulaId)!.errors.some((e) => /0\.04% over 100%/.test(e)));
 });
 
 test('import commit: sealed AS THE UPLOADER into the shell\'s draft, stages recorded, submitted; then the uploader cannot approve, the approver can', async () => {

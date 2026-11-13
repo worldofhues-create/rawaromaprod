@@ -105,7 +105,8 @@ test('resolvePickList: keyed material reference + required quantity, in sequence
 });
 
 test('resolvePickList / resolveManufacturingLines: never the material_id, an alias, the percentage or the formula identity', async () => {
-  const versionId = await version([{ materialId: M1, percentage: 12.34567, sequenceNo: 1 }]);
+  // STOCK-FIX-RP (STK-5): approved only at 100 %, so the probe share has its balance line.
+  const versionId = await version([{ materialId: M1, percentage: 12.34567, sequenceNo: 1 }, { materialId: M2, percentage: 87.65433, sequenceNo: 2 }]);
   const pick = await lookup.resolvePickList(versionId, 100, { actorId: approver.userId });
   const mfg = await lookup.resolveManufacturingLines(versionId, 100, { actorId: approver.userId });
   for (const [lines, keys] of [
@@ -114,13 +115,23 @@ test('resolvePickList / resolveManufacturingLines: never the material_id, an ali
   ] as const) {
     const json = JSON.stringify(lines);
     assert.ok(!json.includes(M1), 'the real material_id must never leave the vault');
-    assert.ok(!json.includes('12.34567'), 'the raw percentage must never leave the vault');
+    assert.ok(!json.includes('12.34567') && !json.includes('87.65433'), 'the raw percentage must never leave the vault');
     for (const line of lines!) {
       // Only these fields (no formula name/code, no alias), and the reference is an opaque HMAC.
       assert.deepEqual(Object.keys(line).sort(), [...keys]);
       assert.match(line.materialRef, /^[A-Za-z0-9_-]{43}$/);
     }
   }
+});
+
+test('STOCK-FIX-RP (STK-7): with the order in mg, the lines come back in whole mg totalling it, and still no share leaves', async () => {
+  const versionId = await version([{ materialId: M1, percentage: 33.333333, sequenceNo: 1 }, { materialId: M2, percentage: 66.666667, sequenceNo: 2 }]);
+  const lines = await lookup.resolvePickList(versionId, 5, { actorId: approver.userId }, 5_000_000);
+  assert.deepEqual(lines!.map((l) => l.requiredMg), [1_666_667, 3_333_333]);
+  assert.equal(lines!.reduce((a, l) => a + l.requiredMg!, 0), 5_000_000);
+  const json = JSON.stringify(lines);
+  assert.ok(!json.includes('33.333333') && !json.includes('66.666667') && !json.includes(M1) && !json.includes(M2));
+  for (const l of lines!) assert.deepEqual(Object.keys(l).sort(), ['materialRef', 'requiredMg', 'requiredQty', 'sequenceNo']);
 });
 
 test('resolveManufacturingLines: the same quantities, uom and sequence as resolveManufacturingInstruction', async () => {
@@ -147,7 +158,7 @@ test('both reads refuse a version that is not approved/locked; null for an unkno
 });
 
 test('both reads are audited on the version, with the actor and request id', async () => {
-  const versionId = await version([{ materialId: M1, percentage: 50, sequenceNo: 1 }]);
+  const versionId = await version([{ materialId: M1, percentage: 50, sequenceNo: 1 }, { materialId: M2, percentage: 50, sequenceNo: 2 }]); // STK-5: a whole recipe
   const actorId = uuidv7();
   await lookup.resolvePickList(versionId, 4, { actorId, requestId: 'req-pl-1' });
   await lookup.resolveManufacturingLines(versionId, 4, { actorId, requestId: 'req-ml-1' });
@@ -163,7 +174,7 @@ test('both reads are audited on the version, with the actor and request id', asy
 });
 
 test('no INTERNAL_BRIDGE_KEY, no keyed read (refused before any decrypt)', async () => {
-  const versionId = await version([{ materialId: M1, percentage: 50, sequenceNo: 1 }]);
+  const versionId = await version([{ materialId: M1, percentage: 50, sequenceNo: 1 }, { materialId: M2, percentage: 50, sequenceNo: 2 }]); // STK-5: a whole recipe
   const kms = new EnvKmsAdapter(config);
   const unkeyed = new FormulaLookupService(new VaultService(db as any, kms), unreachableMasterdata as any);
   await assert.rejects(() => unkeyed.resolvePickList(versionId, 1, { actorId: null }), /INTERNAL_BRIDGE_KEY/);

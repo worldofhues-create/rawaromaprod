@@ -16,7 +16,7 @@ import { FORMULA_DB, formulaSchema, type FormulaDb } from './formula.tokens.js';
 import { KMS_PORT, type KmsPort, type WrappedKey } from './crypto/kms.port.js';
 import { canonicalAudit, unseal } from './crypto/vault-crypto.js';
 
-const { formulaVersion, formulaVault, formulaIngredients, auditEvents } = formulaSchema;
+const { formulaVersion, formulaVault, formulaIngredients, formulaStageIngredients, formulaStageMaster, auditEvents } = formulaSchema;
 
 /** The drizzle transaction handle for this cluster's schema (used by the in-tx helpers). */
 type Tx = Parameters<Parameters<FormulaDb['transaction']>[0]>[0];
@@ -116,6 +116,32 @@ export class VaultService {
       await this.writeAudit(tx, audit);
       return ingredients;
     });
+  }
+
+  /**
+   * STOCK-FIX-RP (STK-5): the total of a version's sealed shares, in micro-percent (exact: a share is
+   * held to 6 decimals), computed INSIDE the Vault for the approval check. Nothing leaves this method
+   * but the sum and the line count: no material, no line share. The version's own lines are the
+   * recipe; a version sealed only into stages is totalled across its stages.
+   */
+  async sealedTotalMicro(tx: Tx, formulaVersionId: string): Promise<{ micro: number; lines: number } | null> {
+    const version = (await tx.select().from(formulaVersion).where(eq(formulaVersion.formulaVersionId, formulaVersionId)).limit(1))[0];
+    if (!version) return null;
+    let rows: Array<{ encPayload: string; encIv: string; encTag: string }> = await tx
+      .select({ encPayload: formulaIngredients.encPayload, encIv: formulaIngredients.encIv, encTag: formulaIngredients.encTag })
+      .from(formulaIngredients).where(eq(formulaIngredients.formulaVersionId, formulaVersionId));
+    if (rows.length === 0) {
+      rows = await tx
+        .select({ encPayload: formulaStageIngredients.encPayload, encIv: formulaStageIngredients.encIv, encTag: formulaStageIngredients.encTag })
+        .from(formulaStageIngredients)
+        .innerJoin(formulaStageMaster, eq(formulaStageMaster.formulaStageId, formulaStageIngredients.formulaStageId))
+        .where(eq(formulaStageMaster.formulaVersionId, formulaVersionId));
+    }
+    if (rows.length === 0) return { micro: 0, lines: 0 };
+    const dek = await this.getDekForFormula(version.formulaId, tx);
+    let micro = 0;
+    for (const r of rows) micro += Math.round(Number(unseal(r, dek).percentage) * 1_000_000);
+    return { micro, lines: rows.length };
   }
 
   /**

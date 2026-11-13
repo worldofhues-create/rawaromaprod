@@ -412,7 +412,13 @@ export class FormulaSetupService {
         else seen.set(k, r.line);
       }
       const total = totalPercent(list.map((r) => r.percentage ?? 0));
-      if (!isHundred(total)) warnings.push(`the percentages add up to ${total}%, not 100%`);
+      // STOCK-FIX-RP (STK-5): VAULT.md rule 2 says the wizard refuses a recipe that is not 100 %; this
+      // was a warning, and a 99.96 % recipe was committed and approved. Now it blocks the commit and says
+      // by how much. Shown to the formulator uploading it, who holds the recipe; never logged.
+      if (!isHundred(total)) {
+        const diff = Math.round((total - 100) * 1_000_000) / 1_000_000;
+        errors.push(`the percentages add up to ${total}%, ${Math.abs(diff)}% ${diff < 0 ? 'short of' : 'over'} 100%: a recipe must total exactly 100%`);
+      }
 
       const mine = facts.filter((f) => f.formula_id === formulaId);
       const latest = mine[0] ?? null;
