@@ -5,6 +5,7 @@
  * are accepted as numbers and stringified at insert; dates as ISO strings.
  */
 import { z } from 'zod';
+import { HAZARD_CLASSES } from './material/material-names.js';
 
 /** Generic cursor list query shared by every table. */
 export const listQuery = z.object({
@@ -66,7 +67,11 @@ export const createMaterial = z.object({
   minStock: z.number().optional(),
   maxStock: z.number().optional(),
   qcRequired: z.preprocess((v) => (v === 'true' ? true : v === 'false' ? false : v), z.boolean().optional()),
-});
+  /** STOCK-FIX-RP (STK-18): the UN DG class as read from a source, and that source. A class without
+   *  a source is refused (rule 1: no regulatory fact without where it came from). */
+  hazardClass: z.enum(HAZARD_CLASSES).optional(),
+  hazardSource: z.string().trim().min(1).max(500).optional(),
+}).refine((m) => !m.hazardClass || !!m.hazardSource, { message: 'A hazard class needs its source (the SDS or the supplier\'s declaration).', path: ['hazardSource'] });
 export type CreateMaterial = z.infer<typeof createMaterial>;
 
 export const createRmAlias = z.object({

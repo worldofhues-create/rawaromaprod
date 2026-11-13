@@ -117,22 +117,22 @@ test('family colours: a hex and a plain colour name; a printed colour cannot be 
   assert.ok(m.code.startsWith(String(f!.colour_name).toUpperCase() + '-'));
 });
 
-test('floor code: colour + a random number in the family; idempotent; never re-issued under another family', async () => {
+// STOCK-FIX-RP (STK-19): this case pinned the random draw (4242, a collision, then 17). The lead's
+// decision for STK-19 is numbers in order within the family, so the same three properties are asserted
+// on ordered numbers: the colour prefix, idempotence, and never re-issued under another family.
+test('floor code: colour + the family\'s next number, in order; idempotent; never re-issued under another family', async () => {
   const fam = await family();
-  const draws = [4242, 4242, 17];
-  codes.drawNumber = () => draws.shift() ?? 99;
-  try {
-    const a = await material(fam);
-    const b = await material(fam);
-    assert.match(a.code, /-4242$/);
-    assert.match(b.code, /-0017$/); // the collision on 4242 drew again
-    const again = await codes.assignCode(a.id, fam, proc);
-    assert.equal(again.code, a.code);
-    const other = await family();
-    await assert.rejects(() => codes.assignCode(a.id, other, proc), /never re-issued/);
-  } finally {
-    codes.drawNumber = new FloorCodeService(sql()).drawNumber;
-  }
+  const a = await material(fam);
+  const b = await material(fam);
+  assert.match(a.code, /-0001$/);
+  assert.match(b.code, /-0002$/);
+  const again = await codes.assignCode(a.id, fam, proc);
+  assert.equal(again.code, a.code);
+  const other = await family();
+  await assert.rejects(() => codes.assignCode(a.id, other, proc), /never re-issued/);
+  // Two assigns racing in one family take different numbers.
+  const [c, d] = await Promise.all([material(fam), material(fam)]);
+  assert.deepEqual([c.code.slice(-4), d.code.slice(-4)].sort(), ['0003', '0004']);
 });
 
 test('lot barcode is opaque (L- + 7 Crockford chars), minted once per lot', async () => {

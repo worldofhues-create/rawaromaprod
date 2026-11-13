@@ -1799,9 +1799,13 @@ async function ensureBridgeProductionAndFactory(
     await ctx.svc.mixingService.endSession(sessionId, { sessionEndDt: ago(78 - i * 2).toISOString() }, users.compounding);
 
     const oilBatchNumber = `DEMO-OIL-${String(i + 1).padStart(4, '0')}`;
+    // STOCK-FIX-RP (STK-10, STK-11): the oil is a stock that packing draws down, so the demo's
+    // quantities carry their unit (kg) from the oil batch through the package order, the fill and the
+    // finished-goods batch. The figures are the demo's own, unchanged.
+    const kgId = ((await ctx.sql`select uom_id::text as id from platform.uom_master where uom_code = 'KG' limit 1`)[0] as { id: string }).id;
     const oilBatch = await ctx.svc.productionBatchService.produceOilBatch({
       productionOrderId, secureMixingSessionId: sessionId, batchNumber: oilBatchNumber,
-      producedQty: Math.floor(orderQty * 0.95), producedDt: ago(77 - i * 2).toISOString(),
+      producedQty: Math.floor(orderQty * 0.95), uomId: kgId, producedDt: ago(77 - i * 2).toISOString(),
     }, users.compounding);
     const oilBatchId = extractId(oilBatch, 'oilBatchId');
     oilBatchCount++;
@@ -1834,7 +1838,7 @@ async function ensureBridgeProductionAndFactory(
     await ctx.svc.coaService.releaseCoa(recorded.coa.batchCoaId, users.qc);
 
     const packageOrder = await ctx.svc.packagingOrdersService.createPackageOrder({
-      productSkuId: skuId, oilBatchId, orderQty: Math.floor(orderQty * 0.9), plannedStartDt: ago(60 - i * 2).toISOString(),
+      productSkuId: skuId, oilBatchId, orderQty: Math.floor(orderQty * 0.9), uomId: kgId, plannedStartDt: ago(60 - i * 2).toISOString(),
     }, users.packaging);
     const packageOrderId = extractId(packageOrder, 'packageOrderId');
     packageOrderCount++;
@@ -1846,13 +1850,13 @@ async function ensureBridgeProductionAndFactory(
     const fillingSessionId = extractId(filling, 'fillingSessionId');
     fillingSessionCount++;
     await ctx.svc.packagingOrdersService.recordFilling(fillingSessionId, {
-      filledQty: Math.floor(orderQty * 0.88), rejectedQty: 2, recordedDt: ago(57 - i * 2).toISOString(),
+      filledQty: Math.floor(orderQty * 0.88), rejectedQty: 2, uomId: kgId, recordedDt: ago(57 - i * 2).toISOString(),
     }, users.filling);
     await ctx.svc.packagingOrdersService.endFillingSession(fillingSessionId, { sessionEndDt: ago(56 - i * 2).toISOString() }, users.filling);
 
     const fgBatchNumber = `DEMO-FG-${String(i + 1).padStart(4, '0')}`;
     const fgBatch = await ctx.svc.packagingBatchService.produceFinishedGoodBatch({
-      packageOrderId, productSkuId: skuId, batchNumber: fgBatchNumber, producedQty: Math.floor(orderQty * 0.88),
+      packageOrderId, productSkuId: skuId, batchNumber: fgBatchNumber, producedQty: Math.floor(orderQty * 0.88), uomId: kgId,
       manufacturingDate: isoDate(55 - i * 2), expiryDate: isoDate(-1090),
     }, users.packaging);
     const fgBatchId = extractId(fgBatch, 'finishedGoodBatchId');

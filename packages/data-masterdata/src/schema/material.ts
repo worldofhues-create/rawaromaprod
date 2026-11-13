@@ -44,6 +44,10 @@ export const material = masterdata.table(
     minStock: numeric("min_stock", { precision: 18, scale: 4 }),
     maxStock: numeric("max_stock", { precision: 18, scale: 4 }),
     qcRequired: boolean("qc_required"),
+    // STOCK-FIX-RP (STK-18): the UN dangerous-goods class as read from a named source (SDS, supplier
+    // declaration). Null is "classification pending"; a class, NOT_REGULATED included, needs its source.
+    hazardClass: varchar("hazard_class", { length: 16 }),
+    hazardSource: text("hazard_source"),
     ...metaColumns(),
   },
   (t) => [

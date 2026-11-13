@@ -11,11 +11,12 @@ import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService } from './floor-station.service.js';
 import { FloorQueueService } from './floor-queue.service.js';
 import { LotSplitService } from './lot-split.service.js';
+import { MaterialImportService } from './material-import.service.js';
 
 @Module({
   imports: [ProductionModule, PolicyModule],
   controllers: [FloorController],
-  providers: [FloorCodeService, FloorStationService, FloorQueueService, LotSplitService],
+  providers: [FloorCodeService, FloorStationService, FloorQueueService, LotSplitService, MaterialImportService],
   exports: [FloorCodeService, FloorQueueService],
 })
 export class FloorModule {}

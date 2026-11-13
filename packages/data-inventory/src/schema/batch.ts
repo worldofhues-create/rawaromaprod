@@ -21,6 +21,8 @@ export const rmBatchMaster = inventory.table(
     receivedQty: numeric("received_qty", { precision: 18, scale: 4 }),
     uomId: uuid("uom_id"),
     storageLocationId: uuid("storage_location_id"),
+    // STOCK-FIX-RP (STK-16): the supplier's own lot reference, from the GRN line; null when none was given.
+    supplierLotRef: varchar("supplier_lot_ref", { length: 100 }),
     ...metaColumns(),
   },
   (t) => [

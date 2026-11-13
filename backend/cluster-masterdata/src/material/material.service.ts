@@ -9,7 +9,8 @@
  * String(n); dates arrive as ISO strings and are stored on date columns as-is. In-schema
  * FKs + cross-schema soft refs are inserted as plain uuids.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { isTotalRow, MATERIAL_NAME_KEY_SQL, materialNameKey, nameLockKey } from './material-names.js';
 import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
@@ -54,7 +55,16 @@ export class MaterialService {
    * same material id for a given material code without ever querying each other.
    */
   async createMaterial(body: CreateMaterial, principal: AuthPrincipal, overrideMaterialId?: string) {
+    // STOCK-FIX-RP (STK-18): never a sheet's total row, never a second material of the same name
+    // (case and spaces aside). Two creates of one name are serialised on an advisory lock.
+    const name = String(body.materialName ?? '').trim();
+    if (!name) throw new BadRequestException('A material needs a name.');
+    if (isTotalRow(name)) throw new BadRequestException(`"${name}" is a sheet's total row, not a material.`);
     return this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${nameLockKey(name)}))`);
+      const [same] = (await tx.execute(sql`
+        select material_code, material_name from masterdata.material where ${MATERIAL_NAME_KEY_SQL} = ${materialNameKey(name)} limit 1`)) as unknown as Array<{ material_code: string | null; material_name: string }>;
+      if (same) throw new ConflictException(`A material named "${same.material_name}" is already on file (${same.material_code ?? 'no code'}). One material, one name: use it, or tell the two apart in the name.`);
       const materialId = overrideMaterialId ?? uuidv7();
       const row = ensure(
         (
@@ -66,7 +76,7 @@ export class MaterialService {
               materialTypeId: body.materialTypeId ?? null,
               materialCategoryId: body.materialCategoryId ?? null,
               materialCode: body.materialCode,
-              materialName: body.materialName,
+              materialName: name,
               uomId: body.uomId ?? null,
               description: body.description ?? null,
               scientificName: body.scientificName ?? null,
@@ -77,6 +87,8 @@ export class MaterialService {
               minStock: body.minStock != null ? String(body.minStock) : null,
               maxStock: body.maxStock != null ? String(body.maxStock) : null,
               qcRequired: body.qcRequired ?? null,
+              hazardClass: body.hazardClass ?? null,
+              hazardSource: body.hazardClass ? body.hazardSource ?? null : null,
               status: 'ACTIVE',
               createdBy: principal.userId,
               updatedBy: principal.userId,

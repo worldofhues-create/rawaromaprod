@@ -18,8 +18,8 @@
  * "Classification pending: handle as hazardous". It never prints a pictogram it does not hold.
  */
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { randomBytes, randomInt } from 'node:crypto';
-import type { Sql } from 'postgres';
+import { randomBytes } from 'node:crypto';
+import type { Sql, TransactionSql } from 'postgres';
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { massFactorMg } from '@core/data-kernel';
 import { scanCode } from './scan-code.js';
@@ -68,8 +68,7 @@ export function codeText(colourName: string, n: number): string {
 
 @Injectable()
 export class FloorCodeService {
-  /** Injectable for tests: a number in [1, 9999] and the 7 barcode characters. */
-  drawNumber: () => number = () => randomInt(1, 10000);
+  /** Injectable for tests: the 7 barcode characters. (STK-19: floor-code numbers are issued in order, not drawn.) */
   drawBarcode: () => string = () => {
     const b = randomBytes(7);
     let s = '';
@@ -125,31 +124,36 @@ export class FloorCodeService {
     return { materialId, code: codeText(r.colour_name, r.number), familyCode: r.family_code, colourName: r.colour_name, colourHex: r.colour_hex, initial: r.initial, number: r.number };
   }
 
-  /** File a material under a family: draws a random free number in that family. Idempotent. */
+  /**
+   * File a material under a family: the family's next number, in order. Idempotent.
+   * STOCK-FIX-RP (STK-19): numbers were drawn at random from 1 to 9999, so a family's codes read in no
+   * order and a person could not tell which came first or find a gap. The family row is locked while
+   * its next number is taken, so two assigns in one family cannot take the same number.
+   */
   async assignCode(materialId: string, familyCode: string, principal: AuthPrincipal): Promise<FloorCode> {
     const have = await this.codeFor(materialId);
     if (have) {
       if (have.familyCode !== familyCode) throw new ConflictException(`This material is already ${have.code}. A code is never re-issued under another family.`);
       return have;
     }
-    const [fam] = await this.sql`select 1 from masterdata.floor_family_colour where family_code = ${familyCode}`;
-    if (!fam) throw new NotFoundException(`No family "${familyCode}". Add it to the colour table first.`);
     const [mat] = await this.sql`select 1 from masterdata.material where material_id = ${materialId}`;
     if (!mat) throw new NotFoundException('No such material.');
-    const [cnt] = await this.sql<{ used: number }[]>`select count(*)::int as used from masterdata.floor_code where family_code = ${familyCode}`;
-    const used = cnt?.used ?? 0;
-    if (used >= 9999) throw new ConflictException('This family has no free numbers left.');
-    for (let attempt = 0; attempt < 50; attempt++) {
-      const n = this.drawNumber();
-      const rows = await this.sql`
-        insert into masterdata.floor_code (material_id, family_code, number, created_by)
-        values (${materialId}, ${familyCode}, ${n}, ${principal.userId})
-        on conflict do nothing returning material_id`;
-      if (rows.length) return (await this.codeFor(materialId))!;
-      const again = await this.codeFor(materialId);
-      if (again) return again; // a concurrent assign for the same material won
-    }
-    throw new ConflictException('Could not draw a free number in this family. Try again.');
+    await this.sql.begin((tx) => this.assignCodeTx(tx, materialId, familyCode, principal.userId));
+    const out = await this.codeFor(materialId);
+    if (!out || out.familyCode !== familyCode) throw new ConflictException(`This material is already ${out?.code ?? 'coded'}. A code is never re-issued under another family.`);
+    return out;
+  }
+
+  /** The in-transaction half of assignCode (the material import files many in one transaction). */
+  async assignCodeTx(tx: TransactionSql, materialId: string, familyCode: string, userId: string): Promise<void> {
+    const [fam] = await tx`select 1 from masterdata.floor_family_colour where family_code = ${familyCode} for update`;
+    if (!fam) throw new NotFoundException(`No family "${familyCode}". Add it to the colour table first.`);
+    const [mine] = await tx`select 1 from masterdata.floor_code where material_id = ${materialId}`;
+    if (mine) return; // a concurrent assign for the same material won
+    const [next] = await tx<{ n: number }[]>`select coalesce(max(number), 0)::int + 1 as n from masterdata.floor_code where family_code = ${familyCode}`;
+    const n = next?.n ?? 1;
+    if (n > 9999) throw new ConflictException('This family has no free numbers left.');
+    await tx`insert into masterdata.floor_code (material_id, family_code, number, created_by) values (${materialId}, ${familyCode}, ${n}, ${userId})`;
   }
 
   /** The opaque barcode for a lot, minted once. */

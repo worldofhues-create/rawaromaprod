@@ -123,6 +123,7 @@ export class GrnService {
                 varianceQty: varianceQty != null ? String(varianceQty) : null,
                 varianceType,
                 varianceReason: it.varianceReason ?? null,
+                supplierLotRef: it.supplierLotRef ?? null,
                 status: 'ACTIVE',
                 createdBy: principal.userId,
                 updatedBy: principal.userId,
@@ -186,6 +187,8 @@ export class GrnService {
                 receivedQty: it.receivedQty != null ? String(it.receivedQty) : null,
                 uomId: it.uomId ?? null,
                 storageLocationId: it.storageLocationId ?? null,
+                // STOCK-FIX-RP (STK-16): the raw lot traces to the supplier's own batch.
+                supplierLotRef: it.supplierLotRef ?? null,
                 // FLOOR-QC-IN-1: born in quarantine, not ACTIVE-until-the-poller-runs (batch/lot-qc.ts).
                 status: BORN_STATUS,
                 createdBy: principal.userId,

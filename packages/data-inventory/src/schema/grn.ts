@@ -48,6 +48,8 @@ export const grnItems = inventory.table(
     varianceQty: numeric("variance_qty", { precision: 18, scale: 3 }),
     varianceType: text("variance_type"),
     varianceReason: text("variance_reason"),
+    // STOCK-FIX-RP (STK-16): the supplier's lot reference for this line, carried to the raw lot.
+    supplierLotRef: varchar("supplier_lot_ref", { length: 100 }),
     ...metaColumns(),
   },
   (t) => [

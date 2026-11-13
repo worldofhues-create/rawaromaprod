@@ -16,3 +16,4 @@ export {
   MASTERDATA_LOOKUP,
   materialMatchKey,
 } from './public-api.js';
+export { isTotalRow, materialNameKey, MATERIAL_NAME_KEY_TEXT, HAZARD_CLASSES } from './material/material-names.js';

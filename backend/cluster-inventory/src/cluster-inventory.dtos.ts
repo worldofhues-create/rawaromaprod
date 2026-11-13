@@ -80,6 +80,8 @@ export const grnItemInput = z.object({
   manufacturingDate: z.string().nullish(),
   expiryDate: z.string().nullish(),
   storageLocationId: z.string().uuid().nullish(),
+  /** STOCK-FIX-RP (STK-16): the supplier's lot reference, as printed on their container or CoA. */
+  supplierLotRef: z.string().trim().min(1).max(100).nullish(),
   containers: z.array(grnContainerInput).default([]),
 });
 export type GrnItemInput = z.infer<typeof grnItemInput>;
@@ -127,6 +129,8 @@ export const createRmBatch = z.object({
   receivedQty: num.nullish(),
   uomId: z.string().uuid().nullish(),
   storageLocationId: z.string().uuid().nullish(),
+  /** STOCK-FIX-RP (STK-16): the supplier's lot reference. */
+  supplierLotRef: z.string().trim().min(1).max(100).nullish(),
 });
 export type CreateRmBatch = z.infer<typeof createRmBatch>;
 

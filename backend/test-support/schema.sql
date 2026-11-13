@@ -47,6 +47,14 @@ alter table masterdata.material add column if not exists reorder_level numeric(1
 alter table masterdata.material add column if not exists min_stock numeric(18,4);
 alter table masterdata.material add column if not exists max_stock numeric(18,4);
 alter table masterdata.material add column if not exists qc_required boolean;
+-- STOCK-FIX-RP (STK-18): schema part of scripts/migrations/2026-11-23-stk-materials.sql (family seed left out).
+alter table masterdata.material add column if not exists hazard_class varchar(16);
+alter table masterdata.material add column if not exists hazard_source text;
+alter table masterdata.material drop constraint if exists material_hazard_class_chk;
+alter table masterdata.material add constraint material_hazard_class_chk check (
+  hazard_class is null or (
+    hazard_class in ('1', '2.1', '2.2', '2.3', '3', '4.1', '4.2', '4.3', '5.1', '5.2', '6.1', '6.2', '7', '8', '9', 'NOT_REGULATED')
+    and hazard_source is not null and btrim(hazard_source) <> ''));
 
 -- D3 (demo-seed): masterdata.material_type_master — ClassificationService.createMaterialType
 -- (backend/cluster-masterdata/src/classification/classification.service.ts); missing entirely
@@ -166,6 +174,8 @@ create table if not exists inventory.grn_items (
   created_by varchar(255),
   updated_by varchar(255)
 );
+alter table inventory.grn_items add column if not exists supplier_lot_ref varchar(100); -- STOCK-FIX-RP (STK-16)
+
 
 create table if not exists inventory.rm_batch_master (
   rm_batch_id uuid primary key default gen_random_uuid(),
@@ -183,6 +193,10 @@ create table if not exists inventory.rm_batch_master (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- STOCK-FIX-RP (STK-16): the supplier's lot reference, on the GRN line and the raw lot (2026-11-23-stk-materials.sql).
+alter table inventory.rm_batch_master add column if not exists supplier_lot_ref varchar(100);
+create index if not exists rm_batch_master_supplier_lot_idx on inventory.rm_batch_master (supplier_lot_ref) where supplier_lot_ref is not null;
+
 
 -- D3 (demo-seed): inventory.stock_transfer — StockService.createStockTransfer; missing
 -- entirely from this harness until now.
@@ -3073,9 +3087,11 @@ create table if not exists location.storage_location_master (
 );
 
 -- SCAN-4 (2026-11-07): scripts/migrations/2026-11-07-scan-scanner-kind.sql mirrored here.
+-- STOCK-FIX-RP: temp_sensor (FLOOR-TEMP-1, below) is in this list too, or re-applying this file to a
+-- reused test database that already holds a temp sensor fails here, before the later line widens it.
 alter table platform.device_master drop constraint if exists device_master_kind_check;
 alter table platform.device_master add constraint device_master_kind_check
-  check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner'));
+  check (kind in ('label_printer', 'display', 'kiosk', 'scale', 'scanner', 'temp_sensor'));
 
 -- FLOOR-GAPS (2026-11-07): the stock ledger table exactly as scripts/migrations/0006_inventory.sql creates it
 -- (a lot split writes one row per side; gen_random_uuid for uuidv7, as everywhere here), then scripts/migrations/2026-11-07-floor-gaps.sql mirrored here

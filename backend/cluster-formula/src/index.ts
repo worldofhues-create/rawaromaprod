@@ -93,3 +93,5 @@ export {
 } from './setup/formula-setup.service.js';
 export { parseRecipeFile, parsePercent, detectDelimiter, totalPercent, isHundred, type RecipeLine } from './setup/recipe-csv.js';
 export { SHELL_KINDS, type ShellKind, type FormulaShellsBody } from './formula.dtos.js';
+// STOCK-FIX-RP (STK-17): the same CSV reader for the raw-material import on the main box.
+export { parseCsv } from './compliance/csv.js';

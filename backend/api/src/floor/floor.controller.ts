@@ -10,6 +10,7 @@ import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService, type LabelKind } from './floor-station.service.js';
 import { FloorQueueService } from './floor-queue.service.js';
 import { LotSplitService } from './lot-split.service.js';
+import { MaterialImportService } from './material-import.service.js';
 
 const s = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -20,9 +21,17 @@ export class FloorController {
     private readonly stations: FloorStationService,
     private readonly queue: FloorQueueService,
     private readonly splits: LotSplitService,
+    private readonly materialImport: MaterialImportService,
   ) {}
 
   /* ── colour table and floor codes ───────────────────────────────────────────────────── */
+
+  /** STOCK-FIX-RP (STK-17): raw materials from a CSV, a dry run unless commit is true. */
+  @Permissions('masterdata:material_import:write')
+  @Post('v1/materials/import')
+  importMaterials(@Body() body: { csv?: unknown; commit?: unknown }, @CurrentUser() p: AuthPrincipal) {
+    return this.materialImport.import(body, p);
+  }
 
   @Permissions('masterdata:floor_code:read')
   @Get('v1/floor/families')

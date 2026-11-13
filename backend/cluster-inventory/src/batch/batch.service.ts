@@ -55,6 +55,7 @@ export class BatchService {
               receivedQty: body.receivedQty != null ? String(body.receivedQty) : null,
               uomId: body.uomId ?? null,
               storageLocationId: body.storageLocationId ?? null,
+              supplierLotRef: body.supplierLotRef ?? null, // STOCK-FIX-RP (STK-16)
               // FLOOR-QC-IN-1: a raw lot is born in quarantine (lot-qc.ts).
               status: BORN_STATUS,
               createdBy: principal.userId,
@@ -74,7 +75,7 @@ export class BatchService {
     // interceptor still nulls it + adds the alias for non-reveal roles); no real material name is
     // added here, so the masking boundary is preserved. Pagination stays id-cursored.
     const rows = (await this.db.execute(sql`
-      select b.rm_batch_id as "rmBatchId", b.batch_number as "batchNumber", b.material_id as "materialId",
+      select b.rm_batch_id as "rmBatchId", b.batch_number as "batchNumber", b.supplier_lot_ref as "supplierLotRef", b.material_id as "materialId",
              b.received_qty as "receivedQty", b.manufacturing_date as "manufacturingDate", b.expiry_date as "expiryDate",
              case when b.expiry_date is null then null
                   when b.expiry_date < now() then 'EXPIRED'
