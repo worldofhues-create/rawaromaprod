@@ -129,6 +129,14 @@ export class ApprovalsService {
         );
       }
 
+      // STOCK-E2E-1 (STK-6): a version with nothing sealed on it is not a formula anyone checked. The
+      // rehearsal approved one (201); a production order from it would carry no lines at all.
+      if (!(await this.hasSealedContent(tx, versionId))) {
+        throw new ConflictException(
+          `nothing is sealed on formula version ${versionId}, so there is nothing to approve: upload or seal its recipe first`,
+        );
+      }
+
       const now = new Date();
 
       const approval = (
@@ -395,6 +403,23 @@ export class ApprovalsService {
     });
 
     return updated;
+  }
+
+  /** True when the version has at least one sealed ingredient or stage ingredient (STOCK-E2E-1). */
+  private async hasSealedContent(tx: Tx, versionId: string): Promise<boolean> {
+    const one = await tx
+      .select({ id: formulaIngredients.formulaIngredientsId })
+      .from(formulaIngredients)
+      .where(eq(formulaIngredients.formulaVersionId, versionId))
+      .limit(1);
+    if (one.length > 0) return true;
+    const staged = await tx
+      .select({ id: formulaStageIngredients.formulaStageIngredientsId })
+      .from(formulaStageIngredients)
+      .innerJoin(formulaStageMaster, eq(formulaStageMaster.formulaStageId, formulaStageIngredients.formulaStageId))
+      .where(eq(formulaStageMaster.formulaVersionId, versionId))
+      .limit(1);
+    return staged.length > 0;
   }
 
   /** True when `userId` sealed any ingredient or stage ingredient on this version. */
