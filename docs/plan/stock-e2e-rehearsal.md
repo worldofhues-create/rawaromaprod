@@ -234,3 +234,27 @@ The risk the rehearsal named: a role that reads the names AND a job's lots can r
 formula uses (never the amounts). Option B removes that from sales and packaging and keeps the people who
 must handle a supplier's drum able to.
 
+
+## STOCK-E2E-2 (14 Nov 2026): both systems together
+
+The joint run is written up in Alembic's `docs/plan/stock-e2e-rehearsal.md` (branch `lane/stock-e2e-2`, sections 9
+to 13: what ran, the reconciliation with its numbers, STK-30 to STK-44). No formula content is in either file.
+What it changed on this side:
+
+- **STK-30** `2d21f92`: the raw-material import took a name already on file as an error and refused the whole
+  file; it is now that material, named in `existing[]` and left alone (given a floor code if it had none).
+- **STK-31** `bc558cf`: the factory catalogue makes one pack SKU per mass pack a product is sold in
+  (`packSkuCode`, `<code>:100G`), and `fg.batch.received` and `qc.batch.released` name the product by the code
+  Alembic's catalogue sent (`bridgeProductCode`), never by a pack SKU's own code. After deploy, Alembic's admin
+  presses "Set up factory catalogue" once: the background sync skips unchanged items, so only the button makes
+  the pack SKUs.
+- **STK-33** `595f282`: a lot counted in a mass unit (bulk, LD-145) is labelled with its own mass
+  (`labelNetContent`); it used to be refused a label and so could never be released, put away or sent.
+- Four floor walks that type a weight in the browser now sign it as a second person (`signTypedOnScreen`);
+  `flow-raw-labels` and `stock2` pass at 1440 (13 of 13), `floor-stations` passes; open: STK-44.
+- The harness: `rp-up.mjs` builds an owner and an application role as production has and takes its ports from
+  the environment; `lib.mjs` signs each person in through Alembic; `j0-pair.mjs`, `j6-pack.mjs`, `j7-putaway.mjs`.
+
+Open on this side: STK-32 (a bulk lot needs a bill of packaging), STK-34 (the typed lot number, closed only on
+`lane/promises-rp`), STK-38 (no screen for the mixer's reveal or assignment), STK-39 (only an admin can sign a
+typed weight in the console), STK-41 (the product label is a preview: seven facts not on file).
