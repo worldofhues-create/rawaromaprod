@@ -4,19 +4,32 @@
  * Lives in the kernel beside bridge-emit for the same reason: several clusters call it inside their
  * own transaction, and none may import another.
  *
- * Flow for a formula with maceration required (production.maceration_setting):
+ * PROM-2 (LD-85: "Every batch rests 45 days between QC 1 and QC 2", owner: "it has to be true"):
+ *   - EVERY batch rests. The days come from the branch rule `maceration.rest` (factory-rules.ts,
+ *     default 45); a formula's own maceration_setting may only LENGTHEN it (and adds its freeze
+ *     step). Before PROM-2 a formula without a setting skipped maceration altogether.
+ *   - RELEASED with no open run is refused: HOLD -> RELEASED and REWORK -> RELEASED used to release a
+ *     batch that never rested on a single QC PASS. The edges stay in OIL_TRANSITIONS; this refuses them.
+ *   - An early release is two people: requested with a reason code and text, approved by someone
+ *     else (floor-ops/maceration.service.ts). QC 2 still gates.
+ *   - On close the run records the days rested and `batch.rest.recorded` goes to ALEMBIC in the
+ *     same transaction: the record the lot page shows a customer.
+ *
+ * Flow:
  *   Mixer -> QC 1 PASS -> IN_MATURATION (a run opens, the timer starts) -> freeze/chill-filter step
- *   (when required) -> minimum days reached (or an admin's early release, with a reason) -> QC 2 PASS
- *   recorded after the run started -> RELEASED (the run closes).
+ *   (when required) -> required days reached (or a second person's early release) -> QC 2 PASS
+ *   recorded after the run started -> RELEASED (the run closes, the fact is sent).
  *   REWORK -> IN_MATURATION restarts the timer. FAILED cancels the run.
  *
  * While a run is open the batch cannot ship, become/move as finished goods, or be reserved: the
- * system refuses, it does not warn. A formula without the setting behaves exactly as before.
+ * system refuses, it does not warn.
  */
 import { ConflictException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
-import type { BridgeEmitTx } from './bridge-emit.js';
+import { bridge as bridgeContracts } from '@core/contracts';
+import { emitBridgeManualEvent, type BridgeEmitTx } from './bridge-emit.js';
+import { restRuleInForce } from './factory-rules.js';
 
 const DAY_MS = 86_400_000;
 
@@ -26,11 +39,15 @@ interface RunRow {
   batch_number: string | null;
   started_at: string | Date;
   min_days: number;
-  max_days: number;
+  /** null = no maximum (the branch rule sets none and no formula setting applies). */
+  max_days: number | null;
   extend_days: number;
   freeze_required: boolean;
   freeze_done_at: string | Date | null;
   early_release_at: string | Date | null;
+  early_release_reason_code: string | null;
+  rule_days: number | null;
+  rule_version: number | null;
 }
 
 const ts = (v: string | Date) => (v instanceof Date ? v : new Date(String(v).replace(' ', 'T'))).getTime();
@@ -39,12 +56,14 @@ async function rows<T>(tx: BridgeEmitTx, q: unknown): Promise<T[]> {
 }
 
 /** Day N (1-based) of the run, and whether its minimum time has passed. */
-export function macerationProgress(run: { started_at: string | Date; min_days: number; extend_days: number; max_days: number; early_release_at?: string | Date | null }, now: Date) {
+export function macerationProgress(run: { started_at: string | Date; min_days: number; extend_days: number; max_days: number | null; early_release_at?: string | Date | null }, now: Date) {
   const elapsedMs = Math.max(0, now.getTime() - ts(run.started_at));
   const day = Math.floor(elapsedMs / DAY_MS) + 1;
   const needDays = Number(run.min_days) + Number(run.extend_days ?? 0);
   const minReached = elapsedMs >= needDays * DAY_MS;
-  return { day, needDays, maxDays: Number(run.max_days), minReached, overMax: elapsedMs > Number(run.max_days) * DAY_MS, releasedEarly: !!run.early_release_at };
+  // PROM-2: no maximum set means no over-maximum alarm, never an invented number.
+  const maxDays = run.max_days == null ? null : Number(run.max_days);
+  return { day, needDays, maxDays, minReached, overMax: maxDays !== null && elapsedMs > maxDays * DAY_MS, releasedEarly: !!run.early_release_at, daysRested: Math.floor(elapsedMs / DAY_MS) };
 }
 
 async function openRun(tx: BridgeEmitTx, oilBatchId: string): Promise<RunRow | undefined> {
@@ -90,6 +109,36 @@ export async function assertNotMacerating(
   );
 }
 
+/** Closes the run and sends `batch.rest.recorded` in the same transaction (PROM-2). */
+async function closeRun(tx: BridgeEmitTx, run: RunRow, p: ReturnType<typeof macerationProgress>, now: Date, userId: string | null) {
+  const earlyRelease = !p.minReached && p.releasedEarly;
+  await tx.execute(sql`
+    update production.maceration_run set status = 'CLOSED', closed_at = ${now.toISOString()}::timestamptz, days_rested = ${p.daysRested},
+           rest_short = ${earlyRelease}, updated_at = ${now.toISOString()}::timestamptz
+     where maceration_run_id = ${run.maceration_run_id}`);
+  await event(tx, run.maceration_run_id, 'CLOSED', `QC 2 passed; released after ${p.daysRested} of ${p.needDays} days${earlyRelease ? ' (early release, approved by a second person)' : ''}`, userId);
+  const wire: bridgeContracts.BatchRestRecordedWire = {
+    batch_no: run.batch_number ?? '',
+    oil_batch_ref: run.oil_batch_id,
+    started_at: new Date(ts(run.started_at)).toISOString(),
+    closed_at: now.toISOString(),
+    days_rested: p.daysRested,
+    required_days: p.needDays,
+    // A run opened before PROM-2 has no rule recorded: its own minimum stands in, version 0.
+    rule_days: Number(run.rule_days ?? run.min_days),
+    rule_version: Number(run.rule_version ?? 0),
+    early_release: earlyRelease,
+    early_release_reason_code: earlyRelease ? ((run.early_release_reason_code as bridgeContracts.AwayFromCautionReasonCode | null) ?? 'other') : null,
+    // No zone log is linked to an oil batch yet (FLOOR-TEMP-1 logs zones and bins, not batches), so
+    // the lot page says "Temperature log: Not on file" rather than inferring one.
+    temperature: null,
+  };
+  const problems = bridgeContracts.checkBatchRestRecordedWire(wire);
+  if (problems.length) throw new ConflictException(`The rest record could not be sent: ${problems.join(', ')}. A batch is released only with its record.`);
+  bridgeContracts.assertNoFormulaContent(wire);
+  await emitBridgeManualEvent(tx, bridgeContracts.BATCH_REST_RECORDED, run.maceration_run_id, wire as unknown as Record<string, unknown>);
+}
+
 /**
  * Called by the oil-batch state machine INSIDE its transaction, after the status moved. Throwing
  * rolls the move back.
@@ -100,19 +149,24 @@ export async function macerationOnTransition(
   now: Date = new Date(),
 ): Promise<void> {
   if (t.to === 'IN_MATURATION' || t.to === 'MATURING') {
-    const setting = (await rows<{ formula_id: string; min_days: number; max_days: number; freeze_required: boolean }>(tx, sql`
-      select ms.formula_id, ms.min_days, ms.max_days, ms.freeze_required
+    // PROM-2: every batch rests. The branch rule sets the days; a formula's setting may lengthen them.
+    const rule = await restRuleInForce(tx, { oilBatchId: t.oilBatchId });
+    const found = (await rows<{ formula_id: string | null; required: boolean | null; min_days: number | null; max_days: number | null; freeze_required: boolean | null }>(tx, sql`
+      select ppi.formula_id, ms.required, ms.min_days, ms.max_days, ms.freeze_required
         from production.oil_batch_master ob
-        join production.production_order po on po.production_order_id = ob.production_order_id
-        join production.production_plan_items ppi on ppi.production_plan_item_id = po.production_plan_item_id
-        join production.maceration_setting ms on ms.formula_id = ppi.formula_id
-       where ob.oil_batch_id = ${t.oilBatchId} and ms.required`))[0];
-    if (!setting) return;
+        left join production.production_order po on po.production_order_id = ob.production_order_id
+        left join production.production_plan_items ppi on ppi.production_plan_item_id = po.production_plan_item_id
+        left join production.maceration_setting ms on ms.formula_id = ppi.formula_id and ms.required
+       where ob.oil_batch_id = ${t.oilBatchId}`))[0];
+    const setting = found?.required ? found : null;
+    const minDays = Math.max(rule.value.minDays, Number(setting?.min_days ?? 0));
+    const maxDays = setting ? Math.max(Number(setting.max_days), minDays) : rule.value.maxDays;
+    const freezeRequired = setting?.freeze_required === true;
     const qc1 = (await rows<{ production_qc_id: string; result: string | null }>(tx, sql`
       select production_qc_id, result from production.production_qc
        where oil_batch_id = ${t.oilBatchId} order by created_dt desc, production_qc_id desc limit 1`))[0];
     if (String(qc1?.result ?? '').toUpperCase() !== 'PASS') {
-      throw new ConflictException('This product macerates: QC 1 (before maceration) must PASS before the batch goes into maceration.');
+      throw new ConflictException('Every batch rests between QC 1 and QC 2: QC 1 (before maceration) must PASS before the batch goes into maceration.');
     }
     const existing = await openRun(tx, t.oilBatchId);
     if (existing) {
@@ -120,8 +174,10 @@ export async function macerationOnTransition(
         await tx.execute(sql`
           update production.maceration_run
              set started_at = ${now.toISOString()}::timestamptz, restart_count = restart_count + 1, qc1_production_qc_id = ${qc1!.production_qc_id},
+                 min_days = ${minDays}, max_days = ${maxDays}, rule_days = ${rule.value.minDays}, rule_version = ${rule.version}, rule_source = ${rule.source},
                  freeze_done_at = null, freeze_done_by = null, alarm_at = null, early_release_at = null, early_release_by = null,
-                 early_release_reason = null, extend_days = 0, updated_at = ${now.toISOString()}::timestamptz
+                 early_release_reason = null, early_release_reason_code = null, early_release_requested_at = null, early_release_approved_by = null,
+                 extend_days = 0, updated_at = ${now.toISOString()}::timestamptz
            where maceration_run_id = ${existing.maceration_run_id}`);
         await event(tx, existing.maceration_run_id, 'RESTARTED', 'rework: the timer starts again', t.userId);
       } else {
@@ -132,20 +188,27 @@ export async function macerationOnTransition(
     const runId = randomUUID();
     await tx.execute(sql`
       insert into production.maceration_run (maceration_run_id, oil_batch_id, formula_id, status, started_at, min_days, max_days,
-                                             freeze_required, qc1_production_qc_id, created_by, created_at, updated_at)
-      values (${runId}, ${t.oilBatchId}, ${setting.formula_id}, 'MACERATING', ${now.toISOString()}::timestamptz, ${setting.min_days},
-              ${setting.max_days}, ${setting.freeze_required}, ${qc1!.production_qc_id},
+                                             freeze_required, qc1_production_qc_id, rule_days, rule_version, rule_source, created_by, created_at, updated_at)
+      values (${runId}, ${t.oilBatchId}, ${found?.formula_id ?? null}, 'MACERATING', ${now.toISOString()}::timestamptz, ${minDays},
+              ${maxDays}, ${freezeRequired}, ${qc1!.production_qc_id}, ${rule.value.minDays}, ${rule.version}, ${rule.source},
               ${t.userId && /^[0-9a-f-]{36}$/i.test(t.userId) ? t.userId : null}, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)`);
-    await event(tx, runId, 'STARTED', null, t.userId);
+    await event(tx, runId, 'STARTED', `rule ${rule.source === 'policy' ? `maceration.rest v${rule.version}` : 'maceration.rest (registry default)'}: ${minDays} days`, t.userId);
     return;
   }
 
   if (t.to === 'RELEASED') {
     const run = await openRun(tx, t.oilBatchId);
-    if (!run) return;
+    if (!run) {
+      // PROM-2: HOLD -> RELEASED and REWORK -> RELEASED no longer skip the rest.
+      const rule = await restRuleInForce(tx, { oilBatchId: t.oilBatchId });
+      const [b] = await rows<{ batch_number: string | null }>(tx, sql`select batch_number from production.oil_batch_master where oil_batch_id = ${t.oilBatchId}`);
+      throw new ConflictException(
+        `Batch ${b?.batch_number ?? t.oilBatchId} has not rested. Every batch rests ${rule.value.minDays} days between QC 1 and QC 2 (branch rule maceration.rest ${rule.version ? `v${rule.version}` : 'registry default'}). Send it into maceration after QC 1.`,
+      );
+    }
     const p = macerationProgress(run, now);
     if (!p.minReached && !p.releasedEarly) {
-      throw new ConflictException(`Batch ${run.batch_number ?? t.oilBatchId} is on day ${p.day} of ${p.needDays} of maceration. Only an admin can release it early, with a reason; QC 2 is still required.`);
+      throw new ConflictException(`Batch ${run.batch_number ?? t.oilBatchId} is on day ${p.day} of ${p.needDays} of maceration. An early release needs a second person to approve it, with a reason; QC 2 is still required.`);
     }
     if (run.freeze_required && !run.freeze_done_at) {
       throw new ConflictException('The freeze / chill-filter step has not been recorded for this batch.');
@@ -157,8 +220,7 @@ export async function macerationOnTransition(
     if (String(qc2?.result ?? '').toUpperCase() !== 'PASS') {
       throw new ConflictException('QC 2 (after maceration) must PASS before the batch is released.');
     }
-    await tx.execute(sql`update production.maceration_run set status = 'CLOSED', closed_at = ${now.toISOString()}::timestamptz, updated_at = ${now.toISOString()}::timestamptz where maceration_run_id = ${run.maceration_run_id}`);
-    await event(tx, run.maceration_run_id, 'CLOSED', 'QC 2 passed; released', t.userId);
+    await closeRun(tx, run, p, now, t.userId);
     return;
   }
 

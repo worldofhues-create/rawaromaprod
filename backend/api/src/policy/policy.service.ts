@@ -13,11 +13,13 @@
  */
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql } from 'postgres';
-import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { PG_CLIENT, factoryRuleProblems, isFactoryRuleKey, type AuthPrincipal } from '@core/backend-kernel';
 import { evaluateRules, validateBody, describeRule, type PolicyBody } from './policy-engine.js';
 
-/** The policies the plan names (§12.0). Other lanes evaluate these keys; nothing else exists. */
-export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework'] as const;
+/** The policies the plan names (§12.0), plus the two factory rules the storefront's process promises
+ *  rest on (PROM-2 `maceration.rest`, PROM-3 `qc.reference_required`; backend-kernel factory-rules.ts,
+ *  where the gates read them inside their own transactions). Other lanes evaluate these keys. */
+export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework', 'maceration.rest', 'qc.reference_required'] as const;
 
 /** Only these roles may override a policy on one record (§12.0). */
 export const OVERRIDE_ROLES = ['owner', 'admin'];
@@ -166,6 +168,10 @@ export class PolicyService {
     if (!why) throw new BadRequestException('Say why the rules are changing.');
     const problems = validateBody(body);
     if (problems.length) throw new BadRequestException(problems.join(' '));
+    // PROM-2/3: a factory rule's every possible value is checked before it can be in force, so a
+    // malformed rest rule is refused here rather than holding every batch on the floor.
+    const ruleProblems = factoryRuleProblems(key, body as PolicyBody);
+    if (ruleProblems.length) throw new BadRequestException(ruleProblems.join(' '));
     await this.versionAt(key);
     return this.sql.begin(async (tx) => {
       // Serialise publishers on this policy so two saves cannot both become version N+1.
@@ -188,6 +194,14 @@ export class PolicyService {
 
   async override(key: string, recordType: string, recordId: string, value: unknown, reason: string, principal: AuthPrincipal) {
     this.assertOverrider(principal);
+    // PROM-2/3: no single-record value on a factory rule. A shorter rest for one batch is an early
+    // release, which needs a second person; a longer one is an extension; a QC comparison is never
+    // waived by a reason (system-led-operations.md 3.4).
+    if (isFactoryRuleKey(key)) {
+      throw new BadRequestException(key === 'maceration.rest'
+        ? 'The rest rule has no single-record override: a shorter rest for one batch is an early release (a second person approves it), a longer one is an extension.'
+        : 'The reference rule has no single-record override: a reason is not a test result.');
+    }
     const why = String(reason ?? '').trim();
     if (!why) throw new BadRequestException('An override needs a reason.');
     if (!String(recordType ?? '').trim() || !String(recordId ?? '').trim()) throw new BadRequestException('Name the record this override is for.');

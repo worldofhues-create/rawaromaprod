@@ -1,0 +1,13 @@
+{
+  "batch_no": "B-2609-0042",
+  "oil_batch_ref": "0192a6c4-8f1e-7b3a-9c2d-5e6f7a8b9c0d",
+  "started_at": "2026-09-14T06:30:00.000Z",
+  "closed_at": "2026-10-29T09:15:00.000Z",
+  "days_rested": 45,
+  "required_days": 45,
+  "rule_days": 45,
+  "rule_version": 1,
+  "early_release": false,
+  "early_release_reason_code": null,
+  "temperature": null
+}

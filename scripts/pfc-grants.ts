@@ -4,6 +4,8 @@
 // packing and logistics hold the station permissions.
 //
 // Early maceration release is admin-only by the plan (section 8): owner and admin, nobody else.
+// PROM-2 (LD-85): an early release is Stop, second person. QC and production may ASK for it
+// (release_early_request); the owner and admin APPROVE it (release_early), never their own request.
 export const PFC_PERMISSIONS = [
   'packaging:packing_station:write',
   'platform:courier_connector:read',
@@ -14,6 +16,7 @@ export const PFC_PERMISSIONS = [
   'platform:print_job:write',
   'production:maceration:read',
   'production:maceration:release_early',
+  'production:maceration:release_early_request',
   'production:maceration:write',
   'production:maceration_setting:write',
   'sales:logistics:write',
@@ -25,10 +28,11 @@ const GRANTS: Record<string, readonly string[]> = {
     'platform:device:read', 'platform:device:write', 'platform:print_job:read',
     'platform:courier_connector:read', 'platform:courier_connector:write',
     'production:maceration:read', 'production:maceration_setting:write', 'production:maceration:release_early',
-    'sales:shipment:read',
+    'production:maceration:release_early_request', 'sales:shipment:read',
   ],
-  production: ['platform:device:read', 'platform:print_job:read', 'platform:print_job:write', 'production:maceration:read', 'production:maceration:write'],
-  qc: ['production:maceration:read', 'platform:print_job:read', 'platform:print_job:write'],
+  production: ['platform:device:read', 'platform:print_job:read', 'platform:print_job:write', 'production:maceration:read', 'production:maceration:write',
+    'production:maceration:release_early_request'],
+  qc: ['production:maceration:read', 'platform:print_job:read', 'platform:print_job:write', 'production:maceration:release_early_request'],
   // SCAN-9 (owner: every step of both flows prints its label): the raw-flow steps belong to these
   // roles (PO, gate entry, receiving audit, GRN, incoming QC). Print rights only: a label carries the
   // opaque id the next step scans, never a name, CAS or percentage (the renderer refuses those).

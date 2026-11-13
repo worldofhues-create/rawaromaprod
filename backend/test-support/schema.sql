@@ -2814,6 +2814,27 @@ create table if not exists production.maceration_run (
   updated_at           timestamptz not null default now()
 );
 create unique index if not exists maceration_run_open_uq on production.maceration_run (oil_batch_id) where status = 'MACERATING';
+-- PROM-2 (scripts/migrations/2026-11-16-prom-2-rest-rule.sql): the rule each run rests under, the
+-- two-person early release, and the days actually rested.
+alter table production.maceration_run alter column max_days drop not null;
+alter table production.maceration_run add column if not exists rule_days integer check (rule_days between 1 and 365);
+alter table production.maceration_run add column if not exists rule_version integer check (rule_version >= 0);
+alter table production.maceration_run add column if not exists rule_source varchar(20) check (rule_source in ('policy', 'registry_default'));
+alter table production.maceration_run add column if not exists early_release_requested_at timestamptz;
+alter table production.maceration_run add column if not exists early_release_reason_code varchar(40);
+alter table production.maceration_run add column if not exists early_release_approved_by uuid;
+alter table production.maceration_run add column if not exists days_rested integer check (days_rested >= 0);
+alter table production.maceration_run add column if not exists rest_short boolean;
+alter table production.maceration_run drop constraint if exists maceration_run_two_people_chk;
+alter table production.maceration_run add constraint maceration_run_two_people_chk
+  check (early_release_approved_by is null or early_release_by is null or early_release_approved_by <> early_release_by);
+insert into platform.policy (policy_key, title, description) values
+  ('maceration.rest', 'Rest between QC 1 and QC 2', 'Every batch rests this many days after QC 1 before QC 2 may release it. A formula may rest longer; a shorter rest for one batch is an early release, approved by a second person.')
+on conflict (policy_key) do nothing;
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('maceration.rest', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"minDays":45,"maxDays":null,"appliesTo":"every_batch","earlyRelease":"second_person"}}',
+   'Owner LD-85, 13 Nov 2026: every batch rests 45 days between QC 1 and QC 2; no maximum set', 'system')
+on conflict (policy_key, version) do nothing;
 
 create table if not exists production.maceration_event (
   maceration_event_id uuid primary key default gen_random_uuid(),

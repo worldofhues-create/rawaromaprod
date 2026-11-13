@@ -51,6 +51,10 @@ export const OUTBOUND_TO_ALEMBIC = [
   // ALEMBIC allocates it to the orders waiting for it. A fact about the FG batch (aggregate
   // `fg_batch`), not a requirement step. Payload: @core/contracts bridge.FgBatchReceivedPayload.
   'fg.batch.received',
+  // PROM-2 (LD-85): a maceration run closed on release; the lot page's "Rested 45 days" comes from
+  // it. A fact about the run (aggregate `maceration_run`). Payload: @core/contracts
+  // bridge.BatchRestRecordedWire. ALEMBIC accepts it first (lane/prom), then this side sends it.
+  'batch.rest.recorded',
   // ALEMBIC Books phase 2 (owner 2026-10-09): payables facts -- a purchase order issued, amended or
   // cancelled, and a goods receipt, each carrying its vendor -- for ALEMBIC's three-way match.
   // Emitted via backend-kernel events/payables-facts.ts; contract docs/bridge/PAYABLES_FACTS.md.

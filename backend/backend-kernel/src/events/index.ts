@@ -20,6 +20,37 @@ export {
   type BridgeEmitTx,
 } from './bridge-emit.js';
 export { assertNotMacerating, macerationOnTransition, macerationProgress } from './maceration-gate.js';
+export {
+  SCOPE_LADDER,
+  OPS,
+  evaluateRules,
+  validateBody,
+  describeRule,
+  describeCondition,
+  type RuleScope,
+  type ConditionOp,
+  type Condition,
+  type Rule,
+  type PolicyBody,
+  type Evaluation,
+} from './policy-engine.js';
+export {
+  MACERATION_REST,
+  QC_REFERENCE_REQUIRED,
+  FACTORY_RULE_KEYS,
+  FACTORY_RULE_DEFAULTS,
+  FACTORY_ENFORCEMENT_VERSION,
+  restRuleProblems,
+  referenceRuleProblems,
+  factoryRuleProblems,
+  isFactoryRuleKey,
+  restRuleInForce,
+  referenceRuleInForce,
+  type FactoryRuleKey,
+  type RestRule,
+  type ReferenceRule,
+  type RuleInForce,
+} from './factory-rules.js';
 export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';
 export {
   recordProduceAlert,

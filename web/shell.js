@@ -1507,6 +1507,8 @@
       o.fields.map(function (f) {
         return '<label style="display:flex;flex-direction:column;gap:5px">' + fLabel(escHtml(f.l), f.req) +
           (f.t === 'textarea' ? '<textarea data-ask="' + f.n + '" rows="3" class="fld" style="height:auto;padding:9px 13px;resize:vertical"></textarea>'
+            // PROM-2: a reason code is chosen from a fixed list, never typed. opts: [[value, label], ...].
+            : f.t === 'select' ? '<select data-ask="' + f.n + '" class="fld"><option value="">Choose…</option>' + (f.opts || []).map(function (o) { return '<option value="' + escHtml(o[0]) + '">' + escHtml(o[1]) + '</option>'; }).join('') + '</select>'
             : '<input data-ask="' + f.n + '" class="fld" type="' + (f.t === 'number' ? 'number' : 'text') + '"' + (f.t === 'number' ? ' inputmode="decimal" step="any"' : '') + (f.value != null ? ' value="' + escHtml(f.value) + '"' : '') + '>') +
           (f.help ? '<span style="font:var(--w-reg) var(--t-cap)/1.35 var(--font-ui);color:var(--ink-3)">' + escHtml(f.help) + '</span>' : '') + '</label>';
       }).join('') +

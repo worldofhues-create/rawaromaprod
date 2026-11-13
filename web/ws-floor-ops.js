@@ -249,6 +249,8 @@
   async function viewMaceration(item, V) {
     V.innerHTML = '<div class="loading">Loading…</div>';
     var runs = await call('/v1/maceration/runs'); if (!runs) { V.innerHTML = errBox('Maceration is not available.'); return; }
+    // PROM-2: the branch rule every batch rests under (default 45 days, no maximum set).
+    var rule = await call('/v1/maceration/rule');
     var settings = can('production:maceration_setting:write') ? await call('/v1/maceration/settings') : null;
     // WALK2-RP-7: the setting asked for a typed formula uuid and listed settings by uuid. WALK2-RP-15: the
     // picker read the Vault directory, which the admin who sets maceration cannot read; it lists the
@@ -256,15 +258,20 @@
     var fr = { rows: [] };
     if (settings) { try { var sp = await tunnel('/v1/maceration/setting-products'); fr = sp.status < 400 ? { rows: data(sp).items || [] } : { rows: [], error: err(sp, 'The products did not load.') }; } catch (e) { fr = { rows: [], error: 'Can\'t connect, so the products did not load.' }; } }
     var FN = {}; (fr.rows || []).forEach(function (f) { FN[f.formulaId] = [f.productCode, f.productName].filter(Boolean).join(' · ') || 'Product without a name'; });
-    var canWrite = can('production:maceration:write'), canEarly = can('production:maceration:release_early');
+    var canWrite = can('production:maceration:write'), canEarly = can('production:maceration:release_early'), canAskEarly = can('production:maceration:release_early_request');
+    var REASONS = [['customer_commitment', 'Customer commitment'], ['confirmed_outside_system', 'Confirmed outside the system'], ['system_data_wrong', 'System data is wrong'],
+      ['supplier_or_carrier_constraint', 'Supplier or carrier constraint'], ['instructed_by_manager', 'Instructed by a manager'], ['other', 'Other']];
+    var reasonLabel = function (c) { var f = REASONS.filter(function (x) { return x[0] === c; })[0]; return f ? f[1] : (c || ''); };
     var list = runs.items || [];
     var rows = list.map(function (r, i) {
       var pct = Math.min(100, Math.round(((r.day - 1) / Math.max(1, r.needDays)) * 100));
       var state = r.overMax ? chip('bad', 'Past maximum') : r.readyForQc2 ? chip('ok', 'Ready for QC 2') : r.minReached ? chip('warn', 'Freeze step due') : chip('neutral', 'Macerating');
-      return '<tr><td class="mono">' + escHtml(r.batchNumber || 'No batch number yet') + '</td><td><b>' + escHtml(r.label) + '</b><div style="height:6px;background:var(--panel-2);border-radius:3px;margin-top:4px"><div style="height:6px;width:' + pct + '%;background:var(--accent,#c60);border-radius:3px"></div></div><div class="t-cap">ends ' + escHtml(when(r.endsAt)) + ' · max ' + r.maxDays + ' days' + (r.restartCount ? ' · restarted ' + r.restartCount + '×' : '') + '</div></td>' +
-        '<td>' + state + (r.releasedEarlyAt ? '<div class="t-cap">Released early: ' + escHtml(r.earlyReleaseReason || '') + ' — QC 2 still required</div>' : '') + '</td>' +
+      return '<tr><td class="mono">' + escHtml(r.batchNumber || 'No batch number yet') + '</td><td><b>' + escHtml(r.label) + '</b><div style="height:6px;background:var(--panel-2);border-radius:3px;margin-top:4px"><div style="height:6px;width:' + pct + '%;background:var(--accent,#c60);border-radius:3px"></div></div><div class="t-cap">ends ' + escHtml(when(r.endsAt)) + ' · ' + escHtml(r.maxLabel === 'No maximum set' ? 'no maximum set' : 'max ' + r.maxLabel) + (r.restartCount ? ' · restarted ' + r.restartCount + '×' : '') + '</div></td>' +
+        '<td>' + state + (r.releasedEarlyAt ? '<div class="t-cap">Released early by a second person (' + escHtml(reasonLabel(r.earlyReleaseReasonCode)) + '): ' + escHtml(r.earlyReleaseReason || '') + ' · QC 2 still required</div>'
+          : r.earlyReleaseRequestedAt ? '<div class="t-cap">' + chip('warn', 'Early release asked') + ' ' + escHtml(reasonLabel(r.earlyReleaseReasonCode)) + ': ' + escHtml(r.earlyReleaseReason || '') + ' · a second person approves or declines</div>' : '') + '</td>' +
         '<td>' + (r.freezeRequired ? (r.freezeDoneAt ? chip('ok', 'Freeze done') : canWrite ? btn('', 'Freeze done', 'sm', ' data-fz="' + i + '"') : chip('warn', 'Freeze due')) : '<span class="t-cap">none</span>') + '</td>' +
-        '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canEarly && !r.releasedEarlyAt && !r.minReached ? btn('', 'Release early', 'sm', ' data-early="' + i + '"') : '') +
+        '<td style="white-space:nowrap">' + (canWrite ? btn('', 'Extend', 'sm', ' data-ext="' + i + '"') + ' ' : '') + (canAskEarly && !r.releasedEarlyAt && !r.earlyReleaseRequestedAt && !r.minReached ? btn('', 'Ask to release early', 'sm', ' data-early="' + i + '"') : '') +
+          (canEarly && r.earlyReleaseRequestedAt && !r.releasedEarlyAt ? btn('', 'Approve early release', 'sm', ' data-early-ok="' + i + '"') + ' ' + btn('', 'Decline', 'sm', ' data-early-no="' + i + '"') : '') +
           // SCAN-11: the oil batch's own label, the maceration start tag, and the done tag once QC 2 may start.
           (r.batchNumber ? '<div style="margin-top:6px;display:flex;flex-direction:column;gap:6px">' +
             stepButtons('fo-mc-b-' + i, { labelKind: 'oil_batch', subjectRef: r.batchNumber, code: r.batchNumber, title: 'BATCH', defaultStation: 'Maceration', lines: [['Product', r.label]] }) +
@@ -273,10 +280,12 @@
     });
     var setCard = settings ? card('Maceration per product', 'admin', '<form id="fo-ms">' + grid(['<label style="display:flex;flex-direction:column;gap:5px;min-width:0"><span class="t-cap">Formula</span><select id="fo-ms-f" class="fld" required' + (fr.error ? ' aria-invalid="true"' : '') + '><option value="">' + escHtml(fr.error || (fr.rows.length ? 'Choose a product…' : 'No product has a formula linked yet')) + '</option>' +
         (fr.rows || []).map(function (f) { return '<option value="' + escHtml(f.formulaId) + '">' + escHtml(FN[f.formulaId] || f.formulaId) + '</option>'; }).join('') + '</select>' + (fr.error ? '<span role="alert" class="t-cap" style="color:var(--bad,#b3261e)">' + escHtml(fr.error) + '</span>' : '') + '</label>',
-      '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-req" type="checkbox" checked> Maceration required</label>', fld('fo-ms-min', 'Minimum days', 'type="number" min="1" max="365" value="30"'), fld('fo-ms-max', 'Maximum days', 'type="number" min="1" max="365" value="120"'),
+      '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-req" type="checkbox" checked> Maceration required</label>', fld('fo-ms-min', 'Minimum days', 'type="number" min="' + (rule ? rule.minDays : 1) + '" max="365" value="' + (rule ? rule.minDays : 45) + '"'), fld('fo-ms-max', 'Maximum days', 'type="number" min="1" max="365" value="120"'),
       '<label style="display:flex;gap:6px;align-items:center"><input id="fo-ms-fz" type="checkbox"> Freeze / chill-filter step</label>', fld('fo-ms-note', 'Freeze note', 'placeholder="chill 24 h at 4 °C, filter"'), btn('', 'Save', 'p', ' type="submit"')]) + '</form>' +
       table(['Product', 'Required', 'Days', 'Freeze'], (settings.items || []).map(function (s) { return '<tr><td>' + escHtml(FN[s.formulaId] || 'No product linked to this formula') + '</td><td>' + (s.required ? 'Yes' : 'No') + '</td><td>' + s.minDays + '–' + s.maxDays + '</td><td>' + (s.freezeRequired ? escHtml(s.freezeNote || 'Yes') : 'No') + '</td></tr>'; }))) : '';
-    V.innerHTML = card('Macerating now', list.length + (list.length === 1 ? ' batch' : ' batches') + ' · they cannot ship, go to FG or be reserved until QC 2 passes', table(['Batch', 'Timer', 'State', 'Freeze', ''], rows)) + setCard;
+    var ruleLine = rule ? '<p class="t-cap" style="margin:0 0 8px">Branch rule: every batch rests ' + rule.minDays + ' days between QC 1 and QC 2 · ' + escHtml(rule.maxLabel) + ' · ' +
+      escHtml(rule.source === 'policy' ? 'maceration.rest v' + rule.version : 'registry default') + '. A product may rest longer; a shorter rest for one batch is an early release a second person approves.</p>' : errBox('The branch rest rule did not load, so no batch can start or finish maceration until it does.');
+    V.innerHTML = card('Macerating now', list.length + (list.length === 1 ? ' batch' : ' batches') + ' · they cannot ship, go to FG or be reserved until QC 2 passes', ruleLine + table(['Batch', 'Timer', 'State', 'Freeze', ''], rows)) + setCard;
     V.querySelectorAll('[data-fz]').forEach(function (b) { b.addEventListener('click', async function () { if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-fz'))].macerationRunId + '/freeze-done', 'POST', {})) viewMaceration(item, V); }); });
     V.querySelectorAll('[data-ext]').forEach(function (b) {
       b.addEventListener('click', async function () {
@@ -287,9 +296,24 @@
     });
     V.querySelectorAll('[data-early]').forEach(function (b) {
       b.addEventListener('click', async function () {
-        var a = await ask('Release early', 'Admin only, logged. QC 2 is still required before the batch is released.', [{ n: 'reason', l: 'Reason', req: true }], 'Release early');
+        var a = await ask('Ask to release early', 'A second person approves or declines it. Logged with your name. QC 2 is still required before the batch is released.',
+          [{ n: 'reasonCode', l: 'Reason', t: 'select', opts: REASONS, req: true }, { n: 'reason', l: 'Say why', t: 'textarea', req: true, help: 'At least 8 characters.' }], 'Ask');
         if (!a) return;
-        if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-early'))].macerationRunId + '/release-early', 'POST', { reason: a.reason })) viewMaceration(item, V);
+        if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-early'))].macerationRunId + '/release-early', 'POST', { reasonCode: a.reasonCode, reason: a.reason })) { toast('Asked. A second person approves or declines it.', 'good'); viewMaceration(item, V); }
+      });
+    });
+    V.querySelectorAll('[data-early-ok]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var a = await ask('Approve early release', 'You are the second person. You cannot approve your own request. QC 2 is still required before the batch is released.', [{ n: 'note', l: 'Note (optional)', t: 'textarea' }], 'Approve');
+        if (!a) return;
+        if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-early-ok'))].macerationRunId + '/release-early/approve', 'POST', { note: a.note })) { toast('Approved. QC 2 is next.', 'good'); viewMaceration(item, V); }
+      });
+    });
+    V.querySelectorAll('[data-early-no]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        var a = await ask('Decline early release', 'The batch keeps resting. Logged with your name.', [{ n: 'reason', l: 'Reason', req: true }], 'Decline');
+        if (!a) return;
+        if (await call('/v1/maceration/runs/' + list[Number(b.getAttribute('data-early-no'))].macerationRunId + '/release-early/decline', 'POST', { reason: a.reason })) viewMaceration(item, V);
       });
     });
     on('fo-ms', 'submit', async function (e) {
