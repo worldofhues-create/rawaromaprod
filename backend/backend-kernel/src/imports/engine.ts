@@ -96,13 +96,15 @@ const CSV_MIME = 'text/csv; charset=utf-8';
 /**
  * A postgres.js transaction that a service's Drizzle client can be bound to. Drizzle's
  * `transaction()` calls `client.begin(fn)`; a transaction has no `begin`, it has `savepoint`. This
- * maps one to the other, so `new MaterialService(drizzle(asPool(tx), { schema }))` runs the service
- * exactly as the route does, inside the import's transaction.
+ * maps one to the other, so `new MaterialService(drizzle(asPool(tx, pool), { schema }))` runs the
+ * service exactly as the route does, inside the import's transaction. Drizzle also reads the client's
+ * `options` (its date parsers); a transaction carries none of its own, so the pool's are handed over.
  */
-export function asPool(tx: TransactionSql): Sql {
+export function asPool(tx: TransactionSql, pool: Sql): Sql {
   return new Proxy(tx as unknown as Sql, {
     get(target, prop, receiver) {
       if (prop === 'begin') return (...args: unknown[]) => (tx.savepoint as (fn: unknown) => unknown)(args[args.length - 1]);
+      if (prop === 'options') return pool.options;
       return Reflect.get(target, prop, receiver);
     },
   });
@@ -190,15 +192,19 @@ export class ImportEngine {
   private static refusals(counts: ImportCounts): Record<ImportMode, string | null> {
     return { all_or_nothing: importCommitRefusal(counts, 'all_or_nothing'), valid_only: importCommitRefusal(counts, 'valid_only') };
   }
-  private async insertRows(tx: Sql | TransactionSql, jobId: string, phase: 'preview' | 'commit', rows: readonly ImportRowPlan[], secret: boolean) {
+  private async insertRows(db: Sql | TransactionSql, jobId: string, phase: 'preview' | 'commit', rows: readonly ImportRowPlan[], secret: boolean) {
+    const tx = db as Sql;
     for (let i = 0; i < rows.length; i += 500) {
       const chunk = rows.slice(i, i + 500).map((r) => ({
-        import_job_id: jobId, phase, row_no: r.row, outcome: r.outcome, natural_key: r.naturalKey.slice(0, 500), label: r.label.slice(0, 500),
-        problems: JSON.stringify(r.problems), notes: JSON.stringify(r.notes),
+        row_no: r.row, outcome: r.outcome, natural_key: r.naturalKey.slice(0, 500), label: r.label.slice(0, 500), problems: r.problems, notes: r.notes,
         // Only a refused row keeps its cells, and a secret kind's rows never do.
-        cells: !secret && r.outcome === 'refuse' ? JSON.stringify(r.cells) : null,
+        cells: !secret && r.outcome === 'refuse' ? r.cells : null,
       }));
-      await tx`insert into ${this.jobRows} ${tx(chunk as never[], 'import_job_id', 'phase', 'row_no', 'outcome', 'natural_key', 'label', 'problems', 'notes', 'cells')}`;
+      // One statement a chunk; the JSON goes as text and is cast (a jsonb parameter would be encoded twice).
+      await tx`insert into ${this.jobRows} (import_job_id, phase, row_no, outcome, natural_key, label, problems, notes, cells)
+               select ${jobId}::uuid, ${phase}, x.row_no, x.outcome, x.natural_key, x.label, x.problems, x.notes, x.cells
+                 from jsonb_to_recordset(${JSON.stringify(chunk)}::text::jsonb)
+                   as x(row_no int, outcome text, natural_key text, label text, problems jsonb, notes jsonb, cells jsonb)`;
     }
   }
 

@@ -71,6 +71,8 @@ export const createMaterial = z.object({
    *  a source is refused (rule 1: no regulatory fact without where it came from). */
   hazardClass: z.enum(HAZARD_CLASSES).optional(),
   hazardSource: z.string().trim().min(1).max(500).optional(),
+  /** IMPORT-RP: where the density was measured or read (the CoA, the SDS). Kept only with a density. */
+  densitySource: z.string().trim().min(1).max(500).optional(),
 }).refine((m) => !m.hazardClass || !!m.hazardSource, { message: 'A hazard class needs its source (the SDS or the supplier\'s declaration).', path: ['hazardSource'] });
 export type CreateMaterial = z.infer<typeof createMaterial>;
 
@@ -80,6 +82,20 @@ export const createRmAlias = z.object({
   aliasType: z.string().optional(),
 });
 export type CreateRmAlias = z.infer<typeof createRmAlias>;
+
+/**
+ * IMPORT-RP: what a dilution is made of. The dilution, its base and its solvent are three materials
+ * already on file; the shares are percent by weight as decimal TEXT (never a double), and total 100.
+ */
+const percentText = z.union([z.string(), z.number()]).transform((v) => String(v).trim());
+export const createMaterialDilution = z.object({
+  dilutionMaterialId: z.string().uuid(),
+  baseMaterialId: z.string().uuid(),
+  solventMaterialId: z.string().uuid(),
+  basePercent: percentText,
+  solventPercent: percentText,
+});
+export type CreateMaterialDilution = z.infer<typeof createMaterialDilution>;
 
 export const createMaterialQcSpecification = z.object({
   materialId: z.string().uuid(),

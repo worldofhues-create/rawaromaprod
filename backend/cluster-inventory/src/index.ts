@@ -15,3 +15,7 @@ export {
 /* PROD-B: the receiving audit (api/src/prodfloor) writes its GRN through the same service, inside
  * its own transaction, so the checklist, the decision and the GRN land together or not at all. */
 export { GrnService } from './grn/grn.service.js';
+/* IMPORT-RP: opening raw stock and stock adjustments in bulk go through the single-record services. */
+export { BatchService } from './batch/batch.service.js';
+export { StockService } from './stock/stock.service.js';
+export { inventorySchema } from './cluster-inventory.tokens.js';

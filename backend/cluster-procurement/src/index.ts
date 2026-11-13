@@ -15,3 +15,6 @@ export {
   type PurchaseOrderRef,
   PROCUREMENT_LOOKUP,
 } from './public-api.js';
+/* IMPORT-RP: the suppliers import writes each row through the service the single-record route calls. */
+export { VendorService } from './vendor/vendor.service.js';
+export { procurementSchema } from './cluster-procurement.tokens.js';

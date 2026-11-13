@@ -4,6 +4,7 @@
 import { PFC_PERMISSIONS } from './pfc-grants.js';
 import { PFD_PERMISSIONS } from './pfd-grants.js';
 import { STK_PERMISSIONS } from './stk-grants.js';
+import { IMP_PERMISSIONS } from './imp-grants.js';
 
 export const RA_PERMISSIONS: string[] = [
   'formula:actual:read',
@@ -332,4 +333,6 @@ export const RA_PERMISSIONS: string[] = [
   // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.
   ...PFD_PERMISSIONS,
   ...STK_PERMISSIONS,
+  // IMPORT-RP (spreadsheet imports, dilutions): scripts/imp-grants.ts.
+  ...IMP_PERMISSIONS,
 ];

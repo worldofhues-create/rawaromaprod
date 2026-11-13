@@ -50,6 +50,7 @@ export const grnItems = inventory.table(
     varianceReason: text("variance_reason"),
     // STOCK-FIX-RP (STK-16): the supplier's lot reference for this line, carried to the raw lot.
     supplierLotRef: varchar("supplier_lot_ref", { length: 100 }),
+    certificateRef: varchar("certificate_ref", { length: 100 }), // IMPORT-RP
     ...metaColumns(),
   },
   (t) => [

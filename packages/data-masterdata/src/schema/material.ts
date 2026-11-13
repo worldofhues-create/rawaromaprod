@@ -9,7 +9,7 @@
  * inventory_batch_id→inventory.inventory_batch, storage_location_id→
  * location.storage_location_master) are plain id-only SOFT refs — no FK.
  */
-import { boolean, date, index, integer, numeric, text, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, numeric, text, timestamp, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { masterdata } from "./_schema.js";
 import {
@@ -48,6 +48,8 @@ export const material = masterdata.table(
     // declaration). Null is "classification pending"; a class, NOT_REGULATED included, needs its source.
     hazardClass: varchar("hazard_class", { length: 16 }),
     hazardSource: text("hazard_source"),
+    // IMPORT-RP: where a density was measured or read (the CoA, the SDS). Null when none is on file.
+    densitySource: text("density_source"),
     ...metaColumns(),
   },
   (t) => [
@@ -137,5 +139,31 @@ export const materialAgeing = masterdata.table(
     index("material_ageing_material_idx").on(t.materialId),
     index("material_ageing_inventory_batch_idx").on(t.inventoryBatchId),
     index("material_ageing_storage_location_idx").on(t.storageLocationId),
+  ],
+);
+
+/**
+ * MATERIAL_DILUTION (IMPORT-RP) — what a dilution is made of: its own material, the base, the
+ * solvent, and the two shares by weight (they total 100; checked by the table). One row a dilution.
+ * Created by scripts/migrations/2026-11-24-imports.sql.
+ */
+export const materialDilution = masterdata.table(
+  "material_dilution",
+  {
+    materialDilutionId: dictPk("material_dilution_id"),
+    dilutionMaterialId: uuid("dilution_material_id").notNull().references(() => material.materialId),
+    baseMaterialId: uuid("base_material_id").notNull().references(() => material.materialId),
+    solventMaterialId: uuid("solvent_material_id").notNull().references(() => material.materialId),
+    basePercent: numeric("base_percent", { precision: 9, scale: 6 }).notNull(),
+    solventPercent: numeric("solvent_percent", { precision: 9, scale: 6 }).notNull(),
+    status: varchar("status", { length: 30 }).notNull().default("ACTIVE"),
+    createdBy: varchar("created_by", { length: 255 }),
+    createdDt: timestamp("created_dt", { withTimezone: true }).notNull().defaultNow(),
+    updatedBy: varchar("updated_by", { length: 255 }),
+    updatedDt: timestamp("updated_dt", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("material_dilution_material_uq").on(t.dilutionMaterialId),
+    index("material_dilution_base_idx").on(t.baseMaterialId),
   ],
 );

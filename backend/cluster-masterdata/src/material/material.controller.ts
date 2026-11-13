@@ -11,15 +11,18 @@ import {
   type AuthPrincipal,
 } from '@core/backend-kernel';
 import { MaterialService } from './material.service.js';
+import { DilutionService } from './dilution.service.js';
 import {
   createMaterial,
   createMaterialAgeing,
+  createMaterialDilution,
   createMaterialQcSpecification,
   createMaterialStorageRule,
   createRmAlias,
   listQuery,
   type CreateMaterial,
   type CreateMaterialAgeing,
+  type CreateMaterialDilution,
   type CreateMaterialQcSpecification,
   type CreateMaterialStorageRule,
   type CreateRmAlias,
@@ -28,7 +31,7 @@ import {
 
 @Controller()
 export class MaterialController {
-  constructor(private readonly materials: MaterialService) {}
+  constructor(private readonly materials: MaterialService, private readonly dilutions: DilutionService) {}
 
   /* ── material ───────────────────────────────────────────────────────── */
 
@@ -51,6 +54,25 @@ export class MaterialController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.materials.createMaterial(body, principal);
+  }
+
+  /* ── material_dilution (IMPORT-RP): which base, which solvent, in what shares ── */
+
+  // A composition names real materials, so the list is for people who may see them (reveal), not for
+  // every reader of the masterdata namespace.
+  @Permissions('masterdata:material_dilution:read', 'masterdata:material:reveal')
+  @Get('v1/material-dilutions')
+  listDilutions(@Query(new ZodValidationPipe(listQuery)) query: ListQuery) {
+    return this.dilutions.listDilutions(query);
+  }
+
+  @Permissions('masterdata:material_dilution:write')
+  @Post('v1/material-dilutions')
+  createDilution(
+    @Body(new ZodValidationPipe(createMaterialDilution)) body: CreateMaterialDilution,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.dilutions.createDilution(body, principal);
   }
 
   /* ── rm_alias ───────────────────────────────────────────────────────── */

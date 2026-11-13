@@ -1,6 +1,7 @@
 import { pfcGrant } from './pfc-grants.js';
 import { pfdGrant } from './pfd-grants.js';
 import { stkGrant } from './stk-grants.js';
+import { impGrant } from './imp-grants.js';
 
 // RA role catalog — the role → permission-subset matrix seeded into iam.role_master +
 // role_permission_mapping. Each role's `select(permissionCode)` decides which of the 263
@@ -255,6 +256,7 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       pfcGrant('procurement'), // SCAN-9: print the PO label
       stkGrant('procurement'),
+      impGrant('procurement'), // IMPORT-RP: what a dilution is made of, one at a time or from a sheet
       pfdGrant('procurement'),
       startsWith('procurement:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -275,6 +277,7 @@ export const ROLES: RoleDef[] = [
     view: 'receiving',
     select: anyOf(
       pfcGrant('receiving'), // SCAN-9: print the gate-entry, receiving and GRN labels
+      impGrant('receiving'), // IMPORT-RP: supplier lots and opening raw stock from a sheet (lots land in quarantine)
       oneOf(
         'inventory:gate_entry_master:read',
         'inventory:gate_entry_master:write',
@@ -347,6 +350,7 @@ export const ROLES: RoleDef[] = [
     view: 'warehouse',
     select: anyOf(
       pfcGrant('warehouse'),
+      impGrant('warehouse'), // IMPORT-RP: stock adjustments from a count sheet
       oneOf(
         'inventory:inventory_batch:read',
         'inventory:inventory_batch:write',
@@ -555,7 +559,7 @@ export const ROLES: RoleDef[] = [
     name: 'Formulator',
     view: 'vault_formulator',
     // PROD-D (lane pf-d): the QC review signature (scripts/pfd-grants.ts), on the main box only.
-    select: anyOf(pfdGrant('formulator'), oneOf(
+    select: anyOf(pfdGrant('formulator'), impGrant('formulator') /* IMPORT-RP: upload recipes through the Vault's own seal path */, oneOf(
       'formula:formula_master:read',
       'formula:formula_master:write',
       'formula:formula_version:read',
