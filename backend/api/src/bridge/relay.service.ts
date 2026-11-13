@@ -149,7 +149,9 @@ export class BridgeRelayService implements OnModuleDestroy {
       const complianceType = (bridgeContracts.COMPLIANCE_AGGREGATE_TYPES as Record<string, string>)[ev.type]
         ?? (ev.type === bridgeContracts.FG_BATCH_RECEIVED ? bridgeContracts.FG_BATCH_AGGREGATE_TYPE
           // PROM-2: the rest record is about one maceration run.
-          : ev.type === bridgeContracts.BATCH_REST_RECORDED ? bridgeContracts.BATCH_REST_AGGREGATE_TYPE : undefined);
+          : ev.type === bridgeContracts.BATCH_REST_RECORDED ? bridgeContracts.BATCH_REST_AGGREGATE_TYPE
+          // PROM-3: the reference approval is about one reference standard.
+          : ev.type === bridgeContracts.QC_REFERENCE_ESTABLISHED ? bridgeContracts.QC_REFERENCE_AGGREGATE_TYPE : undefined);
       const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order'
         // ALEMBIC Books phase 2: payables facts name their own aggregate.
         : ev.type.startsWith('procurement.po.') ? 'purchase_order'

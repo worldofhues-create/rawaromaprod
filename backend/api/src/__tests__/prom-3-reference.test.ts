@@ -23,6 +23,8 @@ import { BatchService } from '../../../cluster-production/src/batch/batch.servic
 import { CoaService } from '../../../cluster-production/src/coa/coa.service.js';
 import { ensureSchema, productionDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 import { parseQcBatchReleased } from '../../../test-support/alembic-docs001.js';
+import { parseQcReferenceEstablished } from '../../../test-support/alembic-prom.js';
+import { readFileSync } from 'node:fs';
 import { QcFloorService } from '../prodfloor/qc-floor.service.js';
 import { ReferenceStandardService } from '../prodfloor/reference-standard.service.js';
 import { PolicyService } from '../policy/policy.service.js';
@@ -224,4 +226,60 @@ test('the inspector is the person signed in; the rule is data and can be publish
   await assert.rejects(() => batches.recordProductionQc({ oilBatchId: b.id, result: 'PASS', inspectedBy: randomUUID() } as never, op), /taken from your sign-in/);
   await assert.rejects(() => policy.override('qc.reference_required', 'oil_batch', b.id, { required: false }, 'urgent', admin), /a reason is not a test result/);
   await assert.rejects(() => policy.publish('qc.reference_required', { rules: [], hasDefault: true, defaultValue: { required: 'no' } }, 'bad', admin), /required must be true or false/);
+});
+
+test('a reference is proposed only from a batch that rested and passed QC 2', async () => {
+  const p = await product();
+  const b = await batchOf(p);
+  await round(b, p);
+  await retain(b);
+  await assert.rejects(() => refs.propose({ oilBatchId: b.id, reason: 'passed QC 1 only' }, qcA), /rested and passed QC 2/);
+});
+
+test('approving a reference sends qc.reference.established in the same transaction: ALEMBIC\'s parser accepts it, the shared fixture parses, no person, name or material crosses', async () => {
+  const fixture = JSON.parse(readFileSync(new URL('../../../test-support/fixtures/qc-reference-established.json', import.meta.url), 'utf8'));
+  assert.ok(parseQcReferenceEstablished(fixture).ok, 'the shared fixture parses on ALEMBIC\'s side');
+  assert.deepEqual(bridge.checkQcReferenceEstablishedWire(fixture), [], 'and passes RawProd\'s own check');
+  const p = await product();
+  const first = await released(p);
+  const r = await refs.propose({ oilBatchId: first.id, reason: 'the first reference' }, qcA);
+  const sent = (id: string) => testClient()`select payload from bridge.outbox where type = 'qc.reference.established' and aggregate_id = ${id}`;
+  assert.equal((await sent(r.referenceStandardId)).length, 0, 'nothing is sent while it waits for a second person');
+  await refs.approve(r.referenceStandardId, {}, qcB);
+  const rows = await sent(r.referenceStandardId);
+  assert.equal(rows.length, 1);
+  const payload = (typeof rows[0]!.payload === 'string' ? JSON.parse(rows[0]!.payload) : rows[0]!.payload) as Record<string, unknown>;
+  assert.deepEqual(Object.keys(payload).sort(), Object.keys(fixture).sort(), 'the shared fixture\'s shape');
+  const parsed = parseQcReferenceEstablished(payload);
+  assert.ok(parsed.ok, JSON.stringify(parsed));
+  assert.equal(parsed.record.batchNo, first.no);
+  assert.equal(parsed.record.reference.ref, r.referenceCode);
+  assert.equal(parsed.record.reference.sampleCode, first.kept);
+  assert.equal(parsed.record.replacesRef, null);
+  const wire = JSON.stringify(payload);
+  for (const leak of ['Oud Rose Vetiver', 'Vetiver', p.formulaId, qcA.userId, qcB.userId, 'the first reference']) assert.ok(!wire.includes(leak), `payload carries ${leak}`);
+  assert.doesNotThrow(() => bridge.assertNoFormulaContent(payload));
+
+  // Replacing it names the reference it retired.
+  const second = await released(p, first.kept);
+  const next = await refs.propose({ oilBatchId: second.id, reason: 'the first bottle is nearly used up' }, qcB);
+  await refs.approve(next.referenceStandardId, { retireReason: 'bottle nearly used up' }, qcA);
+  const swap = (await sent(next.referenceStandardId))[0]!.payload as Record<string, unknown>;
+  const swapParsed = parseQcReferenceEstablished(typeof swap === 'string' ? JSON.parse(swap) : swap);
+  assert.ok(swapParsed.ok && swapParsed.record.replacesRef === r.referenceCode);
+});
+
+test('a bottle with no sample code cannot become the reference, and a code-less reference never matches a blank scan', async () => {
+  const p = await product();
+  const first = await released(p);
+  const r = await refs.propose({ oilBatchId: first.id, reason: 'the reference' }, qcA);
+  await testClient()`update quality.qc_sample_retention set sample_code = null where oil_batch_id = ${first.id}`;
+  await assert.rejects(() => refs.approve(r.referenceStandardId, {}, qcB), /no sample code on file: label the bottle/);
+  assert.equal((await testClient()`select status from quality.reference_standard where reference_standard_id = ${r.referenceStandardId}`)[0]!.status, 'PENDING', 'nothing changed');
+  // A reference that lost its code after approval holds QC rather than accepting a blank scan.
+  await testClient()`update quality.qc_sample_retention set sample_code = ${first.kept} where oil_batch_id = ${first.id}`;
+  await refs.approve(r.referenceStandardId, {}, qcB);
+  await testClient()`update quality.qc_sample_retention set sample_code = null where oil_batch_id = ${first.id}`;
+  const b = await batchOf(p);
+  await assert.rejects(() => round(b, p, qcA, ''), /has no sample code on file: QC is held/);
 });

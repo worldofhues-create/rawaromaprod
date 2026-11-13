@@ -1,6 +1,6 @@
 /**
  * ALEMBIC's process-promise receiver rules, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/promises/facts.ts @ 02802897 (lane/prom; PROM-2, PROM-3). RawProd's promise tests run
+ * alembic packages/domain/src/promises/facts.ts @ 87390015 (lane/prom; PROM-2, PROM-3). RawProd's promise tests run
  * what RawProd emits through the receiver's own parser, so "ALEMBIC would accept this" is proved here
  * rather than assumed. If ALEMBIC changes these rules, re-copy this file.
  */
@@ -180,4 +180,54 @@ export function parseQcPromiseBlock(r: Record<string, unknown>): { ok: true; blo
   if (leak) problems.push(`${leak} would carry formula content`);
   if (problems.length) return { ok: false, problems };
   return { ok: true, block: { stages, reference, isReferenceBatch: r.is_reference_batch === true } };
+}
+
+/* ── PROM-3: a batch becomes a product's retained reference ─────────────────────────────────
+ *
+ * `qc.reference.established` is sent when a second person approves a batch's retained sample as
+ * its product's reference. A reference is proposed from a batch that already passed QC 2, so its
+ * own `qc.batch.released` has usually gone out before the approval and said is_reference_batch
+ * false. This fact is what lets that lot's page say "This batch is the retained reference for this
+ * code and grade" instead of "Not on file". It never claims a comparison: the reference batch
+ * compared with nothing. */
+
+export const QC_REFERENCE_ESTABLISHED = "qc.reference.established" as const;
+
+export interface QcReferenceEstablished {
+  readonly batchNo: string;
+  readonly oilBatchRef: string;
+  readonly reference: QcReferenceRecord;
+  readonly establishedAt: string;
+  /** The reference this one replaced (retired with a reason on the factory's side), or null. */
+  readonly replacesRef: string | null;
+}
+
+const REFERENCE_KEYS = new Set(["batch_no", "oil_batch_ref", "reference", "established_at", "replaces_ref"]);
+
+/** Structural validation of a `qc.reference.established` payload (snake_case wire names). Unknown
+ *  keys are refused, as for `batch.rest.recorded`: a new field is a contract change. */
+export function parseQcReferenceEstablished(raw: unknown): { ok: true; record: QcReferenceEstablished } | { ok: false; problems: string[] } {
+  const r = (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const problems: string[] = [];
+  const leak = formulaContentKey(r);
+  if (leak) problems.push(`${leak} would carry formula content`);
+  for (const k of Object.keys(r)) if (!REFERENCE_KEYS.has(k)) problems.push(`unexpected field ${k}`);
+  const batchNo = text(r.batch_no, 64);
+  if (!batchNo) problems.push("batch_no is required");
+  const oilBatchRef = text(r.oil_batch_ref, 64);
+  if (!oilBatchRef) problems.push("oil_batch_ref is required");
+  if (!ISO_INSTANT(r.established_at)) problems.push("established_at must be a timestamp");
+  let reference: QcReferenceRecord | null = null;
+  const o = (typeof r.reference === "object" && r.reference !== null && !Array.isArray(r.reference) ? r.reference : null) as Record<string, unknown> | null;
+  if (o) {
+    for (const k of Object.keys(o)) if (!["ref", "sample_code", "retained_at"].includes(k)) problems.push(`unexpected field reference.${k}`);
+    const ref = text(o.ref, 80), sampleCode = text(o.sample_code, 50);
+    if (!ref || !sampleCode || !(o.retained_at === null || ISO_INSTANT(o.retained_at))) problems.push("reference needs ref, sample_code and retained_at (or null)");
+    else reference = { ref, sampleCode, retainedAt: (o.retained_at as string | null) ?? null };
+  } else problems.push("reference is required: the retained bottle this batch became");
+  const replacesRef = r.replaces_ref === null ? null : text(r.replaces_ref, 80);
+  if (r.replaces_ref !== null && !replacesRef) problems.push("replaces_ref must be a reference code or null");
+  if (replacesRef && reference && replacesRef === reference.ref) problems.push("a reference cannot replace itself");
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, record: { batchNo: batchNo!, oilBatchRef: oilBatchRef!, reference: reference!, establishedAt: r.established_at as string, replacesRef } };
 }

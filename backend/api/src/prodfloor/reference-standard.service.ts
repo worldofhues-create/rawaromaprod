@@ -8,10 +8,13 @@
  *
  *   propose   QC names the batch and why (quality:reference_standard:write). The batch's latest round
  *             must be APPROVE with nothing failed, and a sample of it must be retained.
+ *             That round must be QC 2: the reference is a batch that rested and passed QC 2.
  *   approve   Stop, second person: someone other than the proposer, signed in within five minutes
  *             (@FreshAuth on the route), approves (quality:reference_standard:approve). When the
  *             product already has an ACTIVE reference, approving retires it, with a reason, and names
- *             this one as its successor: "Retiring one needs a reason and names its successor".
+ *             this one as its successor: "Retiring one needs a reason and names its successor". The
+ *             bottle must carry a sample code, and `qc.reference.established` goes to ALEMBIC in the
+ *             same transaction so the reference batch's lot page can say what it is.
  *   decline   with a reason (toward caution, one person).
  *
  * Nothing is seeded and nothing is derived: until QC proposes and a second person approves a bottle,
@@ -19,7 +22,9 @@
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
-import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { PG_CLIENT, emitBridgeManualEvent, type AuthPrincipal } from '@core/backend-kernel';
+import { bridge as bridgeContracts } from '@core/contracts';
+import { drizzleExec } from '../floor-ops/floor-util.js';
 
 type Q = Sql | TransactionSql;
 type Row = Record<string, unknown>;
@@ -86,12 +91,17 @@ export class ReferenceStandardService {
                             where o.oil_batch_id = ${oilBatchId}`;
       if (!b) throw new NotFoundException('Batch not found.');
       if (String(b.status ?? '').toUpperCase() === 'FAILED') throw new ConflictException('A failed batch cannot be the reference.');
-      const [last] = await tx`select r.decision, r.results, s.product_id::text as product_id from quality.batch_qc_round r
+      const [last] = await tx`select r.decision, r.results, r.stage, s.product_id::text as product_id from quality.batch_qc_round r
                                 join quality.qc_checkpoint_set s on s.qc_checkpoint_set_id = r.qc_checkpoint_set_id
                                where r.oil_batch_id = ${oilBatchId} order by r.round_no desc limit 1`;
       const res = last ? ((typeof last.results === 'string' ? JSON.parse(last.results) : last.results) as { failed?: string[] }) : null;
       if (!last || last.decision !== 'APPROVE' || (res?.failed ?? []).length) {
         throw new ConflictException('Only a batch that passed QC on every checkpoint can be the reference: its latest round is not an approval.');
+      }
+      // The reference is what every later batch is compared with at QC 1 and QC 2, so it is a batch that
+      // rested and passed QC 2, never one that has only passed QC 1 and may still fail after its rest.
+      if (last.stage !== 'QC2') {
+        throw new ConflictException('Only a batch that has rested and passed QC 2 can be the reference: this batch\'s latest approval is not a QC 2.');
       }
       const productId = String(last.product_id);
       const [kept] = await tx`select qc_sample_retention_id::text as id from quality.qc_sample_retention
@@ -123,6 +133,18 @@ export class ReferenceStandardService {
       const [active] = await tx`select reference_standard_id::text as id, reference_code from quality.reference_standard
                                  where product_id = ${String(r.product_id)} and status = 'ACTIVE' for update`;
       const now = new Date().toISOString();
+      // QC scans this bottle's sample code at every comparison, so a bottle with no code cannot be the
+      // reference: a blank scan would match a blank code.
+      const [bottle] = await tx`select o.batch_number, s.sample_code,
+                                       to_char(s.retained_dt at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as retained_at
+                                  from quality.reference_standard rs
+                                  join production.oil_batch_master o on o.oil_batch_id = rs.oil_batch_id
+                                  left join quality.qc_sample_retention s on s.qc_sample_retention_id = rs.qc_sample_retention_id
+                                 where rs.reference_standard_id = ${id}`;
+      if (!bottle || !String(bottle.sample_code ?? '').trim()) {
+        throw new ConflictException('The retained sample has no sample code on file: label the bottle before it becomes the reference.');
+      }
+      if (!String(bottle.batch_number ?? '').trim()) throw new ConflictException('The batch has no batch number, so its lot could not be told.');
       if (active) {
         const why = String(body.retireReason ?? '').trim();
         if (!why) throw new BadRequestException(`Say why ${active.reference_code} is retired: this one replaces it.`);
@@ -131,6 +153,19 @@ export class ReferenceStandardService {
       }
       await tx`update quality.reference_standard set status = 'ACTIVE', approved_by = ${principal.userId}, approved_dt = ${now}::timestamptz,
                  replaces_id = ${active ? String(active.id) : null} where reference_standard_id = ${id}`;
+      // PROM-3: ALEMBIC is told in the same transaction, so the reference batch's lot page can say what it
+      // is. Codes and dates only: who proposed and approved stays here.
+      const wire: bridgeContracts.QcReferenceEstablishedWire = {
+        batch_no: String(bottle.batch_number),
+        oil_batch_ref: String(r.oil_batch_id),
+        reference: { ref: String(r.reference_code), sample_code: String(bottle.sample_code).trim(), retained_at: (bottle.retained_at as string | null) ?? null },
+        established_at: now,
+        replaces_ref: active ? String(active.reference_code) : null,
+      };
+      const problems = bridgeContracts.checkQcReferenceEstablishedWire(wire);
+      if (problems.length) throw new ConflictException(`The reference could not be recorded for ALEMBIC: ${problems.join(', ')}.`);
+      bridgeContracts.assertNoFormulaContent(wire);
+      await emitBridgeManualEvent(drizzleExec(tx as unknown as Sql), bridgeContracts.QC_REFERENCE_ESTABLISHED, id, wire as unknown as Record<string, unknown>);
       return { referenceStandardId: id, referenceCode: String(r.reference_code), status: 'ACTIVE', retired: active ? String(active.reference_code) : null };
     });
   }

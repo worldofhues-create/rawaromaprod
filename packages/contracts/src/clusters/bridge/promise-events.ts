@@ -151,3 +151,44 @@ export function checkQcPromiseBlockWire(p: Partial<QcPromiseBlockWire>): string[
   if (p.is_reference_batch !== undefined && typeof p.is_reference_batch !== "boolean") out.push("is_reference_batch");
   return out;
 }
+
+/* ── PROM-3: a batch becomes its product's retained reference ─────────────────────────────────
+ *
+ * `qc.reference.established` is sent once, in the transaction where a second person approves a
+ * batch's retained sample as its product's reference. A reference is proposed only from a batch that
+ * passed QC 2, so that batch's own `qc.batch.released` has usually gone out already, saying
+ * `is_reference_batch: false`; this fact is what lets its lot page say "This batch is the retained
+ * reference for this code and grade". It never claims a comparison. Aggregate `reference_standard`,
+ * id = quality.reference_standard id. No person, product name or material crosses. */
+
+export const QC_REFERENCE_ESTABLISHED = "qc.reference.established" as const;
+export const QC_REFERENCE_AGGREGATE_TYPE = "reference_standard" as const;
+
+export interface QcReferenceEstablishedWire {
+  /** The batch whose retained sample is the reference (== its `qc.batch.released.batch_no`). */
+  readonly batch_no: string;
+  /** Opaque: RawProd's oil-batch uuid. */
+  readonly oil_batch_ref: string;
+  /** The reference: its code, the retained bottle's sample code, when the sample was retained. */
+  readonly reference: QcReferenceWire;
+  /** When the second person approved it (ISO 8601 UTC). */
+  readonly established_at: string;
+  /** The reference this one retired, or null. */
+  readonly replaces_ref: string | null;
+}
+
+/** ALEMBIC's `parseQcReferenceEstablished` rules ([] = accepted). Exactly the fields above. */
+export function checkQcReferenceEstablishedWire(p: QcReferenceEstablishedWire): string[] {
+  const out: string[] = [];
+  if (!isNonEmpty(p.batch_no, 64)) out.push("batch_no");
+  if (!isNonEmpty(p.oil_batch_ref, 64)) out.push("oil_batch_ref");
+  if (!isIsoInstant(p.established_at)) out.push("established_at");
+  const r = p.reference;
+  if (!r || typeof r !== "object" || !isNonEmpty(r.ref, 80) || !isNonEmpty(r.sample_code, 50) || !(r.retained_at === null || isIsoInstant(r.retained_at))) out.push("reference");
+  else for (const k of Object.keys(r)) if (!["ref", "sample_code", "retained_at"].includes(k)) out.push(`unexpected:reference.${k}`);
+  if (!(p.replaces_ref === null || isNonEmpty(p.replaces_ref, 80))) out.push("replaces_ref");
+  if (p.replaces_ref !== null && r && p.replaces_ref === r.ref) out.push("replaces_ref.self");
+  const allowed = new Set(["batch_no", "oil_batch_ref", "reference", "established_at", "replaces_ref"]);
+  for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
+  return out;
+}

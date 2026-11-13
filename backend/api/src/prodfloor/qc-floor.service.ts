@@ -235,7 +235,9 @@ export class QcFloorService {
         if (refRequired) {
           for (const c of cps.filter((x) => x.checkType === 'REFERENCE')) {
             const given = (results.find((r) => r.checkpointId === c.id) as (QcResult & { referenceSampleCode?: string }) | undefined)?.referenceSampleCode;
-            if (String(given ?? '').trim() !== String(ref.ref.sampleCode ?? '')) {
+            // A reference with no sample code on file is not a bottle anyone can find: never let a blank scan match it.
+            if (!String(ref.ref.sampleCode ?? '').trim()) throw new ConflictException(`The retained reference ${ref.ref.referenceCode} has no sample code on file: QC is held until the bottle is labelled.`);
+            if (String(given ?? '').trim() !== String(ref.ref.sampleCode ?? '').trim()) {
               throw new BadRequestException(`"${c.name}": compare with the retained reference ${ref.ref.referenceCode} and scan its sample code${ref.ref.sampleCode ? ` (${ref.ref.sampleCode})` : ''}.`);
             }
           }
