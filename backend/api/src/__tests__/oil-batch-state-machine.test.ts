@@ -31,7 +31,7 @@ after(async () => {
 
 async function freshBatch() {
   const { batch } = await svc.produceOilBatch(
-    { productionOrderId: crypto.randomUUID(), batchNumber: `B-${crypto.randomUUID()}`, producedQty: 100 },
+    { productionOrderId: crypto.randomUUID(), producedQty: 100 },
     principal(),
   );
   return batch;

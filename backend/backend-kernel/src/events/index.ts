@@ -37,18 +37,22 @@ export {
 export {
   MACERATION_REST,
   QC_REFERENCE_REQUIRED,
+  FILL_LOT_SERVER_ASSIGNED,
   FACTORY_RULE_KEYS,
   FACTORY_RULE_DEFAULTS,
   FACTORY_ENFORCEMENT_VERSION,
   restRuleProblems,
   referenceRuleProblems,
+  lotRuleProblems,
   factoryRuleProblems,
   isFactoryRuleKey,
   restRuleInForce,
   referenceRuleInForce,
+  lotRuleInForce,
   type FactoryRuleKey,
   type RestRule,
   type ReferenceRule,
+  type LotRule,
   type RuleInForce,
 } from './factory-rules.js';
 export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';

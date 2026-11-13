@@ -58,7 +58,7 @@ async function batchFor(formulaId: string) {
   const planItem = randomUUID(), order = randomUUID();
   await sql`insert into production.production_plan_items (production_plan_item_id, formula_id, planned_qty, status) values (${planItem}, ${formulaId}, 10, 'ACTIVE')`;
   await sql`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, status) values (${order}, ${planItem}, 10, 'ACTIVE')`;
-  const { batch } = await batches.produceOilBatch({ productionOrderId: order, batchNumber: `MAC-${randomUUID().slice(0, 8)}`, producedQty: 10 }, op);
+  const { batch } = await batches.produceOilBatch({ productionOrderId: order, producedQty: 10 }, op);
   return batch.oilBatchId as string;
 }
 const qc = (oilBatchId: string, result = 'PASS') => batches.recordProductionQc({ oilBatchId, result }, op);

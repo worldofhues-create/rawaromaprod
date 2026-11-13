@@ -57,7 +57,7 @@ async function batch(opts: { formulaId?: string } = {}) {
             values (${randomUUID()}, ${'PR2-' + randomUUID().slice(0, 8)}, 'Oud Rose Vetiver', ${formulaId}, 'ACTIVE')`;
   await sql`insert into production.production_plan_items (production_plan_item_id, formula_id, planned_qty, status) values (${planItem}, ${formulaId}, 10, 'ACTIVE')`;
   await sql`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, status) values (${order}, ${planItem}, 10, 'ACTIVE')`;
-  const { batch: b } = await batches.produceOilBatch({ productionOrderId: order, batchNumber: `R2-${randomUUID().slice(0, 8)}`, producedQty: 10 }, op);
+  const { batch: b } = await batches.produceOilBatch({ productionOrderId: order, producedQty: 10 }, op);
   return { id: b.oilBatchId as string, no: b.batchNumber as string, formulaId };
 }
 const tick = () => new Promise((r) => setTimeout(r, 15));

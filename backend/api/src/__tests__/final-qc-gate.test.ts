@@ -20,7 +20,7 @@ after(async () => { await restoreReferenceRule?.(); await closeTestClient(); });
 
 test('a pre-maturation PASS does not release a matured batch; a final PASS after maturation does', async () => {
   const { batch } = await svc.produceOilBatch(
-    { productionOrderId: crypto.randomUUID(), batchNumber: `FQ-${crypto.randomUUID()}`, producedQty: 10 }, principal());
+    { productionOrderId: crypto.randomUUID(), producedQty: 10 }, principal());
   await svc.recordProductionQc({ oilBatchId: batch.oilBatchId, result: 'PASS' }, principal()); // in-process QC
   await new Promise((r) => setTimeout(r, 20));
   await svc.transitionOilBatch(batch.oilBatchId, 'IN_MATURATION', principal());

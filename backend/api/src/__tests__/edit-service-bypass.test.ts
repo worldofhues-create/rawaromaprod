@@ -28,7 +28,7 @@ after(async () => {
 
 test('edit-service: PATCH v1/masters/oil-batches/:id cannot set status (or anything else)', async () => {
   const { batch } = await batchSvc.produceOilBatch(
-    { productionOrderId: crypto.randomUUID(), batchNumber: 'EDIT-' + crypto.randomUUID(), producedQty: 5 },
+    { productionOrderId: crypto.randomUUID(), producedQty: 5 },
     principal(),
   );
   await batchSvc.transitionOilBatch(batch.oilBatchId, 'FAILED', principal());

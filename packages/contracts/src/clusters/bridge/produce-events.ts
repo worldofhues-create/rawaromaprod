@@ -98,12 +98,19 @@ export interface FgBatchReceivedPayload {
   /** QC-GATE: the compounded batch number `qc.batch.released` was sent under. ALEMBIC names the
    *  lot after `batch_no` and needs this to find the release; without it the lot stays held. */
   readonly qc_batch_no?: string;
+  /** PROM-4, optional: when the label carrying this lot was applied (ISO 8601 UTC). Absent when no label
+   *  was applied before the put-away. ALEMBIC records it as the lot's label print ("Lot printed at fill"). */
+  readonly label_applied_at?: string;
+  /** PROM-4, optional: true when RawProd's server minted the lot at fill; false for a lot made before
+   *  PROM-4, whose number was typed. Absent from an older sender. */
+  readonly lot_assigned_at_fill?: boolean;
 }
 
 const isNonEmpty = (v: unknown, max = 200) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
 const isIsoInstant = (v: unknown) => typeof v === "string" && v.includes("T") && !Number.isNaN(Date.parse(v));
 
-/** Problems with an `fg.batch.received` payload ([] = valid). Exactly the six fields. */
+/** Problems with an `fg.batch.received` payload ([] = valid). The six fields, plus the optional
+ *  `qc_batch_no` and PROM-4's optional `label_applied_at` and `lot_assigned_at_fill`. */
 export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   const out: string[] = [];
   if (!isNonEmpty(p.batch_no, 64)) out.push("batch_no");
@@ -113,7 +120,9 @@ export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   if (!isNonEmpty(p.rack, 120)) out.push("rack");
   if (!isIsoInstant(p.released_at)) out.push("released_at");
   if (p.qc_batch_no !== undefined && !isNonEmpty(p.qc_batch_no, 64)) out.push("qc_batch_no");
-  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no"]);
+  if (p.label_applied_at !== undefined && !isIsoInstant(p.label_applied_at)) out.push("label_applied_at");
+  if (p.lot_assigned_at_fill !== undefined && typeof p.lot_assigned_at_fill !== "boolean") out.push("lot_assigned_at_fill");
+  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "label_applied_at", "lot_assigned_at_fill"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }

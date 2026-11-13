@@ -692,14 +692,14 @@ export class FloorStationService {
       // The batch, in grams, with one consumption row per raw lot used: the genealogy a recall reads.
       const producedMg = ls.reduce((a, l) => a + Number(l.actual_mg ?? 0), 0);
       const [g] = await tx<{ uom_id: string }[]>`select uom_id::text from platform.uom_master where lower(uom_code) in ('g', 'gm', 'gram', 'grams') order by uom_code limit 1`;
+      // PROM-4: the floor mints the batch number itself (above) and hands it in as assigned; nobody types it.
       const made = await this.batches.produceOilBatch({
         productionOrderId: j.production_order_id,
         secureMixingSessionId: j.mixing_session_id,
-        batchNumber: batchNo,
         producedQty: producedMg / 1000,
         uomId: g?.uom_id,
         consumption: ls.map((l) => ({ consumedForDocumentId: l.picked_batch_id!, consumedQty: Number(l.actual_mg) / 1000, uomId: g?.uom_id })),
-      } as never, principal);
+      } as never, principal, { batchNumber: batchNo, by: 'floor_station' });
       const oilBatchId = (made as { batch: { oilBatchId: string } }).batch.oilBatchId;
       await tx`update production.floor_job set stage = 'DONE', mixed_by = ${principal.userId}, mixed_dt = now(), batch_no = ${batchNo}, oil_batch_id = ${oilBatchId}
         where floor_job_id = ${jobId}`;

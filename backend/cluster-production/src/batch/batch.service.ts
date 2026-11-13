@@ -10,12 +10,16 @@
  *                      oil_batch_event_history (eventType QC_RECORDED), then emits
  *                      production.qc.recorded.
  *
+ * PROM-4: the batch number is never typed. The floor's compound step mints B-<yymm>-<job> itself and
+ * hands it in as `assigned`; any other caller gets OB-<yymm>-<nnnnn> from `production.oil_batch_no_seq`.
+ * A batchNumber in the body is refused.
+ *
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics via num();
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
-import { emitBridgeOutbound, macerationOnTransition, recordOutbox, referenceRuleInForce, type AuthPrincipal } from '@core/backend-kernel';
+import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { emitBridgeOutbound, lotRuleInForce, macerationOnTransition, recordOutbox, referenceRuleInForce, FILL_LOT_SERVER_ASSIGNED, type AuthPrincipal, type BridgeEmitTx } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -241,8 +245,21 @@ export class BatchService {
    * genealogy + a PRODUCED event_history row, then emits production.oil_batch.created. All in
    * one transaction.
    */
-  async produceOilBatch(body: ProduceOilBatch, principal: AuthPrincipal) {
+  async produceOilBatch(body: ProduceOilBatch, principal: AuthPrincipal, assigned?: { batchNumber: string; by: 'floor_station' }) {
+    if (body.batchNumber !== undefined && body.batchNumber !== null) {
+      throw new BadRequestException(`The batch number is assigned by the server: leave it out (${FILL_LOT_SERVER_ASSIGNED}). A typed batch number is never accepted.`);
+    }
+    if (assigned && !/^B-\d{4}-[A-Z0-9-]{1,40}$/.test(assigned.batchNumber)) {
+      throw new Error(`floor batch number ${assigned.batchNumber} is not B-<yymm>-<job>`);
+    }
     return this.db.transaction(async (tx) => {
+      await lotRuleInForce(tx as unknown as BridgeEmitTx);
+      let batchNumber = assigned?.batchNumber;
+      if (!batchNumber) {
+        const rows = Array.from((await tx.execute(sql`select nextval('production.oil_batch_no_seq')::text as n`)) as unknown as { n: string }[]);
+        if (!rows[0]?.n) throw new Error('production.oil_batch_no_seq returned no value');
+        batchNumber = `OB-${new Date().toISOString().slice(2, 7).replace('-', '')}-${rows[0].n.padStart(5, '0')}`;
+      }
       const batch = (
         await tx
           .insert(oilBatchMaster)
@@ -250,7 +267,7 @@ export class BatchService {
             oilBatchId: uuidv7(),
             productionOrderId: body.productionOrderId,
             secureMixingSessionId: body.secureMixingSessionId ?? null,
-            batchNumber: body.batchNumber,
+            batchNumber,
             producedQty: num(body.producedQty),
             uomId: body.uomId ?? null,
             producedDt: body.producedDt ? new Date(body.producedDt) : new Date(),
@@ -293,7 +310,7 @@ export class BatchService {
         tx,
         outbox,
         productionEvents.oilBatchCreated,
-        { oilBatchId, productionOrderId: body.productionOrderId, batchNumber: body.batchNumber },
+        { oilBatchId, productionOrderId: body.productionOrderId, batchNumber },
         oilBatchId,
       );
 

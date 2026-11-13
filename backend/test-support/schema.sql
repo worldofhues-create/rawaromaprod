@@ -3344,3 +3344,17 @@ language sql stable as $$
    where l.rm_batch_id = p_rm_batch_id and l.event = 'LEGACY_RELEASE'
    order by l.at desc limit 1
 $$;
+
+-- scripts/migrations/2026-11-18-prom-4-fill-lot.sql
+-- PROM-4: the finished-good lot and the off-floor oil-batch number are minted by the server.
+create sequence if not exists packaging.fg_lot_seq;
+create sequence if not exists production.oil_batch_no_seq;
+alter table packaging.finished_good_batch_master add column if not exists lot_assigned_at_fill boolean not null default false;
+alter table packaging.finished_good_batch_master add column if not exists lot_rule_version integer check (lot_rule_version >= 0);
+insert into platform.policy (policy_key, title, description) values
+  ('fill.lot_server_assigned', 'Lot assigned at fill', 'The finished-good lot is minted by the server at fill and printed on every pack. It is never typed, so this rule has one valid value.')
+on conflict (policy_key) do nothing;
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('fill.lot_server_assigned', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"required":true}}',
+   'Owner LD-85, 13 Nov 2026: every pack carries a lot number tied to its batch record; the lot is assigned at fill', 'system')
+on conflict (policy_key, version) do nothing;

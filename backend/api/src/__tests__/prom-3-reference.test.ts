@@ -62,7 +62,7 @@ async function batchOf(p: { formulaId: string }) {
   const planItem = randomUUID(), order = randomUUID();
   await testClient()`insert into production.production_plan_items (production_plan_item_id, formula_id, planned_qty, status) values (${planItem}, ${p.formulaId}, 10, 'ACTIVE')`;
   await testClient()`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, status) values (${order}, ${planItem}, 10, 'ACTIVE')`;
-  const { batch } = await batches.produceOilBatch({ productionOrderId: order, batchNumber: `P3-${randomUUID().slice(0, 8)}`, producedQty: 10 }, op);
+  const { batch } = await batches.produceOilBatch({ productionOrderId: order, producedQty: 10 }, op);
   return { id: batch.oilBatchId as string, no: batch.batchNumber as string };
 }
 type P = Awaited<ReturnType<typeof product>>;

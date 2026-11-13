@@ -2062,7 +2062,7 @@
     ] },
     '/v1/oil-batches': { title: 'New oil batch', perm: 'production:oil_batch_master:write', fields: [
       { n: 'productionOrderId', l: 'Production order', t: 'select', fk: '/v1/production-orders', fv: 'productionOrderId', fl: 'orderNumber', req: true },
-      { n: 'batchNumber', l: 'Oil batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty', t: 'number', req: true },
+      /* PROM-4: no batch number field: the server assigns it (fill.lot_server_assigned) */ { n: 'producedQty', l: 'Produced qty', t: 'number', req: true },
       { n: 'uomId', l: 'Unit', t: 'select', fk: '/v1/uoms', fv: 'uomId', fl: 'uomCode' }
     ] },
     '/v1/production-qc': { title: 'Record production QC', perm: 'production:production_qc:write', fields: [
@@ -2081,7 +2081,7 @@
     '/v1/finished-good-batches': { title: 'New finished-goods batch', perm: 'packaging:finished_good_batch_master:write', fields: [
       { n: 'packageOrderId', l: 'Package order', t: 'select', fk: '/v1/package-orders', fv: 'packageOrderId', fl: 'packageOrderId', req: true },
       { n: 'productSkuId', l: 'Product SKU', t: 'select', fk: '/v1/product-skus', fv: 'productSkuId', fl: 'skuCode', req: true },
-      { n: 'batchNumber', l: 'FG batch no.', t: 'text', req: true }, { n: 'producedQty', l: 'Produced qty (units)', t: 'number', req: true },
+      /* PROM-4: no lot field: the lot is assigned at fill by the server and printed on every pack */ { n: 'producedQty', l: 'Produced qty (units)', t: 'number', req: true },
       { n: 'manufacturingDate', l: 'Manufactured on (printed on the label)', t: 'date', req: true },
       { n: 'expiryDate', l: 'Expiry date', t: 'date' }
     ] },

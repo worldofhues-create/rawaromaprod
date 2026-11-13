@@ -57,7 +57,7 @@ async function fixture(opts: { formulaId?: string; productCode?: string; produce
   await sql`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, status)
             values (${orderId}, ${planItemId}, 25, 'COMPLETED')`;
   const { batch } = await batches.produceOilBatch(
-    { productionOrderId: orderId, batchNumber: `A${productId.slice(0, 6)}`, producedQty: 25, producedDt: opts.producedDt ?? '2026-02-14T08:00:00.000Z' },
+    { productionOrderId: orderId, producedQty: 25, producedDt: opts.producedDt ?? '2026-02-14T08:00:00.000Z' },
     qc,
   );
   return { formulaId, productId, productCode, batch };

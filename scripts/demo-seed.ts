@@ -1807,12 +1807,13 @@ async function ensureBridgeProductionAndFactory(
     }
     await ctx.svc.mixingService.endSession(sessionId, { sessionEndDt: ago(78 - i * 2).toISOString() }, users.compounding);
 
-    const oilBatchNumber = `DEMO-OIL-${String(i + 1).padStart(4, '0')}`;
+    // PROM-4: the server assigns the batch number; the seed reads it back.
     const oilBatch = await ctx.svc.productionBatchService.produceOilBatch({
-      productionOrderId, secureMixingSessionId: sessionId, batchNumber: oilBatchNumber,
+      productionOrderId, secureMixingSessionId: sessionId,
       producedQty: Math.floor(orderQty * 0.95), producedDt: ago(77 - i * 2).toISOString(),
     }, users.compounding);
     const oilBatchId = extractId(oilBatch, 'oilBatchId');
+    const oilBatchNumber = String((oilBatch as { batch: { batchNumber: string } }).batch.batchNumber);
     oilBatchCount++;
     await ctx.svc.productionBatchService.recordProductionQc({
       oilBatchId, observedValue: 0.97, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(76 - i * 2).toISOString(),
@@ -1876,9 +1877,9 @@ async function ensureBridgeProductionAndFactory(
     }, users.filling);
     await ctx.svc.packagingOrdersService.endFillingSession(fillingSessionId, { sessionEndDt: ago(56 - i * 2).toISOString() }, users.filling);
 
-    const fgBatchNumber = `DEMO-FG-${String(i + 1).padStart(4, '0')}`;
+    // PROM-4: the lot is assigned at fill by the server.
     const fgBatch = await ctx.svc.packagingBatchService.produceFinishedGoodBatch({
-      packageOrderId, productSkuId: skuId, batchNumber: fgBatchNumber, producedQty: Math.floor(orderQty * 0.88),
+      packageOrderId, productSkuId: skuId, producedQty: Math.floor(orderQty * 0.88),
       manufacturingDate: isoDate(55 - i * 2), expiryDate: isoDate(-1090),
     }, users.packaging);
     const fgBatchId = extractId(fgBatch, 'finishedGoodBatchId');

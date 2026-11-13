@@ -21,7 +21,7 @@ test('the service worker precaches it under a bumped cache name', () => {
   const s = web('sw.js');
   assert.match(s, /'\/ws-floorb\.js'/);
   assert.match(s, /'\/weight\.js'/);
-  assert.match(s, /const CACHE = 'ra-shell-v140'/);
+  assert.match(s, /const CACHE = 'ra-shell-v141'/);
 });
 
 test('the five views register, have a readable address and a help line', () => {

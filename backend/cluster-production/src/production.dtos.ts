@@ -132,7 +132,8 @@ const consumptionRow = z.object({
 export const produceOilBatch = z.object({
   productionOrderId: z.string().uuid(),
   secureMixingSessionId: z.string().uuid().optional(),
-  batchNumber: z.string(),
+  /** PROM-4: never accepted; present only so a typed number is refused with the reason. */
+  batchNumber: z.string().optional(),
   producedQty: z.number().positive(),
   uomId: z.string().uuid().optional(),
   producedDt: isoDateish(),

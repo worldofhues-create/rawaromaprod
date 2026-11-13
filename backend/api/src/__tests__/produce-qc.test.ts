@@ -58,7 +58,7 @@ async function chain() {
             values (${orderId}, ${planItemId}, 100, 'COMPLETED')`;
   const req = await requirement({ sku, qtyKg: 100, productionOrderId: orderId });
   const { batch } = await batches.produceOilBatch(
-    { productionOrderId: orderId, batchNumber: `Q${productId.slice(0, 7)}`, producedQty: 100, producedDt: '2026-09-20T08:00:00.000Z' }, qcUser);
+    { productionOrderId: orderId, producedQty: 100, producedDt: '2026-09-20T08:00:00.000Z' }, qcUser);
   await coa.upsertSpec(productId, { sgMin: 0.95, sgMax: 1.5, flashPointMinC: 110, flashPointMaxC: 120, shelfLifeMonths: 24 }, qcUser);
   const packageOrderId = randomUUID();
   await sql`insert into packaging.package_order (package_order_id, product_sku_id, oil_batch_id, order_qty, status)

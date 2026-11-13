@@ -7,6 +7,10 @@
  *                           maxDays null = no over-maximum alarm ("No maximum set"): no number is
  *                           invented (OQ-PROM-4).
  *   qc.reference_required   { required }   "checked against a retained reference before it ships".
+ *   fill.lot_server_assigned { required }  "Every pack carries a lot number tied to its batch record" (PROM-4).
+ *                           The lot is minted by the server at fill and never typed. Only `true` is a
+ *                           valid value: printing a lot no record holds is a Block (system-led 3.4), so
+ *                           the rule is data the Rules screen shows and PROM-6 reports, not a switch.
  *
  * Both are ordinary policies (platform.policy / policy_version, the Rules screen), evaluated with the
  * one rules engine (policy-engine.ts). What is different is the failure direction:
@@ -28,7 +32,8 @@ import { evaluateRules, type PolicyBody } from './policy-engine.js';
 
 export const MACERATION_REST = 'maceration.rest' as const;
 export const QC_REFERENCE_REQUIRED = 'qc.reference_required' as const;
-export const FACTORY_RULE_KEYS = [MACERATION_REST, QC_REFERENCE_REQUIRED] as const;
+export const FILL_LOT_SERVER_ASSIGNED = 'fill.lot_server_assigned' as const;
+export const FACTORY_RULE_KEYS = [MACERATION_REST, QC_REFERENCE_REQUIRED, FILL_LOT_SERVER_ASSIGNED] as const;
 export type FactoryRuleKey = (typeof FACTORY_RULE_KEYS)[number];
 
 export interface RestRule {
@@ -40,17 +45,24 @@ export interface RestRule {
 export interface ReferenceRule {
   required: boolean;
 }
+export interface LotRule {
+  required: true;
+}
 
-export const FACTORY_RULE_DEFAULTS: { [MACERATION_REST]: RestRule; [QC_REFERENCE_REQUIRED]: ReferenceRule } = Object.freeze({
+export const FACTORY_RULE_DEFAULTS: { [MACERATION_REST]: RestRule; [QC_REFERENCE_REQUIRED]: ReferenceRule; [FILL_LOT_SERVER_ASSIGNED]: LotRule } = Object.freeze({
   [MACERATION_REST]: Object.freeze({ minDays: 45, maxDays: null, appliesTo: 'every_batch', earlyRelease: 'second_person' }) as RestRule,
   [QC_REFERENCE_REQUIRED]: Object.freeze({ required: true }) as ReferenceRule,
+  [FILL_LOT_SERVER_ASSIGNED]: Object.freeze({ required: true }) as LotRule,
 });
 
-/** 1 = PROM-2 (every batch rests, no skip through HOLD/REWORK, early release by two people) and
- *  PROM-3 (QC 1 / QC 2 rounds against the retained reference are the release verdict). */
+/** 1 = PROM-2 (every batch rests, no skip through HOLD/REWORK, early release by two people),
+ *  PROM-3 (QC 1 / QC 2 rounds against the retained reference are the release verdict) and PROM-4
+ *  (the finished-good lot and the generic oil-batch number are minted by the server; a typed one is
+ *  refused). */
 export const FACTORY_ENFORCEMENT_VERSION: Readonly<Record<FactoryRuleKey, number>> = Object.freeze({
   [MACERATION_REST]: 1,
   [QC_REFERENCE_REQUIRED]: 1,
+  [FILL_LOT_SERVER_ASSIGNED]: 1,
 });
 
 const isDays = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 365;
@@ -74,6 +86,13 @@ export function referenceRuleProblems(v: unknown): string[] {
   return typeof o.required === 'boolean' ? [] : ['required must be true or false.'];
 }
 
+/** PROM-4: the lot rule has one valid value. Switching it off would let a typed lot onto a pack. */
+export function lotRuleProblems(v: unknown): string[] {
+  const o = (v ?? null) as Partial<LotRule> | null;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return ['The lot rule is not a rule.'];
+  return o.required === true ? [] : ['required must be true: the lot is assigned by the server at fill and is never typed, so this rule cannot be switched off.'];
+}
+
 export function isFactoryRuleKey(key: string): key is FactoryRuleKey {
   return (FACTORY_RULE_KEYS as readonly string[]).includes(key);
 }
@@ -81,7 +100,7 @@ export function isFactoryRuleKey(key: string): key is FactoryRuleKey {
 /** Every value a body can produce (each rule's THEN and the default), checked; [] = publishable. */
 export function factoryRuleProblems(key: string, body: PolicyBody): string[] {
   if (!isFactoryRuleKey(key)) return [];
-  const check = key === MACERATION_REST ? restRuleProblems : referenceRuleProblems;
+  const check = key === MACERATION_REST ? restRuleProblems : key === FILL_LOT_SERVER_ASSIGNED ? lotRuleProblems : referenceRuleProblems;
   const out: string[] = [];
   (body.rules ?? []).forEach((r, i) => check(r.then).forEach((p) => out.push(`Rule ${i + 1}: ${p}`)));
   if (body.hasDefault) check(body.defaultValue).forEach((p) => out.push(`Otherwise: ${p}`));
@@ -123,4 +142,13 @@ export async function referenceRuleInForce(tx: BridgeEmitTx, ctx: { productId?: 
   const problems = referenceRuleProblems(r.value);
   if (problems.length) throw new ConflictException(`The ${QC_REFERENCE_REQUIRED} rule (v${r.version}) is not a valid rule, so QC is held: ${problems.join(' ')} Ask an admin to fix it on the Rules screen.`);
   return r as RuleInForce<ReferenceRule>;
+}
+
+/** PROM-4: the lot rule in force. Read by the fill and the oil-batch create so the version that
+ *  refused a typed lot is the one on record; a malformed value holds (409), never a typed lot. */
+export async function lotRuleInForce(tx: BridgeEmitTx): Promise<RuleInForce<LotRule>> {
+  const r = await readRule(tx, FILL_LOT_SERVER_ASSIGNED, { record_type: 'fill' });
+  const problems = lotRuleProblems(r.value);
+  if (problems.length) throw new ConflictException(`The ${FILL_LOT_SERVER_ASSIGNED} rule (v${r.version}) is not a valid rule, so this fill is held: ${problems.join(' ')} Ask an admin to fix it on the Rules screen.`);
+  return r as RuleInForce<LotRule>;
 }

@@ -53,6 +53,10 @@ export interface FgBatchInfo {
   qc: FgQcState;
   stocked: number;
   status: string | null;
+  /** PROM-4: the server minted this lot at fill (false on a lot made before PROM-4, whose number was typed). */
+  lotAssignedAtFill: boolean;
+  /** PROM-4: when the first APPLIED label went on this batch, or null when none has. */
+  labelAppliedAt: string | null;
 }
 
 export interface ShelfTaskRow {
@@ -98,6 +102,9 @@ export function buildFgBatchReceived(input: {
   qcBatchNo?: string | null;
   /** Made from an oil batch: ALEMBIC releases it against qc_batch_no, so the field is required. */
   compounded?: boolean;
+  /** PROM-4: when the label carrying this lot was applied, and whether the server minted the lot. */
+  labelAppliedAt?: string | null;
+  lotAssignedAtFill?: boolean;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   const payload: bridgeContracts.FgBatchReceivedPayload = {
@@ -108,6 +115,9 @@ export function buildFgBatchReceived(input: {
     rack: input.rack ?? '',
     released_at: input.releasedAt ?? '',
     ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
+    // PROM-4: the lot's own label record. Absent (never false-filled) when no label has been applied.
+    ...(input.labelAppliedAt ? { label_applied_at: input.labelAppliedAt } : {}),
+    ...(input.lotAssignedAtFill !== undefined ? { lot_assigned_at_fill: input.lotAssignedAtFill } : {}),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.
@@ -133,7 +143,9 @@ export class ShelfTaskService {
     const r = ((await q.execute(sql`
       select f.finished_good_batch_id::text as id, f.batch_number, f.produced_qty::float as qty, f.uom_id::text, u.uom_code,
              f.product_sku_id::text, s.sku_code, s.pack_size, pm.product_id::text, pm.product_code, pm.product_name,
-             f.manufacturing_date, f.expiry_date, f.status,
+             f.manufacturing_date, f.expiry_date, f.status, f.lot_assigned_at_fill,
+             (select min(lr.applied_dt) from packaging.fg_label_record lr
+               where lr.finished_good_batch_id = f.finished_good_batch_id and lr.status = 'APPLIED') as label_applied_at,
              po.oil_batch_id::text, ob.batch_number as oil_batch_number, ob.production_order_id::text, c.status as coa_status, c.overall_result, c.released_dt,
              coalesce((select sum(st.qty) from location.fg_bin_stock st where st.finished_good_batch_id = f.finished_good_batch_id), 0)::float as stocked
         from packaging.finished_good_batch_master f
@@ -162,6 +174,8 @@ export class ShelfTaskService {
       coaStatus, coaResult, releasedAt: r.released_dt ? new Date(r.released_dt as string).toISOString() : null,
       qcBatchNo: (r.oil_batch_number as string | null) ?? null,
       qc, stocked: Number(r.stocked ?? 0), status: (r.status as string | null) ?? null,
+      lotAssignedAtFill: r.lot_assigned_at_fill === true,
+      labelAppliedAt: r.label_applied_at ? new Date(r.label_applied_at as string).toISOString() : null,
     };
   }
 
@@ -324,6 +338,7 @@ export class ShelfTaskService {
     const built = buildFgBatchReceived({
       batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
       rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId,
+      labelAppliedAt: fg.labelAppliedAt, lotAssignedAtFill: fg.lotAssignedAtFill,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {
