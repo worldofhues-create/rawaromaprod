@@ -61,7 +61,8 @@ begin
   if not exists (select 1 from pg_roles where rolname = app) then
     raise exception 'material_purchase_price grants: DB_APP_ROLE "%" is not a role in this cluster', app;
   end if;
-  execute format('grant usage on schema procurement to %I', app);
+  -- No schema grant here: the application role's USAGE on procurement is given at provisioning, like
+  -- every other procurement table's (automation-app-role-grants.test.ts holds migrations to that).
   execute format('grant select, insert on procurement.material_purchase_price to %I', app);
   execute format('grant select, insert, update on procurement.purchase_price_setting to %I', app);
 end $$;

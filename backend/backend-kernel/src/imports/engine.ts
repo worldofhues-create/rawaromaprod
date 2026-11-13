@@ -265,7 +265,12 @@ export class ImportEngine {
     const sha = createHash('sha256').update(input.bytes).digest('hex');
     if (sha !== job.fileSha256) throw DomainError.conflict('This is not the file that was previewed (it has changed since). Preview it again, then import.');
     const [other] = await this.sql`select import_job_id from ${this.jobs} where kind = ${job.kind} and file_sha256 = ${sha} and status = 'committed' limit 1`;
-    if (other) return this.result(this.view((await this.sql`select * from ${this.jobs} where import_job_id = ${other.import_job_id}`)[0]!), 'commit', true);
+    if (other) {
+      // Somebody committed this very file while this preview waited. It is in; its rows are theirs.
+      const theirs = this.view((await this.sql`select * from ${this.jobs} where import_job_id = ${other.import_job_id}`)[0]!);
+      const answer = await this.result(theirs, 'commit', true);
+      return theirs.uploadedBy === ctx.principal.userId ? answer : { ...answer, rows: [] };
+    }
 
     // Judged afresh: the preview is a promise about the file, the commit is about the database now.
     const judged = await this.judge(h, input.bytes, ctx);

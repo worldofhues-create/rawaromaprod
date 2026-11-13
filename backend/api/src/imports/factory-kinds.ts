@@ -61,9 +61,22 @@ async function materialsByCode(sql: Sql, codes: string[]): Promise<Map<string, M
      where upper(m.material_code) = any(${want})`;
   return new Map(rows.map((m) => [up(m.code), m]));
 }
-async function uomsByCode(sql: Sql): Promise<Map<string, { id: string; code: string }>> {
-  const rows = await sql<{ id: string; code: string }[]>`select uom_id::text as id, uom_code as code from platform.uom_master where uom_code is not null`;
-  return new Map(rows.map((u) => [u.code.trim().toLowerCase(), u]));
+export interface Uom { id: string; code: string }
+async function allUoms(sql: Sql): Promise<Uom[]> {
+  return sql<Uom[]>`select uom_id::text as id, uom_code as code from platform.uom_master where uom_code is not null order by uom_id`;
+}
+/**
+ * The unit a person wrote. The unit list has no rule against "kg" and "KG" both being on it, so the
+ * code as written wins; failing that, the one unit that differs only in case; two of those is said,
+ * never picked between.
+ */
+export function findUom(uoms: readonly Uom[], text: string): Uom | string {
+  const t = text.trim();
+  const exact = uoms.filter((u) => u.code.trim() === t);
+  if (exact.length >= 1) return exact[0]!;
+  const loose = uoms.filter((u) => u.code.trim().toLowerCase() === t.toLowerCase());
+  if (loose.length === 1) return loose[0]!;
+  return loose.length === 0 ? `The unit "${t}" is not in the unit list (Setup, Units).` : `"${t}" matches ${loose.length} units that differ only in capitals (${loose.map((u) => u.code).join(', ')}). Write it exactly as the unit list has it.`;
 }
 interface Vendor { id: string; code: string | null; name: string | null }
 async function allVendors(sql: Sql): Promise<Vendor[]> {
@@ -168,13 +181,14 @@ function suppliers(sql: Sql): ImportKindHandler<SupplierInput> {
 interface LotInput { materialId: string; vendorId: string; supplierLot: string; qty: string; uomId: string; receivedDate: string; mfgDate: string | null; expiryDate: string | null; certificate: string | null }
 
 /** Quantity, unit and the ingredient's own unit: the quantity as text and the unit's id, or problems. */
-function quantityIn(r: ImportTableRow, p: { problems: string[] }, uoms: Map<string, { id: string; code: string }>, mat: Mat | undefined): { qty: string; uomId: string } | null {
+function quantityIn(r: ImportTableRow, p: { problems: string[] }, uoms: readonly Uom[], mat: Mat | undefined): { qty: string; uomId: string } | null {
   const q = cellQuantity(r.values.quantity ?? '', 'Quantity');
   const unitText = (r.values.unit ?? '').trim();
   if (!q.ok) p.problems.push(q.problem); else if (!q.value) p.problems.push('"Quantity" is empty.');
   if (!unitText) p.problems.push('"Unit" is empty: a quantity needs its unit.');
-  const uom = unitText ? uoms.get(unitText.toLowerCase()) : undefined;
-  if (unitText && !uom) p.problems.push(`The unit "${unitText}" is not in the unit list (Setup, Units).`);
+  const found = unitText ? findUom(uoms, unitText) : undefined;
+  if (typeof found === 'string') p.problems.push(found);
+  const uom = typeof found === 'string' ? undefined : found;
   if (!q.ok || !q.value || !uom) return null;
   const qty = decimalText(q.value);
   if (mat?.uom) {
@@ -201,7 +215,7 @@ function supplierLots(sql: Sql): ImportKindHandler<LotInput> {
     async plan(rows, ctx) {
       const mats = await materialsByCode(sql, rows.map((r) => r.values.ingredient ?? ''));
       const vendors = await allVendors(sql);
-      const uoms = await uomsByCode(sql);
+      const uoms = await allUoms(sql);
       const matIds = [...mats.values()].map((m) => m.id);
       const onFile = matIds.length ? await sql<{ m: string; v: string | null; lot: string; batch: string }[]>`
         select b.material_id::text as m, g.vendor_id::text as v, lower(btrim(b.supplier_lot_ref)) as lot, b.batch_number as batch
@@ -319,7 +333,7 @@ function rawStockOpening(sql: Sql): ImportKindHandler<OpeningInput> {
     spec: RAW_STOCK_OPENING,
     async plan(rows, ctx) {
       const mats = await materialsByCode(sql, rows.map((r) => r.values.ingredient ?? ''));
-      const uoms = await uomsByCode(sql);
+      const uoms = await allUoms(sql);
       const lots = [...new Set(rows.map((r) => up(r.values.lot ?? '')).filter(Boolean))];
       const onFile = lots.length ? await sql<{ lot: string; m: string | null }[]>`select upper(batch_number) as lot, material_id::text as m from inventory.rm_batch_master where upper(batch_number) = any(${lots})` : [];
       const have = new Map(onFile.map((x) => [x.lot, x.m]));
@@ -462,7 +476,7 @@ function packagingMaterials(sql: Sql): ImportKindHandler<PackagingInput> {
   return {
     spec: PACKAGING_MATERIALS,
     async plan(rows) {
-      const uoms = await uomsByCode(sql);
+      const uoms = await allUoms(sql);
       const codes = [...new Set(rows.map((r) => up(r.values.code ?? '')).filter(Boolean))];
       const onFile = new Map(codes.length ? (await sql<{ code: string; name: string | null }[]>`select upper(packaging_material_code) as code, packaging_material_name as name from packaging.packaging_material_master where upper(packaging_material_code) = any(${codes})`).map((x) => [x.code, x.name]) : []);
       const seen = new Map<string, number>();
@@ -472,8 +486,9 @@ function packagingMaterials(sql: Sql): ImportKindHandler<PackagingInput> {
         if (code.length > 50) p.problems.push('The code is longer than 50 characters.');
         if (name.length > 200) p.problems.push('The name is longer than 200 characters.');
         const unit = (r.values.unit ?? '').trim();
-        const uom = unit ? uoms.get(unit.toLowerCase()) : undefined;
-        if (unit && !uom) p.problems.push(`The unit "${unit}" is not in the unit list (Setup, Units).`);
+        const found = unit ? findUom(uoms, unit) : undefined;
+        if (typeof found === 'string') p.problems.push(found);
+        const uom = typeof found === 'string' ? undefined : found;
         if (code) { const first = seen.get(up(code)); if (first) p.problems.push(`The code ${code} is also on row ${first}.`); else seen.set(up(code), r.row); }
         if (code && onFile.has(up(code))) {
           if (low(onFile.get(up(code)) ?? '') === low(name) && !p.problems.length) { p.outcome = 'skip'; p.problems.push('Already on file under this code and name.'); return p; }

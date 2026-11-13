@@ -170,7 +170,7 @@ export class MaterialImportService {
       : []);
     const families = new Set((await this.sql<{ f: string }[]>`select family_code as f from masterdata.floor_family_colour`).map((x) => x.f));
     const wantsUnit = inputs.some((r) => r.unit), wantsSupplier = inputs.some((r) => r.supplier);
-    const uoms = new Map(wantsUnit ? (await this.sql<{ id: string; code: string }[]>`select uom_id::text as id, lower(uom_code) as code from platform.uom_master where uom_code is not null`).map((u) => [u.code, u.id]) : []);
+    const uoms = wantsUnit ? await this.sql<{ id: string; code: string }[]>`select uom_id::text as id, uom_code as code from platform.uom_master where uom_code is not null order by uom_id` : [];
     const vendors = wantsSupplier ? await this.sql<{ id: string; code: string | null; name: string | null }[]>`select vendor_id::text as id, lower(vendor_code) as code, lower(btrim(vendor_name)) as name from procurement.vendor_details` : [];
 
     const seenKey = new Map<string, number>(), seenLoose = new Map<string, number>(), seenCode = new Map<string, number>();
@@ -211,8 +211,11 @@ export class MaterialImportService {
       if (r.hazardClass && !(HAZARD_CLASSES as readonly string[]).includes(r.hazardClass)) r.errors.push(`${r.hazardClass} is not a UN hazard class`);
       if (r.hazardClass && !r.hazardSource) r.errors.push('a hazard class needs its source (the SDS or the supplier\'s declaration)');
       if (input.unit) {
-        r.uomId = uoms.get(input.unit.trim().toLowerCase()) ?? null;
-        if (!r.uomId) r.errors.push(`the unit "${input.unit}" is not in the unit list (Setup, Units)`);
+        // As written first; else the one unit that differs only in capitals; two of those is said, not chosen.
+        const want = input.unit.trim();
+        const exact = uoms.filter((u) => u.code.trim() === want), loose = uoms.filter((u) => u.code.trim().toLowerCase() === want.toLowerCase());
+        r.uomId = exact[0]?.id ?? (loose.length === 1 ? loose[0]!.id : null);
+        if (!r.uomId) r.errors.push(loose.length > 1 ? `"${want}" matches ${loose.length} units that differ only in capitals (${loose.map((u) => u.code).join(', ')}): write it exactly as the unit list has it` : `the unit "${input.unit}" is not in the unit list (Setup, Units)`);
       }
       if (input.supplier) {
         const want = input.supplier.trim().toLowerCase();

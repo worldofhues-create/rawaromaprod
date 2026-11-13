@@ -18,7 +18,7 @@ import { ImportEngine, readImportFile, templateXlsx, toCsv, writeWorkbook, type 
 import { DilutionService } from '../../../cluster-masterdata/src/material/dilution.service.js';
 import { FloorCodeService } from '../floor/floor-code.service.js';
 import { MaterialImportService } from '../floor/material-import.service.js';
-import { factoryKinds, gstinValid } from '../imports/factory-kinds.js';
+import { factoryKinds, findUom, gstinValid } from '../imports/factory-kinds.js';
 import { FACTORY_IMPORT_SPECS, INGREDIENTS } from '../imports/kind-specs.js';
 import { PurchasePriceService } from '../imports/purchase-price.service.js';
 import { ensureSchema, testClient, principal, closeTestClient } from '../../../test-support/db.js';
@@ -267,7 +267,14 @@ test('a file changed since the preview is refused; another person cannot see or 
   await refused(() => engine.preview('ingredients', { bytes }, ctx(onlySuppliers)), 403, /may not import ingredients/);
   await refused(() => engine.preview('no-such-kind', { bytes }, ctx()), 404, /no import called/);
   assert.equal(await count('masterdata.material'), before);
+  // Two people preview the same file; the first commits. The second is told it is in, and is not handed the first one's rows.
+  const theirs = await engine.preview('ingredients', { bytes, fileName: 'p.csv' }, ctx(other));
   assert.equal((await engine.commit(pre.job.importJobId, { bytes }, ctx())).job.status, 'committed');
+  const late = await engine.commit(theirs.job.importJobId, { bytes }, ctx(other));
+  assert.deepEqual([late.alreadyImported, late.job.importJobId, late.rows.length], [true, pre.job.importJobId, 0]);
+  const again = await engine.preview('ingredients', { bytes }, ctx(other));
+  assert.deepEqual([again.alreadyImported, again.rows.length], [true, 0]);
+  assert.equal(await count('masterdata.material'), before + 1);
 });
 
 test('one transaction: a row that fails when written undoes the whole import by default, and only itself under valid rows only', async () => {
@@ -297,6 +304,15 @@ test('one transaction: a row that fails when written undoes the whole import by 
   assert.deepEqual(done.job.written, { rows: 3, create: 2, update: 0, skip: 0, refuse: 1 });
   assert.deepEqual((await sql()`select code from public._imprp_things where code like ${'%' + x} order by code`).map((r) => r.code), [`A-${x}`, `C-${x}`]);
   assert.match(rowOf(done, 3).problems.join(' '), /same code or key was added/);
+});
+
+test('a unit is read as written; one that differs only in capitals is taken when it is the only one, and never picked between two', () => {
+  const list = [{ id: '1', code: 'kg' }, { id: '2', code: 'KG' }, { id: '3', code: 'Ltr' }];
+  assert.deepEqual(findUom(list, 'kg'), { id: '1', code: 'kg' });
+  assert.deepEqual(findUom(list, ' KG '), { id: '2', code: 'KG' });
+  assert.deepEqual(findUom(list, 'ltr'), { id: '3', code: 'Ltr' });
+  assert.match(String(findUom(list, 'Kg')), /matches 2 units that differ only in capitals \(kg, KG\)/);
+  assert.match(String(findUom(list, 'barrel')), /is not in the unit list/);
 });
 
 /* ── suppliers ────────────────────────────────────────────────────────────────────────────── */
