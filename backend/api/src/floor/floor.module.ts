@@ -17,6 +17,6 @@ import { MaterialImportService } from './material-import.service.js';
   imports: [ProductionModule, PolicyModule],
   controllers: [FloorController],
   providers: [FloorCodeService, FloorStationService, FloorQueueService, LotSplitService, MaterialImportService],
-  exports: [FloorCodeService, FloorQueueService],
+  exports: [FloorCodeService, FloorQueueService, MaterialImportService], // IMPORT-RP: the ingredients kind shares the import's judge and writer
 })
 export class FloorModule {}

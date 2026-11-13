@@ -1661,6 +1661,10 @@
         h('div', { style: 'margin-top:10px' }, [simpleTable(['Product', 'Kind', 'Formula', 'Version', 'State', ''], rows)]),
       ]));
       if (canSeal) content.appendChild(recipeUploadCard());
+      // IMPORT-RP: the spreadsheet template for recipes (formula code, version, line, ingredient code,
+      // parts by weight). Drawn only when the Vault says this person may run it; sealed through the
+      // same recipe import as the card above, and nothing of the file is kept with the import.
+      if (window.RaImportPanel) content.appendChild(RaImportPanel.card({ api: api, kinds: ['formulas'], title: 'Upload recipes from a spreadsheet', onCommitted: function () { screenRecipes(); } }));
     } catch (e) {
       content.innerHTML = ''; content.appendChild(notBuilt('Recipes didn\'t load', e.message));
     }

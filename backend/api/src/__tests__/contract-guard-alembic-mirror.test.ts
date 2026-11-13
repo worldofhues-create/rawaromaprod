@@ -25,6 +25,11 @@ const ALEMBIC_INBOUND_EVENT_TYPES = [
   'qc.batch.released', 'compliance.certificate.calculated', 'fg.batch.received',
   'procurement.vendor.upserted', 'procurement.po.issued', 'procurement.po.amended', 'procurement.po.cancelled', 'inventory.grn.created',
   'SalesOrderManualContinuityCreated', 'SalesOrderManualContinuityConfirmed', 'SalesOrderManualContinuityItemAdded',
+  // IMPORT-RP-COST (LD-156, 2026-11-13): NOT copied from an ALEMBIC commit. The lead gave both sides the
+  // same contract text and ALEMBIC's receiver is being built against it on its own lane; when that lane
+  // lands, replace this note with its commit. Until ALEMBIC accepts the type a fact waits parked in
+  // bridge.outbox and is replayed under the same event id, so RawProd must not go live with this first.
+  'material.cost.recorded',
 ];
 const ALEMBIC_RAWPROD_FACT_KINDS = [
   'production_requirement_status', 'material_availability', 'po_status', 'grn_status', 'qc_status', 'fg_atp', 'dispatch_status',

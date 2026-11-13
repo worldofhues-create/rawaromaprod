@@ -89,6 +89,7 @@ export class MaterialService {
               qcRequired: body.qcRequired ?? null,
               hazardClass: body.hazardClass ?? null,
               hazardSource: body.hazardClass ? body.hazardSource ?? null : null,
+              densitySource: body.density != null ? body.densitySource ?? null : null,
               status: 'ACTIVE',
               createdBy: principal.userId,
               updatedBy: principal.userId,

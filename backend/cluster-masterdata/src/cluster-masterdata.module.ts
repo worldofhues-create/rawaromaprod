@@ -14,6 +14,7 @@ import { ClassificationController } from './classification/classification.contro
 import { ClassificationService } from './classification/classification.service.js';
 import { MaterialController } from './material/material.controller.js';
 import { MaterialService } from './material/material.service.js';
+import { DilutionService } from './material/dilution.service.js';
 import { MasterdataLookupService } from './masterdata-lookup.service.js';
 import {
   MASTERDATA_DB,
@@ -33,6 +34,7 @@ import { MASTERDATA_LOOKUP } from './public-api.js';
     },
     ClassificationService,
     MaterialService,
+    DilutionService,
     MasterdataLookupService,
     { provide: MASTERDATA_LOOKUP, useExisting: MasterdataLookupService },
   ],

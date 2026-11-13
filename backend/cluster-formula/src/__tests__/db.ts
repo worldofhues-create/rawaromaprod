@@ -32,7 +32,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
  *  run — on a fresh database they only add what Drizzle cannot express (CHECK constraints); on a
  *  database this harness pushed before the tables existed (the sentinel below skips the push),
  *  they create the tables too. Only the `-- @target: formula` blocks are run. */
-const FORMULA_MIGRATIONS = ['2026-09-28-compliance-documents.sql', '2026-10-05-formula-setup.sql', '2026-10-06-ruh.sql'];
+const FORMULA_MIGRATIONS = ['2026-09-28-compliance-documents.sql', '2026-10-05-formula-setup.sql', '2026-10-06-ruh.sql', '2026-11-03-vault-idempotency-key.sql', '2026-11-26-vault-imports.sql'];
 
 function formulaBlocks(file: string): string[] {
   const text = readFileSync(join(__dirname, '..', '..', '..', '..', 'scripts', 'migrations', file), 'utf8');

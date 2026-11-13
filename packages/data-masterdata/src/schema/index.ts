@@ -20,5 +20,6 @@ export {
   materialQcSpecifications,
   materialStorageRules,
   materialAgeing,
+  materialDilution,
 } from "./material.js";
 export { outbox, auditEvents } from "./crosscutting.js";

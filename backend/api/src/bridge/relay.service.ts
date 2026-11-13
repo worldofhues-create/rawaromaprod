@@ -152,6 +152,8 @@ export class BridgeRelayService implements OnModuleDestroy {
         // ALEMBIC Books phase 2: payables facts name their own aggregate.
         : ev.type.startsWith('procurement.po.') ? 'purchase_order'
         : ev.type === 'inventory.grn.created' ? 'goods_receipt'
+        // IMPORT-RP-COST: a recorded purchase price is its own aggregate (the price row).
+        : ev.type === 'material.cost.recorded' ? 'material_cost'
         : 'production_requirement');
       const orgId = req?.orgId ?? metaOrg ?? (await this.fallbackOrgId());
 

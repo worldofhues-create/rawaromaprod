@@ -65,6 +65,7 @@ import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 import { RuhModule } from './ruh/ruh.module.js';
 import { PolicyModule } from './policy/policy.module.js';
 import { FloorModule } from './floor/floor.module.js';
+import { ImportsModule } from './imports/imports.module.js';
 import { ProdfloorModule } from './prodfloor/prodfloor.module.js';
 import { FloorOpsModule } from './floor-ops/floor-ops.module.js';
 
@@ -115,6 +116,8 @@ import { FloorOpsModule } from './floor-ops/floor-ops.module.js';
     // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
     PolicyModule,
     FloorModule,
+    // IMPORT-RP: spreadsheet templates, preview and commit for the lists the factory keeps.
+    ImportsModule,
     ProdfloorModule,
     RuhModule,
     // Lane pf-c (production floor P3/P4): devices, print jobs, scales, maceration, packing, logistics.

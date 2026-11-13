@@ -15,3 +15,6 @@ export const META_DYNAMIC_PERMISSION = 'core:dynamic-permission';
  * permission gate at all; the service self-masks or filters its output per caller instead of
  * denying. See any-authenticated.decorator.ts. */
 export const META_ANY_AUTHENTICATED = 'core:any-authenticated';
+/** `@NoStoredReply()` — the idempotency interceptor keeps the in-flight claim for this route but
+ * never stores its answer (it carries a recipe's lines). See no-stored-reply.decorator.ts. */
+export const META_NO_STORED_REPLY = 'core:no-stored-reply';

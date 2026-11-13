@@ -29,6 +29,9 @@ export * from './events/index.js';
 // Stock (STOCK-FIX-RP: the oil ledger, called inside each cluster's own transaction)
 export * from './stock/index.js';
 
+// Imports (IMPORT-RP: one template, one preview, one commit, for every list the factory keeps)
+export * from './imports/index.js';
+
 // Flags (in-memory snapshot)
 export * from './flags/index.js';
 

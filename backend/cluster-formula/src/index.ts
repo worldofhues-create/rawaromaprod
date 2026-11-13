@@ -95,3 +95,6 @@ export { parseRecipeFile, parsePercent, detectDelimiter, totalPercent, isHundred
 export { SHELL_KINDS, type ShellKind, type FormulaShellsBody } from './formula.dtos.js';
 // STOCK-FIX-RP (STK-17): the same CSV reader for the raw-material import on the main box.
 export { parseCsv } from './compliance/csv.js';
+/* IMPORT-RP: the formulas import kind's registry entry (its permission and its mirror), for the
+ * permissions test and the access catalogue. No formula data. */
+export { FORMULAS } from './imports/formula-import.kind.js';

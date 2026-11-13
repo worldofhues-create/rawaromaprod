@@ -1,6 +1,7 @@
 import { pfcGrant } from './pfc-grants.js';
 import { pfdGrant } from './pfd-grants.js';
 import { stkGrant } from './stk-grants.js';
+import { impGrant } from './imp-grants.js';
 
 // RA role catalog — the role → permission-subset matrix seeded into iam.role_master +
 // role_permission_mapping. Each role's `select(permissionCode)` decides which of the 263
@@ -255,6 +256,7 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       pfcGrant('procurement'), // SCAN-9: print the PO label
       stkGrant('procurement'),
+      impGrant('procurement'), // IMPORT-RP: what a dilution is made of, one at a time or from a sheet
       pfdGrant('procurement'),
       startsWith('procurement:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -275,6 +277,7 @@ export const ROLES: RoleDef[] = [
     view: 'receiving',
     select: anyOf(
       pfcGrant('receiving'), // SCAN-9: print the gate-entry, receiving and GRN labels
+      impGrant('receiving'), // IMPORT-RP: supplier lots and opening raw stock from a sheet (lots land in quarantine)
       oneOf(
         'inventory:gate_entry_master:read',
         'inventory:gate_entry_master:write',
@@ -347,6 +350,7 @@ export const ROLES: RoleDef[] = [
     view: 'warehouse',
     select: anyOf(
       pfcGrant('warehouse'),
+      impGrant('warehouse'), // IMPORT-RP: stock adjustments from a count sheet
       oneOf(
         'inventory:inventory_batch:read',
         'inventory:inventory_batch:write',
@@ -555,7 +559,7 @@ export const ROLES: RoleDef[] = [
     name: 'Formulator',
     view: 'vault_formulator',
     // PROD-D (lane pf-d): the QC review signature (scripts/pfd-grants.ts), on the main box only.
-    select: anyOf(pfdGrant('formulator'), oneOf(
+    select: anyOf(pfdGrant('formulator'), impGrant('formulator') /* IMPORT-RP: upload recipes through the Vault's own seal path */, oneOf(
       'formula:formula_master:read',
       'formula:formula_master:write',
       'formula:formula_version:read',
@@ -701,14 +705,14 @@ export const ROLES: RoleDef[] = [
     code: 'finance',
     name: 'Finance',
     view: 'finance',
-    select: oneOf(
+    select: anyOf(impGrant('finance') /* IMPORT-RP-COST: what a material costs, read and recorded */, oneOf(
       'procurement:purchase_order:read', 'procurement:purchase_order_items:read', 'procurement:vendor_details:read',
       'procurement:vendor_credit_note:read', 'procurement:vendor_credit_notes_allocation:read', 'inventory:grn_master:read',
       'platform:policy:read',
       // PROD-B-5 + PROD-A-9: finance sees supplier payments and, per plan 10, requests, approves and releases
       // them under lane B's per-payment maker-checker (payment-gate.ts). Never PO create/edit (PROD-A-9).
       'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
-    ),
+    )),
     sampleEmail: 'finance@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_FINANCE_PASSWORD',
   },

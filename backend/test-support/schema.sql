@@ -3362,3 +3362,69 @@ language sql stable as $$
    where l.rm_batch_id = p_rm_batch_id and l.event = 'LEGACY_RELEASE'
    order by l.at desc limit 1
 $$;
+
+-- IMPORT-RP (scripts/migrations/2026-11-24-imports.sql): the import job and its rows, what a dilution
+-- is made of, a density's source, a received lot's certificate reference; and the tables the import
+-- tests write through that this harness did not have yet.
+create table if not exists platform.import_job (
+  import_job_id uuid primary key, kind varchar(60) not null, file_sha256 char(64) not null, file_name varchar(255),
+  file_format varchar(8) not null check (file_format in ('csv', 'xlsx')), uploaded_by varchar(255) not null,
+  uploaded_dt timestamptz not null default now(), status varchar(12) not null check (status in ('previewed', 'committed', 'refused')),
+  mode varchar(16) check (mode in ('all_or_nothing', 'valid_only')),
+  n_rows integer not null default 0, n_create integer not null default 0, n_update integer not null default 0,
+  n_skip integer not null default 0, n_refuse integer not null default 0,
+  file_problems jsonb not null default '[]'::jsonb, ignored_columns jsonb not null default '[]'::jsonb,
+  committed_by varchar(255), committed_dt timestamptz,
+  w_rows integer, w_create integer, w_update integer, w_skip integer, w_refuse integer
+);
+create unique index if not exists import_job_committed_uq on platform.import_job (kind, file_sha256) where status = 'committed';
+create table if not exists platform.import_job_row (
+  import_job_id uuid not null references platform.import_job(import_job_id), phase varchar(8) not null check (phase in ('preview', 'commit')),
+  row_no integer not null, outcome varchar(8) not null check (outcome in ('create', 'update', 'skip', 'refuse')),
+  natural_key text not null default '', label text not null default '', problems jsonb not null default '[]'::jsonb,
+  notes jsonb not null default '[]'::jsonb, cells jsonb,
+  primary key (import_job_id, phase, row_no),
+  constraint import_job_row_cells_refused_only check (cells is null or outcome = 'refuse')
+);
+alter table masterdata.material add column if not exists density_source text;
+alter table inventory.grn_items add column if not exists certificate_ref varchar(100);
+alter table inventory.rm_batch_master add column if not exists certificate_ref varchar(100);
+create table if not exists masterdata.material_dilution (
+  material_dilution_id uuid primary key,
+  dilution_material_id uuid not null references masterdata.material(material_id),
+  base_material_id uuid not null references masterdata.material(material_id),
+  solvent_material_id uuid not null references masterdata.material(material_id),
+  base_percent numeric(9, 6) not null check (base_percent > 0 and base_percent < 100),
+  solvent_percent numeric(9, 6) not null check (solvent_percent > 0 and solvent_percent < 100),
+  status varchar(30) not null default 'ACTIVE', created_by varchar(255), created_dt timestamptz not null default now(),
+  updated_by varchar(255), updated_dt timestamptz not null default now(),
+  constraint material_dilution_total_chk check (base_percent + solvent_percent = 100),
+  constraint material_dilution_distinct_chk check (
+    base_material_id <> solvent_material_id and dilution_material_id <> base_material_id and dilution_material_id <> solvent_material_id)
+);
+create unique index if not exists material_dilution_material_uq on masterdata.material_dilution (dilution_material_id);
+create table if not exists inventory.stock_adjustment (
+  stock_adjustment_id uuid primary key default gen_random_uuid(),
+  inventory_batch_id uuid, adjustment_qty numeric(18,4), uom_id uuid, adjustment_reason text, adjustment_dt timestamptz, approved_by uuid,
+  status varchar(30), created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
+  created_by varchar(255), updated_by varchar(255)
+);
+
+-- IMPORT-RP-COST (scripts/migrations/2026-11-25-material-purchase-price.sql).
+create table if not exists procurement.material_purchase_price (
+  material_purchase_price_id uuid primary key, material_id uuid not null, vendor_id uuid,
+  unit varchar(8) not null check (unit in ('kg', 'g', 'L', 'ml', 'unit')),
+  list_price_paise bigint not null check (list_price_paise > 0),
+  discount_bps integer not null default 0 check (discount_bps between 0 and 10000),
+  net_price_paise bigint not null check (net_price_paise >= 0 and net_price_paise <= list_price_paise),
+  gst_rate_pct numeric(5,2) check (gst_rate_pct is null or (gst_rate_pct >= 0 and gst_rate_pct <= 100)),
+  hsn_code varchar(8) check (hsn_code is null or hsn_code ~ '^([0-9]{4}|[0-9]{6}|[0-9]{8})$'),
+  effective_from date not null, note text, source varchar(8) not null check (source in ('import', 'screen')),
+  job_ref uuid, created_by varchar(255) not null, created_dt timestamptz not null default now()
+);
+create unique index if not exists material_purchase_price_key_uq
+  on procurement.material_purchase_price (material_id, coalesce(vendor_id, '00000000-0000-0000-0000-000000000000'::uuid), effective_from);
+create table if not exists procurement.purchase_price_setting (
+  key varchar(60) primary key, value_pct numeric(6,2) not null check (value_pct > 0 and value_pct <= 1000),
+  updated_by varchar(255), updated_dt timestamptz not null default now()
+);

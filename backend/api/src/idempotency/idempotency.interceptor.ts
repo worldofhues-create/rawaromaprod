@@ -15,13 +15,17 @@
  *   - the same key while the first is still running: 409, "still being processed".
  *   - the same key for a DIFFERENT request (method, path or body): 422 -- a key names one intent.
  *
+ * A route marked @NoStoredReply() (IMPORT-RP: its answer carries a recipe's lines) keeps the claim while
+ * it runs, so two copies cannot run at once, and then forgets it: nothing of its answer is stored, and a
+ * later re-send runs again.
+ *
  * No key, a GET, or no signed-in user: the request passes through unchanged, exactly as before.
  * Scope is the user (RawProd is single-tenant, like every platform table), so one person's key can
  * never answer another person's request.
  */
 import { createHash } from 'node:crypto';
 import { type CallHandler, type ExecutionContext, Inject, Injectable, type NestInterceptor } from '@nestjs/common';
-import { DomainError, PG_CLIENT, type RequestWithUser } from '@core/backend-kernel';
+import { DomainError, META_NO_STORED_REPLY, PG_CLIENT, type RequestWithUser } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { catchError, concatMap, from, of, throwError, type Observable } from 'rxjs';
 
@@ -95,8 +99,11 @@ export class IdempotencyInterceptorBase implements NestInterceptor {
         if (claim.kind === 'replay') return of(claim.response);
         if (claim.kind === 'busy') return throwError(() => DomainError.conflict('This request is still being processed. Wait a moment and look again.'));
         if (claim.kind === 'mismatch') return throwError(() => new DomainError('VALIDATION_FAILED', 'This Idempotency-Key was already used for a different request.', 422));
+        // The formula rule: an answer that holds a recipe's lines is never written down.
+        const handler = typeof context.getHandler === 'function' ? context.getHandler() : undefined;
+        const forget = !!handler && Reflect.getMetadata(META_NO_STORED_REPLY, handler) === true;
         return next.handle().pipe(
-          concatMap((out) => from(this.store.complete(userId, key, out).then(() => out))),
+          concatMap((out) => from((forget ? this.store.release(userId, key) : this.store.complete(userId, key, out)).then(() => out))),
           catchError((err) => from(this.store.release(userId, key)).pipe(concatMap(() => throwError(() => err)))),
         );
       }),

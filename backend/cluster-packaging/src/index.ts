@@ -14,3 +14,6 @@ export {
   type PackagingLookup,
   PACKAGING_LOOKUP,
 } from './public-api.js';
+/* IMPORT-RP: the packaging-materials import writes each row through the service the single-record route calls. */
+export { CatalogService } from './catalog/catalog.service.js';
+export { packagingSchema } from './packaging.tokens.js';

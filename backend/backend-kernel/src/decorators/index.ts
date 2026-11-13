@@ -7,6 +7,7 @@ export { CurrentUser } from './current-user.decorator.js';
 export { SelfService } from './self-service.decorator.js';
 export { DynamicPermission } from './dynamic-permission.decorator.js';
 export { AnyAuthenticated } from './any-authenticated.decorator.js';
+export { NoStoredReply } from './no-stored-reply.decorator.js';
 export {
   META_PUBLIC,
   META_PERMISSIONS,
@@ -16,4 +17,5 @@ export {
   META_SELF_SERVICE,
   META_DYNAMIC_PERMISSION,
   META_ANY_AUTHENTICATED,
+  META_NO_STORED_REPLY,
 } from './metadata.keys.js';
