@@ -89,7 +89,7 @@ test('each console root declares both faces from its own origin, and ships no ot
     const fonts = readdirSync(join(ROOT, dir)).filter((f) => /\.(woff2?|ttf|otf)$/.test(f)).sort();
     assert.deepEqual(fonts, ['jetbrains-mono-latin.woff2', 'manrope-latin-ext.woff2', 'manrope-latin.woff2', 'noto-nastaliq-urdu-arabic.woff2',
       'noto-nastaliq-urdu-latin.woff2', 'rozha-one-devanagari.woff2', 'rozha-one-latin.woff2'], dir);
-    assert.doesNotMatch(readFileSync(join(ROOT, dir.split('/')[0], dir.startsWith('web/') ? 'index.html' : 'index.html'), 'utf8'), /rel="preload"[^>]*(rozha|noto)/, 'Rozha / Noto never preloaded');
+    assert.doesNotMatch(readFileSync(join(ROOT, dir.split('/')[0]!, dir.startsWith('web/') ? 'index.html' : 'index.html'), 'utf8'), /rel="preload"[^>]*(rozha|noto)/, 'Rozha / Noto never preloaded');
     for (const lic of ['OFL-manrope.txt', 'OFL-jetbrains-mono.txt', 'OFL-rozha-one.txt', 'OFL-noto-nastaliq-urdu.txt']) assert.ok(existsSync(join(ROOT, dir, lic)), `${dir}/${lic}`);
   }
   assert.ok(!existsSync(join(ROOT, 'web/fonts')) || readdirSync(join(ROOT, 'web/fonts')).length === 0, 'web/fonts holds old files');

@@ -6,6 +6,11 @@ name: unit-tests
 on:
   pull_request:
   push:
+  # SHIP-RP: a fast deploy runs only the tests its change touches; the whole suite runs here every night
+  # on main and reports (infra/aws/nightly-proof.sh is the laptop's copy). 20:30 UTC is 02:00 IST.
+  schedule:
+    - cron: '30 20 * * *'
+  workflow_dispatch:
 jobs:
   unit:
     runs-on: ubuntu-latest
