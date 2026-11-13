@@ -4,9 +4,8 @@ import { master, receivedLot, releasedOil } from '../../harness/chain';
 import { confirmIfAsked, createViaForm, expectRefused, openNav, rowById, signIn, sql, uniq } from '../../harness/walk';
 
 test('QC records an in-process result on a batch; a CAPA moves to verified only by someone else', async ({ page }, info) => {
-  const batch = uniq('OBQ-', info);
   await master();
-  const { oil } = await releasedOil(batch, 2);
+  const { oil, batchNumber: batch } = await releasedOil(2); // the number the server assigned (PROM-4)
   await signIn(page, 'factory', 'qc');
   await openNav(page, 'Production QC');
   const before = Number(sql(`select count(*) from production.production_qc where oil_batch_id='${oil}'`));

@@ -6,8 +6,7 @@ import { confirmDialog, expectRefused, openNav, rowAction, signIn, sql, uniq } f
 test('QC records a batch certificate from the product spec and releases it; a packer cannot', async ({ page }, info) => {
   await master(); await producible();
   const { product } = await sku();
-  const batch = uniq('OBC-', info);
-  await releasedOil(batch, 2);
+  const { batchNumber: batch } = await releasedOil(2); // the number the server assigned (PROM-4)
   await must('qc', 'PUT', `/v1/product-qc-specs/${product}`, { sgMin: 0.5, sgMax: 2, flashPointMinC: 20, flashPointMaxC: 120, shelfLifeMonths: 24 });
   await signIn(page, 'factory', 'qc');
   await openNav(page, 'Batch certificates');
