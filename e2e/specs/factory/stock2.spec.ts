@@ -4,7 +4,7 @@
  *   STOCK2-5  at 375 Scan a lot's cards keep their padding, and "Exit focus mode" never sits on a card. */
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { signedTypedE2e, must } from '../../harness/chain';
+import { signedTypedE2e, signTypedOnScreen, must } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { wedge } from '../../harness/labels';
 
@@ -59,6 +59,10 @@ test('STOCK2-1: under the pick the leftover stays on the lot; over it the readin
   await expect(page.locator('#fl-wt')).toBeVisible();
   await page.locator('#fl-wt').fill('125.2');
   await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125200);
+  await page.locator('#fl-wtick').click();
   await expect(page.locator('#ra-view')).toContainText('125.2 g typed');
   await expect.poll(() => onHand(a.ib)).toBe('874.8000');
   // over
@@ -70,6 +74,10 @@ test('STOCK2-1: under the pick the leftover stays on the lot; over it the readin
   await page.locator('#fl-tote').fill(toteB);
   await page.locator('#fl-go').click();
   await page.locator('#fl-wt').fill('125.7');
+  await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125700);
   await page.locator('#fl-wtick').click();
   await expect(page.locator('#ra-view')).toContainText('held for a supervisor');
   await expect(page.locator('#fl-stock-alerts')).toContainText(`${b.jobNo} line 1 weighed over the pick`);

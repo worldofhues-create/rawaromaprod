@@ -8,7 +8,7 @@
  * lanes); their Print buttons and the scan into Batch QC are walked in the browser. */
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { must } from '../../harness/chain';
+import { must, signTypedOnScreen } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { jobDecodes, labelWindows, printedJob, reprintWithReason, wedge, windowDecodes } from '../../harness/labels';
 
@@ -81,6 +81,10 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   await page.getByRole('button', { name: 'Reprint', exact: true }).last().click();
   expect(await lastWindow(n)).toContain('REPRINT');
   await page.locator('#fl-wt').fill('125.5');
+  await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125500);
   await page.locator('#fl-wtick').click();
   n = windows.length;
   await page.locator('#fl-vdone').click();

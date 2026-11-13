@@ -51,6 +51,22 @@ export async function signedTypedE2e(mg: number): Promise<{ source: 'typed'; wei
   await must('admin', 'POST', `/v1/scales/typed-checks/${c.checkId}/sign`, {});
   return { source: 'typed', weightCheckId: c.checkId };
 }
+/**
+ * STOCK-E2E-2: the second person's half of a weight typed ON THE VERIFY SCREEN. The screen asks for the sign-off
+ * on the first press and sends the weight on the press after it is signed (STK-27); the walks that type a weight
+ * in the browser never signed, so they stopped at "waiting for a verifier or supervisor to sign it". This signs
+ * the pending check of that weight as the admin, which is what the Devices screen's Sign button does.
+ */
+export async function signTypedOnScreen(mg: number): Promise<void> {
+  // Every pending check of that weight: a walk that stopped earlier leaves its own behind, and the list does not
+  // say which one this page holds.
+  const pending = await until(`a pending typed check of ${mg} mg`, async () => {
+    const list = (await must('admin', 'GET', '/v1/scales/typed-checks')) as { items?: Array<{ checkId: string; mg: number | string; status: string }> };
+    const mine = (list.items ?? []).filter((c) => Number(c.mg) === mg && c.status === 'PENDING');
+    return mine.length ? mine : null;
+  }, 15_000);
+  for (const c of pending) await must('admin', 'POST', `/v1/scales/typed-checks/${c.checkId}/sign`, {});
+}
 export async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 60_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {

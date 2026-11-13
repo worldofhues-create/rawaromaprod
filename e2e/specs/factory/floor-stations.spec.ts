@@ -2,7 +2,7 @@
  * walked Picker -> Verifier -> Mixer by three different people, with the refusals a person meets. */
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { must } from '../../harness/chain';
+import { must, signTypedOnScreen } from '../../harness/chain';
 import { expectRefused, factoryCall, openNav, signIn, sql, uniq } from '../../harness/walk';
 
 const letters = () => Array.from({ length: 7 }, () => String.fromCharCode(65 + Math.floor(Math.random() * 26))).join('');
@@ -116,12 +116,24 @@ test('Pick -> Verify -> Mix by three people: FEFO and wrong-scan refusals, toler
   await expect(page.locator('#ra-view')).toContainText('target 125.50 g ± 1.25 g');
   await page.locator('#fl-wt').fill('127');
   await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(127000);
+  await page.locator('#fl-wtick').click();
   await expect(page.locator('#fl-err')).toContainText('outside');
   // STOCK2-1: over the pick is held for a supervisor; at or under it the verifier ticks alone.
   await page.locator('#fl-wt').fill('125.6');
   await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125600);
+  await page.locator('#fl-wtick').click();
   await expect(page.locator('#ra-view')).toContainText('held for a supervisor');
   await page.locator('#fl-wt').fill('125.4');
+  await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125400);
   await page.locator('#fl-wtick').click();
   await expect(page.locator('#ra-view')).toContainText('125.4 g typed');
   await noHorizontalScroll(page);

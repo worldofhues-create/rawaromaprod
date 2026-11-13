@@ -7,7 +7,7 @@
  * below: each makes a child lot with its own L- code and label, in the genealogy, ledger balanced. */
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { master, must, receivedLot, signedTypedE2e } from '../../harness/chain';
+import { master, must, receivedLot, signedTypedE2e, signTypedOnScreen } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { jobDecodes, labelWindows, printedJob, reprintWithReason, wedge, windowDecodes } from '../../harness/labels';
 
@@ -233,6 +233,10 @@ test('R8: a lot splits across two bins from Stock, and the verifier\'s leftover 
   await openNav(page, 'Verify');
   await wedge(page, '#fl-tote', tote, ']Q1', 'Enter');
   await page.locator('#fl-wt').fill('125.5');
+  await page.locator('#fl-wtick').click();
+  // STK-27: a typed weight waits for a second person; the admin signs it (Devices, Typed weights), then the verifier presses again.
+  await expect(page.locator('#fl-wsrc')).toContainText('waiting for a verifier or supervisor to sign it');
+  await signTypedOnScreen(125500);
   await page.locator('#fl-wtick').click();
   await expect(page.locator('#fl-vdone')).toBeVisible();
   await page.locator('#fl-lo-wt').fill('774.5');
