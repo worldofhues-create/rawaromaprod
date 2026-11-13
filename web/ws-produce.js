@@ -626,7 +626,12 @@
     return '<div class="lbl" style="width:' + s.w + ';height:' + s.h + '">' +
       '<div class="top"><div><div class="pn">' + escHtml(c.productName || c.productCode || c.skuCode) + '</div><div class="sm">' + escHtml((self.RacCode && self.RacCode.parse(c.skuCode) ? self.RacCode.line(c.productCode, c.skuCode) : (c.productCode ? c.productCode + ' · ' : '') + c.skuCode) + (c.packSize ? ' · ' + c.packSize : '')) /* RAC-CODES-RP-2: code + grade */ + '</div></div>' + scanCodes(c.batchNumber, s.small ? 56 : 60, { barHeightMm: s.small ? 6 : 10, textMm: s.small ? 2 : 3 }) + '</div>' +
       '<div class="row"><span>Batch</span><b class="big">' + escHtml(c.batchNumber) + '</b></div>' +
-      '<div class="row"><span>Net qty</span><b>' + escHtml(c.netQuantity + (c.unit ? ' ' + c.unit : '')) + (c.packSize ? ' × ' + escHtml(c.packSize) : '') + '</b></div>' +
+      /* STAGE-2-RP (b): this row read "100 g × 100 g": one pack's net content, then the pack size again
+         as if it were a count, and the lot's quantity nowhere. The server sends each figure in its own
+         field (fg-label.service.ts: netQuantity/unit is ONE pack, lotQuantity/lotUnit is the lot), so
+         each is printed once, from its own field, and a figure that was not sent is not printed. */
+      '<div class="row"><span>Net qty</span><b>' + escHtml(c.netQuantity ? c.netQuantity + (c.unit ? ' ' + c.unit : '') : 'not on file') + '</b>' +
+        (c.lotQuantity ? '<span>Lot qty</span><b>' + escHtml(c.lotQuantity + (c.lotUnit ? ' ' + c.lotUnit : '')) + '</b>' : '') + '</div>' +
       '<div class="row"><span>Mfg</span><b>' + escHtml(c.manufacturingDate) + '</b><span>Exp</span><b>' + escHtml(c.expiryDate) + '</b></div>' +
       '<div class="row"><span>QC</span><b class="qc">' + escHtml(c.qcStatus) + '</b>' + (c.qcReleasedAt ? '<span>' + escHtml(String(c.qcReleasedAt).slice(0, 10)) + '</span>' : '') + '</div>' +
       dg + '<div class="rack"><span>RACK</span><b>' + escHtml(c.rack || '—') + '</b></div>' +

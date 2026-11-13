@@ -52,13 +52,21 @@
     '112412 122114 122411 142112 142211 241211 221114 413111 241112 134111 111242 121142 121241 114212 124112 124211 411212 421112 ' +
     '421211 212141 214121 412121 111143 111341 131141 114113 114311 411113 411311 113141 114131 311141 411131 211412 211214 211232 2331112').split(' ');
 
-  /** Set-B values with start, check and stop. Characters outside ASCII 32..126 become '?'. */
+  /** Set-B values with start, check and stop.
+   *  STAGE-2-RP (b): a character outside ASCII 32..126 used to be encoded as '?', so the bars said
+   *  something the text beside them did not and a scanner read a code that is no lot's. Set B cannot
+   *  carry it, so nothing is encoded: the caller gets a sentence (build() and codesHtml() already
+   *  refuse such a code before they reach here; this is the encoder holding the same line). */
   function code128Values(data) {
     var vals = [104];
     var s = String(data);
     for (var i = 0; i < s.length; i++) {
       var c = s.charCodeAt(i);
-      vals.push((c >= 32 && c <= 126 ? c : 63) - 32);
+      if (c < 32 || c > 126) {
+        throw new Error('This code cannot be printed as a barcode: character ' + (i + 1) + ' of ' + JSON.stringify(s) +
+          ' is not one a Code 128 barcode can carry. Nothing was printed in its place.');
+      }
+      vals.push(c - 32);
     }
     var sum = 104;
     for (var j = 1; j < vals.length; j++) sum += j * vals[j];
