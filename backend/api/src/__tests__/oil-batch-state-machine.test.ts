@@ -11,16 +11,21 @@ import { ConflictException, NotFoundException } from '@nestjs/common';
 import { BatchService } from '../../../cluster-production/src/batch/batch.service.js';
 import { productionSchema } from '../../../cluster-production/src/production.tokens.js';
 import { ensureSchema, productionDb, principal, closeTestClient, testClient } from '../../../test-support/db.js';
-import { qc1, completeRest, qc2 } from '../../../test-support/promise-fixtures.js';
+import { qc1, completeRest, qc2, typedQcIsTheVerdict } from '../../../test-support/promise-fixtures.js';
+import { PolicyService } from '../policy/policy.service.js';
 
 let svc: BatchService;
 
+/* PROM-3: this suite is about the state machine's edges; the typed QC reading stays its verdict. */
+let restoreReferenceRule: (() => Promise<void>) | undefined;
 before(async () => {
   await ensureSchema();
   svc = new BatchService(productionDb());
+  restoreReferenceRule = await typedQcIsTheVerdict(new PolicyService(testClient()));
 });
 
 after(async () => {
+  await restoreReferenceRule?.();
   await closeTestClient();
 });
 

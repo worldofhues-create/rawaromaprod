@@ -36,6 +36,7 @@ import type {
   IfraCertificateValue,
   QcBatchReleasedPayload,
 } from "./compliance-events.js";
+import { checkQcPromiseBlockWire, type QcPromiseBlockWire } from "./promise-events.js";
 
 /* ── 1. requirement fields ─────────────────────────────────────────────────────────────────── */
 
@@ -179,6 +180,10 @@ export interface QcBatchReleasedWire {
   readonly best_before: string;
   readonly released_at: string;
   readonly qc_record_ref: string;
+  /** PROM-3 (promise-events.ts): optional, so an older sender still parses on ALEMBIC's side. */
+  readonly stages?: QcPromiseBlockWire["stages"];
+  readonly reference?: QcPromiseBlockWire["reference"];
+  readonly is_reference_batch?: boolean;
 }
 
 /** Specific gravity as it prints: at least three decimals, the fourth only when it is not 0
@@ -211,6 +216,8 @@ export function toQcBatchReleasedWire(
     /** The analyst's conformance calls (the internal record carries only the descriptions). */
     colourAppearancePass: boolean;
     odourPass: boolean;
+    /** PROM-3: the QC 1 / QC 2 rounds and the retained reference they compared with. */
+    promise?: QcPromiseBlockWire;
   },
 ): QcBatchReleasedWire {
   const sg = internal.results.find((r) => r.test === "specific_gravity_20_4");
@@ -251,6 +258,7 @@ export function toQcBatchReleasedWire(
     best_before: internal.bestBefore,
     released_at: internal.releasedAt,
     qc_record_ref: opts.qcRecordRef,
+    ...(opts.promise ? { stages: opts.promise.stages, reference: opts.promise.reference, is_reference_batch: opts.promise.is_reference_batch } : {}),
   };
 }
 
@@ -279,6 +287,7 @@ export function checkQcBatchReleasedWire(p: QcBatchReleasedWire): string[] {
   if (!ISO_DATE.test(p.best_before ?? "") || p.best_before <= p.production_date) out.push("best_before");
   if (!isIsoInstant(p.released_at)) out.push("released_at");
   if (!isNonEmpty(p.qc_record_ref)) out.push("qc_record_ref");
+  out.push(...checkQcPromiseBlockWire(p));
   // A passed verdict must not contradict itself: every line passed and every number in spec.
   if (p.status === "passed") {
     for (const r of p.results ?? []) {

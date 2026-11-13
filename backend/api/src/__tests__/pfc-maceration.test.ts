@@ -28,6 +28,11 @@ import { ensureSchema, productionDb, packagingDb, salesDb, testClient, principal
 import { assertNotMacerating } from '../../../backend-kernel/src/events/maceration-gate.js';
 import { MacerationService } from '../floor-ops/maceration.service.js';
 import { openAlerts } from '../floor-ops/floor-alerts.js';
+import { PolicyService } from '../policy/policy.service.js';
+import { typedQcIsTheVerdict } from '../../../test-support/promise-fixtures.js';
+
+/* PROM-3: this suite is about the rest; the typed QC reading stays its verdict (promise-fixtures). */
+let restoreReferenceRule: (() => Promise<void>) | undefined;
 
 let batches: BatchService;
 let mac: MacerationService;
@@ -43,8 +48,9 @@ before(async () => {
   mac = new MacerationService(testClient());
   dispatch = new DispatchService(salesDb(), new PackagingLookupService(packagingDb()));
   reservations = new ReservationService(packagingDb());
+  restoreReferenceRule = await typedQcIsTheVerdict(new PolicyService(testClient()));
 });
-after(async () => closeTestClient());
+after(async () => { await restoreReferenceRule?.(); await closeTestClient(); });
 
 /** A batch whose order makes `formulaId` (production order -> plan item -> formula). */
 async function batchFor(formulaId: string) {

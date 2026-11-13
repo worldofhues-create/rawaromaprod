@@ -1,12 +1,15 @@
 /**
  * ALEMBIC's DOCS-001 receiver rules, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/compliance/documents.ts @ 80ffa1eb (lane/rc12; COMPLIANCE_FACTS.md) —
+ * alembic packages/domain/src/compliance/documents.ts @ 80ffa1eb (lane/rc12; COMPLIANCE_FACTS.md), with
+ * parseQcBatchReleased's PROM-3 lines re-copied from alembic lane/prom @ 02802897 (the optional stages /
+ * reference block, parsed by parseQcPromiseBlock in alembic-prom.ts) —
  * parseQcBatchReleased, coaEligibility, parseCertificateCalculated and the IFRA / allergen
  * validators they call. RawProd's contract tests run what RawProd emits through the receiver's
  * own parser, so "ALEMBIC would accept this" is proved here rather than assumed. If ALEMBIC changes
  * these rules, re-copy this file (and the tests will say what no longer matches).
  */
 /* eslint-disable */
+import { parseQcPromiseBlock, type QcPromiseBlock } from "./alembic-prom.js";
 export const EU_ALLERGENS_26: ReadonlyArray<{ readonly name: string; readonly cas: string }> = Object.freeze([
   { name: "alpha-iso-Methylionone", cas: "127-51-5" },
   { name: "Amyl Cinnamal", cas: "122-40-7" },
@@ -182,6 +185,8 @@ export interface QcBatchRelease {
   readonly releasedAt: string;
   /** RawProd's own id for the QC record, for the audit trail. */
   readonly qcRecordRef: string;
+  /** PROM-3: the QC 1 / QC 2 rounds and the retained reference, or null from an older sender. */
+  readonly promise?: QcPromiseBlock | null;
 }
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
@@ -228,8 +233,11 @@ export function parseQcBatchReleased(raw: unknown): { ok: true; release: QcBatch
   if (!releasedAt || Number.isNaN(Date.parse(releasedAt))) problems.push("released_at must be a timestamp");
   const qcRecordRef = str(r.qc_record_ref);
   if (!qcRecordRef) problems.push("qc_record_ref is required");
+  const promise = parseQcPromiseBlock(r);
+  if (!promise.ok) problems.push(...promise.problems);
   if (problems.length) return { ok: false, problems };
-  return { ok: true, release: { batchNo: batchNo!, productRef, status: status!, results, photos, productionDate: productionDate!, bestBefore: bestBefore!, releasedAt: releasedAt!, qcRecordRef: qcRecordRef! } };
+  return { ok: true, release: { batchNo: batchNo!, productRef, status: status!, results, photos, productionDate: productionDate!, bestBefore: bestBefore!, releasedAt: releasedAt!, qcRecordRef: qcRecordRef!,
+    promise: promise.ok ? promise.block : null } };
 }
 
 export type CoaEligibility =

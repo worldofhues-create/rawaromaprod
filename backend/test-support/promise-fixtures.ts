@@ -27,3 +27,19 @@ export async function qc2(batches: BatchService, oilBatchId: string, p: AuthPrin
   await tick();
   await batches.recordProductionQc({ oilBatchId, result: 'PASS' }, p);
 }
+
+const REFERENCE_ON = { rules: [], hasDefault: true, defaultValue: { required: true } };
+const REFERENCE_OFF = { rules: [], hasDefault: true, defaultValue: { required: false } };
+const RULE_EDITOR = { userId: '00000000-0000-7000-8000-0000000000a1', portal: 'ops', roles: ['admin'], permissions: ['platform:policy:write'] } as unknown as AuthPrincipal;
+
+/**
+ * PROM-3: for a suite whose subject is the REST or the state machine, not the QC basis, the typed
+ * production_qc reading stays the verdict, exactly as before PROM-3: `qc.reference_required` is
+ * published OFF for the suite and back ON (the shipped default) after it. The rounds-are-the-verdict
+ * path is proved in prom-3-reference.test.ts. Files run one at a time (run-tests.mjs), so no other
+ * suite sees the switch.
+ */
+export async function typedQcIsTheVerdict(policy: { publish: (key: string, body: unknown, reason: string, p: AuthPrincipal) => Promise<unknown> }): Promise<() => Promise<void>> {
+  await policy.publish('qc.reference_required', REFERENCE_OFF, 'test suite: the typed QC reading is the verdict for this suite', RULE_EDITOR);
+  return async () => { await policy.publish('qc.reference_required', REFERENCE_ON, 'test suite: back to the shipped default', RULE_EDITOR); };
+}

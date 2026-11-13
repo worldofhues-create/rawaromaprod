@@ -148,6 +148,11 @@ test('a passed batch is released once: one qc.batch.released with the contract p
     best_before: '2028-02-14',
     released_at: 'X',
     qc_record_ref: row.batchCoaId,
+    // PROM-3: the QC 1 / QC 2 rounds and the retained reference. This batch took no staged round, so it
+    // claims none: an empty list, no reference, not a reference batch (ALEMBIC prints "Not on file").
+    stages: [],
+    reference: null,
+    is_reference_batch: false,
   });
   assert.ok(!Number.isNaN(Date.parse(payload.released_at)));
   assert.ok(!JSON.stringify(payload).includes(f.formulaId), 'the formula id must never cross the bridge');

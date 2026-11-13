@@ -326,6 +326,12 @@ export const RA_PERMISSIONS: string[] = [
   'quality:temperature:write',
   'quality:storage_zone:write',
   'quality:temperature_limit:write',
+  // PROM-3 (2026-11-13): the retained reference per product (backend/api/src/prodfloor/
+  // reference-standard.controller.ts). qc holds all three through quality:*; a reference is approved
+  // by a person other than the one who proposed it, so two QC people establish one.
+  'quality:reference_standard:read',
+  'quality:reference_standard:write',
+  'quality:reference_standard:approve',
   // Lane pf-c (production floor P3/P4): scripts/pfc-grants.ts.
   ...PFC_PERMISSIONS,
   // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.

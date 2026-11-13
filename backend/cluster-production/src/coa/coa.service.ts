@@ -281,6 +281,7 @@ export class CoaService {
       const wire = bridgeContracts.toQcBatchReleasedWire(payload, {
         status: 'passed', factorySku, qcRecordRef: coa.batchCoaId,
         colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+        promise: await this.promiseBlock(tx, coa.oilBatchId),
       });
       const wireProblems = bridgeContracts.checkQcBatchReleasedWire(wire);
       if (wireProblems.length > 0) throw new ConflictException(`The release could not be sent: ${wireProblems.join(', ')}.`);
@@ -342,6 +343,7 @@ export class CoaService {
         const wire = bridgeContracts.toQcBatchReleasedWire(internal, {
           status: 'failed', factorySku, qcRecordRef: coa.batchCoaId,
           colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+          promise: await this.promiseBlock(tx, coa.oilBatchId),
         });
         if (bridgeContracts.checkQcBatchReleasedWire(wire).length === 0) {
           bridgeContracts.assertNoFormulaContent(wire);
@@ -362,6 +364,40 @@ export class CoaService {
   }
 
   /* ── helpers ─────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * PROM-3: what the lot page shows a customer about QC 1 and QC 2 -- each staged round, and the
+   * retained reference the latest round compared with (null when it compared with none: the page
+   * then says "Not on file"). `is_reference_batch` only when this batch IS an approved reference.
+   * Opaque refs and codes only: no product name, material or person crosses.
+   */
+  async promiseBlock(tx: Tx | ProductionDb, oilBatchId: string): Promise<bridgeContracts.QcPromiseBlockWire> {
+    const rounds = (await tx.execute(sql`
+      select r.batch_qc_round_id::text as id, r.stage, r.decision, r.reference_standard_id::text as ref_id,
+             to_char(r.created_dt at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as decided_at
+        from quality.batch_qc_round r
+       where r.oil_batch_id = ${oilBatchId} and r.stage is not null order by r.round_no
+    `)) as unknown as { id: string; stage: bridgeContracts.QcStageCode; decision: bridgeContracts.QcStageWire['decision']; ref_id: string | null; decided_at: string }[];
+    const last = Array.from(rounds).reverse().find((r) => r.ref_id);
+    let reference: bridgeContracts.QcReferenceWire | null = null;
+    if (last?.ref_id) {
+      const ref = ((await tx.execute(sql`
+        select rs.reference_code, s.sample_code,
+               to_char(s.retained_dt at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as retained_at
+          from quality.reference_standard rs left join quality.qc_sample_retention s on s.qc_sample_retention_id = rs.qc_sample_retention_id
+         where rs.reference_standard_id = ${last.ref_id}
+      `)) as unknown as { reference_code: string; sample_code: string | null; retained_at: string | null }[])[0];
+      if (ref?.sample_code) reference = { ref: ref.reference_code, sample_code: ref.sample_code, retained_at: ref.retained_at };
+    }
+    const isRef = ((await tx.execute(sql`
+      select 1 as one from quality.reference_standard where oil_batch_id = ${oilBatchId} and status in ('ACTIVE', 'RETIRED') limit 1
+    `)) as unknown as unknown[]).length > 0;
+    return {
+      stages: Array.from(rounds).map((r) => ({ stage: r.stage, round_ref: r.id, decided_at: r.decided_at, decision: r.decision })),
+      reference,
+      is_reference_batch: isRef,
+    };
+  }
 
   /**
    * The factory SKU a QC fact names (DOCS-001 `product_ref.factory_sku`): the SKU of an ALEMBIC

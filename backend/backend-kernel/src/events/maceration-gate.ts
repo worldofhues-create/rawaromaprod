@@ -15,6 +15,13 @@
  *   - On close the run records the days rested and `batch.rest.recorded` goes to ALEMBIC in the
  *     same transaction: the record the lot page shows a customer.
  *
+ * PROM-3 (LD-85: "checked against a retained reference before it ships"): with the factory rule
+ *   `qc.reference_required` on (v1, the default), QC 1 and QC 2 are ROUNDS on the product's pinned
+ *   checkpoints (quality.batch_qc_round, stage QC1 / QC2), each compared with the product's retained
+ *   reference (or recorded as NO_REFERENCE_YET for a product that has none). A typed production_qc
+ *   PASS no longer moves a batch into maceration or releases it. QC 2 counts only when taken after the
+ *   rest ended, and only with a retained sample of this batch on file.
+ *
  * Flow:
  *   Mixer -> QC 1 PASS -> IN_MATURATION (a run opens, the timer starts) -> freeze/chill-filter step
  *   (when required) -> required days reached (or a second person's early release) -> QC 2 PASS
@@ -29,7 +36,7 @@ import { sql } from 'drizzle-orm';
 import { randomUUID } from 'node:crypto';
 import { bridge as bridgeContracts } from '@core/contracts';
 import { emitBridgeManualEvent, type BridgeEmitTx } from './bridge-emit.js';
-import { restRuleInForce } from './factory-rules.js';
+import { referenceRuleInForce, restRuleInForce } from './factory-rules.js';
 
 const DAY_MS = 86_400_000;
 
@@ -64,6 +71,29 @@ export function macerationProgress(run: { started_at: string | Date; min_days: n
   // PROM-2: no maximum set means no over-maximum alarm, never an invented number.
   const maxDays = run.max_days == null ? null : Number(run.max_days);
   return { day, needDays, maxDays, minReached, overMax: maxDays !== null && elapsedMs > maxDays * DAY_MS, releasedEarly: !!run.early_release_at, daysRested: Math.floor(elapsedMs / DAY_MS) };
+}
+
+interface RoundRow {
+  batch_qc_round_id: string;
+  stage: string | null;
+  decision: string;
+  /** epoch ms, read as a number so no driver's timestamp parsing is involved */
+  created_ms: number;
+  reference_basis: string | null;
+}
+
+/** The latest QC round on the batch (PROM-3: the verdict when qc.reference_required is on). */
+async function latestRound(tx: BridgeEmitTx, oilBatchId: string): Promise<RoundRow | undefined> {
+  return (await rows<RoundRow>(tx, sql`
+    select batch_qc_round_id, stage, decision, (extract(epoch from created_dt) * 1000)::float8 as created_ms, reference_basis from quality.batch_qc_round
+     where oil_batch_id = ${oilBatchId} order by round_no desc limit 1`))[0];
+}
+
+/** When the rest of an open run ended: the required days served, or a second person's early release. */
+export function restEndedAt(run: { started_at: string | Date; min_days: number; extend_days: number; early_release_at?: string | Date | null }, now: Date): Date | null {
+  const served = ts(run.started_at) + (Number(run.min_days) + Number(run.extend_days ?? 0)) * DAY_MS;
+  if (served <= now.getTime()) return new Date(served);
+  return run.early_release_at ? new Date(ts(run.early_release_at)) : null;
 }
 
 async function openRun(tx: BridgeEmitTx, oilBatchId: string): Promise<RunRow | undefined> {
@@ -162,18 +192,30 @@ export async function macerationOnTransition(
     const minDays = Math.max(rule.value.minDays, Number(setting?.min_days ?? 0));
     const maxDays = setting ? Math.max(Number(setting.max_days), minDays) : rule.value.maxDays;
     const freezeRequired = setting?.freeze_required === true;
-    const qc1 = (await rows<{ production_qc_id: string; result: string | null }>(tx, sql`
-      select production_qc_id, result from production.production_qc
-       where oil_batch_id = ${t.oilBatchId} order by created_dt desc, production_qc_id desc limit 1`))[0];
-    if (String(qc1?.result ?? '').toUpperCase() !== 'PASS') {
-      throw new ConflictException('Every batch rests between QC 1 and QC 2: QC 1 (before maceration) must PASS before the batch goes into maceration.');
+    // PROM-3: with the reference rule on, QC 1 is an approved round, not a typed PASS.
+    const refRule = await referenceRuleInForce(tx, { oilBatchId: t.oilBatchId });
+    let qc1ProductionQcId: string | null = null, qc1RoundId: string | null = null;
+    if (refRule.value.required) {
+      const r = await latestRound(tx, t.oilBatchId);
+      if (!r || r.stage !== 'QC1' || r.decision !== 'APPROVE') {
+        throw new ConflictException('Every batch rests between QC 1 and QC 2: QC 1 (a full round on the product\'s checkpoints, compared with its retained reference) must be approved before the batch goes into maceration.');
+      }
+      qc1RoundId = r.batch_qc_round_id;
+    } else {
+      const qc1 = (await rows<{ production_qc_id: string; result: string | null }>(tx, sql`
+        select production_qc_id, result from production.production_qc
+         where oil_batch_id = ${t.oilBatchId} order by created_dt desc, production_qc_id desc limit 1`))[0];
+      if (String(qc1?.result ?? '').toUpperCase() !== 'PASS') {
+        throw new ConflictException('Every batch rests between QC 1 and QC 2: QC 1 (before maceration) must PASS before the batch goes into maceration.');
+      }
+      qc1ProductionQcId = qc1!.production_qc_id;
     }
     const existing = await openRun(tx, t.oilBatchId);
     if (existing) {
       if (t.from === 'REWORK') {
         await tx.execute(sql`
           update production.maceration_run
-             set started_at = ${now.toISOString()}::timestamptz, restart_count = restart_count + 1, qc1_production_qc_id = ${qc1!.production_qc_id},
+             set started_at = ${now.toISOString()}::timestamptz, restart_count = restart_count + 1, qc1_production_qc_id = ${qc1ProductionQcId}, qc1_round_id = ${qc1RoundId},
                  min_days = ${minDays}, max_days = ${maxDays}, rule_days = ${rule.value.minDays}, rule_version = ${rule.version}, rule_source = ${rule.source},
                  freeze_done_at = null, freeze_done_by = null, alarm_at = null, early_release_at = null, early_release_by = null,
                  early_release_reason = null, early_release_reason_code = null, early_release_requested_at = null, early_release_approved_by = null,
@@ -188,9 +230,9 @@ export async function macerationOnTransition(
     const runId = randomUUID();
     await tx.execute(sql`
       insert into production.maceration_run (maceration_run_id, oil_batch_id, formula_id, status, started_at, min_days, max_days,
-                                             freeze_required, qc1_production_qc_id, rule_days, rule_version, rule_source, created_by, created_at, updated_at)
+                                             freeze_required, qc1_production_qc_id, qc1_round_id, rule_days, rule_version, rule_source, created_by, created_at, updated_at)
       values (${runId}, ${t.oilBatchId}, ${found?.formula_id ?? null}, 'MACERATING', ${now.toISOString()}::timestamptz, ${minDays},
-              ${maxDays}, ${freezeRequired}, ${qc1!.production_qc_id}, ${rule.value.minDays}, ${rule.version}, ${rule.source},
+              ${maxDays}, ${freezeRequired}, ${qc1ProductionQcId}, ${qc1RoundId}, ${rule.value.minDays}, ${rule.version}, ${rule.source},
               ${t.userId && /^[0-9a-f-]{36}$/i.test(t.userId) ? t.userId : null}, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)`);
     await event(tx, runId, 'STARTED', `rule ${rule.source === 'policy' ? `maceration.rest v${rule.version}` : 'maceration.rest (registry default)'}: ${minDays} days`, t.userId);
     return;
@@ -213,12 +255,26 @@ export async function macerationOnTransition(
     if (run.freeze_required && !run.freeze_done_at) {
       throw new ConflictException('The freeze / chill-filter step has not been recorded for this batch.');
     }
-    const qc2 = (await rows<{ result: string | null }>(tx, sql`
-      select result from production.production_qc
-       where oil_batch_id = ${t.oilBatchId} and created_dt >= ${new Date(ts(run.started_at)).toISOString()}::timestamptz
-       order by created_dt desc, production_qc_id desc limit 1`))[0];
-    if (String(qc2?.result ?? '').toUpperCase() !== 'PASS') {
-      throw new ConflictException('QC 2 (after maceration) must PASS before the batch is released.');
+    const refRule = await referenceRuleInForce(tx, { oilBatchId: t.oilBatchId });
+    if (refRule.value.required) {
+      // PROM-3: QC 2 is an approved round taken AFTER the rest ended, with what it compared with on
+      // record, and a sample of this batch retained so a complaint can be re-tested against it.
+      const ended = restEndedAt(run, now);
+      const r = await latestRound(tx, t.oilBatchId);
+      if (!r || r.stage !== 'QC2' || r.decision !== 'APPROVE' || !ended || Number(r.created_ms) < ended.getTime()) {
+        throw new ConflictException('QC 2 (a full round on the same checkpoints, compared with the retained reference, taken after the rest) must be approved before the batch is released. A typed QC result does not release a batch.');
+      }
+      if (!r.reference_basis) throw new ConflictException('QC 2 did not record what it was compared with, so the batch is not released.');
+      const [kept] = await rows<{ one: number }>(tx, sql`select 1 as one from quality.qc_sample_retention where oil_batch_id = ${t.oilBatchId} limit 1`);
+      if (!kept) throw new ConflictException('Retain a sample of this batch before it is released: a complaint about the lot is re-tested against it.');
+    } else {
+      const qc2 = (await rows<{ result: string | null }>(tx, sql`
+        select result from production.production_qc
+         where oil_batch_id = ${t.oilBatchId} and created_dt >= ${new Date(ts(run.started_at)).toISOString()}::timestamptz
+         order by created_dt desc, production_qc_id desc limit 1`))[0];
+      if (String(qc2?.result ?? '').toUpperCase() !== 'PASS') {
+        throw new ConflictException('QC 2 (after maceration) must PASS before the batch is released.');
+      }
     }
     await closeRun(tx, run, p, now, t.userId);
     return;

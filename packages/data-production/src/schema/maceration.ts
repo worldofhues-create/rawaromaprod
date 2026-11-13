@@ -35,7 +35,9 @@ export const macerationRun = production.table(
     maxDays: integer("max_days"),
     extendDays: integer("extend_days").notNull().default(0),
     freezeRequired: boolean("freeze_required").notNull().default(false),
-    qc1ProductionQcId: uuid("qc1_production_qc_id").notNull(),
+    // PROM-3: QC 1 is a round (qc1_round_id) when qc.reference_required is on; a typed reading otherwise.
+    qc1ProductionQcId: uuid("qc1_production_qc_id"),
+    qc1RoundId: uuid("qc1_round_id"),
     freezeDoneAt: timestamp("freeze_done_at", { withTimezone: true }),
     freezeDoneBy: uuid("freeze_done_by"),
     alarmAt: timestamp("alarm_at", { withTimezone: true }),

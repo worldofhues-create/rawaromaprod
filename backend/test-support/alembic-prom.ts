@@ -1,6 +1,6 @@
 /**
  * ALEMBIC's process-promise receiver rules, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/promises/facts.ts on lane/prom (PROM-2, PROM-3). RawProd's promise tests run
+ * alembic packages/domain/src/promises/facts.ts @ 02802897 (lane/prom; PROM-2, PROM-3). RawProd's promise tests run
  * what RawProd emits through the receiver's own parser, so "ALEMBIC would accept this" is proved here
  * rather than assumed. If ALEMBIC changes these rules, re-copy this file.
  */
@@ -15,6 +15,9 @@
  *   PROM-2  `batch.rest.recorded`   one maceration run closed on release: when the rest
  *           started and ended, the days rested, the branch rule it rested under, and whether a
  *           second person approved an early release.
+ *   PROM-3  the block `qc.batch.released` gains: each QC 1 / QC 2 round, the retained reference
+ *           the last one compared with, and whether this batch IS a product's reference. Every
+ *           field optional, so a release from an older sender still parses (`promise: null`).
  *
  * Rule 3: a missing record is null and the lot page says "Not on file"; nothing here fills
  * one in. D-1 (formula secrecy): the only identities are the batch number and an opaque run
@@ -124,4 +127,57 @@ export function parseBatchRestRecorded(raw: unknown): { ok: true; record: BatchR
       earlyReleaseReasonCode: (r.early_release ? code : null) as EarlyReleaseReasonCode | null, temperature,
     },
   };
+}
+
+/* ── PROM-3: the QC stages and the retained reference on `qc.batch.released` ───────────── */
+
+export const QC_STAGES = ["QC1", "QC2"] as const;
+export type QcStage = (typeof QC_STAGES)[number];
+const QC_DECISIONS = ["APPROVE", "REWORK", "HOLD_RETEST", "REJECT", "REVIEW", "HOLD_CAPA"] as const;
+
+export interface QcStageRecord {
+  readonly stage: QcStage;
+  readonly roundRef: string;
+  readonly decidedAt: string;
+  readonly decision: (typeof QC_DECISIONS)[number];
+}
+export interface QcReferenceRecord {
+  readonly ref: string;
+  readonly sampleCode: string;
+  readonly retainedAt: string | null;
+}
+export interface QcPromiseBlock {
+  readonly stages: readonly QcStageRecord[];
+  readonly reference: QcReferenceRecord | null;
+  readonly isReferenceBatch: boolean;
+}
+
+/** The PROM-3 fields of a `qc.batch.released` payload. `block` is null when the sender sent none of
+ *  them (an older RawProd): the release still parses, and the lot page says "Not on file". */
+export function parseQcPromiseBlock(r: Record<string, unknown>): { ok: true; block: QcPromiseBlock | null } | { ok: false; problems: string[] } {
+  if (r.stages === undefined && r.reference === undefined && r.is_reference_batch === undefined) return { ok: true, block: null };
+  const problems: string[] = [];
+  const stages: QcStageRecord[] = [];
+  if (r.stages !== undefined) {
+    if (!Array.isArray(r.stages) || r.stages.length > 50) problems.push("stages must be a list of at most 50 rounds");
+    else r.stages.forEach((x, i) => {
+      const o = (typeof x === "object" && x ? x : {}) as Record<string, unknown>;
+      const roundRef = text(o.round_ref, 64);
+      if (!(QC_STAGES as readonly unknown[]).includes(o.stage) || !roundRef || !ISO_INSTANT(o.decided_at) || !(QC_DECISIONS as readonly unknown[]).includes(o.decision)) {
+        problems.push(`stages[${i}] needs stage QC1|QC2, round_ref, decided_at and a decision`);
+      } else stages.push({ stage: o.stage as QcStage, roundRef, decidedAt: o.decided_at as string, decision: o.decision as QcStageRecord["decision"] });
+    });
+  }
+  let reference: QcReferenceRecord | null = null;
+  if (r.reference !== undefined && r.reference !== null) {
+    const o = (typeof r.reference === "object" ? r.reference : {}) as Record<string, unknown>;
+    const ref = text(o.ref, 80), sampleCode = text(o.sample_code, 50);
+    if (!ref || !sampleCode || !(o.retained_at === null || ISO_INSTANT(o.retained_at))) problems.push("reference needs ref, sample_code and retained_at (or null)");
+    else reference = { ref, sampleCode, retainedAt: (o.retained_at as string | null) ?? null };
+  }
+  if (r.is_reference_batch !== undefined && typeof r.is_reference_batch !== "boolean") problems.push("is_reference_batch must be true or false");
+  const leak = formulaContentKey({ stages: r.stages, reference: r.reference });
+  if (leak) problems.push(`${leak} would carry formula content`);
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, block: { stages, reference, isReferenceBatch: r.is_reference_batch === true } };
 }

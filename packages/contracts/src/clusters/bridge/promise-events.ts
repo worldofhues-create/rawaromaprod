@@ -8,6 +8,12 @@
  *           `maceration_run`, id = the run's uuid. The lot page reads "Rested 45 days, 14 Sep to
  *           29 Oct 2026" from it, and "Rest record: Not on file" where none arrived.
  *
+ *   PROM-3  `qc.batch.released` gains `stages` (each QC 1 / QC 2 round: its stage, opaque round
+ *           ref, when it was decided, the decision), `reference` (the retained reference the last
+ *           QC 2 compared with: its code, the retained bottle's sample code and date) or null, and
+ *           `is_reference_batch` (this batch IS a product's approved retained reference). Optional:
+ *           an older RawProd that sends none of them still parses on ALEMBIC's side.
+ *
  * `checkBatchRestRecordedWire` applies ALEMBIC's own parse rules (`parseBatchRestRecorded`,
  * packages/domain/src/promises/facts.ts on that side) before the row is written to the outbox, so a
  * payload ALEMBIC would refuse is refused here instead of parking there.
@@ -96,5 +102,52 @@ export function checkBatchRestRecordedWire(p: BatchRestRecordedWire): string[] {
   const allowed = new Set(["batch_no", "oil_batch_ref", "started_at", "closed_at", "days_rested", "required_days", "rule_days",
     "rule_version", "early_release", "early_release_reason_code", "temperature"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
+  return out;
+}
+
+/* ── PROM-3: the QC stages and the retained reference on `qc.batch.released` ──────────────────── */
+
+export const QC_STAGES = ["QC1", "QC2"] as const;
+export type QcStageCode = (typeof QC_STAGES)[number];
+export const QC_ROUND_DECISIONS = ["APPROVE", "REWORK", "HOLD_RETEST", "REJECT", "REVIEW", "HOLD_CAPA"] as const;
+
+export interface QcStageWire {
+  readonly stage: QcStageCode;
+  /** Opaque: RawProd's batch_qc_round uuid. */
+  readonly round_ref: string;
+  readonly decided_at: string;
+  readonly decision: (typeof QC_ROUND_DECISIONS)[number];
+}
+
+export interface QcReferenceWire {
+  /** The reference's code, "R-<product code>-<n>". */
+  readonly ref: string;
+  /** The retained bottle's sample code, as QC scanned it at the comparison. */
+  readonly sample_code: string;
+  /** When that sample was retained (ISO 8601 UTC), or null when the retention record has no date. */
+  readonly retained_at: string | null;
+}
+
+export interface QcPromiseBlockWire {
+  readonly stages: readonly QcStageWire[];
+  readonly reference: QcReferenceWire | null;
+  readonly is_reference_batch: boolean;
+}
+
+/** ALEMBIC's rules for the PROM-3 block ([] = accepted). Fields absent = an older sender; accepted. */
+export function checkQcPromiseBlockWire(p: Partial<QcPromiseBlockWire>): string[] {
+  const out: string[] = [];
+  if (p.stages !== undefined) {
+    if (!Array.isArray(p.stages) || p.stages.length > 50) out.push("stages");
+    else p.stages.forEach((st, i) => {
+      if (!st || !(QC_STAGES as readonly string[]).includes(st.stage) || !isNonEmpty(st.round_ref, 64) || !isIsoInstant(st.decided_at)
+          || !(QC_ROUND_DECISIONS as readonly string[]).includes(st.decision)) out.push(`stages[${i}]`);
+    });
+  }
+  if (p.reference !== undefined && p.reference !== null) {
+    const r = p.reference;
+    if (!isNonEmpty(r.ref, 80) || !isNonEmpty(r.sample_code, 50) || !(r.retained_at === null || isIsoInstant(r.retained_at))) out.push("reference");
+  }
+  if (p.is_reference_batch !== undefined && typeof p.is_reference_batch !== "boolean") out.push("is_reference_batch");
   return out;
 }

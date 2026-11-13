@@ -13,9 +13,9 @@
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics via num();
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
-import { emitBridgeOutbound, macerationOnTransition, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, macerationOnTransition, recordOutbox, referenceRuleInForce, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -154,7 +154,12 @@ export class BatchService {
     /* Final-QC gate (golden journey lane/j2): RELEASED is the state packaging consumes, and it
      * was reachable with NO production QC on file at all — live, a matured batch went straight
      * to RELEASED. The latest QC reading recorded against the batch must be a PASS. */
-    if (tgt === 'RELEASED') {
+    /* PROM-3: with qc.reference_required on, the verdict is the QC 2 ROUND against the retained
+     * reference, checked by the kernel's maceration gate inside the transaction below; a typed
+     * production_qc PASS no longer releases anything. This reading stays the verdict only when the
+     * rule is switched off. */
+    const roundsAreTheVerdict = tgt === 'RELEASED' && (await referenceRuleInForce(this.db, { oilBatchId: id })).value.required;
+    if (tgt === 'RELEASED' && !roundsAreTheVerdict) {
       const latest = (
         await this.db
           .select({ result: productionQc.result })
@@ -346,6 +351,10 @@ export class BatchService {
    * All in one transaction.
    */
   async recordProductionQc(body: RecordProductionQc, principal: AuthPrincipal) {
+    // PROM-3: the inspector is the person signed in, never a name the caller types.
+    if (body.inspectedBy != null && body.inspectedBy !== principal.userId) {
+      throw new BadRequestException('The inspector is taken from your sign-in: a QC reading cannot be recorded under another person.');
+    }
     // Auto-grade against the supplied spec range (audit #8): observed value inside [min,max] = PASS.
     const graded =
       (body.specMin != null || body.specMax != null) && body.observedValue != null
@@ -364,7 +373,7 @@ export class BatchService {
             qcParameterId: body.qcParameterId ?? null,
             observedValue: num(body.observedValue),
             result: graded,
-            inspectedBy: body.inspectedBy ?? principal.userId,
+            inspectedBy: principal.userId,
             inspectionDt: body.inspectionDt ? new Date(body.inspectionDt) : new Date(),
             status: 'ACTIVE',
             createdBy: principal.userId,

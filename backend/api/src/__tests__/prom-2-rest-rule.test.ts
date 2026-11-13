@@ -25,6 +25,11 @@ import { MacerationService } from '../floor-ops/maceration.service.js';
 import { PolicyService } from '../policy/policy.service.js';
 import { FACTORY_RULE_DEFAULTS } from '../../../backend-kernel/src/events/factory-rules.js';
 import { bridge } from '@core/contracts';
+import { typedQcIsTheVerdict } from '../../../test-support/promise-fixtures.js';
+
+/* PROM-3: this suite is about the rest; the typed QC reading stays its verdict (promise-fixtures). The
+   rounds-against-the-reference verdict, with the rest, is proved in prom-3-reference.test.ts. */
+let restoreReferenceRule: (() => Promise<void>) | undefined;
 
 let batches: BatchService;
 let mac: MacerationService;
@@ -39,8 +44,9 @@ before(async () => {
   batches = new BatchService(productionDb());
   mac = new MacerationService(testClient());
   policy = new PolicyService(testClient());
+  restoreReferenceRule = await typedQcIsTheVerdict(policy);
 });
-after(async () => closeTestClient());
+after(async () => { await restoreReferenceRule?.(); await closeTestClient(); });
 
 /** A batch for a product with a name and a linked formula, so a leak of either would be visible. */
 async function batch(opts: { formulaId?: string } = {}) {

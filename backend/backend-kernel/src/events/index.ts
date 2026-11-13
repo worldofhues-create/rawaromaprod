@@ -19,7 +19,7 @@ export {
   emitBridgeManualEvent,
   type BridgeEmitTx,
 } from './bridge-emit.js';
-export { assertNotMacerating, macerationOnTransition, macerationProgress } from './maceration-gate.js';
+export { assertNotMacerating, macerationOnTransition, macerationProgress, restEndedAt } from './maceration-gate.js';
 export {
   SCOPE_LADDER,
   OPS,
