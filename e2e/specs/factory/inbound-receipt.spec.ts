@@ -17,7 +17,7 @@ test('supplier shipment, gate entry and GRN from an issued PO; the lot lands in 
 
   await openNav(page, 'Goods receipts');
   await createDoc(page, { grnNumber: `GRN-${c}`, purchaseOrderId: { label: number }, gateEntryId: { label: `GE-${c}` }, grnDate: '2031-05-02' },
-    { purchaseOrderItemId: { first: true }, materialId: { label: 'Chain raw material' }, receivedQty: 10, uomId: { label: 'CH-KG' } });
+    { purchaseOrderItemId: { first: true }, materialId: { label: 'Chain raw material' }, receivedQty: 10, uomId: { label: 'kg' } });
   await searchFor(page, `GRN-${c}`);
   expect(sql(`select count(*) from inventory.grn_master where grn_number='GRN-${c}'`)).toBe('1');
   // A receipt made on this screen must reach Books: the fact is written for it, naming the order's vendor.

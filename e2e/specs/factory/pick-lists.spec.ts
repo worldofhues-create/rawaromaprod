@@ -21,7 +21,9 @@ test('production generates the pick list on screen; the issue reads back on Mate
   await rowById(page, pl).getByRole('button', { name: 'Issue materials', exact: true }).click();
   await expect(page.locator('#ra-issue')).not.toContainText('Chain raw material');
   // Another material's lot is on hand but not offered; the server refuses it if sent anyway.
-  const other = (await must('owner', 'POST', '/v1/materials', { materialCode: `OTHER-${invBatch.slice(0, 8)}`, materialName: 'Other material', uomId: kg })).materialId;
+  // STAGE-2-RP: one material, one name (STK-18): the second width's pass was refused the name the first had taken.
+  // The id's LAST eight characters: its first eight are the clock, shared by two lots received within a minute.
+  const other = (await must('owner', 'POST', '/v1/materials', { materialCode: `OTHER-${invBatch.slice(-8)}`, materialName: `Other material ${invBatch.slice(-8)}`, uomId: kg })).materialId;
   const otherLot = (await must('warehouse', 'POST', '/v1/inventory-batches', { materialId: other, quantityOnHand: 5, uomId: kg })).inventoryBatchId;
   const wrong = await rp('compounding', 'POST', '/v1/material-issues', { productionOrderId: order, materialPickListId: pl, items: [{ materialId: mat, inventoryBatchId: otherLot }] });
   expect(wrong.status).toBe(400);

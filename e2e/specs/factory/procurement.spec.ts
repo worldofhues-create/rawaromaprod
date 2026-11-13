@@ -40,7 +40,7 @@ test('stock requirement -> PR -> approved by another -> RFQ -> quote -> PO, each
   await searchFor(page, `Q-${c}`);
 
   await openNav(page, 'Quote lines');
-  await createViaForm(page, { quotationId: { label: `Q-${c}` }, materialId: { label: 'Chain raw material' }, quotedQty: 40, uomId: { label: 'CH-KG' }, quotedRate: 120 });
+  await createViaForm(page, { quotationId: { label: `Q-${c}` }, materialId: { label: 'Chain raw material' }, quotedQty: 40, uomId: { label: 'kg' }, quotedRate: 120 });
 
   await openNav(page, 'Supplier quotes');
   await searchFor(page, `Q-${c}`);
