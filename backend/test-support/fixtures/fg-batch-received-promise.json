@@ -1,0 +1,37 @@
+{
+  "batch_no": "FG-2610-00042",
+  "sku": "FG-ISO-E-SUPER",
+  "pack_size": "25 kg",
+  "qty_kg": 100,
+  "rack": "R01-S2-B3",
+  "released_at": "2026-10-29T09:15:00.000Z",
+  "qc_batch_no": "B-2609-0042",
+  "label_applied_at": "2026-10-30T10:00:00.000Z",
+  "lot_assigned_at_fill": true,
+  "promise": {
+    "oil_batch_no": "B-2609-0042",
+    "rest": {
+      "batch_no": "B-2609-0042",
+      "oil_batch_ref": "0192a6c4-8f1e-7b3a-9c2d-5e6f7a8b9c0d",
+      "started_at": "2026-09-14T06:30:00.000Z",
+      "closed_at": "2026-10-29T09:15:00.000Z",
+      "days_rested": 45,
+      "required_days": 45,
+      "rule_days": 45,
+      "rule_version": 1,
+      "early_release": false,
+      "early_release_reason_code": null,
+      "temperature": null
+    },
+    "qc": {
+      "stages": [
+        { "stage": "QC1", "round_ref": "0192a6c4-0001-7b3a-9c2d-5e6f7a8b9c0d", "decided_at": "2026-09-14T06:00:00.000Z", "decision": "APPROVE" },
+        { "stage": "QC2", "round_ref": "0192a6c4-0002-7b3a-9c2d-5e6f7a8b9c0d", "decided_at": "2026-10-29T09:00:00.000Z", "decision": "APPROVE" }
+      ],
+      "reference": { "ref": "R-RAC-0450-CL-01", "sample_code": "RS-2608-0007", "retained_at": "2026-08-20T08:00:00.000Z" },
+      "is_reference_batch": false
+    },
+    "continuity_key": "ck1:6f1e0c0f5b8a4d2e9c7b3a1f0e2d4c6b8a9f7e5d3c1b2a4f6e8d0c2b4a6f8e1d",
+    "formula_version_ref": "0192a6c4-0f0f-7b3a-9c2d-5e6f7a8b9c0d"
+  }
+}

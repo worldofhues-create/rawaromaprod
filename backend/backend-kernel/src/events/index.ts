@@ -19,7 +19,7 @@ export {
   emitBridgeManualEvent,
   type BridgeEmitTx,
 } from './bridge-emit.js';
-export { assertNotMacerating, macerationOnTransition, macerationProgress, restEndedAt } from './maceration-gate.js';
+export { assertNotMacerating, macerationOnTransition, macerationProgress, restEndedAt, emitRestStarted } from './maceration-gate.js';
 export {
   SCOPE_LADDER,
   OPS,
@@ -51,6 +51,9 @@ export {
   restRuleInForce,
   referenceRuleInForce,
   lotRuleInForce,
+  factoryRuleReading,
+  factoryRulesStateWire,
+  type PolicyVersionRow,
   type FactoryRuleKey,
   type RestRule,
   type ReferenceRule,
@@ -73,6 +76,8 @@ export {
   type SupplierRule,
 } from './continuity.js';
 export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';
+// PROM-3 / PROM-6: one batch's process record, as ALEMBIC is told it.
+export { qcPromiseBlockOf, restRecordOf, fgPromiseBlockOf } from './lot-promise.js';
 export {
   recordProduceAlert,
   type ProduceAlertInput,

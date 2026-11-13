@@ -23,7 +23,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { assertNotMacerating, emitBridgeManualEvent, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, emitBridgeManualEvent, fgPromiseBlockOf, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { SHELF_DB, type ShelfDb, type ShelfTx } from './shelf.tokens.js';
 import { ShelfLayoutService, WALK_ORDER_SQL, type BinLocation } from './shelf-layout.service.js';
 import { PickLightService, colourFor, type PickLightCommand } from './pick-light.service.js';
@@ -105,6 +105,8 @@ export function buildFgBatchReceived(input: {
   /** PROM-4: when the label carrying this lot was applied, and whether the server minted the lot. */
   labelAppliedAt?: string | null;
   lotAssignedAtFill?: boolean;
+  /** PROM-6: the compounded batch's process record (backend-kernel fgPromiseBlockOf), or null. */
+  promise?: bridgeContracts.FgPromiseBlockWire | null;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   const payload: bridgeContracts.FgBatchReceivedPayload = {
@@ -118,6 +120,8 @@ export function buildFgBatchReceived(input: {
     // PROM-4: the lot's own label record. Absent (never false-filled) when no label has been applied.
     ...(input.labelAppliedAt ? { label_applied_at: input.labelAppliedAt } : {}),
     ...(input.lotAssignedAtFill !== undefined ? { lot_assigned_at_fill: input.lotAssignedAtFill } : {}),
+    // PROM-6: the batch's process record travels with the lot. Absent (never invented) without one.
+    ...(input.promise ? { promise: input.promise } : {}),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.
@@ -339,6 +343,7 @@ export class ShelfTaskService {
       batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
       rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId,
       labelAppliedAt: fg.labelAppliedAt, lotAssignedAtFill: fg.lotAssignedAtFill,
+      promise: fg.oilBatchId ? await fgPromiseBlockOf(tx, fg.oilBatchId) : null,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {

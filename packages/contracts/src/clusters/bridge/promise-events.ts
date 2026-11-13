@@ -259,3 +259,139 @@ export function checkProductMaterialChangedWire(p: ProductMaterialChangedWire): 
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }
+
+/* ── PROM-6: the factory's rules as it enforces them, a rest begun, and the lot's promise block ─────
+ *
+ * `factory.rules.state`  each process-promise rule with its policy version (0 = the registry default)
+ *                        and the CODE's enforcement version (backend-kernel FACTORY_ENFORCEMENT_VERSION),
+ *                        sent on every change of one of them, once a day and once at start. ALEMBIC
+ *                        prints a promise only while the rule is enforced: a value alone does not prove the
+ *                        enforcing code is deployed, the two together do. Aggregate `factory_rules`. A rule
+ *                        the factory could not read (its gate holds every batch) is null. `branch` is null:
+ *                        the general rung every branch reads until WO-SET-2 scopes the rules (LD-42).
+ * `batch.rest.started`   a maceration run opened or was extended: the rest's schedule while it runs, for
+ *                        order tracking's "Resting" step. Aggregate `maceration_run`.
+ * `fg.batch.received`    gains an optional `promise` block: the compounded batch the lot was filled from,
+ *                        its rest, its QC rounds and reference, its continuity key and its opaque formula
+ *                        version id. Never a material, supplier, formula name or percentage (D-1). */
+
+export const FACTORY_RULES_STATE = "factory.rules.state" as const;
+export const FACTORY_RULES_AGGREGATE_TYPE = "factory_rules" as const;
+export const FACTORY_RULES_STATE_REASONS = ["rule_change", "daily", "startup"] as const;
+export type FactoryRulesStateReason = (typeof FACTORY_RULES_STATE_REASONS)[number];
+
+export interface RestRuleReadingWire {
+  readonly version: number;
+  readonly enforcement_version: number;
+  readonly min_days: number;
+  readonly max_days: number | null;
+  readonly early_release: "second_person";
+}
+export interface SwitchRuleReadingWire {
+  readonly version: number;
+  readonly enforcement_version: number;
+  readonly value: boolean;
+}
+export interface FactoryRulesStateWire {
+  readonly branch: string | null;
+  readonly as_of: string;
+  readonly reason: FactoryRulesStateReason;
+  readonly rules: {
+    readonly "maceration.rest"?: RestRuleReadingWire | null;
+    readonly "qc.reference_required"?: SwitchRuleReadingWire | null;
+    readonly "fill.lot_server_assigned"?: SwitchRuleReadingWire | null;
+    readonly "continuity.supplier_change_is_material"?: SwitchRuleReadingWire | null;
+    readonly "receiving.supplier_lot_required"?: SwitchRuleReadingWire | null;
+  };
+}
+
+/** ALEMBIC's `parseFactoryRulesState` rules for what this side sends ([] = accepted). Stricter than the
+ *  receiver on one point: this side never sends a rule key the receiver does not know. */
+export function checkFactoryRulesStateWire(p: FactoryRulesStateWire): string[] {
+  const out: string[] = [];
+  if (!(p.branch === null || isNonEmpty(p.branch, 40))) out.push("branch");
+  if (!isIsoInstant(p.as_of)) out.push("as_of");
+  if (!(FACTORY_RULES_STATE_REASONS as readonly string[]).includes(p.reason)) out.push("reason");
+  const rules = (p.rules ?? null) as Record<string, unknown> | null;
+  if (!rules || typeof rules !== "object" || Array.isArray(rules)) out.push("rules");
+  else for (const [k, v] of Object.entries(rules)) {
+    if (!["maceration.rest", "qc.reference_required", "fill.lot_server_assigned", "continuity.supplier_change_is_material", "receiving.supplier_lot_required"].includes(k)) { out.push(`unexpected:rules.${k}`); continue; }
+    if (v === null) continue;
+    const o = v as Record<string, unknown>;
+    if (!isCount(o.version)) out.push(`rules.${k}.version`);
+    if (!isCount(o.enforcement_version, 1)) out.push(`rules.${k}.enforcement_version`);
+    const allowed = k === "maceration.rest" ? ["version", "enforcement_version", "min_days", "max_days", "early_release"] : ["version", "enforcement_version", "value"];
+    for (const f of Object.keys(o)) if (!allowed.includes(f)) out.push(`unexpected:rules.${k}.${f}`);
+    if (k === "maceration.rest") {
+      const min = o.min_days, max = o.max_days;
+      if (!isCount(min, 1) || (min as number) > 365) out.push("rules.maceration.rest.min_days");
+      if (!(max === null || (isCount(max, 1) && (max as number) <= 365))) out.push("rules.maceration.rest.max_days");
+      if (isCount(min, 1) && isCount(max, 1) && (max as number) < (min as number)) out.push("rules.maceration.rest.max_days.below_min");
+      if (o.early_release !== "second_person") out.push("rules.maceration.rest.early_release");
+    } else if (typeof o.value !== "boolean") out.push(`rules.${k}.value`);
+  }
+  for (const k of Object.keys(p)) if (!["branch", "as_of", "reason", "rules"].includes(k)) out.push(`unexpected:${k}`);
+  return out;
+}
+
+export const BATCH_REST_STARTED = "batch.rest.started" as const;
+
+export interface BatchRestStartedWire {
+  readonly batch_no: string;
+  /** Opaque: RawProd's oil-batch uuid. */
+  readonly oil_batch_ref: string;
+  readonly started_at: string;
+  /** What this batch must rest: the branch rule, a formula's longer rest, plus any extension. */
+  readonly required_days: number;
+  readonly rule_days: number;
+  readonly rule_version: number;
+  /** started_at + required_days: the earliest release without a second person. Never a promised date. */
+  readonly release_due_at: string;
+}
+
+/** ALEMBIC's `parseBatchRestStarted` rules ([] = accepted). Exactly the fields above. */
+export function checkBatchRestStartedWire(p: BatchRestStartedWire): string[] {
+  const out: string[] = [];
+  if (!isNonEmpty(p.batch_no, 64)) out.push("batch_no");
+  if (!isNonEmpty(p.oil_batch_ref, 64)) out.push("oil_batch_ref");
+  if (!isIsoInstant(p.started_at)) out.push("started_at");
+  if (!isCount(p.required_days, 1) || p.required_days > 365) out.push("required_days");
+  if (!isCount(p.rule_days, 1) || p.rule_days > 365) out.push("rule_days");
+  if (isCount(p.required_days, 1) && isCount(p.rule_days, 1) && p.required_days < p.rule_days) out.push("required_days.below_rule");
+  if (!isCount(p.rule_version)) out.push("rule_version");
+  if (!isIsoInstant(p.release_due_at)) out.push("release_due_at");
+  else if (isIsoInstant(p.started_at) && isCount(p.required_days, 1)
+    && Math.abs(Date.parse(p.release_due_at) - (Date.parse(p.started_at) + p.required_days * 86_400_000)) > 60_000) out.push("release_due_at.not_started_plus_required");
+  const allowed = new Set(["batch_no", "oil_batch_ref", "started_at", "required_days", "rule_days", "rule_version", "release_due_at"]);
+  for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
+  return out;
+}
+
+export interface FgPromiseBlockWire {
+  /** The compounded batch the lot was filled from (== `qc_batch_no`). */
+  readonly oil_batch_no: string;
+  readonly rest: BatchRestRecordedWire | null;
+  readonly qc: QcPromiseBlockWire | null;
+  readonly continuity_key: string | null;
+  /** Opaque: RawProd's formula version uuid; never a name or content. */
+  readonly formula_version_ref: string | null;
+}
+
+/** ALEMBIC's `parseFgPromiseBlock` rules ([] = accepted). */
+export function checkFgPromiseBlockWire(p: FgPromiseBlockWire, qcBatchNo?: string | null): string[] {
+  const out: string[] = [];
+  if (!isNonEmpty(p.oil_batch_no, 64)) out.push("promise.oil_batch_no");
+  if (qcBatchNo && p.oil_batch_no !== qcBatchNo) out.push("promise.oil_batch_no.not_qc_batch_no");
+  if (p.rest !== null) {
+    checkBatchRestRecordedWire(p.rest).forEach((x) => out.push(`promise.rest.${x}`));
+    if (p.rest.batch_no !== p.oil_batch_no) out.push("promise.rest.batch_no");
+  }
+  if (p.qc !== null) {
+    checkQcPromiseBlockWire(p.qc).forEach((x) => out.push(`promise.qc.${x}`));
+    for (const k of Object.keys(p.qc)) if (!["stages", "reference", "is_reference_batch"].includes(k)) out.push(`unexpected:promise.qc.${k}`);
+  }
+  if (!(p.continuity_key === null || isContinuityKey(p.continuity_key))) out.push("promise.continuity_key");
+  if (!(p.formula_version_ref === null || isNonEmpty(p.formula_version_ref, 64))) out.push("promise.formula_version_ref");
+  for (const k of Object.keys(p)) if (!["oil_batch_no", "rest", "qc", "continuity_key", "formula_version_ref"].includes(k)) out.push(`unexpected:promise.${k}`);
+  return out;
+}

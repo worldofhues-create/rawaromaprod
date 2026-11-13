@@ -41,7 +41,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { emitBridgeManualEvent, emitBridgeOutbound, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeManualEvent, emitBridgeOutbound, qcPromiseBlockOf, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import type { ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
@@ -372,32 +372,10 @@ export class CoaService {
    * Opaque refs and codes only: no product name, material or person crosses.
    */
   async promiseBlock(tx: Tx | ProductionDb, oilBatchId: string): Promise<bridgeContracts.QcPromiseBlockWire> {
-    const rounds = (await tx.execute(sql`
-      select r.batch_qc_round_id::text as id, r.stage, r.decision, r.reference_standard_id::text as ref_id,
-             to_char(r.created_dt at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as decided_at
-        from quality.batch_qc_round r
-       where r.oil_batch_id = ${oilBatchId} and r.stage is not null order by r.round_no
-    `)) as unknown as { id: string; stage: bridgeContracts.QcStageCode; decision: bridgeContracts.QcStageWire['decision']; ref_id: string | null; decided_at: string }[];
-    const last = Array.from(rounds).reverse().find((r) => r.ref_id);
-    let reference: bridgeContracts.QcReferenceWire | null = null;
-    if (last?.ref_id) {
-      const ref = ((await tx.execute(sql`
-        select rs.reference_code, s.sample_code,
-               to_char(s.retained_dt at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as retained_at
-          from quality.reference_standard rs left join quality.qc_sample_retention s on s.qc_sample_retention_id = rs.qc_sample_retention_id
-         where rs.reference_standard_id = ${last.ref_id}
-      `)) as unknown as { reference_code: string; sample_code: string | null; retained_at: string | null }[])[0];
-      if (ref?.sample_code) reference = { ref: ref.reference_code, sample_code: ref.sample_code, retained_at: ref.retained_at };
-    }
-    const isRef = ((await tx.execute(sql`
-      select 1 as one from quality.reference_standard where oil_batch_id = ${oilBatchId} and status in ('ACTIVE', 'RETIRED') limit 1
-    `)) as unknown as unknown[]).length > 0;
-    return {
-      stages: Array.from(rounds).map((r) => ({ stage: r.stage, round_ref: r.id, decided_at: r.decided_at, decision: r.decision })),
-      reference,
-      is_reference_batch: isRef,
-    };
+    // PROM-6: one implementation, in the kernel, shared with the finished-good receipt's promise block.
+    return qcPromiseBlockOf(tx, oilBatchId);
   }
+
 
   /**
    * The factory SKU a QC fact names (DOCS-001 `product_ref.factory_sku`): the SKU of an ALEMBIC

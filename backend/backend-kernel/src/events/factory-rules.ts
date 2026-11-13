@@ -29,6 +29,7 @@ import { ConflictException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { BridgeEmitTx } from './bridge-emit.js';
 import { evaluateRules, type PolicyBody } from './policy-engine.js';
+import { bridge as bridgeContracts } from '@core/contracts';
 
 export const MACERATION_REST = 'maceration.rest' as const;
 export const QC_REFERENCE_REQUIRED = 'qc.reference_required' as const;
@@ -168,4 +169,63 @@ export async function lotRuleInForce(tx: BridgeEmitTx): Promise<RuleInForce<LotR
   const problems = lotRuleProblems(r.value);
   if (problems.length) throw new ConflictException(`The ${FILL_LOT_SERVER_ASSIGNED} rule (v${r.version}) is not a valid rule, so this fill is held: ${problems.join(' ')} Ask an admin to fix it on the Rules screen.`);
   return r as RuleInForce<LotRule>;
+}
+
+/* ── PROM-6: `factory.rules.state`, what ALEMBIC is told about these rules ───────────────────────
+ *
+ * Pure. For each rule: the latest published version (0 and the registry default when none), every value
+ * that version can produce (each rule's THEN and its default), and FACTORY_ENFORCEMENT_VERSION for the
+ * rule. ALEMBIC prints a promise only on the reading, so the reading is the CAUTIOUS one across every
+ * possible value, never the general rung alone: a switch reads true only when every value it can take is
+ * true (one product with the reference rule off makes "checked against a retained reference" untrue), and
+ * the rest's minimum is the smallest minimum any case can rest under. A version whose values cannot be
+ * used (its gates hold) reads null: nothing is claimed for a rule the factory cannot read.
+ * `receiving.supplier_lot_required` (PROM-1) is not a factory rule here yet, so it is not sent. */
+
+export interface PolicyVersionRow {
+  version: number;
+  body: string | PolicyBody;
+}
+
+function possibleValues(body: PolicyBody): unknown[] {
+  const out = (body.rules ?? []).map((r) => (r as { then?: unknown }).then);
+  if (body.hasDefault) out.push(body.defaultValue);
+  return out;
+}
+
+/** The reading of one rule from its latest published version (null row = none published). */
+export function factoryRuleReading(key: FactoryRuleKey, row: PolicyVersionRow | null):
+  bridgeContracts.RestRuleReadingWire | bridgeContracts.SwitchRuleReadingWire | null {
+  const enforcement_version = FACTORY_ENFORCEMENT_VERSION[key];
+  const version = row ? Number(row.version) : 0;
+  let values: unknown[];
+  if (!row) values = [FACTORY_RULE_DEFAULTS[key]];
+  else {
+    let body: PolicyBody;
+    try { body = (typeof row.body === 'string' ? JSON.parse(row.body) : row.body) as PolicyBody; } catch { return null; }
+    if (!body || typeof body !== 'object') return null;
+    if (factoryRuleProblems(key, body).length) return null;
+    values = possibleValues(body);
+  }
+  if (!values.length) return null;
+  if (key === MACERATION_REST) {
+    const rest = values as RestRule[];
+    if (rest.some((v) => restRuleProblems(v).length)) return null;
+    const min_days = Math.min(...rest.map((v) => v.minDays));
+    const max_days = rest.some((v) => v.maxDays === null) ? null : Math.max(...rest.map((v) => v.maxDays as number));
+    return { version, enforcement_version, min_days, max_days, early_release: 'second_person' };
+  }
+  const check = key === FILL_LOT_SERVER_ASSIGNED ? lotRuleProblems : key === CONTINUITY_SUPPLIER_CHANGE ? supplierChangeRuleProblems : referenceRuleProblems;
+  if (values.some((v) => check(v).length)) return null;
+  const on = (v: unknown) => key === CONTINUITY_SUPPLIER_CHANGE ? (v as SupplierChangeRule).isMaterial === true : (v as ReferenceRule | LotRule).required === true;
+  return { version, enforcement_version, value: values.every(on) };
+}
+
+/** Pure: the `factory.rules.state` payload from each rule's latest published version. */
+export function factoryRulesStateWire(
+  latest: Partial<Record<FactoryRuleKey, PolicyVersionRow | null>>, asOf: string, reason: bridgeContracts.FactoryRulesStateReason,
+): bridgeContracts.FactoryRulesStateWire {
+  const rules: Record<string, unknown> = {};
+  for (const key of FACTORY_RULE_KEYS) rules[key] = factoryRuleReading(key, latest[key] ?? null);
+  return { branch: null, as_of: asOf, reason, rules: rules as bridgeContracts.FactoryRulesStateWire['rules'] };
 }

@@ -20,7 +20,7 @@
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { emitBridgeOutbound, macerationProgress, PG_CLIENT, restRuleInForce, type AuthPrincipal } from '@core/backend-kernel';
+import { emitBridgeOutbound, emitRestStarted, macerationProgress, PG_CLIENT, restRuleInForce, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
 import { clearAlert, raiseAlert } from './floor-alerts.js';
@@ -154,6 +154,8 @@ export class MacerationService {
       }
       await tx`update production.maceration_run set extend_days = extend_days + ${days}, alarm_at = null, updated_at = ${this.clock().toISOString()}::timestamptz where maceration_run_id = ${id}::uuid`;
       await this.log(tx as unknown as Sql, id, 'EXTENDED', `+${days} days: ${why}`, principal);
+      // PROM-6: ALEMBIC's order tracking hears the later schedule in the same transaction.
+      await emitRestStarted(drizzleExec(tx as unknown as Sql), id);
     });
     return this.run(id);
   }

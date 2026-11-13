@@ -15,6 +15,7 @@ import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundEx
 import type { Sql } from 'postgres';
 import { PG_CLIENT, factoryRuleProblems, isFactoryRuleKey, type AuthPrincipal } from '@core/backend-kernel';
 import { evaluateRules, validateBody, describeRule, type PolicyBody } from './policy-engine.js';
+import { emitFactoryRulesState } from './factory-rules-state.js';
 
 /** The policies the plan names (§12.0), plus the factory rules (PROM-4 adds `fill.lot_server_assigned`) the storefront's process promises
  *  rest on (PROM-2 `maceration.rest`, PROM-3 `qc.reference_required`; backend-kernel factory-rules.ts,
@@ -194,6 +195,9 @@ export class PolicyService {
       const next = row!.next;
       await tx`insert into platform.policy_version (policy_key, version, body, reason, created_by)
         values (${key}, ${next}, ${JSON.stringify(body)}::text::jsonb, ${why}, ${principal.userId})`;
+      // PROM-6: ALEMBIC is told the factory rules as they now stand, in this transaction, so the state
+      // and the version it describes commit together (factory-rules-state.ts).
+      if (isFactoryRuleKey(key)) await emitFactoryRulesState(tx, 'rule_change');
       return { key, version: next };
     });
   }

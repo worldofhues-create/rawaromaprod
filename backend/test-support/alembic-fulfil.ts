@@ -1,10 +1,13 @@
 /**
  * ALEMBIC's `fg.batch.received` receiver, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/fulfil/contract.ts (lane/prom, PROM-4). RawProd's PROM-4 test runs the
- * receipt RawProd builds through the receiver's own parser, so "ALEMBIC would accept the lot's label
- * record" is proved here rather than assumed. If ALEMBIC changes this parser, re-copy it.
+ * alembic packages/domain/src/fulfil/contract.ts (lane/prom, PROM-4, PROM-6), from `export interface
+ * FgBatchReceived` to the end of `parseFgBatchReceived`. RawProd's tests run the receipt RawProd builds
+ * through the receiver's own parser, so "ALEMBIC would accept the lot's label record and promise block" is
+ * proved here rather than assumed. The promise block's parser is ALEMBIC's facts.ts, copied verbatim in
+ * alembic-prom.ts. If ALEMBIC changes this parser, re-copy it.
  */
 /* eslint-disable */
+import { parseFgPromiseBlock, type FgPromiseBlock } from './alembic-prom.js';
 export interface FgBatchReceived {
   readonly batchNo: string;
   readonly sku: string;
@@ -19,13 +22,7 @@ export interface FgBatchReceived {
    *  after the finished-good batch. */
   readonly qcBatchNo: string | null;
   /** Optional: the requirement this batch answers. */
-  readonly requirementId: string | null;
-  /** PROM-4, optional: when the factory applied the label carrying this lot. Null from an older
-   *  sender, or when no label went on before the put-away: the lot page then says "Not on file". */
-  readonly labelAppliedAt: string | null;
-  /** PROM-4, optional: true when the factory's server minted the lot at fill; false for a lot whose
-   *  number was typed (made before PROM-4); null from an older sender. */
-  readonly lotAssignedAtFill: boolean | null;
+  readonly requirementId: string | null; /** PROM-4, optional: when the factory applied the label carrying this lot (null from an older sender, or no label before the put-away: the lot page says "Not on file"), and whether its server minted the lot at fill (false: typed before PROM-4; null: older sender). One line so no cited line moves. */ readonly labelAppliedAt: string | null; readonly lotAssignedAtFill: boolean | null; /** PROM-6, optional: the process record of the compounded batch this lot was filled from (rest, QC rounds and reference, continuity key, formula version ref), or null from an older sender. */ readonly promise: FgPromiseBlock | null;
 }
 
 const KG = /^\d{1,7}(?:\.\d{1,6})?$/;
@@ -69,6 +66,10 @@ export function parseFgBatchReceived(raw: unknown):
   }
   const lotAssignedAtFill = r.lot_assigned_at_fill === undefined || r.lot_assigned_at_fill === null ? null : r.lot_assigned_at_fill;
   if (lotAssignedAtFill !== null && typeof lotAssignedAtFill !== "boolean") problems.push("lot_assigned_at_fill, when sent, must be true or false");
+  /* PROM-6: optional, so an older sender parses as before; when sent it must name the same batch QC released. */
+  const promise = parseFgPromiseBlock(r.promise);
+  if (!promise.ok) problems.push(...promise.problems);
+  else if (promise.block && qcBatchNo && promise.block.oilBatchNo !== qcBatchNo) problems.push("promise.oil_batch_no must be qc_batch_no: one lot, one compounded batch");
   if (problems.length) return { ok: false, problems };
   return {
     ok: true,
@@ -78,6 +79,7 @@ export function parseFgBatchReceived(raw: unknown):
       qtyKg: qtyRaw as string, qtyMg: kgStringToMg(qtyRaw as string),
       rack: rack as string, releasedAt: releasedAt as string, requirementId: req,
       labelAppliedAt, lotAssignedAtFill: lotAssignedAtFill as boolean | null,
+      promise: promise.ok ? promise.block : null,
     },
   };
 }

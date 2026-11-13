@@ -1,6 +1,6 @@
 /**
  * ALEMBIC's process-promise receiver rules, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/promises/facts.ts (lane/prom; PROM-2, PROM-3, PROM-5). RawProd's promise tests run
+ * alembic packages/domain/src/promises/facts.ts (lane/prom; PROM-2, PROM-3, PROM-5, PROM-6). RawProd's promise tests run
  * what RawProd emits through the receiver's own parser, so "ALEMBIC would accept this" is proved here
  * rather than assumed. If ALEMBIC changes these rules, re-copy this file.
  */
@@ -314,4 +314,255 @@ export function parseProductMaterialChanged(raw: unknown): { ok: true; record: P
   if (!ISO_INSTANT(r.approved_at)) problems.push("approved_at must be a timestamp");
   if (problems.length) return { ok: false, problems };
   return { ok: true, record: { productCode: c.productCode!, grade: c.grade, kind: r.kind as MaterialChangeKind, fromKey: r.from_key as string, toKey: r.to_key as string, firstBatchNo: c.firstBatchNo, approvedAt: r.approved_at as string } };
+}
+
+/* ── PROM-6: the factory's rules, as the factory enforces them ──────────────────────────────
+ *
+ * `factory.rules.state` is how ALEMBIC learns that production ENFORCES a promise, not only that a
+ * rule has a value (process-promises.md section 4: `enforced(rule)`). The factory sends it on every
+ * change of one of these rules and once a day. Each rule carries its value, the policy version in
+ * force (0 = the factory's registry default), and `enforcement_version`: a constant in the factory's
+ * CODE, bumped by the commit that changed how the rule is enforced. A value alone does not prove the
+ * code that enforces it is deployed; the two together do.
+ *
+ *   maceration.rest                          { version, enforcement_version, min_days, max_days, early_release }
+ *   qc.reference_required                    { version, enforcement_version, value }
+ *   fill.lot_server_assigned                 { version, enforcement_version, value }
+ *   continuity.supplier_change_is_material   { version, enforcement_version, value }
+ *   receiving.supplier_lot_required          { version, enforcement_version, value }   (PROM-1; absent until built)
+ *
+ * A rule the factory could not read (a malformed policy version: its gate holds every batch) is sent
+ * as null. A rule key ALEMBIC does not know is IGNORED, so the factory can add one before ALEMBIC
+ * reads it; a known rule of the wrong shape refuses the whole fact (permanent 400, RawProd parks it).
+ * `branch` is null while the factory's rules have one general rung that every branch reads (LD-42:
+ * one site); a branch code once WO-SET-2 scopes them. */
+
+export const FACTORY_RULES_STATE = "factory.rules.state" as const;
+
+export const FACTORY_RULE_KEYS = [
+  "maceration.rest",
+  "qc.reference_required",
+  "fill.lot_server_assigned",
+  "continuity.supplier_change_is_material",
+  "receiving.supplier_lot_required",
+] as const;
+export type FactoryRuleKey = (typeof FACTORY_RULE_KEYS)[number];
+
+/** The `enforcement_version` at which each rule's enforcement entered the factory's code. A state
+ *  below it says the factory runs code that does not yet enforce the rule, so the promise cannot
+ *  hold whatever the value says. The PROM unit that introduced each: */
+export const FACTORY_RULE_INTRODUCED_AT: Readonly<Record<FactoryRuleKey, number>> = Object.freeze({
+  "maceration.rest": 1, // PROM-2: every batch rests, no skip through HOLD/REWORK, early release by two people
+  "qc.reference_required": 1, // PROM-3: QC 1 / QC 2 rounds against the retained reference are the release verdict
+  "fill.lot_server_assigned": 1, // PROM-4: the lot is minted by the server at fill, a typed one refused
+  "continuity.supplier_change_is_material": 1, // PROM-5: continuity recorded at compounding, a change sent before release
+  "receiving.supplier_lot_required": 1, // PROM-1: supplier and supplier lot required at receipt
+});
+
+/** How old a rules state may be before no promise may rest on it (process-promises.md section 4). */
+export const FACTORY_RULES_STATE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+
+export const FACTORY_RULES_STATE_REASONS = ["rule_change", "daily", "startup"] as const;
+
+export interface RestRuleReading {
+  readonly version: number;
+  readonly enforcementVersion: number;
+  readonly minDays: number;
+  /** null = no maximum set (OQ-PROM-4); never an invented number. */
+  readonly maxDays: number | null;
+  readonly earlyRelease: "second_person";
+}
+export interface SwitchRuleReading {
+  readonly version: number;
+  readonly enforcementVersion: number;
+  readonly value: boolean;
+}
+export type FactoryRuleReading = RestRuleReading | SwitchRuleReading;
+
+export interface FactoryRulesState {
+  readonly branch: string | null;
+  readonly asOf: string;
+  readonly reason: (typeof FACTORY_RULES_STATE_REASONS)[number];
+  /** A key absent = the factory did not send that rule; null = it could not read it (its gate holds). */
+  readonly rules: { readonly [K in FactoryRuleKey]?: (K extends "maceration.rest" ? RestRuleReading : SwitchRuleReading) | null };
+  /** Rule keys sent that ALEMBIC does not know: ignored, kept only so the inbox shows them. */
+  readonly ignoredKeys: readonly string[];
+}
+
+const STATE_KEYS = new Set(["branch", "as_of", "reason", "rules"]);
+const isRuleKey = (k: string): k is FactoryRuleKey => (FACTORY_RULE_KEYS as readonly string[]).includes(k);
+
+function readRule(key: FactoryRuleKey, raw: unknown, problems: string[]): FactoryRuleReading | null {
+  if (raw === null) return null;
+  if (typeof raw !== "object" || Array.isArray(raw)) { problems.push(`rules.${key} must be an object or null`); return null; }
+  const o = raw as Record<string, unknown>;
+  const allowed = key === "maceration.rest"
+    ? ["version", "enforcement_version", "min_days", "max_days", "early_release"]
+    : ["version", "enforcement_version", "value"];
+  for (const k of Object.keys(o)) if (!allowed.includes(k)) problems.push(`unexpected field rules.${key}.${k}`);
+  const bad = problems.length;
+  if (!count(o.version)) problems.push(`rules.${key}.version must be a whole number (0 = the registry default)`);
+  if (!count(o.enforcement_version, 1)) problems.push(`rules.${key}.enforcement_version must be a whole number from 1`);
+  if (key === "maceration.rest") {
+    if (!count(o.min_days, 1, 365)) problems.push("rules.maceration.rest.min_days must be 1 to 365");
+    if (!(o.max_days === null || count(o.max_days, 1, 365))) problems.push("rules.maceration.rest.max_days must be 1 to 365 or null");
+    if (count(o.min_days, 1, 365) && count(o.max_days, 1, 365) && (o.max_days as number) < (o.min_days as number)) problems.push("rules.maceration.rest.max_days cannot be less than min_days");
+    if (o.early_release !== "second_person") problems.push("rules.maceration.rest.early_release must be second_person");
+    if (problems.length > bad) return null;
+    return { version: o.version as number, enforcementVersion: o.enforcement_version as number, minDays: o.min_days as number, maxDays: (o.max_days as number | null), earlyRelease: "second_person" };
+  }
+  if (typeof o.value !== "boolean") problems.push(`rules.${key}.value must be true or false`);
+  if (problems.length > bad) return null;
+  return { version: o.version as number, enforcementVersion: o.enforcement_version as number, value: o.value as boolean };
+}
+
+/** Structural validation of a `factory.rules.state` payload. Unknown top-level fields are refused
+ *  (nothing else crosses, no person); unknown RULE keys are ignored. */
+export function parseFactoryRulesState(raw: unknown): { ok: true; record: FactoryRulesState } | { ok: false; problems: string[] } {
+  const r = (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const problems: string[] = [];
+  const leak = formulaContentKey(r);
+  if (leak) problems.push(`${leak} would carry formula content`);
+  for (const k of Object.keys(r)) if (!STATE_KEYS.has(k)) problems.push(`unexpected field ${k}`);
+  const branch = r.branch === null ? null : text(r.branch, 40);
+  if (r.branch !== null && !branch) problems.push("branch must be a branch code or null (the general rung)");
+  if (!ISO_INSTANT(r.as_of)) problems.push("as_of must be a timestamp");
+  if (!(FACTORY_RULES_STATE_REASONS as readonly unknown[]).includes(r.reason)) problems.push(`reason must be one of ${FACTORY_RULES_STATE_REASONS.join(", ")}`);
+  const rules: Record<string, FactoryRuleReading | null> = {};
+  const ignoredKeys: string[] = [];
+  if (typeof r.rules !== "object" || r.rules === null || Array.isArray(r.rules)) problems.push("rules must be an object keyed by rule");
+  else {
+    for (const [k, v] of Object.entries(r.rules as Record<string, unknown>)) {
+      if (!isRuleKey(k)) { if (k.length <= 80) ignoredKeys.push(k); continue; }
+      rules[k] = readRule(k, v, problems);
+    }
+  }
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, record: { branch, asOf: r.as_of as string, reason: r.reason as FactoryRulesState["reason"], rules: rules as FactoryRulesState["rules"], ignoredKeys } };
+}
+
+/** Pure: whether the factory ENFORCES `key` according to `state`, at `now` (process-promises.md
+ *  section 4, `enforced(rule)`). True only when the state is under 48 hours old, the rule was sent
+ *  and readable, the factory's code is at or above the enforcement version that introduced it, and
+ *  its value is the enforcing one. Every other answer is false with the reason, never a guess. */
+export function factoryRuleEnforced(state: FactoryRulesState | null, key: FactoryRuleKey, now: Date): { enforced: boolean; reason: string } {
+  if (!state) return { enforced: false, reason: "No factory rules state on file" };
+  const age = now.getTime() - Date.parse(state.asOf);
+  if (!(age <= FACTORY_RULES_STATE_MAX_AGE_MS)) return { enforced: false, reason: "The factory rules state is more than 48 hours old" };
+  const rule = state.rules[key];
+  if (rule === undefined) return { enforced: false, reason: `The factory did not send ${key}` };
+  if (rule === null) return { enforced: false, reason: `The factory could not read ${key}, so it holds` };
+  if (rule.enforcementVersion < FACTORY_RULE_INTRODUCED_AT[key]) return { enforced: false, reason: `The factory's code does not yet enforce ${key}` };
+  if ("value" in rule && rule.value !== true) return { enforced: false, reason: `${key} is switched off` };
+  return { enforced: true, reason: `${key} v${rule.version}, enforcement ${rule.enforcementVersion}` };
+}
+
+/* ── PROM-6: the promise block of `fg.batch.received` ────────────────────────────────────────
+ *
+ * A finished-good lot is filled from one compounded (oil) batch. The receipt carries that batch's
+ * process record with it, so the lot itself holds what the storefront's per-lot promises rest on,
+ * whether or not the batch's own facts were matched to it:
+ *
+ *   promise: { oil_batch_no, rest: <batch.rest.recorded> | null, qc: { stages, reference,
+ *              is_reference_batch } | null, continuity_key: ck1:... | null, formula_version_ref: <opaque> | null }
+ *
+ * The label print stays where PROM-4 put it (`label_applied_at` beside the block). Every part may be
+ * null (Rule 3: missing is null, the lot page says "Not on file"); a receipt with no block at all, from
+ * an older sender, parses exactly as before. `formula_version_ref` is the factory's opaque version id,
+ * never a formula's name or content (D-1). */
+
+export interface FgPromiseBlock {
+  readonly oilBatchNo: string;
+  readonly rest: BatchRestRecord | null;
+  readonly qc: QcPromiseBlock | null;
+  readonly continuityKey: string | null;
+  readonly formulaVersionRef: string | null;
+}
+
+const FG_PROMISE_KEYS = new Set(["oil_batch_no", "rest", "qc", "continuity_key", "formula_version_ref"]);
+
+/** The `promise` block of an `fg.batch.received` payload; `block` is null when none was sent. */
+export function parseFgPromiseBlock(raw: unknown): { ok: true; block: FgPromiseBlock | null } | { ok: false; problems: string[] } {
+  if (raw === undefined || raw === null) return { ok: true, block: null };
+  if (typeof raw !== "object" || Array.isArray(raw)) return { ok: false, problems: ["promise must be an object or null"] };
+  const r = raw as Record<string, unknown>;
+  const problems: string[] = [];
+  const leak = formulaContentKey(r, "promise");
+  if (leak) problems.push(`${leak} would carry formula content`);
+  for (const k of Object.keys(r)) if (!FG_PROMISE_KEYS.has(k)) problems.push(`unexpected field promise.${k}`);
+  const oilBatchNo = text(r.oil_batch_no, 64);
+  if (!oilBatchNo) problems.push("promise.oil_batch_no is required: the compounded batch this lot was filled from");
+  let rest: BatchRestRecord | null = null;
+  if (r.rest !== undefined && r.rest !== null) {
+    const p = parseBatchRestRecorded(r.rest);
+    if (!p.ok) problems.push(...p.problems.map((x) => `promise.rest: ${x}`));
+    else if (oilBatchNo && p.record.batchNo !== oilBatchNo) problems.push("promise.rest.batch_no must be promise.oil_batch_no");
+    else rest = p.record;
+  }
+  let qc: QcPromiseBlock | null = null;
+  if (r.qc !== undefined && r.qc !== null) {
+    if (typeof r.qc !== "object" || Array.isArray(r.qc)) problems.push("promise.qc must be an object or null");
+    else {
+      const o = r.qc as Record<string, unknown>;
+      for (const k of Object.keys(o)) if (!["stages", "reference", "is_reference_batch"].includes(k)) problems.push(`unexpected field promise.qc.${k}`);
+      const p = parseQcPromiseBlock(o);
+      if (!p.ok) problems.push(...p.problems.map((x) => `promise.qc: ${x}`));
+      else qc = p.block;
+    }
+  }
+  const continuityKey = r.continuity_key === undefined || r.continuity_key === null ? null : r.continuity_key;
+  if (continuityKey !== null && !isKey(continuityKey)) problems.push("promise.continuity_key must be ck1: and 64 hex characters, or null");
+  const formulaVersionRef = r.formula_version_ref === undefined || r.formula_version_ref === null ? null : text(r.formula_version_ref, 64);
+  if (r.formula_version_ref !== undefined && r.formula_version_ref !== null && !formulaVersionRef) problems.push("promise.formula_version_ref must be an opaque reference or null");
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, block: { oilBatchNo: oilBatchNo!, rest, qc, continuityKey: continuityKey as string | null, formulaVersionRef } };
+}
+
+/* ── PROM-6: a rest that has begun ──────────────────────────────────────────────────────────
+ *
+ * `batch.rest.recorded` arrives only when a rest ends. Order tracking's "Resting (maceration)" step
+ * (P-10) needs the rest's real dates WHILE it runs, so the factory also sends `batch.rest.started`
+ * when a maceration run opens, and again on each extension (the latest per run is the schedule).
+ * `release_due_at` is the earliest the batch may be released without a second person: started_at
+ * plus required_days. Never a promise of a release date: QC 2 still decides. */
+
+export const BATCH_REST_STARTED = "batch.rest.started" as const;
+
+export interface BatchRestStarted {
+  readonly batchNo: string;
+  readonly oilBatchRef: string;
+  readonly startedAt: string;
+  readonly requiredDays: number;
+  readonly ruleDays: number;
+  readonly ruleVersion: number;
+  readonly releaseDueAt: string;
+}
+
+const REST_START_KEYS = new Set(["batch_no", "oil_batch_ref", "started_at", "required_days", "rule_days", "rule_version", "release_due_at"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Structural validation of a `batch.rest.started` payload. Unknown keys are refused. */
+export function parseBatchRestStarted(raw: unknown): { ok: true; record: BatchRestStarted } | { ok: false; problems: string[] } {
+  const r = (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const problems: string[] = [];
+  const leak = formulaContentKey(r);
+  if (leak) problems.push(`${leak} would carry formula content`);
+  for (const k of Object.keys(r)) if (!REST_START_KEYS.has(k)) problems.push(`unexpected field ${k}`);
+  const batchNo = text(r.batch_no, 64);
+  if (!batchNo) problems.push("batch_no is required");
+  const oilBatchRef = text(r.oil_batch_ref, 64);
+  if (!oilBatchRef) problems.push("oil_batch_ref is required");
+  if (!ISO_INSTANT(r.started_at)) problems.push("started_at must be a timestamp");
+  if (!count(r.required_days, 1, 365)) problems.push("required_days must be 1 to 365");
+  if (!count(r.rule_days, 1, 365)) problems.push("rule_days must be 1 to 365");
+  if (count(r.required_days, 1, 365) && count(r.rule_days, 1, 365) && r.required_days < r.rule_days) problems.push("required_days cannot be shorter than the branch rule: a shorter rest is an early release");
+  if (!count(r.rule_version)) problems.push("rule_version must be a whole number");
+  if (!ISO_INSTANT(r.release_due_at)) problems.push("release_due_at must be a timestamp");
+  else if (ISO_INSTANT(r.started_at) && count(r.required_days, 1, 365)
+    && Math.abs(Date.parse(r.release_due_at) - (Date.parse(r.started_at) + (r.required_days as number) * DAY_MS)) > 60_000) {
+    problems.push("release_due_at must be started_at plus required_days");
+  }
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, record: { batchNo: batchNo!, oilBatchRef: oilBatchRef!, startedAt: r.started_at as string, requiredDays: r.required_days as number,
+    ruleDays: r.rule_days as number, ruleVersion: r.rule_version as number, releaseDueAt: r.release_due_at as string } };
 }

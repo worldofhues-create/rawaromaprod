@@ -139,6 +139,37 @@ export async function assertNotMacerating(
   );
 }
 
+/**
+ * PROM-6: sends `batch.rest.started` for an open run, in the caller's transaction: when the run opens,
+ * when rework restarts it and when it is extended, so ALEMBIC's order tracking shows the rest's real
+ * dates while it runs ("Resting (maceration)"). `release_due_at` is the earliest release without a second
+ * person, never a promised date: QC 2 still decides. A run the receiver would refuse is not opened.
+ */
+export async function emitRestStarted(tx: BridgeEmitTx, runId: string): Promise<bridgeContracts.BatchRestStartedWire> {
+  const run = (await rows<RunRow>(tx, sql`
+    select mr.*, ob.batch_number from production.maceration_run mr
+      left join production.oil_batch_master ob on ob.oil_batch_id = mr.oil_batch_id
+     where mr.maceration_run_id = ${runId}`))[0];
+  if (!run) throw new ConflictException(`No maceration run ${runId}.`);
+  const required = Number(run.min_days) + Number(run.extend_days ?? 0);
+  const started = ts(run.started_at);
+  const wire: bridgeContracts.BatchRestStartedWire = {
+    batch_no: run.batch_number ?? '',
+    oil_batch_ref: run.oil_batch_id,
+    started_at: new Date(started).toISOString(),
+    required_days: required,
+    // A run opened before PROM-2 has no rule recorded: its own minimum stands in, version 0.
+    rule_days: Number(run.rule_days ?? run.min_days),
+    rule_version: Number(run.rule_version ?? 0),
+    release_due_at: new Date(started + required * DAY_MS).toISOString(),
+  };
+  const problems = bridgeContracts.checkBatchRestStartedWire(wire);
+  if (problems.length) throw new ConflictException(`The rest could not be recorded for the sales system: ${problems.join(', ')}. A batch rests only with its record.`);
+  bridgeContracts.assertNoFormulaContent(wire);
+  await emitBridgeManualEvent(tx, bridgeContracts.BATCH_REST_STARTED, runId, wire as unknown as Record<string, unknown>);
+  return wire;
+}
+
 /** Closes the run and sends `batch.rest.recorded` in the same transaction (PROM-2). */
 async function closeRun(tx: BridgeEmitTx, run: RunRow, p: ReturnType<typeof macerationProgress>, now: Date, userId: string | null) {
   const earlyRelease = !p.minReached && p.releasedEarly;
@@ -222,6 +253,7 @@ export async function macerationOnTransition(
                  extend_days = 0, updated_at = ${now.toISOString()}::timestamptz
            where maceration_run_id = ${existing.maceration_run_id}`);
         await event(tx, existing.maceration_run_id, 'RESTARTED', 'rework: the timer starts again', t.userId);
+        await emitRestStarted(tx, existing.maceration_run_id); // PROM-6: the new schedule
       } else {
         await event(tx, existing.maceration_run_id, 'RESUMED', `from ${t.from}`, t.userId);
       }
@@ -235,6 +267,7 @@ export async function macerationOnTransition(
               ${maxDays}, ${freezeRequired}, ${qc1ProductionQcId}, ${qc1RoundId}, ${rule.value.minDays}, ${rule.version}, ${rule.source},
               ${t.userId && /^[0-9a-f-]{36}$/i.test(t.userId) ? t.userId : null}, ${now.toISOString()}::timestamptz, ${now.toISOString()}::timestamptz)`);
     await event(tx, runId, 'STARTED', `rule ${rule.source === 'policy' ? `maceration.rest v${rule.version}` : 'maceration.rest (registry default)'}: ${minDays} days`, t.userId);
+    await emitRestStarted(tx, runId); // PROM-6: the rest's schedule, while it runs
     return;
   }
 

@@ -36,7 +36,7 @@ import type {
   IfraCertificateValue,
   QcBatchReleasedPayload,
 } from "./compliance-events.js";
-import { checkQcPromiseBlockWire, type QcPromiseBlockWire } from "./promise-events.js";
+import { checkQcPromiseBlockWire, checkFgPromiseBlockWire, type QcPromiseBlockWire, type FgPromiseBlockWire } from "./promise-events.js";
 
 /* ── 1. requirement fields ─────────────────────────────────────────────────────────────────── */
 
@@ -104,6 +104,10 @@ export interface FgBatchReceivedPayload {
   /** PROM-4, optional: true when RawProd's server minted the lot at fill; false for a lot made before
    *  PROM-4, whose number was typed. Absent from an older sender. */
   readonly lot_assigned_at_fill?: boolean;
+  /** PROM-6, optional: the process record of the compounded batch this lot was filled from (its rest, QC
+   *  rounds and reference, continuity key, opaque formula version id). Absent for a lot not made from an
+   *  oil batch, and from an older sender; ALEMBIC records the lot with those fields null. */
+  readonly promise?: FgPromiseBlockWire;
 }
 
 const isNonEmpty = (v: unknown, max = 200) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
@@ -122,7 +126,8 @@ export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   if (p.qc_batch_no !== undefined && !isNonEmpty(p.qc_batch_no, 64)) out.push("qc_batch_no");
   if (p.label_applied_at !== undefined && !isIsoInstant(p.label_applied_at)) out.push("label_applied_at");
   if (p.lot_assigned_at_fill !== undefined && typeof p.lot_assigned_at_fill !== "boolean") out.push("lot_assigned_at_fill");
-  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "label_applied_at", "lot_assigned_at_fill"]);
+  if (p.promise !== undefined) out.push(...checkFgPromiseBlockWire(p.promise, p.qc_batch_no ?? null));
+  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "label_applied_at", "lot_assigned_at_fill", "promise"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }

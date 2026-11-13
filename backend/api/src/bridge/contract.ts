@@ -65,6 +65,12 @@ export const OUTBOUND_TO_ALEMBIC = [
   // bridge.ProductMaterialChangedWire. ALEMBIC accepts them first (lane/prom).
   'product.continuity.current',
   'product.material.changed',
+  // PROM-6 (LD-85): the factory's process-promise rules with the enforcement version of the code that
+  // enforces each (on every change, daily and at start; aggregate `factory_rules`), and a rest that has
+  // begun or was extended (aggregate `maceration_run`). Payloads: @core/contracts
+  // bridge.FactoryRulesStateWire, bridge.BatchRestStartedWire. ALEMBIC accepts them first (lane/prom).
+  'factory.rules.state',
+  'batch.rest.started',
   // ALEMBIC Books phase 2 (owner 2026-10-09): payables facts -- a purchase order issued, amended or
   // cancelled, and a goods receipt, each carrying its vendor -- for ALEMBIC's three-way match.
   // Emitted via backend-kernel events/payables-facts.ts; contract docs/bridge/PAYABLES_FACTS.md.
