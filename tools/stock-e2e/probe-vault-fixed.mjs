@@ -1,6 +1,6 @@
 import { client } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const V = { vault: true };
 const f = await C.must('formulator', 'POST', '/v1/formulas', { formulaCode: `REH-PROBE-EMPTY2-${Date.now()}`, formulaName: 'probe: empty after fix' }, V);
 const fv = (await C.must('formulator', 'POST', '/v1/formula-versions', { formulaId: f.formulaId, versionNumber: 1 }, V)).formulaVersionId;

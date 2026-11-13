@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 import { client, until, stateFile } from './lib.mjs';
 const [run, ...labels] = process.argv.slice(2);
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
 const out = (k, v) => console.log(k, JSON.stringify(v));
 const pair = JSON.parse(readFileSync(`${run}/bridge.json`, 'utf8'));

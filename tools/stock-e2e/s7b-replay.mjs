@@ -1,6 +1,6 @@
 import { client, stateFile } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const parked = await C.rp('owner', 'GET', '/v1/bridge/outbox/parked?limit=50');
 const rows = Array.isArray(parked.body) ? parked.body : parked.body?.items ?? [];
 const res = [];

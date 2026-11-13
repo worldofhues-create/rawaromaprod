@@ -2,7 +2,7 @@
  * the path given, and nothing read from it is ever written to stdout except counts and row numbers. */
 import { execFileSync } from 'node:child_process';
 import { createHash, createPrivateKey, randomUUID, sign } from 'node:crypto';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 
 /* ── the sheet ──────────────────────────────────────────────────────────────────────────── */
 
@@ -85,9 +85,77 @@ function subjectOf(email) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 
-export function client({ api, vault, keysFile }) {
-  const { signingKey } = JSON.parse(readFileSync(keysFile, 'utf8'));
-  const key = createPrivateKey({ key: Buffer.from(signingKey, 'base64'), format: 'der', type: 'pkcs8' });
+/** Ports and database names, so two rehearsals on one laptop do not collide (defaults: the first run's). */
+export const RP = {
+  api: `http://127.0.0.1:${process.env.SE2E_RP_API_PORT || 4361}`,
+  vault: `http://127.0.0.1:${process.env.SE2E_RP_VAULT_PORT || 4362}`,
+  pgPort: Number(process.env.SE2E_RP_PG_PORT || 5561),
+  mainDb: process.env.SE2E_RP_DB || 'stock_e2e_rp',
+};
+
+/* STOCK-E2E-2: THE SIGN-IN A PERSON DOES. With SE2E_ALEMBIC_API set, nobody's token is minted here: each
+ * factory person signs in to Alembic with the six-digit code mailed to them (read from the mail drop, as a
+ * colleague reads an inbox), steps up for the Vault, asks Alembic for a signed assertion and hands that to
+ * RawProd. Sessions are kept in the run directory (0600) so one code serves the whole run: the code budget
+ * is three per person per fifteen minutes and is not relaxed for a rehearsal. */
+const ALEMBIC = process.env.SE2E_ALEMBIC_API || '';
+const DROP = process.env.SE2E_STAFF_MAIL_DROP || '';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function codeFromDrop(tag, sinceMs) {
+  for (let i = 0; i < 80; i++) {
+    const hit = readdirSync(DROP).filter((f) => f.endsWith(tag)).map((f) => ({ f, t: statSync(`${DROP}/${f}`).mtimeMs }))
+      .filter((x) => x.t > sinceMs).sort((a, b) => b.t - a.t)[0];
+    if (hit) { const m = /\b(\d{6})\b/.exec(readFileSync(`${DROP}/${hit.f}`, 'utf8').split('\n\n').slice(1).join('\n\n')); if (m) return m[1]; }
+    await sleep(250);
+  }
+  throw new Error(`no mail in the drop for ${tag}`);
+}
+const jf = async (res) => { const t = await res.text(); try { return JSON.parse(t); } catch { return { raw: t.slice(0, 200) }; } };
+export function alembicPeople(run) {
+  const file = `${run}/alembic-sessions.json`;
+  const load = () => (existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {});
+  const save = (s) => writeFileSync(file, JSON.stringify(s), { mode: 0o600 });
+  async function session(email) {
+    const all = load(); const hit = all[email];
+    if (hit && Date.now() - hit.at < 7 * 3600_000) return hit.token;
+    const since = Date.now() - 5;
+    const ask = await fetch(`${ALEMBIC}/api/v1/auth/staff/code`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email }) });
+    if (ask.status >= 300) throw new Error(`Alembic would not send ${email} a code: ${ask.status}`);
+    const code = await codeFromDrop(`signin-${email}.txt`, since);
+    const v = await jf(await fetch(`${ALEMBIC}/api/v1/auth/staff/code/verify`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, code }) }));
+    if (!v.token) throw new Error(`Alembic sign-in refused for ${email}: ${JSON.stringify(v).slice(0, 200)}`);
+    const now = load(); now[email] = { token: v.token, at: Date.now(), steppedUpAt: 0 }; save(now);
+    return v.token;
+  }
+  async function stepUp(email) {
+    const token = await session(email);
+    const all = load();
+    if (Date.now() - (all[email]?.steppedUpAt ?? 0) < 4 * 60_000) return token;
+    const since = Date.now() - 5;
+    await fetch(`${ALEMBIC}/api/v1/auth/staff/step-up/code`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
+    const code = await codeFromDrop(`step_up-${email}.txt`, since);
+    const v = await jf(await fetch(`${ALEMBIC}/api/v1/auth/staff/step-up/verify`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify({ code }) }));
+    if (!v.steppedUpAt) throw new Error(`Alembic step-up refused for ${email}: ${JSON.stringify(v).slice(0, 200)}`);
+    const now = load(); now[email].steppedUpAt = Date.now(); save(now);
+    return token;
+  }
+  /** A RawProd access token for `email`, by the real round trip. */
+  async function rawprodToken(email, target, api) {
+    const bearer = target === 'vault' ? await stepUp(email) : await session(email);
+    const a = await jf(await fetch(`${ALEMBIC}/api/v1/staff/rawprod-assertion`, { method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${bearer}`, 'idempotency-key': randomUUID() }, body: JSON.stringify({ target }) }));
+    if (!a.token) throw new Error(`Alembic gave ${email} no ${target} assertion: ${JSON.stringify(a).slice(0, 200)}`);
+    const r = await jf(await fetch(`${api}/auth/alembic-assertion`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assertion: a.token }) }));
+    if (!r?.data?.accessToken) throw new Error(`RawProd refused ${email}'s assertion: ${JSON.stringify(r?.error ?? r).slice(0, 200)}`);
+    return r.data.accessToken;
+  }
+  return { session, stepUp, rawprodToken };
+}
+
+export function client({ api = RP.api, vault = RP.vault, keysFile, run }) {
+  const joint = !!ALEMBIC;
+  const people = joint ? alembicPeople(run ?? keysFile.replace(/\/[^/]+$/, '')) : null;
+  const key = joint ? null : createPrivateKey({ key: Buffer.from(JSON.parse(readFileSync(keysFile, 'utf8')).signingKey, 'base64'), format: 'der', type: 'pkcs8' });
   const mint = (email, target) => {
     const now = Math.floor(Date.now() / 1000);
     const claims = { iss: 'alembic', aud: 'rawprod', sub: subjectOf(email), tenant_id: process.env.ASSERT_TENANT ?? 'rac', org_id: process.env.ASSERT_TENANT ?? 'rac', email, roles: ['admin'],
@@ -96,14 +164,23 @@ export function client({ api, vault, keysFile }) {
     return `${input}.${b64u(sign(null, Buffer.from(input), key))}`;
   };
   const tokens = new Map();
+  // Joint run: RawProd tokens are shared between the step scripts of one run (each is its own process).
+  const tokFile = joint ? `${run ?? keysFile.replace(/\/[^/]+$/, '')}/rp-tokens.json` : null;
+  const disk = () => (tokFile && existsSync(tokFile) ? JSON.parse(readFileSync(tokFile, 'utf8')) : {});
   async function tokenFor(role, target) {
-    const k = `${role}|${target}`; const hit = tokens.get(k);
-    if (hit && Date.now() - hit.at < 200_000) return hit.token;
-    const res = await fetch(`${api}/auth/alembic-assertion`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assertion: mint(EMAIL[role], target) }) });
-    const j = await res.json();
-    if (!j?.data?.accessToken) throw new Error(`sign-in for ${role} failed: ${res.status} ${JSON.stringify(j?.error)}`);
-    tokens.set(k, { token: j.data.accessToken, at: Date.now() });
-    return j.data.accessToken;
+    const k = `${role}|${target}`; const hit = tokens.get(k) ?? disk()[k];
+    if (hit && Date.now() - hit.at < (joint ? 600_000 : 200_000)) { tokens.set(k, hit); return hit.token; }
+    let token;
+    if (joint) token = await people.rawprodToken(EMAIL[role], target, api);
+    else {
+      const res = await fetch(`${api}/auth/alembic-assertion`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ assertion: mint(EMAIL[role], target) }) });
+      const j = await res.json();
+      if (!j?.data?.accessToken) throw new Error(`sign-in for ${role} failed: ${res.status} ${JSON.stringify(j?.error)}`);
+      token = j.data.accessToken;
+    }
+    tokens.set(k, { token, at: Date.now() });
+    if (tokFile) { const d = disk(); d[k] = tokens.get(k); writeFileSync(tokFile, JSON.stringify(d), { mode: 0o600 }); }
+    return token;
   }
   async function rp(role, method, path, body, opts = {}) {
     const res = await fetch(`${opts.vault ? vault : api}${path}`, { method,
@@ -131,7 +208,7 @@ export function client({ api, vault, keysFile }) {
     }
     return out;
   }
-  return { rp, must, all, tokens };
+  return { rp, must, all, tokens, tokenFor, people };
 }
 
 export async function until(what, fn, ms = 60_000) {

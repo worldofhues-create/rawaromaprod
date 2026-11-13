@@ -2,7 +2,7 @@
  * Usage: node s6-pack.mjs <runDir> <label> <skuCode> <packGrams> [probe]   Counts and statuses only. */
 import { client, until, stateFile } from './lib.mjs';
 const [run, label, skuCode, packG, probe] = process.argv.slice(2);
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
 const B = S.batch[label];
 const step = (k, v) => { B.steps[k] = v; console.log(label, k, JSON.stringify(v)); st.save(S); };

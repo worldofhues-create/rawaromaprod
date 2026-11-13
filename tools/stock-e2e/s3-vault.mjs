@@ -2,7 +2,7 @@
  * approval, lock. Then who can read it. Prints statuses and counts only, never a line. */
 import { readSheet, formulasOf, normName, client, until, stateFile } from './lib.mjs';
 const [xlsx, run] = process.argv.slice(2);
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
 const ev = (k, v) => { S.ev ??= {}; S.ev[k] = v; console.log(k, JSON.stringify(v)); st.save(S); };
 const { formulas } = formulasOf(readSheet(xlsx));

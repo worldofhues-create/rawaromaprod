@@ -1,6 +1,6 @@
 import { client, stateFile } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const S = stateFile(`${run}/state.json`).load();
 const B5 = S.batch.B5, pcs = S.masters.pcs, today = new Date().toISOString().slice(0, 10);
 const po = await C.must('packaging', 'POST', '/v1/package-orders', { productSkuId: S.sku.a9pm.sku, oilBatchId: B5.oil, orderQty: 2, uomId: pcs });

@@ -1,6 +1,6 @@
 import { client, stateFile, EMAIL } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const S = stateFile(`${run}/state.json`).load();
 for (const role of ['formulator', 'vault_approver']) {
   const a = await C.rp(role, 'GET', '/v1/formula-access-audit?limit=500', undefined, { vault: true });

@@ -3,7 +3,7 @@
  * written off whole, B5 held. Statuses and integer mg only. Usage: node s8-remnant.mjs <runDir> */
 import { client, stateFile } from './lib.mjs';
 const [run] = process.argv.slice(2);
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
 const plan = { B1: 'KEEP', B2: 'LOSS_WRITE_OFF', B3: 'FAILED_WRITE_OFF', B5: 'HOLD', B6: 'KEEP' };
 const out = {};

@@ -1,6 +1,6 @@
 import { client, stateFile } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const S = stateFile(`${run}/state.json`).load();
 const q = await C.rp('picker', 'GET', '/v1/floor/queue');
 const items = Array.isArray(q.body) ? q.body : q.body?.items ?? q.body?.jobs ?? [];

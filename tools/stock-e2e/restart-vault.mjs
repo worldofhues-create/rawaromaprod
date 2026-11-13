@@ -13,5 +13,5 @@ await new Promise((r) => setTimeout(r, 3000));
 const l = openSync(`${run}/vault-api.log`, 'a');
 const child = spawn('node', ['--import', '@swc-node/register/esm-register', 'src/vault-main.ts'], { cwd: `${repo}/backend/api`, env, stdio: ['ignore', l, l], detached: true });
 child.unref(); writeFileSync(`${run}/vault-api.pid`, String(child.pid));
-for (let i = 0; i < 120; i++) { try { if ((await fetch('http://127.0.0.1:4362/health')).ok) { console.log('vault-api restarted', Object.keys(env).length, 'vars'); process.exit(0); } } catch {} await new Promise((r) => setTimeout(r, 1000)); }
+for (let i = 0; i < 120; i++) { try { if ((await fetch(`http://127.0.0.1:${process.env.SE2E_RP_VAULT_PORT || 4362}/health`)).ok) { console.log('vault-api restarted', Object.keys(env).length, 'vars'); process.exit(0); } } catch {} await new Promise((r) => setTimeout(r, 1000)); }
 console.log('api did not come back'); process.exit(1);

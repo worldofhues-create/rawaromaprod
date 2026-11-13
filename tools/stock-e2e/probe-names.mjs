@@ -1,6 +1,6 @@
 import { client, stateFile } from './lib.mjs';
 const run = process.argv[2];
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const S = stateFile(`${run}/state.json`).load();
 const names = Object.keys(S.mat).filter((k) => k.length > 4);
 const leaks = (b) => { const t = JSON.stringify(b ?? '').toLowerCase(); return names.filter((n) => t.includes(n)).length; };

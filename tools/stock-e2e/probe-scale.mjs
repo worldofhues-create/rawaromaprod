@@ -1,10 +1,10 @@
 import { client, stateFile, readSheet, formulasOf, normName } from './lib.mjs';
 const [xlsx, run] = process.argv.slice(2);
-const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
 const { formulas } = formulasOf(readSheet(xlsx));
 const today = new Date().toISOString().slice(0, 10);
-const P = 'postgres://' + process.env.USER + '@127.0.0.1:5561/stock_e2e_rp';
+const P = 'postgres://' + process.env.USER + `@127.0.0.1:${process.env.SE2E_RP_PG_PORT || 5561}/${process.env.SE2E_RP_DB || 'stock_e2e_rp'}`;
 import { execFileSync } from 'node:child_process';
 const q = (s) => execFileSync('/opt/homebrew/opt/postgresql@17/bin/psql', [P, '-Atc', s], { encoding: 'utf8' }).trim();
 async function probe(fid, qty, uomKey, tag) {
