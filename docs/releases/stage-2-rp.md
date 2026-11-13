@@ -274,9 +274,7 @@ throwaway PostgreSQL 17 (`/opt/homebrew/opt/postgresql@17/bin`, port 5417; `SHIP
 It prints each thing it would do to production as `WOULD RUN`. Evidence is written to
 `~/.rawprod/ship-evidence/<sha>/`.
 
-**The dry run could not be completed by the release build**, because its first gate is that the commit
-is on a branch of origin, and the release build cannot push RawProd. Its result on the unpushed head is
-in section 9.
+**The dry run needs the commit on a branch of origin.** The release build could not push RawProd, so the dry runs recorded in section 9 ran against a stand-in origin; run them on the pushed head.
 
 Then, to deploy: `infra/aws/ship.sh <sha> --apply`, and `infra/aws/ship.sh <sha> --role vault --apply`.
 
@@ -383,13 +381,16 @@ comparisons were redone as sorted `diff`s, which is what the table reports.
 
 ### Not done, or not green
 
-1. **The ship tooling's dry run did not run.** `infra/aws/ship.sh d848c03b --base ee14722`
-   was run on the commit before this note's last edit and stopped at its first gate, as designed, exit 1:
-   `FATAL: commit d848c03b is on no branch of origin, so the box cannot fetch it. Push it first`. The
-   release build cannot push RawProd, so gates (b) to (d) of the tool (its own install, typecheck, build,
-   tests and migrations forward) have not run under the tool. Each was run by hand and is in the table
-   above. After the push, run the two dry runs in section 7 before `--apply`. Evidence of the refusal:
-   `~/.rawprod/ship-evidence/d848c03b9c5e25d0ef9fd97193dff27f7a9e07bb/20261113T202539Z-main-dry-run/ship.json`.
+1. **The ship tooling's dry run, on a stand-in origin.** On the pushed `1a25a36`, `infra/aws/ship.sh 1a25a36 --base ee14722`
+   stopped at its second gate, typecheck (exit 2: an unused import in a test, now fixed). The release build cannot push RawProd,
+   so the other gates were run on `eb60f44` with `SHIP_REPO` pointing at a local clone whose `origin` is a local bare copy of
+   this branch (the tool's own "pushed" check is satisfied by that copy, nothing else is bypassed). Main, `--base ee14722`: pushed
+   commit ok, install ok, typecheck ok (62 s), build ok (59 s), touched tests ok (**whole suite**, 349 s), migrations forward ok
+   (11 s, main shape), tree unchanged ok: **DRY RUN PASSED**. `--role vault`: the same gates ok (typecheck 57 s, build 60 s, whole
+   suite 338 s, migrations forward 9 s, vault shape), publish consoles skipped by design: **DRY RUN PASSED**. Evidence:
+   `~/.rawprod/ship-evidence/eb60f4404d0ef6c1b004f38ad4bd69cc257c3b17/`. Nothing was sent to AWS. The commits after `eb60f44`
+   change only this note, so after the real push the two dry runs are to be run once more on the pushed head (they take about
+   8 minutes each) before `--apply`.
 2. **The nine browser walks are green** (it was 18 of 278 red at `2417e6e`). The chain (`e2e/harness/chain.ts`) now drives
    the process the branch enforces: the number the server assigns; QC 1 as a round on the product's checkpoints
    (REFERENCE included, `NO_REFERENCE_YET` because the chain product has no retained bottle); the rest ended
