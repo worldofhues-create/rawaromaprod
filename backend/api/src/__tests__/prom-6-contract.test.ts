@@ -146,7 +146,7 @@ async function batch() {
   await s()`insert into production.production_plan_items (production_plan_item_id, formula_id, planned_qty, status) values (${planItem}, ${formulaId}, 10, 'ACTIVE')`;
   await s()`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, status) values (${order}, ${planItem}, 10, 'ACTIVE')`;
   const { batch: b } = await batches.produceOilBatch({ productionOrderId: order, producedQty: 10 }, op);
-  return { id: b.oilBatchId as string, no: b.batchNumber as string };
+  return { id: b.oilBatchId as string, no: b.batchNumber as string, order };
 }
 const tick = () => new Promise((r) => setTimeout(r, 15));
 const qc = async (id: string) => { await tick(); await batches.recordProductionQc({ oilBatchId: id, result: 'PASS' }, op); };
@@ -166,6 +166,7 @@ test('a batch going into maceration sends batch.rest.started, and an extension s
   assert.equal(Date.parse(p.release_due_at) - Date.parse(p.started_at), 45 * 86_400_000);
   const parsed = parseBatchRestStarted(p);
   assert.ok(parsed.ok, JSON.stringify(parsed));
+  assert.equal(p._correlation_id, undefined, 'a batch made for stock names no ALEMBIC journey');
   const admin = principal({ userId: randomUUID(), roles: ['admin'], permissions: ['production:maceration:extend'] });
   await mac.extend(run.macerationRunId, { days: 5, reason: 'PROM-6 test: the oil needs longer' }, admin);
   sent = await starts(run.macerationRunId);
@@ -175,6 +176,28 @@ test('a batch going into maceration sends batch.rest.started, and an extension s
   assert.ok(parseBatchRestStarted(sent[1]!.payload).ok);
   const text = JSON.stringify(sent.map((x) => x.payload));
   for (const word of [NAME, 'PROM-6 test', admin.userId, op.userId]) assert.ok(!text.includes(word), word);
+});
+
+test('PROM-11: a batch made for an ALEMBIC requirement names that journey on batch.rest.started; the wire ALEMBIC parses is unchanged', async () => {
+  const b = await batch();
+  const correlationId = randomUUID(), orgId = randomUUID();
+  await s()`insert into bridge.production_requirement
+    (production_requirement_id, alembic_requirement_id, org_id, correlation_id, order_ref, mapped_sku, qty, uom, needed_by,
+     lifecycle_status, production_order_id, last_applied_version, last_emitted_version)
+    values (${randomUUID()}, ${randomUUID()}, ${orgId}, ${correlationId}, 'PR11-ORDER', 'PR11-SKU', 10, 'KG', now(), 'ACCEPTED', ${b.order}, 1, 0)`;
+  await qc(b.id);
+  await batches.transitionOilBatch(b.id, 'IN_MATURATION', op);
+  const run = (await runOf(b.id))!;
+  const p = (await starts(run.macerationRunId))[0]!.payload;
+  assert.equal(p._correlation_id, correlationId, "the envelope carries the requirement's journey, as fg.batch.received does");
+  assert.equal(p._org_id, orgId);
+  /* The relay strips the transport keys before signing (relay.service.ts); what ALEMBIC receives is the
+     wire it already parses, so an older ALEMBIC is unaffected. Its verbatim parser refuses the keys if
+     they ever reached it, which is why they are metadata and not payload. */
+  const wire = Object.fromEntries(Object.entries(p).filter(([k]) => !k.startsWith('_')));
+  assert.ok(parseBatchRestStarted(wire).ok, JSON.stringify(parseBatchRestStarted(wire)));
+  assert.equal(parseBatchRestStarted(p).ok, false);
+  assert.ok(!JSON.stringify(p).includes('PR11-ORDER') && !JSON.stringify(p).includes(NAME), 'D-1: no order ref or material name rides along');
 });
 
 /* ── fg.batch.received promise block ───────────────────────────────────────────────────────── */

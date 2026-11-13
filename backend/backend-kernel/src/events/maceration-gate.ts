@@ -146,8 +146,8 @@ export async function assertNotMacerating(
  * person, never a promised date: QC 2 still decides. A run the receiver would refuse is not opened.
  */
 export async function emitRestStarted(tx: BridgeEmitTx, runId: string): Promise<bridgeContracts.BatchRestStartedWire> {
-  const run = (await rows<RunRow>(tx, sql`
-    select mr.*, ob.batch_number from production.maceration_run mr
+  const run = (await rows<RunRow & { production_order_id: string | null }>(tx, sql`
+    select mr.*, ob.batch_number, ob.production_order_id from production.maceration_run mr
       left join production.oil_batch_master ob on ob.oil_batch_id = mr.oil_batch_id
      where mr.maceration_run_id = ${runId}`))[0];
   if (!run) throw new ConflictException(`No maceration run ${runId}.`);
@@ -166,7 +166,21 @@ export async function emitRestStarted(tx: BridgeEmitTx, runId: string): Promise<
   const problems = bridgeContracts.checkBatchRestStartedWire(wire);
   if (problems.length) throw new ConflictException(`The rest could not be recorded for the sales system: ${problems.join(', ')}. A batch rests only with its record.`);
   bridgeContracts.assertNoFormulaContent(wire);
-  await emitBridgeManualEvent(tx, bridgeContracts.BATCH_REST_STARTED, runId, wire as unknown as Record<string, unknown>);
+  /* PROM-11: the envelope names the journey of the ALEMBIC requirement this batch's production order
+     serves (if any), exactly as fg.batch.received does (shelf-task.service.ts emitReceived), so ALEMBIC's
+     order tracking can say THIS order's batch is resting, with these dates. Transport metadata: the relay
+     strips `_correlation_id` / `_org_id` before signing, so the wire payload is unchanged and an older
+     ALEMBIC sees the same fact. A batch made for stock names no journey. */
+  const journey = run.production_order_id
+    ? (await rows<{ correlation_id: string; org_id: string }>(tx, sql`
+        select correlation_id::text, org_id::text from bridge.production_requirement
+         where production_order_id = ${run.production_order_id}::uuid
+         order by priority_rank nulls last, needed_by, created_dt limit 1`))[0]
+    : undefined;
+  await emitBridgeManualEvent(tx, bridgeContracts.BATCH_REST_STARTED, runId, {
+    ...(wire as unknown as Record<string, unknown>),
+    ...(journey ? { _correlation_id: journey.correlation_id, _org_id: journey.org_id } : {}),
+  });
   return wire;
 }
 
