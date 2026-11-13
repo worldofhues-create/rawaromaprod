@@ -195,7 +195,9 @@ test('what the main box pulls: numbers + opaque ref + formula id only — never 
     // Lane produce: + the version NUMBER (DOCS-001 prints "formula v3") — still never the version id.
     assert.deepEqual(Object.keys(c).sort(), ['amendment', 'calculatedAt', 'certificateId', 'formulaId', 'formulaVersionNumber', 'formulaVersionRef', 'kind', 'seq', 'values']);
     assert.equal(typeof c.formulaVersionNumber, 'number');
-    const json = JSON.stringify(c);
+    // The timestamp is left out of the text searched: it is not formula content, and a calculation made at 21:23:37.5xx contains
+    // "37.5" by the clock alone. The ship tool's whole-suite run failed on exactly that ("leaked 37.5"). Every other field is searched.
+    const json = JSON.stringify({ ...c, calculatedAt: null });
     for (const secret of [M.m1, M.m3, f.formulaVersionId, '37.5', '62.5']) assert.ok(!json.includes(secret), `leaked ${secret}`);
   }
 });

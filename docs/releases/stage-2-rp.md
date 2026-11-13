@@ -370,6 +370,11 @@ comparisons were redone as sorted `diff`s, which is what the table reports.
 - The form sheet dropped a textarea's given value (`5311b31`).
 - `1a25a36`'s test left an unused import, so `pnpm typecheck` was red on the head the ship tool saw
   (`stage2-existing-batches.test.ts(20,1): error TS6133`, gate "typecheck", exit 2). Removed; typecheck exit 0.
+- `stage2-existing-batches.test.ts` asserted `maceration.rest` v1; in the whole suite the rule is at v6 and two
+  of its tests failed in the ship tool's touched-tests gate. It reads the version in force now (`363f948`).
+- `compliance-vault.test.ts` "what the main box pulls" searched the certificate's JSON for `37.5`, which a
+  `calculatedAt` of `...:37.5xx` contains by the clock alone ("leaked 37.5", once in four whole runs). The
+  timestamp is left out of the text searched; every other field still is.
 - The stock-cover walk (`pfd-floor`, `defaultLeadDays`) passed only while no QC time was measured. Once the nine
   walks finish real batches, QC days are measured (a round seconds after the mix) and read 0, the rule's
   `defaultLeadDays` no longer applies, and the product read Covered. The walk's rule now also sets `extraDays`.
