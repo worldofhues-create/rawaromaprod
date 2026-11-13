@@ -8,7 +8,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { BadRequestException, ConflictException } from '@nestjs/common';
-import { FgLabelService, packNetContent } from '../packaging-qc/fg-label.service.js';
+import { FgLabelService, packNetContent, labelNetContent } from '../packaging-qc/fg-label.service.js';
 import { InventoryViewService } from '../inventory-view/inventory-view.service.js';
 import { ScaleService } from '../floor-ops/scale.service.js';
 import { PickingService, MixingService, BatchService } from '@ra/cluster-production';
@@ -140,4 +140,17 @@ test('STK-29: availability pages with a cursor in FEFO order, every lot once, no
   assert.equal(all.nextCursor, null);
   assert.equal(String((all.items[0] as Record<string, unknown>).batchNumber), 'P29-5', 'first to expire first');
   await assert.rejects(() => svc.availability({ cursor: 'not-a-cursor' }), BadRequestException);
+});
+
+test('STK-33: a lot left as BULK is labelled with its own mass; it has no pack, and used to be refused a label for ever', () => {
+  // The joint rehearsal: a bulk lot (counted in kg, lead ruling LD-145) of a SKU with no pack was refused a label
+  // ("no net content on file"), so packaging QC refused it, it was never released, never put away, and
+  // fg.batch.received was never sent: a lot left as bulk could not reach the sales system at all.
+  assert.deepEqual(labelNetContent({ netContentMg: null, packSize: null, lotQty: 1.9, lotUomCode: 'kg' }), { value: '1.9', unit: 'kg' });
+  assert.deepEqual(labelNetContent({ netContentMg: null, packSize: null, lotQty: '2500.0000', lotUomCode: 'G' }), { value: '2500', unit: 'g' });
+  // A filled lot is one pack's net content, exactly as before, whatever the count.
+  assert.deepEqual(labelNetContent({ netContentMg: 100_000, packSize: '100 g', lotQty: 49, lotUomCode: 'pcs' }), { value: '100', unit: 'g' });
+  // A lot counted in packs with no pack on file is still refused: nothing is guessed.
+  assert.equal(labelNetContent({ netContentMg: null, packSize: null, lotQty: 4, lotUomCode: 'pcs' }), null);
+  assert.equal(labelNetContent({ netContentMg: null, packSize: null, lotQty: 0, lotUomCode: 'kg' }), null);
 });

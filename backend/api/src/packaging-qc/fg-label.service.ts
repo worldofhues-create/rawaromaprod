@@ -19,6 +19,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common';
 import { sql as dsql } from 'drizzle-orm';
 import { PG_CLIENT, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { bridge as bridgeContracts } from '@core/contracts';
 import type { Sql } from 'postgres';
 import { shelfDb } from '../shelf/shelf.tokens.js';
 import { ShelfTaskService, qcRefusal, type FgBatchInfo } from '../shelf/shelf-task.service.js';
@@ -150,7 +151,7 @@ export class FgLabelService {
     const [sku] = fg.productSkuId
       ? await this.sql<{ net_content_mg: string | null }[]>`select net_content_mg::text from packaging.product_sku where product_sku_id = ${fg.productSkuId}`
       : [];
-    const net = packNetContent(sku?.net_content_mg ?? null, fg.packSize);
+    const net = labelNetContent({ netContentMg: sku?.net_content_mg ?? null, packSize: fg.packSize, lotQty: fg.producedQty, lotUomCode: fg.uomCode });
     const content: LabelContent = {
       skuCode: String(fg.skuCode ?? ''),
       batchNumber: String(fg.batchNumber ?? ''),
@@ -199,6 +200,23 @@ export function packNetContent(netContentMg: string | number | null, packSize: s
   if (!m) return null;
   const u = m[2]!.toLowerCase();
   return { value: String(Number(m[1])), unit: u === 'gm' ? 'g' : ['l', 'ltr', 'litre', 'litres'].includes(u) ? 'L' : u };
+}
+
+/**
+ * STK-33 (STOCK-E2E-2): the net quantity a lot's label states. A lot counted in packs states ONE PACK's net
+ * content (packNetContent, STK-20). A lot counted in a MASS unit is bulk (lead ruling LD-145: it has no pack and
+ * `fg.batch.received` sends none), so its label states the lot's own mass in the unit it was counted in. It used
+ * to be refused a label for want of a pack, which refused it packaging QC, release, put-away and the fact itself:
+ * a lot left as bulk could never reach the sales system. A lot counted in packs with no pack on file is still
+ * refused; nothing is guessed.
+ */
+export function labelNetContent(a: { netContentMg: string | number | null; packSize: string | null; lotQty: number | string | null; lotUomCode: string | null }): { value: string; unit: string } | null {
+  const unit = String(a.lotUomCode ?? '').trim().toLowerCase();
+  if (bridgeContracts.kgPerUnit(a.lotUomCode) !== null) {
+    const q = Number(a.lotQty);
+    return Number.isFinite(q) && q > 0 ? { value: String(q), unit: unit === 'kgs' ? 'kg' : unit === 'gm' || unit === 'gms' ? 'g' : unit } : null;
+  }
+  return packNetContent(a.netContentMg, a.packSize);
 }
 
 /** A label is never printed with a blank field the batch record should carry. */
