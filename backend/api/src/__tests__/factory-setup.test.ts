@@ -414,7 +414,7 @@ test('STK-31: the catalogue makes one pack SKU per MASS pack the product is sold
 test('STK-31: a pack SKU code is made from the product code and the pack, fits the 50 characters a code may have, and never collides', () => {
   assert.equal(packSkuCode('abf', '100 g'), 'abf:100G');
   assert.equal(packSkuCode('abf', '1 kg'), 'abf:1KG');
-  const long = 'acqua-di-parma-bergamoto-di-calabria-identical';
+  const long = 'a-product-code-as-long-as-the-longest-on-file1'; // 46 characters: the suffix would not fit in 50
   const a = packSkuCode(long, '100 g'), b = packSkuCode(`${long}-x`, '100 g'), c = packSkuCode(long, '500 g');
   for (const code of [a, b, c]) assert.ok(code.length <= 50 && /^[\x21-\x7e]+$/.test(code), code);
   assert.equal(new Set([a, b, c]).size, 3);
