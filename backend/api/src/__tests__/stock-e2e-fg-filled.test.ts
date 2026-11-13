@@ -35,7 +35,7 @@ async function filledOrder(filled: number, rejected = 0) {
 
 const make = (o: { packageOrderId: string; uomId: string }, producedQty: number) =>
   new PackagingBatchService(packagingDb()).produceFinishedGoodBatch(
-    { packageOrderId: o.packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: `FG-F-${crypto.randomUUID().slice(0, 8)}`, producedQty, uomId: o.uomId },
+    { packageOrderId: o.packageOrderId, productSkuId: crypto.randomUUID(), /* STAGE-2-RP: no typed lot number; the server assigns it at fill (PROM-4) */ producedQty, uomId: o.uomId },
     principal(),
   );
 

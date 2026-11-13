@@ -44,7 +44,7 @@ async function sku(netContentMg: number | null, packSize: string | null = null) 
 
 /** An oil batch made through the real produce path (the floor passes producedMg), then RELEASED. */
 async function oil(madeMg: number, release = true) {
-  const made = await batches.produceOilBatch({ productionOrderId: crypto.randomUUID(), batchNumber: `B-STK10-${crypto.randomUUID().slice(0, 6)}`, producedQty: madeMg / 1000, producedMg: madeMg, uomId: g }, principal());
+  const made = await batches.produceOilBatch({ productionOrderId: crypto.randomUUID(), /* STAGE-2-RP: no typed batch number; the server assigns it (PROM-4) */ producedQty: madeMg / 1000, producedMg: madeMg, uomId: g }, principal());
   const id = made.batch.oilBatchId;
   if (release) await testClient()`update production.oil_batch_master set status = 'RELEASED' where oil_batch_id = ${id}`;
   return id;
