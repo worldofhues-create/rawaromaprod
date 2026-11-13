@@ -64,11 +64,42 @@ export class StockService {
       );
       if (body.inventoryBatchId && body.adjustmentQty != null) {
         // Over-issue guard (audit #5): a correction must not take physical on-hand negative.
-        const cur = (
-          await tx.select({ onHand: inventoryBatch.quantityOnHand }).from(inventoryBatch).where(eq(inventoryBatch.inventoryBatchId, body.inventoryBatchId)).limit(1)
-        )[0];
-        if (Number(cur?.onHand ?? 0) + Number(body.adjustmentQty) < 0) {
-          throw new ConflictException(`Adjustment would take on-hand negative (${Number(cur?.onHand ?? 0) + Number(body.adjustmentQty)}).`);
+        // STAGE-2-RP: the row is locked, as createStockReservation locks it, so a reservation and a
+        // decrease made at the same moment are judged one after the other, never against the same figure.
+        const cur = ((await tx.execute(sql`
+          select ib.quantity_on_hand::text as on_hand,
+                 (select uom_code from platform.uom_master u where u.uom_id = ib.uom_id) as uom_code
+            from inventory.inventory_batch ib
+           where ib.inventory_batch_id = ${body.inventoryBatchId}
+           for update`)) as unknown as Array<{ on_hand: string | null; uom_code: string | null }>)[0];
+        if (Number(cur?.on_hand ?? 0) + Number(body.adjustmentQty) < 0) {
+          throw new ConflictException(`Adjustment would take on-hand negative (${Number(cur?.on_hand ?? 0) + Number(body.adjustmentQty)}).`);
+        }
+        // STAGE-2-RP (STK-9's rule, at the one door every adjustment goes through): a DECREASE may not
+        // leave the lot holding less than production has reserved from it. The sheet import refused
+        // this in its own plan and this route did not, so a count correction typed on the screen could
+        // take stock a planned run was counting on, and the run met the shortfall on the floor. Free
+        // stock is on-hand minus active reservations, each in its own unit, compared exactly in the
+        // lot's (createStockReservation's arithmetic). An increase is never refused for a reservation.
+        if (Number(body.adjustmentQty) < 0) {
+          const lotUom = cur?.uom_code ?? null;
+          const held = (await tx.execute(sql`
+            select coalesce(u.uom_code, ${lotUom}) as uom, sum(r.reserved_qty)::text as qty
+              from inventory.stock_reservation r left join platform.uom_master u on u.uom_id = r.uom_id
+             where r.inventory_batch_id = ${body.inventoryBatchId} and r.released_dt is null
+             group by 1`)) as unknown as Array<{ uom: string | null; qty: string }>;
+          if (held.length) {
+            const after = netQty([{ qty: cur?.on_hand ?? '0', uom: lotUom }], [{ qty: String(Math.abs(Number(body.adjustmentQty))), uom: lotUom }], lotUom);
+            const free = 'refused' in after ? after : netQty([{ qty: after.qty, uom: lotUom }], held, lotUom);
+            if ('refused' in free) throw new ConflictException(`Cannot adjust this lot. ${notTotalled(free as { refused: string; units: string[] })}`);
+            if (signOf(free.qty) < 0) {
+              const reserved = netQty(held, [], lotUom);
+              throw new ConflictException(
+                `${'qty' in reserved ? reserved.qty : 'Part'} ${lotUom ?? ''} of this lot is reserved for production, and this decrease would leave ${(after as { qty: string }).qty}: `.replace(/\s+of this lot/, ' of this lot')
+                  + 'it cuts into the reservation (on-hand − active reservations). Release the reservation first, or adjust by less.',
+              );
+            }
+          }
         }
         await tx
           .update(inventoryBatch)
