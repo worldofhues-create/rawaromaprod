@@ -1,0 +1,10 @@
+import { client, stateFile } from './lib.mjs';
+const run = process.argv[2];
+const C = client({ api: 'http://127.0.0.1:4361', vault: 'http://127.0.0.1:4362', keysFile: `${run}/keys.json` });
+const S = stateFile(`${run}/state.json`).load();
+const q = await C.rp('picker', 'GET', '/v1/floor/queue');
+const items = Array.isArray(q.body) ? q.body : q.body?.items ?? q.body?.jobs ?? [];
+const b4 = items.find((x) => x.floorJobId === S.batch.B4.job);
+console.log('queue', JSON.stringify({ status: q.status, jobs: items.length, b4: b4 ? Object.fromEntries(Object.entries(b4).filter(([k]) => /stage|wait|block|ready|status|reason/i.test(k)).map(([k, v]) => [k, typeof v === 'string' ? v.replace(/[A-Z]+-\d{4}/g, 'CODE').slice(0, 120) : v])) : null, keys: Object.keys(items[0] ?? {}).join(',') }));
+const cover = await C.rp('production', 'GET', '/v1/reorder-suggestions?limit=5');
+console.log('reorder', JSON.stringify({ status: cover.status, n: (Array.isArray(cover.body) ? cover.body : cover.body?.items ?? []).length }));
