@@ -40,6 +40,8 @@ const RULE_EDITOR = { userId: '00000000-0000-7000-8000-0000000000a1', portal: 'o
  * suite sees the switch.
  */
 export async function typedQcIsTheVerdict(policy: { publish: (key: string, body: unknown, reason: string, p: AuthPrincipal) => Promise<unknown> }): Promise<() => Promise<void>> {
-  await policy.publish('qc.reference_required', REFERENCE_OFF, 'test suite: the typed QC reading is the verdict for this suite', RULE_EDITOR);
-  return async () => { await policy.publish('qc.reference_required', REFERENCE_ON, 'test suite: back to the shipped default', RULE_EDITOR); };
+  // Saving a factory rule needs a sign-in from the last five minutes (PROM-2/3), so the editor signs in now.
+  const editor = () => ({ ...RULE_EDITOR, authTime: Math.floor(Date.now() / 1000) }) as AuthPrincipal;
+  await policy.publish('qc.reference_required', REFERENCE_OFF, 'test suite: the typed QC reading is the verdict for this suite', editor());
+  return async () => { await policy.publish('qc.reference_required', REFERENCE_ON, 'test suite: back to the shipped default', editor()); };
 }

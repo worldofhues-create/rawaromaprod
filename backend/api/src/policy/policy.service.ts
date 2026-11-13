@@ -21,6 +21,9 @@ import { evaluateRules, validateBody, describeRule, type PolicyBody } from './po
  *  where the gates read them inside their own transactions). Other lanes evaluate these keys. */
 export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework', 'maceration.rest', 'qc.reference_required'] as const;
 
+/** PROM-2/3: how recent a sign-in must be to save a factory rule (seconds). */
+export const FACTORY_RULE_FRESH_SECONDS = 300;
+
 /** Only these roles may override a policy on one record (§12.0). */
 export const OVERRIDE_ROLES = ['owner', 'admin'];
 
@@ -172,6 +175,16 @@ export class PolicyService {
     // malformed rest rule is refused here rather than holding every batch on the floor.
     const ruleProblems = factoryRuleProblems(key, body as PolicyBody);
     if (ruleProblems.length) throw new BadRequestException(ruleProblems.join(' '));
+    // PROM-2/3 (FACTORY.md owner decision 1: "A rule that moves money or releases product needs a
+    // fresh code"): the rest and the reference rule release product, so saving one needs a sign-in
+    // proved within five minutes, the same window @FreshAuth gives early release and a reference.
+    // Here rather than on the route, which every other policy shares.
+    if (isFactoryRuleKey(key)) {
+      const age = Math.floor(Date.now() / 1000) - Number(principal.authTime);
+      if (!Number.isFinite(age) || age > FACTORY_RULE_FRESH_SECONDS || age < -5) {
+        throw new ForbiddenException(`Sign in again to save ${key}: a rule that releases product needs a sign-in from the last five minutes.`);
+      }
+    }
     await this.versionAt(key);
     return this.sql.begin(async (tx) => {
       // Serialise publishers on this policy so two saves cannot both become version N+1.

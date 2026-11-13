@@ -218,3 +218,17 @@ test('a malformed rule is refused at publish; a rule with no answer holds the ba
     await policy.publish('maceration.rest', REST_45, 'test: back to the owner\'s 45', admin);
   }
 });
+
+test('saving the rest rule needs a reason and a sign-in from the last five minutes; other policies do not', async () => {
+  const stale = { ...admin, authTime: Math.floor(Date.now() / 1000) - 3600 };
+  await assert.rejects(() => policy.publish('maceration.rest', REST_45, '', admin), /Say why/);
+  await assert.rejects(() => policy.publish('maceration.rest', REST_45, 'an hour-old sign-in', stale), /Sign in again to save maceration\.rest/);
+  await assert.rejects(() => policy.publish('qc.reference_required', { rules: [], hasDefault: true, defaultValue: { required: false } }, 'an hour-old sign-in', stale), /Sign in again/);
+  assert.equal((await mac.rule()).minDays, 45, 'nothing was saved');
+  // A rule that does not release product keeps its existing behaviour: the version in force is saved
+  // again unchanged, so no other suite sees a different floor queue.
+  const [cur] = await testClient()`select body::text as body from platform.policy_version where policy_key = 'floor.queue' order by version desc limit 1`;
+  const body = cur ? JSON.parse(String(cur.body)) : { rules: [], hasDefault: true, defaultValue: { mode: 'alternate' } };
+  const r = await policy.publish('floor.queue', body, 'test: a stale sign-in on another policy, same value', stale);
+  assert.ok(r.version >= 1);
+});
