@@ -63,6 +63,9 @@ before(async () => {
 after(async () => closeTestClient());
 
 const to = (n: string, target: string) => said(() => batches.transitionOilBatch(oil(n), target, op));
+/** The version of maceration.rest in force. Fresh from the migration it is 1; in the whole suite other tests publish more of them
+ *  into the same database (the ship tool's run saw v6), so the test reads it rather than assuming it. */
+const restVersion = async () => Number((await sql()`select max(version)::int as v from platform.policy_version where policy_key = 'maceration.rest'`)[0]!.v);
 const nearNow = (v: unknown) => Math.abs(Date.now() - new Date(String(v)).getTime()) < 5 * 60_000;
 
 test('MIXED, nothing decided: the rest is counted from the day it goes into maceration after the deploy, not from the day it was mixed', async () => {
@@ -74,7 +77,7 @@ test('MIXED, nothing decided: the rest is counted from the day it goes into mace
   const r = (await run('mixed'))!;
   assert.ok(nearNow(r.started_at), 'the rest starts now');
   assert.ok(new Date(String(r.started_at)).getTime() - (await producedAt('mixed')) > 9 * DAY, 'the ten days since it was mixed are not counted');
-  assert.deepEqual([r.min_days, r.rule_days, r.rule_version, r.rule_source], [45, 45, 1, 'policy']);
+  assert.deepEqual([r.min_days, r.rule_days, r.rule_version, r.rule_source], [45, 45, await restVersion(), 'policy']);
   assert.match(await to('mixed', 'RELEASED'), /is on day 1 of 45 of maceration\. An early release needs a second person/);
 });
 
@@ -123,7 +126,7 @@ test('RESTING under a run opened before the deploy, rest not served: it waits ou
 
 test('IN_MATURATION with no rest run (its formula had no setting): it is treated as never rested, and its rest starts when it is sent back into maceration', async () => {
   assert.equal((await run('norun')), undefined);
-  assert.match(await to('norun', 'RELEASED'), /has not rested\. Every batch rests 45 days between QC 1 and QC 2 \(branch rule maceration\.rest v1\)\. Send it into maceration after QC 1/);
+  assert.match(await to('norun', 'RELEASED'), new RegExp(String.raw`has not rested\. Every batch rests 45 days between QC 1 and QC 2 \(branch rule maceration\.rest v${await restVersion()}\)\. Send it into maceration after QC 1`));
   // The status is already IN_MATURATION, so "send it into maceration" is two presses: Hold, then maceration.
   assert.equal(await to('norun', 'IN_MATURATION'), 'ok', 'the same status again is accepted and does nothing');
   assert.equal((await run('norun')), undefined, 'and opens no rest');
@@ -132,7 +135,7 @@ test('IN_MATURATION with no rest run (its formula had no setting): it is treated
   assert.equal(await to('norun', 'IN_MATURATION'), 'ok');
   const r = (await run('norun'))!;
   assert.ok(nearNow(r.started_at));
-  assert.deepEqual([r.min_days, r.rule_version], [45, 1], 'the twelve days since it was mixed are not counted');
+  assert.deepEqual([r.min_days, r.rule_version], [45, await restVersion()], 'the twelve days since it was mixed are not counted');
 });
 
 test('RELEASED before the deploy and filled: it is not held; its finished lot is numbered by the server and carries no rest or QC record', async () => {
