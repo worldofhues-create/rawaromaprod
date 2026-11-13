@@ -151,7 +151,10 @@ export class BridgeRelayService implements OnModuleDestroy {
           // PROM-2: the rest record is about one maceration run.
           : ev.type === bridgeContracts.BATCH_REST_RECORDED ? bridgeContracts.BATCH_REST_AGGREGATE_TYPE
           // PROM-3: the reference approval is about one reference standard.
-          : ev.type === bridgeContracts.QC_REFERENCE_ESTABLISHED ? bridgeContracts.QC_REFERENCE_AGGREGATE_TYPE : undefined);
+          : ev.type === bridgeContracts.QC_REFERENCE_ESTABLISHED ? bridgeContracts.QC_REFERENCE_AGGREGATE_TYPE
+          // PROM-5: a product's continuity record, and one material change.
+          : ev.type === bridgeContracts.PRODUCT_CONTINUITY_CURRENT ? bridgeContracts.PRODUCT_CONTINUITY_AGGREGATE_TYPE
+          : ev.type === bridgeContracts.PRODUCT_MATERIAL_CHANGED ? bridgeContracts.MATERIAL_CHANGE_AGGREGATE_TYPE : undefined);
       const aggregateType = complianceType ?? (ev.type.startsWith('SalesOrder') ? 'sales_order'
         // ALEMBIC Books phase 2: payables facts name their own aggregate.
         : ev.type.startsWith('procurement.po.') ? 'purchase_order'

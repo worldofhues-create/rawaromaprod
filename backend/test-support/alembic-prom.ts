@@ -1,6 +1,6 @@
 /**
  * ALEMBIC's process-promise receiver rules, copied VERBATIM (test fixture only) from
- * alembic packages/domain/src/promises/facts.ts @ 87390015 (lane/prom; PROM-2, PROM-3). RawProd's promise tests run
+ * alembic packages/domain/src/promises/facts.ts (lane/prom; PROM-2, PROM-3, PROM-5). RawProd's promise tests run
  * what RawProd emits through the receiver's own parser, so "ALEMBIC would accept this" is proved here
  * rather than assumed. If ALEMBIC changes these rules, re-copy this file.
  */
@@ -230,4 +230,88 @@ export function parseQcReferenceEstablished(raw: unknown): { ok: true; record: Q
   if (replacesRef && reference && replacesRef === reference.ref) problems.push("a reference cannot replace itself");
   if (problems.length) return { ok: false, problems };
   return { ok: true, record: { batchNo: batchNo!, oilBatchRef: oilBatchRef!, reference: reference!, establishedAt: r.established_at as string, replacesRef } };
+}
+
+/* ── PROM-5: continuity, and a change of material ────────────────────────────────────────────
+ *
+ * "Reorder the same code, grade and pack, and get the same oil" and "If a raw material changes, we
+ * tell you before your next order". The factory defines the same oil once: the same formula version,
+ * the same raw-material identities each from the same supplier(s), and the same retained reference.
+ * It sends an OPAQUE key over those three (ck1:sha256), never the inputs:
+ *
+ *   `product.continuity.current`   the product's key changed (its first keyed batch, a change, or a
+ *                                  new reference). `first_batch_no` names the first batch under it.
+ *   `product.material.changed`     one kind of change: formula_version | supplier | reference, from
+ *                                  one key to another, recorded at compounding -- before any lot
+ *                                  under the new key can be released, because every batch rests.
+ *
+ * `grade` is null from the factory today: a RawProd product row is one code and grade, so its code
+ * carries both. D-1: a key naming a material, supplier, formula, CAS number or percentage is refused,
+ * and no person crosses. PROM-9 builds the customer notices from the change records. */
+
+export const PRODUCT_CONTINUITY_CURRENT = "product.continuity.current" as const;
+export const PRODUCT_MATERIAL_CHANGED = "product.material.changed" as const;
+export const MATERIAL_CHANGE_KINDS = ["formula_version", "supplier", "reference"] as const;
+export type MaterialChangeKind = (typeof MATERIAL_CHANGE_KINDS)[number];
+
+const CONTINUITY_KEY = /^ck1:[0-9a-f]{64}$/;
+const isKey = (v: unknown): v is string => typeof v === "string" && CONTINUITY_KEY.test(v);
+
+export interface ProductContinuityCurrent {
+  readonly productCode: string;
+  readonly grade: string | null;
+  readonly continuityKey: string;
+  readonly effectiveFrom: string;
+  readonly firstBatchNo: string | null;
+}
+
+export interface ProductMaterialChanged {
+  readonly productCode: string;
+  readonly grade: string | null;
+  readonly kind: MaterialChangeKind;
+  readonly fromKey: string;
+  readonly toKey: string;
+  readonly firstBatchNo: string | null;
+  readonly approvedAt: string;
+}
+
+const CONTINUITY_KEYS = new Set(["product_code", "grade", "continuity_key", "effective_from", "first_batch_no"]);
+const CHANGE_KEYS = new Set(["product_code", "grade", "kind", "from_key", "to_key", "first_batch_no", "approved_at"]);
+
+function commonContinuityProblems(r: Record<string, unknown>, allowed: ReadonlySet<string>, problems: string[]): { productCode: string | null; grade: string | null; firstBatchNo: string | null } {
+  const leak = formulaContentKey(r);
+  if (leak) problems.push(`${leak} would carry formula content`);
+  for (const k of Object.keys(r)) if (!allowed.has(k)) problems.push(`unexpected field ${k}`);
+  const productCode = text(r.product_code, 80);
+  if (!productCode) problems.push("product_code is required");
+  const grade = r.grade === null || r.grade === undefined ? null : text(r.grade, 40);
+  if (r.grade !== null && r.grade !== undefined && !grade) problems.push("grade must be text or null");
+  const firstBatchNo = r.first_batch_no === null || r.first_batch_no === undefined ? null : text(r.first_batch_no, 64);
+  if (r.first_batch_no !== null && r.first_batch_no !== undefined && !firstBatchNo) problems.push("first_batch_no must be a batch number or null");
+  return { productCode, grade, firstBatchNo };
+}
+
+/** Structural validation of a `product.continuity.current` payload. Unknown keys are refused. */
+export function parseProductContinuityCurrent(raw: unknown): { ok: true; record: ProductContinuityCurrent } | { ok: false; problems: string[] } {
+  const r = (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const problems: string[] = [];
+  const c = commonContinuityProblems(r, CONTINUITY_KEYS, problems);
+  if (!isKey(r.continuity_key)) problems.push("continuity_key must be ck1: and 64 hex characters");
+  if (!ISO_INSTANT(r.effective_from)) problems.push("effective_from must be a timestamp");
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, record: { productCode: c.productCode!, grade: c.grade, continuityKey: r.continuity_key as string, effectiveFrom: r.effective_from as string, firstBatchNo: c.firstBatchNo } };
+}
+
+/** Structural validation of a `product.material.changed` payload. Unknown keys are refused. */
+export function parseProductMaterialChanged(raw: unknown): { ok: true; record: ProductMaterialChanged } | { ok: false; problems: string[] } {
+  const r = (typeof raw === "object" && raw !== null && !Array.isArray(raw) ? raw : {}) as Record<string, unknown>;
+  const problems: string[] = [];
+  const c = commonContinuityProblems(r, CHANGE_KEYS, problems);
+  if (!(MATERIAL_CHANGE_KINDS as readonly unknown[]).includes(r.kind)) problems.push(`kind must be one of ${MATERIAL_CHANGE_KINDS.join(", ")}`);
+  if (!isKey(r.from_key)) problems.push("from_key must be ck1: and 64 hex characters");
+  if (!isKey(r.to_key)) problems.push("to_key must be ck1: and 64 hex characters");
+  if (isKey(r.from_key) && r.from_key === r.to_key) problems.push("a change moves from one key to another");
+  if (!ISO_INSTANT(r.approved_at)) problems.push("approved_at must be a timestamp");
+  if (problems.length) return { ok: false, problems };
+  return { ok: true, record: { productCode: c.productCode!, grade: c.grade, kind: r.kind as MaterialChangeKind, fromKey: r.from_key as string, toKey: r.to_key as string, firstBatchNo: c.firstBatchNo, approvedAt: r.approved_at as string } };
 }

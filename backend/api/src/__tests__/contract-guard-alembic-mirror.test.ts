@@ -27,6 +27,9 @@ const ALEMBIC_INBOUND_EVENT_TYPES = [
   'batch.rest.recorded',
   // PROM-3: alembic lane/prom 87390015 packages/domain/src/bridge/envelope.ts.
   'qc.reference.established',
+  // PROM-5: alembic lane/prom packages/domain/src/bridge/envelope.ts.
+  'product.continuity.current',
+  'product.material.changed',
   'procurement.vendor.upserted', 'procurement.po.issued', 'procurement.po.amended', 'procurement.po.cancelled', 'inventory.grn.created',
   'SalesOrderManualContinuityCreated', 'SalesOrderManualContinuityConfirmed', 'SalesOrderManualContinuityItemAdded',
 ];

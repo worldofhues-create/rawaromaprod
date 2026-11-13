@@ -192,3 +192,70 @@ export function checkQcReferenceEstablishedWire(p: QcReferenceEstablishedWire): 
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }
+
+/* ── PROM-5: continuity, and a change of material ─────────────────────────────────────────────
+ *
+ * `product.continuity.current` is sent whenever a product's continuity key changes: its first keyed
+ * batch, a batch whose formula version, raw-material suppliers or reference differ, or a new reference.
+ * `product.material.changed` is sent once per kind of change, before any lot made under the new key can
+ * be released (it is recorded at compounding, and every batch then rests). The key is opaque
+ * (ck1:sha256): no material, supplier, formula or percentage can be read from it. Aggregates
+ * `product_continuity` / `material_change`, ids = RawProd's row uuids. `grade` is null: a RawProd
+ * product row IS one code and grade, so the code carries it. No person crosses. */
+
+export const PRODUCT_CONTINUITY_CURRENT = "product.continuity.current" as const;
+export const PRODUCT_CONTINUITY_AGGREGATE_TYPE = "product_continuity" as const;
+export const PRODUCT_MATERIAL_CHANGED = "product.material.changed" as const;
+export const MATERIAL_CHANGE_AGGREGATE_TYPE = "material_change" as const;
+export const MATERIAL_CHANGE_KINDS = ["formula_version", "supplier", "reference"] as const;
+export type MaterialChangeKindWire = (typeof MATERIAL_CHANGE_KINDS)[number];
+
+const isContinuityKey = (v: unknown) => typeof v === "string" && /^ck1:[0-9a-f]{64}$/.test(v);
+
+export interface ProductContinuityCurrentWire {
+  readonly product_code: string;
+  readonly grade: string | null;
+  readonly continuity_key: string;
+  readonly effective_from: string;
+  /** The first batch made under this key, or null when a new reference moved it. */
+  readonly first_batch_no: string | null;
+}
+
+export interface ProductMaterialChangedWire {
+  readonly product_code: string;
+  readonly grade: string | null;
+  readonly kind: MaterialChangeKindWire;
+  readonly from_key: string;
+  readonly to_key: string;
+  readonly first_batch_no: string | null;
+  readonly approved_at: string;
+}
+
+/** ALEMBIC's `parseProductContinuityCurrent` rules ([] = accepted). Exactly the fields above. */
+export function checkProductContinuityCurrentWire(p: ProductContinuityCurrentWire): string[] {
+  const out: string[] = [];
+  if (!isNonEmpty(p.product_code, 80)) out.push("product_code");
+  if (!(p.grade === null || isNonEmpty(p.grade, 40))) out.push("grade");
+  if (!isContinuityKey(p.continuity_key)) out.push("continuity_key");
+  if (!isIsoInstant(p.effective_from)) out.push("effective_from");
+  if (!(p.first_batch_no === null || isNonEmpty(p.first_batch_no, 64))) out.push("first_batch_no");
+  const allowed = new Set(["product_code", "grade", "continuity_key", "effective_from", "first_batch_no"]);
+  for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
+  return out;
+}
+
+/** ALEMBIC's `parseProductMaterialChanged` rules ([] = accepted). Exactly the fields above. */
+export function checkProductMaterialChangedWire(p: ProductMaterialChangedWire): string[] {
+  const out: string[] = [];
+  if (!isNonEmpty(p.product_code, 80)) out.push("product_code");
+  if (!(p.grade === null || isNonEmpty(p.grade, 40))) out.push("grade");
+  if (!(MATERIAL_CHANGE_KINDS as readonly string[]).includes(p.kind)) out.push("kind");
+  if (!isContinuityKey(p.from_key)) out.push("from_key");
+  if (!isContinuityKey(p.to_key)) out.push("to_key");
+  if (isContinuityKey(p.from_key) && p.from_key === p.to_key) out.push("to_key.same");
+  if (!(p.first_batch_no === null || isNonEmpty(p.first_batch_no, 64))) out.push("first_batch_no");
+  if (!isIsoInstant(p.approved_at)) out.push("approved_at");
+  const allowed = new Set(["product_code", "grade", "kind", "from_key", "to_key", "first_batch_no", "approved_at"]);
+  for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
+  return out;
+}

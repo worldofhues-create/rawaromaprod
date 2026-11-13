@@ -59,6 +59,12 @@ export const OUTBOUND_TO_ALEMBIC = [
   // the lot page's "This batch is the retained reference" comes from it. Aggregate `reference_standard`.
   // Payload: @core/contracts bridge.QcReferenceEstablishedWire. ALEMBIC accepts it first (lane/prom 87390015).
   'qc.reference.established',
+  // PROM-5 (LD-85): a product's continuity key changed, and what kind of material change that was
+  // (formula version, a raw material's supplier, the retained reference). Aggregates
+  // `product_continuity` / `material_change`. Payloads: @core/contracts bridge.ProductContinuityCurrentWire,
+  // bridge.ProductMaterialChangedWire. ALEMBIC accepts them first (lane/prom).
+  'product.continuity.current',
+  'product.material.changed',
   // ALEMBIC Books phase 2 (owner 2026-10-09): payables facts -- a purchase order issued, amended or
   // cancelled, and a goods receipt, each carrying its vendor -- for ALEMBIC's three-way match.
   // Emitted via backend-kernel events/payables-facts.ts; contract docs/bridge/PAYABLES_FACTS.md.

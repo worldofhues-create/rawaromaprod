@@ -19,7 +19,7 @@
  */
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, lotRuleInForce, macerationOnTransition, recordOutbox, referenceRuleInForce, FILL_LOT_SERVER_ASSIGNED, type AuthPrincipal, type BridgeEmitTx } from '@core/backend-kernel';
+import { emitBridgeOutbound, lotRuleInForce, macerationOnTransition, recordBatchContinuity, recordOutbox, referenceRuleInForce, FILL_LOT_SERVER_ASSIGNED, type AuthPrincipal, type BridgeEmitTx } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -294,6 +294,11 @@ export class BatchService {
           updatedBy: principal.userId,
         });
       }
+
+      // PROM-5: the batch's continuity key, from the raw lots it consumed, its formula version and the
+      // product's reference; a change from the product's current key is recorded and sent now, at
+      // compounding, before any lot under the new key can be released.
+      await recordBatchContinuity(tx as unknown as BridgeEmitTx, oilBatchId, principal.userId);
 
       await tx.insert(oilBatchEventHistory).values({
         oilBatchEventHistoryId: uuidv7(),

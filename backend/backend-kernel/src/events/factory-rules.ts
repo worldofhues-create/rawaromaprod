@@ -33,7 +33,10 @@ import { evaluateRules, type PolicyBody } from './policy-engine.js';
 export const MACERATION_REST = 'maceration.rest' as const;
 export const QC_REFERENCE_REQUIRED = 'qc.reference_required' as const;
 export const FILL_LOT_SERVER_ASSIGNED = 'fill.lot_server_assigned' as const;
-export const FACTORY_RULE_KEYS = [MACERATION_REST, QC_REFERENCE_REQUIRED, FILL_LOT_SERVER_ASSIGNED] as const;
+/** PROM-5: whether a supplier change for one raw-material identity is a "raw material change" the
+ *  customer is told about (OQ-PROM-5 default: yes). Read by continuity.ts. */
+export const CONTINUITY_SUPPLIER_CHANGE = 'continuity.supplier_change_is_material' as const;
+export const FACTORY_RULE_KEYS = [MACERATION_REST, QC_REFERENCE_REQUIRED, FILL_LOT_SERVER_ASSIGNED, CONTINUITY_SUPPLIER_CHANGE] as const;
 export type FactoryRuleKey = (typeof FACTORY_RULE_KEYS)[number];
 
 export interface RestRule {
@@ -48,11 +51,15 @@ export interface ReferenceRule {
 export interface LotRule {
   required: true;
 }
+export interface SupplierChangeRule {
+  isMaterial: boolean;
+}
 
-export const FACTORY_RULE_DEFAULTS: { [MACERATION_REST]: RestRule; [QC_REFERENCE_REQUIRED]: ReferenceRule; [FILL_LOT_SERVER_ASSIGNED]: LotRule } = Object.freeze({
+export const FACTORY_RULE_DEFAULTS: { [MACERATION_REST]: RestRule; [QC_REFERENCE_REQUIRED]: ReferenceRule; [FILL_LOT_SERVER_ASSIGNED]: LotRule; [CONTINUITY_SUPPLIER_CHANGE]: SupplierChangeRule } = Object.freeze({
   [MACERATION_REST]: Object.freeze({ minDays: 45, maxDays: null, appliesTo: 'every_batch', earlyRelease: 'second_person' }) as RestRule,
   [QC_REFERENCE_REQUIRED]: Object.freeze({ required: true }) as ReferenceRule,
   [FILL_LOT_SERVER_ASSIGNED]: Object.freeze({ required: true }) as LotRule,
+  [CONTINUITY_SUPPLIER_CHANGE]: Object.freeze({ isMaterial: true }) as SupplierChangeRule,
 });
 
 /** 1 = PROM-2 (every batch rests, no skip through HOLD/REWORK, early release by two people),
@@ -63,6 +70,9 @@ export const FACTORY_ENFORCEMENT_VERSION: Readonly<Record<FactoryRuleKey, number
   [MACERATION_REST]: 1,
   [QC_REFERENCE_REQUIRED]: 1,
   [FILL_LOT_SERVER_ASSIGNED]: 1,
+  /* PROM-5: each batch's continuity key is recorded at compounding, and a change is sent before any
+     lot under the new key can be released. */
+  [CONTINUITY_SUPPLIER_CHANGE]: 1,
 });
 
 const isDays = (v: unknown) => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 365;
@@ -86,6 +96,12 @@ export function referenceRuleProblems(v: unknown): string[] {
   return typeof o.required === 'boolean' ? [] : ['required must be true or false.'];
 }
 
+export function supplierChangeRuleProblems(v: unknown): string[] {
+  const o = (v ?? null) as Partial<SupplierChangeRule> | null;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return ['The supplier-change rule is not a rule.'];
+  return typeof o.isMaterial === 'boolean' ? [] : ['isMaterial must be true or false.'];
+}
+
 /** PROM-4: the lot rule has one valid value. Switching it off would let a typed lot onto a pack. */
 export function lotRuleProblems(v: unknown): string[] {
   const o = (v ?? null) as Partial<LotRule> | null;
@@ -100,7 +116,8 @@ export function isFactoryRuleKey(key: string): key is FactoryRuleKey {
 /** Every value a body can produce (each rule's THEN and the default), checked; [] = publishable. */
 export function factoryRuleProblems(key: string, body: PolicyBody): string[] {
   if (!isFactoryRuleKey(key)) return [];
-  const check = key === MACERATION_REST ? restRuleProblems : key === FILL_LOT_SERVER_ASSIGNED ? lotRuleProblems : referenceRuleProblems;
+  const check = key === MACERATION_REST ? restRuleProblems : key === FILL_LOT_SERVER_ASSIGNED ? lotRuleProblems
+    : key === CONTINUITY_SUPPLIER_CHANGE ? supplierChangeRuleProblems : referenceRuleProblems;
   const out: string[] = [];
   (body.rules ?? []).forEach((r, i) => check(r.then).forEach((p) => out.push(`Rule ${i + 1}: ${p}`)));
   if (body.hasDefault) check(body.defaultValue).forEach((p) => out.push(`Otherwise: ${p}`));

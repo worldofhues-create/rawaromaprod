@@ -19,7 +19,7 @@ import { evaluateRules, validateBody, describeRule, type PolicyBody } from './po
 /** The policies the plan names (§12.0), plus the factory rules (PROM-4 adds `fill.lot_server_assigned`) the storefront's process promises
  *  rest on (PROM-2 `maceration.rest`, PROM-3 `qc.reference_required`; backend-kernel factory-rules.ts,
  *  where the gates read them inside their own transactions). Other lanes evaluate these keys. */
-export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework', 'maceration.rest', 'qc.reference_required', 'fill.lot_server_assigned'] as const;
+export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework', 'maceration.rest', 'qc.reference_required', 'fill.lot_server_assigned', 'continuity.supplier_change_is_material'] as const;
 
 /** PROM-2/3: how recent a sign-in must be to save a factory rule (seconds). */
 export const FACTORY_RULE_FRESH_SECONDS = 300;
@@ -215,6 +215,8 @@ export class PolicyService {
         ? 'The rest rule has no single-record override: a shorter rest for one batch is an early release (a second person approves it), a longer one is an extension.'
         : key === 'fill.lot_server_assigned'
           ? 'The lot rule has no single-record override: a pack never carries a lot number that no record holds.'
+          : key === 'continuity.supplier_change_is_material'
+            ? 'The supplier-change rule has no single-record override: whether a customer is told cannot depend on the batch.'
           : 'The reference rule has no single-record override: a reason is not a test result.');
     }
     const why = String(reason ?? '').trim();

@@ -22,7 +22,7 @@
  */
 import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
-import { PG_CLIENT, emitBridgeManualEvent, type AuthPrincipal } from '@core/backend-kernel';
+import { PG_CLIENT, emitBridgeManualEvent, recordReferenceContinuity, type AuthPrincipal } from '@core/backend-kernel';
 import { bridge as bridgeContracts } from '@core/contracts';
 import { drizzleExec } from '../floor-ops/floor-util.js';
 
@@ -166,6 +166,12 @@ export class ReferenceStandardService {
       if (problems.length) throw new ConflictException(`The reference could not be recorded for ALEMBIC: ${problems.join(', ')}.`);
       bridgeContracts.assertNoFormulaContent(wire);
       await emitBridgeManualEvent(drizzleExec(tx as unknown as Sql), bridgeContracts.QC_REFERENCE_ESTABLISHED, id, wire as unknown as Record<string, unknown>);
+      // PROM-5: the product's continuity moves to this reference for the batches that follow; replacing a
+      // reference is a material change the customer is told about, a first reference is not.
+      await recordReferenceContinuity(drizzleExec(tx as unknown as Sql), {
+        productId: String(r.product_id), referenceCode: String(r.reference_code), replacesRef: active ? String(active.reference_code) : null,
+        recordedBy: principal.userId,
+      });
       return { referenceStandardId: id, referenceCode: String(r.reference_code), status: 'ACTIVE', retired: active ? String(active.reference_code) : null };
     });
   }

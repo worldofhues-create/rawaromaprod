@@ -38,12 +38,14 @@ export {
   MACERATION_REST,
   QC_REFERENCE_REQUIRED,
   FILL_LOT_SERVER_ASSIGNED,
+  CONTINUITY_SUPPLIER_CHANGE,
   FACTORY_RULE_KEYS,
   FACTORY_RULE_DEFAULTS,
   FACTORY_ENFORCEMENT_VERSION,
   restRuleProblems,
   referenceRuleProblems,
   lotRuleProblems,
+  supplierChangeRuleProblems,
   factoryRuleProblems,
   isFactoryRuleKey,
   restRuleInForce,
@@ -53,8 +55,23 @@ export {
   type RestRule,
   type ReferenceRule,
   type LotRule,
+  type SupplierChangeRule,
   type RuleInForce,
 } from './factory-rules.js';
+export {
+  CONTINUITY_SUPPLIER_RULE,
+  SUPPLIER_RULE_DEFAULT,
+  supplierRuleProblems,
+  continuityKey,
+  changeKinds,
+  recordBatchContinuity,
+  recordReferenceContinuity,
+  type ContinuityInputs,
+  type ContinuityComponents,
+  type ContinuityResult,
+  type MaterialChangeKind,
+  type SupplierRule,
+} from './continuity.js';
 export { emitPurchaseOrderFact, emitPurchaseOrderCancelled, emitGoodsReceiptFact } from './payables-facts.js';
 export {
   recordProduceAlert,
