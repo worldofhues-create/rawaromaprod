@@ -51,7 +51,9 @@ for (const part of parts) {
   }
   if (!sku) { out(`sku_${key}`, { onFile: false, productSkus: skus.length, why: 'the factory holds no SKU of this pack for the product: a person would have to type one' }); process.exit(1); }
   const skuId = sku.productSkuId;
-  if (!bulk && !P.skus[skuId]) {
+  // STK-32: a bulk lot is filled through a package order too, and a package order with no bill of packaging
+  // cannot issue or fill ("has no BOM items to issue"); the catalogue's bulk SKU comes with none.
+  if (!P.skus[skuId]) {
     const pm = (await C.must('owner', 'POST', '/v1/packaging-materials', { packagingMaterialCode: `PM-${label}-${key}`, packagingMaterialName: `Rehearsal container ${what}`, uomId: pcs })).packagingMaterialId;
     await C.must('owner', 'POST', '/v1/packaging-boms', { productSkuId: skuId, packagingMaterialId: pm, requiredQty: 1, uomId: pcs });
     await C.must('warehouse', 'POST', '/v1/inventory-batches', { materialId: pm, quantityOnHand: 500, uomId: pcs });
@@ -60,6 +62,10 @@ for (const part of parts) {
   const count = bulk ? null : Number(nText);
   const massMg = bulk ? Number(nText) : count * packMg;
   const qty = bulk ? massMg / 1_000_000 : count, uom = bulk ? kg : pcs;
+  // An order this step opened and could not issue (its bill of packaging is copied when it is made, and it holds
+  // the oil it was promised) is cancelled, which frees the oil, and made again.
+  const stale = (await C.all('packaging', '/v1/package-orders')).filter((p) => p.oilBatchId === B.oil && p.productSkuId === skuId && p.status === 'DRAFT');
+  for (const d of stale) out(`cancelStale_${key}`, { status: (await C.rp('packaging', 'POST', `/v1/package-orders/${d.packageOrderId}/cancel`, { reason: 'rehearsal: made before the SKU had a bill of packaging' })).status });
   const po = await C.rp('packaging', 'POST', '/v1/package-orders', { productSkuId: skuId, oilBatchId: B.oil, orderQty: qty, uomId: uom });
   if (po.status >= 300) { out(`packageOrder_${key}`, { status: po.status, err: err(po) }); process.exit(1); }
   const pkg = po.body.order.packageOrderId;

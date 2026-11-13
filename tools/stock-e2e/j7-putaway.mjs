@@ -20,13 +20,12 @@ for (const label of labels) {
     if (!tasks.length) ensure = await C.rp('warehouse', 'POST', '/v1/shelf/putaway', { finishedGoodBatchId: l.fg });
     const t = tasks[0] ?? ensure?.body?.task ?? ensure?.body;
     const taskId = t?.shelfTaskId ?? t?.taskId ?? t?.id;
-    const bin = t?.targetBinCode ?? t?.binCode ?? t?.targetBin ?? t?.toBinCode ?? null;
-    const free = bin ? null : (await C.rp('warehouse', 'GET', '/v1/shelf/locations')).body;
-    const firstBin = bin ?? (Array.isArray(free) ? free : free?.items ?? free?.bins ?? []).map((b) => b.binCode ?? b.code ?? b.label).find(Boolean) ?? null;
-    const done = taskId ? await C.rp('warehouse', 'POST', `/v1/shelf/tasks/${taskId}/putaway`, { binCode: firstBin }) : null;
+    // The bin the system chose for the task (another SKU's bin is refused with a warning to read).
+    const bin = t?.label ?? t?.bin ?? null;
+    const done = taskId && bin ? await C.rp('warehouse', 'POST', `/v1/shelf/tasks/${taskId}/putaway`, { binCode: bin }) : null;
     const f = done?.body?.fgBatchReceived;
     out(`putaway_${label}_${l.key}`, { task: !!taskId, complete: done?.status ?? null, err: done?.error?.message?.slice(0, 200) ?? null, sent: f?.sent ?? null, problems: f?.problems ?? null,
-      fact: f?.payload ? { skuIsCommercial: f.payload.sku === (Object.entries(S.fp ?? {}).find(([, p]) => Object.keys(p.skus ?? {}).includes(l.skuId) || true) ?? [null])[0] ? null : undefined, sku: f.payload.sku, qty_kg: f.payload.qty_kg,
+      fact: f?.payload ? { skuIsTheProductCode: Object.keys(S.fp ?? {}).includes(f.payload.sku), qty_kg: f.payload.qty_kg,
         pack_count: f.payload.pack_count ?? null, pack_net_mg: f.payload.pack_net_mg ?? null, pack_size: f.payload.pack_size ?? null, qc_batch_no: !!f.payload.qc_batch_no } : null });
     if (done?.status < 300) { l.putAway = true; l.fact = f?.payload ? { sku: f.payload.sku, qty_kg: f.payload.qty_kg, pack_count: f.payload.pack_count ?? null, pack_net_mg: f.payload.pack_net_mg ?? null } : null; st.save(S); }
   }

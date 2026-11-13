@@ -5,7 +5,8 @@ import { client, stateFile } from './lib.mjs';
 const [run] = process.argv.slice(2);
 const C = client({ keysFile: `${run}/keys.json`, run });
 const st = stateFile(`${run}/state.json`); const S = st.load();
-const plan = { B1: 'KEEP', B2: 'LOSS_WRITE_OFF', B3: 'FAILED_WRITE_OFF', B5: 'HOLD', B6: 'KEEP' };
+// STOCK-E2E-2: REMNANT_PLAN='{"B1":"KEEP",...}' names another run's batches.
+const plan = process.env.REMNANT_PLAN ? JSON.parse(process.env.REMNANT_PLAN) : { B1: 'KEEP', B2: 'LOSS_WRITE_OFF', B3: 'FAILED_WRITE_OFF', B5: 'HOLD', B6: 'KEEP' };
 const out = {};
 for (const [label, what] of Object.entries(plan)) {
   const B = S.batch?.[label];
