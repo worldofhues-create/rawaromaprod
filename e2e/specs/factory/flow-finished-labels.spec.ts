@@ -40,6 +40,20 @@ async function floorJob(info: Parameters<Parameters<typeof test>[1]>[1], grams =
 const staged: string[] = [];
 test.afterEach(() => { while (staged.length) sql(staged.shift()!); });
 
+/* STAGE-2-RP (STK-44): this walk stopped at the Packing station. A weight typed there (no scale is
+ * connected in the walk) is accepted only once a second person has signed it (FLOOR-FIX-3/16): the
+ * first press asks why it was typed and files the weight for a sign-off, and the press after the
+ * sign-off records it. The walk pressed once and waited for the row, which is not what the screen
+ * asks of a person. It now does both halves: the packer answers the question, the admin signs the
+ * pending weight (what Floor devices, Typed weights, Sign does), and the packer presses again. */
+async function typedThenSigned(page: Page, button: string, field: string, mg: number) {
+  await page.getByRole('button', { name: button }).click();
+  await page.getByRole('button', { name: 'Ask for a sign-off', exact: true }).click();
+  await expect(page.locator(`#${field}-src`)).toContainText('waiting for a second person to sign');
+  await signTypedOnScreen(mg);
+  await page.getByRole('button', { name: button }).click();
+}
+
 test('finished flow: every step prints both codes, reprints with a reason, and its label scans at the next step', async ({ page }, info) => {
   test.setTimeout(240_000);
   const windows = labelWindows(page);
@@ -173,7 +187,7 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   await page.getByRole('checkbox', { name: new RegExp(fgNo) }).check();
   await page.getByRole('button', { name: 'Start packing' }).click();
   await page.locator('#fo-u-t').fill('10'); await page.locator('#fo-u-tol').fill('0.1'); await page.locator('#fo-u-w').fill('10.05'); await page.locator('#fo-u-seal').check();
-  await page.getByRole('button', { name: 'Record unit + print label' }).click();
+  await typedThenSigned(page, 'Record unit + print label', 'fo-u-w', 10050);
   await expect(page.locator('tr', { hasText: 'not in a carton' })).toBeVisible();
   const unit = sql(`select unit_code from sales.shipment_unit u join sales.shipment s using (shipment_id) where s.sales_order_id='${so}'`);
   await jobDecodes(page, (await printedJob('customer', unit)).template, unit);
@@ -181,7 +195,7 @@ test('finished flow: every step prints both codes, reprints with a reason, and i
   await wedge(page, '#fo-scan-u', unit, ']Q1', 'Enter');
   await expect(page.locator('tr', { hasText: 'in carton 1' })).toBeVisible();
   await page.locator('#fo-c-w').fill('60');
-  await page.getByRole('button', { name: 'Weigh + close carton' }).click();
+  await typedThenSigned(page, 'Weigh + close carton', 'fo-c-w', 60000);
   await page.getByRole('button', { name: /Finish packing/ }).click();
   await expect(page.locator('.chip', { hasText: 'Packed' })).toBeVisible();
   const ship = sql(`select shipment_no from sales.shipment where sales_order_id='${so}'`);

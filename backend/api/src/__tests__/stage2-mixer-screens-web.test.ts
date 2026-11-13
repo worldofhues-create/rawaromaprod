@@ -74,3 +74,15 @@ test('the floor queue offers "Assign mixer" to a supervisor, by person, not by t
   assert.match(queue, /data-assign=/);
   assert.match(floor, /t: 'select'/, 'the mixer is chosen from the people who may mix');
 });
+
+/* STAGE-2-RP (STK-44): the Packing station asks why a weight was typed and offers "Scale not reading"
+ * as the answer (ws-floor-ops.js passes it as the field's value). The form sheet drew a text INPUT's
+ * value and dropped a TEXTAREA's, so the question opened empty, "Ask for a sign-off" answered "Why
+ * typed is needed", and the finished-goods walk stopped there (as a packer would have, puzzled). */
+test('the form sheet shows the value a textarea field was given, as it does for an input', () => {
+  const shell = read('web/shell.js');
+  const textarea = /f\.t === 'textarea' \? '<textarea data-ask="[^\n]*<\/textarea>'/.exec(shell);
+  assert.ok(textarea, 'the textarea branch of askForm');
+  assert.match(textarea![0], /f\.value != null \? escHtml\(f\.value\) : ''/, 'its value is drawn, escaped');
+  assert.match(read('web/ws-floor-ops.js'), /t: 'textarea', req: true, value: 'Scale not reading'/, 'the one caller that gives a textarea a value');
+});

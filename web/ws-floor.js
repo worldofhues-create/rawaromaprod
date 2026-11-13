@@ -21,7 +21,11 @@
   function esc(v) { return escHtml(v == null ? '' : String(v)); }
   function chip(tone, t) { return '<span class="chip ' + tone + '"><i class="dot"></i>' + esc(t) + '</span>'; }
   function btn(id, label, cls, attrs) { return '<button ' + (/\btype=/.test(attrs || '') ? '' : 'type="button" ') + 'id="' + id + '" class="btn ' + (cls || '') + '"' + (attrs || '') + '>' + label + '</button>'; }
-  function big(attrs) { return ' style="min-height:56px;font-size:18px;padding:0 22px"' + (attrs || ''); }
+  /* STAGE-2-RP (STK-44): .btn is one line by rule (white-space:nowrap, width:max-content), so a floor
+   * button with a long label ("Return and print the lot label", 18 px) was wider than its card on a 375
+   * phone and ran past the edge. A big button may now take two lines and never more than its card's
+   * width; one that fits is drawn exactly as before (56 px high, one line). */
+  function big(attrs) { return ' style="min-height:56px;height:auto;font-size:18px;line-height:1.2;padding:8px 22px;white-space:normal;max-width:100%;box-sizing:border-box"' + (attrs || ''); }
   function swatch(l) {
     if (!l || !l.colourName) return '';
     // Colour is never the only signal: the name and its initial are printed beside it.
