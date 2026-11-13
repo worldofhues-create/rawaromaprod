@@ -2456,6 +2456,24 @@ create table if not exists production.floor_job (
   created_by            varchar(255),
   created_dt            timestamptz not null default now()
 );
+-- STOCK-FIX-RP (STK-15, D-1): schema part of scripts/migrations/2026-11-22-stk-mixer-reveal.sql.
+alter table production.floor_job add column if not exists mixer_assigned_to varchar(255);
+alter table production.floor_job add column if not exists mixer_assigned_by varchar(255);
+alter table production.floor_job add column if not exists mixer_assigned_dt timestamptz;
+create table if not exists production.floor_mix_reveal (
+  floor_mix_reveal_id uuid primary key,
+  floor_job_id        uuid not null references production.floor_job(floor_job_id),
+  step_seq            integer not null,
+  floor_line_id       uuid not null,
+  revealed_to         varchar(255) not null,
+  revealed_dt         timestamptz not null default clock_timestamp()
+);
+create index if not exists floor_mix_reveal_job_idx on production.floor_mix_reveal (floor_job_id, revealed_dt);
+create index if not exists floor_mix_reveal_user_idx on production.floor_mix_reveal (revealed_to, revealed_dt);
+drop trigger if exists floor_mix_reveal_append_only on production.floor_mix_reveal;
+create trigger floor_mix_reveal_append_only before update or delete on production.floor_mix_reveal
+  for each row execute function production.stk_append_only();
+
 create sequence if not exists production.floor_job_no_seq;
 
 create table if not exists production.floor_line (

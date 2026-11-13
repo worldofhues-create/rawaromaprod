@@ -4,7 +4,7 @@
  * separation of duties on every call, so a person holding two floor roles still cannot verify
  * their own pick.
  */
-import { BadRequestException, Body, Controller, Get, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
 import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService, type LabelKind } from './floor-station.service.js';
@@ -201,6 +201,30 @@ export class FloorController {
   @Post('v1/floor/jobs/:id/mix/steps/:seq')
   step(@Param('id', ParseUUIDPipe) id: string, @Param('seq', ParseIntPipe) seq: number, @CurrentUser() p: AuthPrincipal) {
     return this.stations.doStep(id, seq, p);
+  }
+
+  /** STOCK-FIX-RP (STK-15, D-1): assign the batch to one mixer, by name (a supervisor). */
+  @Permissions('production:floor_job:write')
+  @Post('v1/floor/jobs/:id/mix/assign')
+  assignMixer(@Param('id', ParseUUIDPipe) id: string, @Body() body: { userId?: string }, @CurrentUser() p: AuthPrincipal) {
+    return this.stations.assignMixer(id, String(body?.userId ?? ''), p);
+  }
+
+  /** STOCK-FIX-RP (STK-15, D-1): the current step's material name, to the assigned mixer only.
+   *  Never cached: the name is for the screen in front of the mixer, for this step. */
+  @Permissions('production:floor_mix:reveal_name')
+  @Header('Cache-Control', 'no-store')
+  @Post('v1/floor/jobs/:id/mix/reveal')
+  revealCurrentStep(@Param('id', ParseUUIDPipe) id: string, @Body() body: { seq?: unknown }, @CurrentUser() p: AuthPrincipal) {
+    if (body?.seq !== undefined && !(typeof body.seq === 'number' && Number.isInteger(body.seq))) throw new BadRequestException('seq is a step number.');
+    return this.stations.revealCurrentStep(id, { seq: body?.seq as number | undefined }, p);
+  }
+
+  /** STOCK-FIX-RP (STK-15): who saw a name on this job, at which step, when. Ids and times only. */
+  @Permissions('production:floor_job:write')
+  @Get('v1/floor/jobs/:id/mix/reveals')
+  revealLog(@Param('id', ParseUUIDPipe) id: string) {
+    return this.stations.revealLog(id);
   }
 
   @Permissions('production:floor_mix:write')

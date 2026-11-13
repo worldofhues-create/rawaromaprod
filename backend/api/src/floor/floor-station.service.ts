@@ -693,12 +693,92 @@ export class FloorStationService {
     if (j.verified_by === principal.userId) throw new ForbiddenException('You verified this job, so someone else must mix it.');
   }
 
+  /* ── STOCK-FIX-RP (STK-15, D-1 / LD-35, WO-FLOOR-6): the mixer's scoped name reveal ─────────────
+   * The mixer assigned to a batch, by name, may see the material NAME of the CURRENT step of the
+   * ACTIVE batch: one name, beside its floor code, never a list, a share, a weight or a print, and
+   * every view is logged (who, job, step, line, when; never the name). The moment the step is
+   * confirmed it is no longer the current step, so its name is no longer served. Pickers and
+   * verifiers hold no reveal permission, and an unassigned mixer is refused like anyone else. */
+
+  /** The mixer a job is assigned to, if any (read under the caller's lock). */
+  private async assignedMixer(sql: Sql | TransactionSql, jobId: string): Promise<string | null> {
+    const [r] = await sql<{ m: string | null }[]>`select mixer_assigned_to as m from production.floor_job where floor_job_id = ${jobId}`;
+    return r?.m ?? null;
+  }
+
+  /** Once a job has an assigned mixer, only that mixer moves its steps. */
+  private async assertAssignedMixerIfAny(tx: TransactionSql, j: JobRow, principal: AuthPrincipal) {
+    const m = await this.assignedMixer(tx, j.floor_job_id);
+    if (m && m !== principal.userId) throw new ForbiddenException(`${j.job_no} is assigned to another mixer.`);
+  }
+
+  /** POST /v1/floor/jobs/:id/mix/assign — a supervisor assigns the batch to one mixer, by user. */
+  async assignMixer(jobId: string, userId: string, principal: AuthPrincipal) {
+    const who = String(userId ?? '').trim();
+    if (!/^[0-9a-f-]{36}$/i.test(who)) throw new BadRequestException('Name the mixer by their user id.');
+    return this.sql.begin(async (tx) => {
+      const j = await this.lockJob(tx, jobId);
+      if (j.stage === 'DONE') throw new ConflictException(`${j.job_no} is already finished.`);
+      if (j.verified_by === who || j.picked_by === who) throw new ConflictException('The person who picked or verified this job cannot mix it.');
+      const [m] = await tx<{ ok: boolean }[]>`
+        select exists (select 1 from iam.user_master u join iam.user_role_mapping urm on urm.user_id = u.user_id
+                         join iam.role_master r on r.role_id = urm.role_id
+                        where u.user_id::text = ${who} and lower(r.role_code) = 'mixer' and coalesce(u.is_active, true)) as ok`;
+      if (!m?.ok) throw new ConflictException('That person is not an active mixer.');
+      const before = await this.assignedMixer(tx, jobId);
+      if (before && before !== who) {
+        const [mixing] = await tx<{ n: number }[]>`select count(*)::int as n from production.floor_mix_step where floor_job_id = ${jobId} and done_dt is not null`;
+        if ((mixing?.n ?? 0) > 0) throw new ConflictException(`${j.job_no} is already being mixed by its assigned mixer.`);
+      }
+      await tx`update production.floor_job set mixer_assigned_to = ${who}, mixer_assigned_by = ${principal.userId}, mixer_assigned_dt = now() where floor_job_id = ${jobId}`;
+      return { floorJobId: jobId, jobNo: j.job_no, mixerAssignedTo: who };
+    });
+  }
+
+  /** POST /v1/floor/jobs/:id/mix/reveal — the current step's material name, to its assigned mixer. */
+  async revealCurrentStep(jobId: string, body: { seq?: number }, principal: AuthPrincipal) {
+    // Defence in depth: the route already demands this permission.
+    if (!principal.permissions.includes('production:floor_mix:reveal_name')) throw new ForbiddenException('Only a mixer sees a material name, and only on their own batch.');
+    return this.sql.begin(async (tx) => {
+      const j = await this.lockJob(tx, jobId);
+      if (j.stage !== 'MIX' || j.oil_batch_id) throw new ConflictException(`${j.job_no} is not a batch being mixed, so no name is shown.`);
+      await this.assertRunning(tx, j);
+      this.assertNotVerifier(j, principal);
+      const mixer = await this.assignedMixer(tx, jobId);
+      if (!mixer) throw new ForbiddenException(`${j.job_no} has no assigned mixer, so no name is shown. A supervisor assigns it first.`);
+      if (mixer !== principal.userId) throw new ForbiddenException(`${j.job_no} is assigned to another mixer.`);
+      const [step] = await tx<{ seq: number; instruction: string }[]>`
+        select seq, instruction from production.floor_mix_step where floor_job_id = ${jobId} and done_dt is null order by seq limit 1`;
+      if (!step) throw new ConflictException('Every step is done: nothing is shown.');
+      if (body.seq !== undefined && body.seq !== step.seq) throw new ForbiddenException(`Only the current step (${step.seq}) is shown.`);
+      const [line] = await tx<{ floor_line_id: string; material_id: string }[]>`
+        select floor_line_id::text, material_id::text from production.floor_line where floor_job_id = ${jobId} and seq = ${step.seq}`;
+      if (!line || !step.instruction.startsWith(`Add line ${step.seq}:`)) throw new ConflictException(`Step ${step.seq} adds no material, so there is no name to show.`);
+      const [m] = await tx<{ name: string | null }[]>`select material_name as name from masterdata.material where material_id = ${line.material_id}`;
+      const fc = await this.codes.codeFor(line.material_id);
+      await tx`insert into production.floor_mix_reveal (floor_mix_reveal_id, floor_job_id, step_seq, floor_line_id, revealed_to)
+               values (${uuidv7()}, ${jobId}, ${step.seq}, ${line.floor_line_id}, ${principal.userId})`;
+      return { jobNo: j.job_no, seq: step.seq, code: fc?.code ?? null, name: m?.name ?? null, shownUntil: 'this step is confirmed' };
+    });
+  }
+
+  /** GET /v1/floor/jobs/:id/mix/reveals — the reveal log for a supervisor: who, step, when. No names. */
+  async revealLog(jobId: string) {
+    const j = await this.job(jobId);
+    const rows = await this.sql<{ seq: number; who: string; at: string; person: string | null }[]>`
+      select r.step_seq as seq, r.revealed_to as who, r.revealed_dt::text as at, u.user_name as person
+        from production.floor_mix_reveal r left join iam.user_master u on u.user_id::text = r.revealed_to
+       where r.floor_job_id = ${jobId} order by r.revealed_dt, r.floor_mix_reveal_id`;
+    return { floorJobId: jobId, jobNo: j.job_no, items: rows.map((r) => ({ stepSeq: r.seq, revealedTo: r.who, revealedToName: r.person, revealedAt: r.at })) };
+  }
+
   async doStep(jobId: string, seq: number, principal: AuthPrincipal) {
     return this.sql.begin(async (tx) => {
       const j = await this.lockJob(tx, jobId);
       this.assertStage(j, 'MIX', 'mix');
       await this.assertRunning(tx, j);
       this.assertNotVerifier(j, principal);
+      await this.assertAssignedMixerIfAny(tx, j, principal); // STK-15
       const steps = await tx<{ seq: number; instruction: string; done_dt: string | null }[]>`
         select seq, instruction, done_dt::text from production.floor_mix_step where floor_job_id = ${jobId} order by seq`;
       const step = steps.find((s) => s.seq === seq);
@@ -720,6 +800,7 @@ export class FloorStationService {
       this.assertStage(j, 'MIX', 'finish mixing');
       await this.assertRunning(tx, j);
       this.assertNotVerifier(j, principal);
+      await this.assertAssignedMixerIfAny(tx, j, principal); // STK-15
       const open = await tx<{ seq: number }[]>`select seq from production.floor_mix_step where floor_job_id = ${jobId} and done_dt is null order by seq`;
       if (open.length) throw new ConflictException(`${open.length} step(s) still open: ${open.map((s) => s.seq).join(', ')}.`);
       const ls = await this.lines(tx, jobId);
