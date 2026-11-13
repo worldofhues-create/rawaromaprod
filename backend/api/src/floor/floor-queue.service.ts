@@ -24,33 +24,8 @@ import { mgToQty } from '@core/data-kernel';
 import { FloorCodeService, qtyToMg } from './floor-code.service.js';
 import { stationMedians, predictLate, groupByFormula, type PipelineJob, type Prediction } from './pipeline.js';
 
-export interface QueueJob {
-  floorJobId: string;
-  jobNo: string;
-  stage: string;
-  orderRef: string | null;
-  tote: string | null;
-  promiseDt: string | null;
-  createdDt: string;
-  expedite: boolean;
-  channel: string | null;
-  customerTier: string | null;
-  ready: boolean;
-  waitingOn: string[];
-  /** ORDER (a customer order, the default) or SUGGESTED (an approved cover suggestion). */
-  source?: 'ORDER' | 'SUGGESTED';
-  /** FLOOR-LOT-STOP-1: why the line is stopped, or null. */
-  stopped?: string | null;
-}
-
-export interface RankedJob extends QueueJob {
-  position: number | null;
-  lane: 'NEW' | 'DELAYED';
-  daysLate: number;
-  priority: 'EXPEDITE' | 'TOP' | 'ALTERNATE' | 'SUGGESTED' | 'HOLD';
-  why: string;
-  policyVersion: number | null;
-}
+export type { QueueJob, RankedJob } from './floor-queue.types.js';
+import type { QueueJob, RankedJob } from './floor-queue.types.js';
 
 const DAY = 86_400_000;
 

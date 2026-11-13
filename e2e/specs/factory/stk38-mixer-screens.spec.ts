@@ -131,7 +131,9 @@ test('Mix station: the assigned mixer sees the current step\'s one name, logged,
   }, j.name);
   expect(kept.worker, 'the service worker is registered, so the cache check means something').toBe(true);
   expect(kept.hits).toEqual([]);
-  expect(sql(`select count(*) from platform.idempotency_key where response::text like '%${j.name}%'`)).toBe('0');
+  // (the mixer's own rows: the warehouse's lot-label answer names the material to a role that may read names, and is not this route)
+  expect(sql(`select count(*) from platform.idempotency_key where user_id='${m.id}' and (response::text like '%${j.name}%' or response ? 'shownUntil')`)).toBe('0');
+  expect(sql(`select count(*) from platform.idempotency_key where response ? 'shownUntil'`), 'no reveal answer is kept for anyone').toBe('0');
 
   // a tab that is hidden loses the name; asking again is a second, logged view
   await page.evaluate(() => { Object.defineProperty(document, 'hidden', { configurable: true, get: () => true }); document.dispatchEvent(new Event('visibilitychange')); });

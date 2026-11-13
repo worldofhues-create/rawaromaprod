@@ -17,7 +17,7 @@ import { BadRequestException, ConflictException, ForbiddenException, Inject, Inj
 import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import type { Sql } from 'postgres';
-import type { PairedDevice } from './devices.service.js';
+import type { PairedDevice } from './devices.types.js';
 import { FLOOR_CLOCK } from './floor.tokens.js';
 import { iso, systemClock, type Clock } from './floor-util.js';
 

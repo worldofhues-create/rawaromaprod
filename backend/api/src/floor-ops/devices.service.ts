@@ -26,7 +26,9 @@ import { iso, newDeviceToken, sha256, sixDigitCode, systemClock, text, type Cloc
 
 // FLOOR-TEMP-1: temp_sensor -- a thermometer / data logger that pairs like a scale and posts readings
 // for the one zone its config names (POST /v1/device-agent/temperature-readings).
-export const DEVICE_KINDS = ['label_printer', 'display', 'kiosk', 'scale', 'scanner', 'temp_sensor'] as const;
+export { DEVICE_KINDS } from './devices.types.js';
+export type { DeviceKind, PairedDevice } from './devices.types.js';
+import { DEVICE_KINDS, type DeviceKind, type PairedDevice } from './devices.types.js';
 /** SCAN-4: what a scanner can be recorded as reading (the BarcodeDetector names, so one vocabulary). */
 export const SYMBOLOGIES = ['qr_code', 'code_128', 'code_39', 'code_93', 'ean_13', 'ean_8', 'upc_a', 'upc_e', 'itf', 'codabar', 'data_matrix', 'pdf417', 'aztec'] as const;
 /** A wedge / Bluetooth scanner types into the station's screen: nothing to pair, no heartbeat. */
@@ -38,7 +40,6 @@ function scannerConfig(config: Record<string, unknown>): Record<string, unknown>
   if (bad.length) throw new BadRequestException(`Unknown symbology ${bad.join(', ')}. Use ${SYMBOLOGIES.join(', ')}.`);
   return { ...config, symbologies: [...new Set(s.map(String))] };
 }
-export type DeviceKind = (typeof DEVICE_KINDS)[number];
 export const PAIRING_TTL_MS = 10 * 60 * 1000;
 /** Heartbeat is every 60 s; two missed beats make a device offline. */
 // FLOOR-FIX-6: plan §1.4, offline after 60 s without a heartbeat (was 2 min). Senders beat every
@@ -49,13 +50,6 @@ export const PAIR_FAILS_PER_MINUTE = 20;
 
 export interface PairingCode { code: string; expiresAt: string; validMinutes: number }
 
-export interface PairedDevice {
-  deviceId: string;
-  kind: DeviceKind;
-  station: string;
-  name: string;
-  config: Record<string, unknown>;
-}
 
 const KIND_WORD: Record<DeviceKind, string> = { label_printer: 'Printer', display: 'Display', kiosk: 'Kiosk', scale: 'Scale', scanner: 'Scanner', temp_sensor: 'Temperature sensor' };
 

@@ -16,7 +16,7 @@
  *                   and only among ready ALTERNATE jobs: expedited, top, held, waiting and suggested
  *                   jobs stay where the rule put them.
  */
-import type { RankedJob, QueueJob } from './floor-queue.service.js';
+import type { RankedJob, QueueJob } from './floor-queue.types.js';
 
 const DAY = 86_400_000;
 export const STAGES = ['PICK', 'VERIFY', 'MIX'] as const;
