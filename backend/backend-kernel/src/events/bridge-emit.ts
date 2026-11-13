@@ -134,6 +134,21 @@ export async function emitBridgeToRequirement(
  * (see its own comment) precisely so this stays correct without this helper needing to know
  * about org ids or the production-requirement schema at all.
  */
+/**
+ * STK-31 (STOCK-E2E-2): THE CODE ALEMBIC KNOWS A FACTORY PRODUCT BY, or null when ALEMBIC's catalogue never sent
+ * the product. A product has one SKU per pack (100 g, 500 g, ...), each with its own factory code, and ALEMBIC
+ * resolves a fact's product by ONE code: the one its catalogue sent (bridge.catalogue_item.sku_code). Every
+ * outbound fact that names a product asks here first, so a lot filled on a pack SKU, and the QC release of the
+ * oil it was filled from, name the same product ALEMBIC holds instead of a code it has never heard of.
+ */
+export async function bridgeProductCode(tx: BridgeEmitTx, productId: string | null | undefined): Promise<string | null> {
+  if (!productId) return null;
+  const rows = (await tx.execute(sql`
+    select sku_code from bridge.catalogue_item where product_id = ${productId}::uuid order by synced_at desc limit 1
+  `)) as unknown as Array<{ sku_code: string }>;
+  return rows[0]?.sku_code ?? null;
+}
+
 export async function emitBridgeManualEvent(
   tx: BridgeEmitTx,
   type: string,

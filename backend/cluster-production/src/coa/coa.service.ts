@@ -41,7 +41,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { emitBridgeManualEvent, emitBridgeOutbound, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { bridgeProductCode, emitBridgeManualEvent, emitBridgeOutbound, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import type { ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
@@ -276,7 +276,7 @@ export class CoaService {
       });
       const problems = bridgeContracts.validateQcBatchReleased(payload);
       if (problems.length > 0) throw new ConflictException(`The release could not be sent: incomplete ${problems.join(', ')}.`);
-      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes);
+      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes, coa.productId);
       if (!factorySku) throw new ConflictException('The product has no SKU code; the sales system cannot map a QC release without one.');
       const wire = bridgeContracts.toQcBatchReleasedWire(payload, {
         status: 'passed', factorySku, qcRecordRef: coa.batchCoaId,
@@ -318,7 +318,7 @@ export class CoaService {
       const skuCodes = ((await tx.execute(sql`
         select sku_code from packaging.product_sku where product_id = ${coa.productId} and sku_code is not null order by sku_code
       `)) as unknown as { sku_code: string }[]).map((r) => r.sku_code);
-      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes);
+      const factorySku = await this.factorySku(tx, coa.oilBatchId, skuCodes, coa.productId);
       const photos = await tx.select().from(batchCoaPhoto).where(eq(batchCoaPhoto.batchCoaId, batchCoaId));
       const docPaths = new Map<string, string | null>();
       for (const p of photos) if (p.documentId) docPaths.set(p.documentId, await this.documentPath(tx, p.documentId));
@@ -369,7 +369,7 @@ export class CoaService {
    * product's first SKU code. The batch number is what ALEMBIC matches a COA on; the SKU only
    * has to resolve to the product.
    */
-  private async factorySku(tx: Tx, oilBatchId: string, productSkuCodes: string[]): Promise<string | null> {
+  private async factorySku(tx: Tx, oilBatchId: string, productSkuCodes: string[], productId?: string | null): Promise<string | null> {
     const linked = ((await tx.execute(sql`
       select r.mapped_sku
         from production.oil_batch_master b
@@ -377,7 +377,9 @@ export class CoaService {
        where b.oil_batch_id = ${oilBatchId}
        order by r.priority_rank nulls last, r.needed_by, r.created_dt
     `)) as unknown as { mapped_sku: string }[]).map((r) => r.mapped_sku);
-    return linked.find((s) => productSkuCodes.includes(s)) ?? productSkuCodes[0] ?? null;
+    // STK-31: after the requirement's own SKU, the code ALEMBIC's catalogue sent for the product; only a product
+    // ALEMBIC never sent falls back to its first SKU code (which, with one SKU per pack, may be any pack's).
+    return linked.find((s) => productSkuCodes.includes(s)) ?? (await bridgeProductCode(tx as never, productId)) ?? productSkuCodes[0] ?? null;
   }
 
   private async resolveProduct(tx: Tx, oilBatchId: string, requested: string | undefined): Promise<string> {

@@ -27,7 +27,7 @@ import { uuidv7 } from '@core/data-kernel';
 import { BRIDGE_DB, type BridgeDb } from '../bridge/bridge.tokens.js';
 import { verifySignedBridgeRequest } from '../bridge/signed-request.js';
 import { PickLightService } from '../shelf/pick-light.service.js';
-import { floorCodeFor, itemProblems, requestProblems, type CatalogueItem, type CatalogueRequest } from './catalogue.contract.js';
+import { floorCodeFor, itemProblems, massPacks, packSkuCode, requestProblems, type CatalogueItem, type CatalogueRequest } from './catalogue.contract.js';
 import { SetupStatusService } from './setup-status.service.js';
 
 export interface ItemResult {
@@ -200,6 +200,20 @@ export class FactoryCatalogueService {
          converts without needing a pack size. */
       await tx`insert into packaging.product_sku (product_sku_id, product_id, sku_code, pack_size, status, created_by, updated_by)
                values (${productSkuId}::uuid, ${productId}::uuid, ${i.sku_code}, null, 'ACTIVE', ${who}, ${who})`;
+    }
+    /* STK-31 (STOCK-E2E-2): ONE PACK SKU PER MASS PACK THE PRODUCT IS SOLD IN. The item has always carried the
+       packs and they were kept only as a note, so to fill a 100 g bottle a person typed a SKU, and the facts that
+       SKU sent named a code ALEMBIC had never heard of. Each pack SKU holds its net content in mg (what the oil
+       ledger, the label and fg.batch.received read) under a code made from the product's; a SKU of that net
+       content already under the product, whoever made it, is left alone. A volume gets none: no density, no mass. */
+    for (const pack of massPacks(i)) {
+      const [held] = (await tx`select 1 as x from packaging.product_sku where product_id = ${productId}::uuid and net_content_mg = ${pack.netMg} limit 1`) as Array<{ x: number }>;
+      if (held) continue;
+      const code = packSkuCode(i.sku_code, pack.label);
+      const [taken] = (await tx`select 1 as x from packaging.product_sku where sku_code = ${code} limit 1`) as Array<{ x: number }>;
+      if (taken) continue; // a code somebody else holds is never rewritten; the setup screen shows the pack as missing
+      await tx`insert into packaging.product_sku (product_sku_id, product_id, sku_code, pack_size, net_content_mg, status, created_by, updated_by)
+               values (${uuidv7()}::uuid, ${productId}::uuid, ${code}, ${pack.label}, ${pack.netMg}, 'ACTIVE', ${who}, ${who})`;
     }
 
     const before = existing ? JSON.stringify({

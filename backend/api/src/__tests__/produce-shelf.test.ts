@@ -284,3 +284,27 @@ test('move, and sheets in rack walking order', async () => {
   const cancelled = await tasks.cancel(sheet.items[1]!.shelfTaskId, worker);
   assert.equal(cancelled.status, 'CANCELLED');
 });
+
+test('STK-31: a lot filled on a pack SKU of a catalogue product is received under the code Alembic knows, with its packs', async () => {
+  const r = await rack();
+  const product = await productWithSku({ packSize: '100 g' }); // a pack SKU: its own code is <product>-100G
+  const commercial = `commercial-${product.productId.slice(0, 8)}`;
+  await testClient()`insert into bridge.catalogue_item (alembic_sku_id, sku_code, name, classification, classification_basis, product_id, synced_by)
+                     values (${randomUUID()}, ${commercial}, 'Althair', 'blend', 'test', ${product.productId}, 'test')`;
+  const each = await eachUom();
+  const fg = await finishedGood({ coa: 'RELEASED', product, qty: 9, uomId: each.id });
+  const task = await tasks.ensurePutaway(fg.fgBatchId, worker, { binCode: r.bins[0] });
+  const done = await tasks.completePutaway(task.shelfTaskId, r.bins[0]!, worker);
+  assert.equal(done.fgBatchReceived.sent, true, JSON.stringify(done.fgBatchReceived));
+  assert.ok(done.fgBatchReceived.sent);
+  const p = done.fgBatchReceived.payload;
+  assert.equal(p.sku, commercial, 'the pack SKU code is the factory\'s own; Alembic resolves the product by the code its catalogue sent');
+  assert.deepEqual([p.pack_count, p.pack_net_mg, p.qty_kg], [9, 100_000, 0.9]);
+  // A product the catalogue never sent keeps its own SKU code, exactly as before.
+  const own = await productWithSku({ packSize: '100 g' });
+  const fg2 = await finishedGood({ coa: 'RELEASED', product: own, qty: 2, uomId: each.id });
+  const t2 = await tasks.ensurePutaway(fg2.fgBatchId, worker, { binCode: r.bins[1] });
+  const d2 = await tasks.completePutaway(t2.shelfTaskId, r.bins[1]!, worker);
+  assert.ok(d2.fgBatchReceived.sent);
+  assert.equal(d2.fgBatchReceived.payload.sku, own.skuCode);
+});

@@ -220,3 +220,19 @@ test('the relay delivers qc.batch.released signed over the exact bytes, as aggre
   const published = await testClient()`select published_at from bridge.outbox where id = ${event!.id}`;
   assert.ok(published[0]!.published_at);
 });
+
+test('STK-31: a product the Alembic catalogue sent is named on the QC release by ITS code, never by a pack SKU that sorts first', async () => {
+  // The joint rehearsal: a 100 g pack SKU made beside the catalogue's own SKU sorted first, the release for the
+  // whole oil batch went out under the pack SKU's code, Alembic knew no such product, and every lot of the batch
+  // would have stayed in quarantine.
+  const f = await fixture();
+  await spec(f.productId);
+  const commercial = `zz-commercial-${f.productId.slice(0, 8)}`;
+  await testClient()`insert into packaging.product_sku (product_id, sku_code, pack_size, status) values (${f.productId}, ${commercial}, null, 'ACTIVE')`;
+  await testClient()`insert into bridge.catalogue_item (alembic_sku_id, sku_code, name, classification, classification_basis, product_id, synced_by)
+                     values (${randomUUID()}, ${commercial}, 'Althair', 'blend', 'test', ${f.productId}, 'test')`;
+  const { coa: row } = await coa.recordCoa({ oilBatchId: f.batch.oilBatchId, ...PASSING, photos: [] }, qc);
+  await coa.releaseCoa(row.batchCoaId, qc);
+  const [ev] = await outboxFor(row.batchCoaId);
+  assert.deepEqual((ev!.payload as { product_ref: unknown }).product_ref, { factory_sku: commercial });
+});

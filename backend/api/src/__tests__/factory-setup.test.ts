@@ -35,6 +35,7 @@ import { FactorySetupController, CHECKLIST_PERMISSIONS } from '../factory-setup/
 import {
   floorCodeFor, itemProblems, requestProblems, planRackLayout, layoutCsv, layoutProblems, layoutBins, readQcDraft,
   decide, weakest, type CatalogueItem,
+  packSkuCode,
 } from '../factory-setup/catalogue.contract.js';
 import { ROLES as RA_ROLES } from '../../../../scripts/ra-roles.js';
 import { RA_PERMISSIONS } from '../../../../scripts/ra-permissions.js';
@@ -381,4 +382,41 @@ test('role gates: QC decisions need the QC spec write (qc, owner); racks need ra
   assert.deepEqual(holders(perms('decideQc')), ['owner', 'qc']);
   assert.deepEqual(holders(perms('decideRacks')), ['owner', 'warehouse']);
   for (const p of CHECKLIST_PERMISSIONS) assert.ok(RA_PERMISSIONS.includes(p as never), p);
+});
+
+test('STK-31: the catalogue makes one pack SKU per MASS pack the product is sold in; a volume gets none; syncing again makes none twice', async () => {
+  // The catalogue already carried the packs (100 g, 500 g, 1 kg, 5 kg) and the factory kept them as a note: to fill
+  // a 100 g bottle a person had to type a SKU, and nothing Alembic knew matched what they typed.
+  const sql = testClient();
+  const it = item({ pack_sizes: [
+    { label: '100 g', dimension: 'MASS', kg: 0.1, status: 'ok' }, { label: '1 kg', dimension: 'MASS', kg: 1, status: 'ok' },
+    { label: '30 ml', dimension: 'VOLUME', kg: null, status: 'needs_density' },
+  ] });
+  const r = res(await upsert([it]))[0]!;
+  const read = () => sql`select sku_code, pack_size, net_content_mg::text as n from packaging.product_sku where product_id = ${r.product_id} order by net_content_mg nulls first`;
+  let skus = await read();
+  assert.deepEqual(skus.map((s) => [s.pack_size, s.n]), [[null, null], ['100 g', '100000'], ['1 kg', '1000000']]);
+  assert.equal(skus[0]!.sku_code, it.sku_code, 'the bulk SKU still carries the ALEMBIC code, and is the one ALEMBIC is told');
+  assert.equal(r.product_sku_id, (await sql`select product_sku_id::text as id from packaging.product_sku where sku_code = ${it.sku_code}`)[0]!.id);
+  assert.deepEqual(skus.slice(1).map((s) => s.sku_code), [packSkuCode(it.sku_code, '100 g'), packSkuCode(it.sku_code, '1 kg')]);
+  // Again, renamed, and with a pack added: the two on file stay as they are and only the new one is made.
+  await upsert([{ ...it, name: 'Hedione Renamed', pack_sizes: [...it.pack_sizes, { label: '5 kg', dimension: 'MASS', kg: 5, status: 'ok' }] }]);
+  skus = await read();
+  assert.deepEqual(skus.map((s) => s.n), [null, '100000', '1000000', '5000000']);
+  // A person's own SKU of that net content is used, never doubled.
+  const mine = item({ pack_sizes: [{ label: '500 g', dimension: 'MASS', kg: 0.5, status: 'ok' }] });
+  const m = res(await upsert([{ ...mine, pack_sizes: [] }]))[0]!;
+  await sql`insert into packaging.product_sku (product_id, sku_code, pack_size, net_content_mg, status) values (${m.product_id}, ${`HAND-${mine.sku_code}`}, '500 g', 500000, 'ACTIVE')`;
+  await upsert([mine]);
+  assert.equal((await sql`select count(*)::int as n from packaging.product_sku where product_id = ${m.product_id} and net_content_mg = 500000`)[0]!.n, 1);
+});
+
+test('STK-31: a pack SKU code is made from the product code and the pack, fits the 50 characters a code may have, and never collides', () => {
+  assert.equal(packSkuCode('abf', '100 g'), 'abf:100G');
+  assert.equal(packSkuCode('abf', '1 kg'), 'abf:1KG');
+  const long = 'acqua-di-parma-bergamoto-di-calabria-identical';
+  const a = packSkuCode(long, '100 g'), b = packSkuCode(`${long}-x`, '100 g'), c = packSkuCode(long, '500 g');
+  for (const code of [a, b, c]) assert.ok(code.length <= 50 && /^[\x21-\x7e]+$/.test(code), code);
+  assert.equal(new Set([a, b, c]).size, 3);
+  assert.equal(packSkuCode(long, '100 g'), a, 'the same product and pack always give the same code');
 });

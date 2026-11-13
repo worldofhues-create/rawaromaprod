@@ -23,7 +23,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { assertNotMacerating, emitBridgeManualEvent, parsePackSizeMg, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, bridgeProductCode, emitBridgeManualEvent, parsePackSizeMg, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { SHELF_DB, type ShelfDb, type ShelfTx } from './shelf.tokens.js';
 import { ShelfLayoutService, WALK_ORDER_SQL, type BinLocation } from './shelf-layout.service.js';
 import { PickLightService, colourFor, type PickLightCommand } from './pick-light.service.js';
@@ -341,8 +341,10 @@ export class ShelfTaskService {
       ? ((await tx.execute(sql`select net_content_mg::text as n from packaging.product_sku where product_sku_id = ${fg.productSkuId}::uuid`)) as unknown as Array<{ n: string | null }>)
       : [];
     const packNetMg = sku?.n != null ? Number(sku.n) : parsePackSizeMg(fg.packSize);
+    // STK-31: the product by the code ALEMBIC's catalogue sent, when it sent one; a pack SKU's own code is the factory's.
+    const commercial = await bridgeProductCode(tx, fg.productId);
     const built = buildFgBatchReceived({
-      batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
+      batchNo: fg.batchNumber, sku: commercial ?? fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
       rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId, packNetMg,
     });
     if (!built.ok) {

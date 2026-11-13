@@ -9,20 +9,23 @@ const step = (k, v) => { B.steps[k] = v; console.log(label, k, JSON.stringify(v)
 const { formulas } = formulasOf(readSheet(xlsx));
 const f = formulas.find((x) => x.id === fid);
 const today = () => new Date().toISOString().slice(0, 10);
-const { g } = S.masters;
+const { g, kg } = S.masters;
 const batchMg = Number(batchG) * 1000;
+// STOCK-E2E-2: ORDER_UOM=kg plans and orders the same batch in kilograms (STK-7: it must scale to the same mg).
+const inKg = process.env.ORDER_UOM === 'kg';
+const orderUom = inKg ? kg : g, orderQty = inKg ? Number(batchG) / 1000 : Number(batchG);
 
 // What the formula says each line must be, exactly, in mg (the merged Vault lines).
 const exact = S.vault[fid].lines.map((l) => ({ k: l.k, materialId: S.mat[l.k].id, mg: (l.mg * batchMg) / f.totalMg }));
 
 if (!B.order) {
   const plan = (await C.must('production', 'POST', '/v1/production-plans', { planDate: today() })).productionPlanId;
-  const item = (await C.must('production', 'POST', '/v1/production-plan-items', { productionPlanId: plan, formulaId: S.vault[fid].formulaId, plannedQty: Number(batchG), uomId: g })).productionPlanItemId;
-  const o = await C.rp('production', 'POST', '/v1/production-orders', { formulaVersionId: S.vault[fid].fv, productionPlanItemId: item, orderQty: Number(batchG), uomId: g });
+  const item = (await C.must('production', 'POST', '/v1/production-plan-items', { productionPlanId: plan, formulaId: S.vault[fid].formulaId, plannedQty: orderQty, uomId: orderUom })).productionPlanItemId;
+  const o = await C.rp('production', 'POST', '/v1/production-orders', { formulaVersionId: S.vault[fid].fv, productionPlanItemId: item, orderQty, uomId: orderUom });
   if (o.status >= 300) { step('order', { status: o.status, error: o.error }); process.exit(1); }
   B.order = o.body.order.productionOrderId; B.plan = plan; B.planItem = item;
   const ings = o.body.ingredients ?? o.body.order?.ingredients ?? [];
-  step('order', { status: o.status, orderNumber: o.body.order.orderNumber, ingredientsReturned: Array.isArray(ings) ? ings.length : null, bodyKeys: Object.keys(o.body),
+  step('order', { status: o.status, orderedIn: inKg ? 'kg' : 'g', orderNumber: o.body.order.orderNumber, ingredientsReturned: Array.isArray(ings) ? ings.length : null, bodyKeys: Object.keys(o.body),
     reservation: o.body.reservation ? { linesReserved: o.body.reservation.linesReserved, shortLines: o.body.reservation.shortLines } : null });
 }
 // Reservation at planning (LD-19): is anything reserved by the order itself?
@@ -33,9 +36,11 @@ if (!B.pickList) {
   const pl = await C.rp('production', 'POST', `/v1/production-orders/${B.order}/pick-list`, { pickListDate: today() });
   if (pl.status >= 300) { step('pickList', { status: pl.status, error: pl.error }); process.exit(1); }
   B.pickList = pl.body.pickList.materialPickListId;
-  const items = pl.body.items ?? [];
+  // STOCK-FIX-RP: the pick-list route answers with a count; the lines and their mg are the order's reservation read.
+  const resvRead = await C.rp('production', 'GET', `/v1/production-orders/${B.order}/reservation`);
+  const items = pl.body.items ?? (resvRead.body?.lines ?? []).map((l) => ({ materialId: l.materialId, requiredMg: l.requiredMg }));
   // Scaling: the system's line quantity against the exact formula quantity, to the mg.
-  const sysMg = items.map((i) => ({ materialId: i.materialId, mg: Math.round(Number(i.pickedQty ?? i.requiredQty) * 1000) }));
+  const sysMg = items.map((i) => ({ materialId: i.materialId, mg: i.requiredMg != null ? Number(i.requiredMg) : Math.round(Number(i.pickedQty ?? i.requiredQty) * (i.uomId === kg ? 1_000_000 : 1000)) }));
   const diffs = exact.map((e) => { const s = sysMg.find((x) => x.materialId === e.materialId); return s ? s.mg - e.mg : null; });
   step('pickList', { status: pl.status, lines: items.length, formulaLines: exact.length, exactTotalMg: exact.reduce((s, e) => s + e.mg, 0), systemTotalMg: sysMg.reduce((s, x) => s + x.mg, 0),
     linesOff: diffs.filter((d) => d !== 0).length, maxOffMg: Math.max(...diffs.map((d) => Math.abs(d ?? 0))), missing: diffs.filter((d) => d === null).length, itemFields: Object.keys(items[0] ?? {}).join(','),
@@ -159,7 +164,7 @@ if (!B.oil) {
   // checked to be present or absent, never printed.
   if (process.env.REVEAL_PROBE === label) {
     // The mixer's user id: the subject of the access token the mixer already holds (it read the mix view above).
-    const tok = C.tokens.get('mixer|factory')?.token;
+    const tok = await C.tokenFor('mixer', 'factory');
     const mixerId = tok ? JSON.parse(Buffer.from(tok.split('.')[1], 'base64url').toString('utf8')).sub : null;
     probes.revealUnassigned = (await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {})).status;
     probes.assign = (await C.rp('production', 'POST', `/v1/floor/jobs/${B.job}/mix/assign`, { userId: mixerId })).status;

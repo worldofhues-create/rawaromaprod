@@ -78,6 +78,32 @@ const str = (v: unknown, max: number): v is string => typeof v === 'string' && v
 const optStr = (v: unknown, max: number): boolean => v === null || v === undefined || (typeof v === 'string' && v.length <= max);
 const optNum = (v: unknown): boolean => v === null || v === undefined || (typeof v === 'number' && Number.isFinite(v));
 
+/**
+ * STK-31 (STOCK-E2E-2): the code of the factory SKU that is ONE PACK of a catalogue product, made from the
+ * product's code and the pack's label ("abf" + "100 g" → "abf:100G"), so nobody types one. The catalogue's own
+ * SKU keeps the bare ALEMBIC code and is the bulk product. A code may be 50 characters; a product code too long
+ * to take the suffix is cut and given eight hex of its own hash, so two long codes never share a pack code.
+ */
+export function packSkuCode(productCode: string, packLabel: string): string {
+  const pack = packLabel.replace(/\s+/g, '').toUpperCase().replace(/[^\x21-\x7e]/g, '');
+  const whole = `${productCode}:${pack}`;
+  if (whole.length <= 50) return whole;
+  const hash = createHash('sha256').update(productCode).digest('hex').slice(0, 8);
+  return `${productCode.slice(0, 50 - pack.length - hash.length - 2)}~${hash}:${pack}`;
+}
+
+/** The mass packs of an item that can be filled and counted: a label, and a whole number of milligrams. */
+export function massPacks(item: Pick<CatalogueItem, 'pack_sizes'>): Array<{ label: string; netMg: number }> {
+  const out: Array<{ label: string; netMg: number }> = [];
+  for (const p of item.pack_sizes ?? []) {
+    if (p.dimension !== 'MASS' || p.status !== 'ok' || typeof p.kg !== 'number' || !(p.kg > 0)) continue;
+    const netMg = Math.round(p.kg * 1_000_000);
+    if (Math.abs(netMg - p.kg * 1_000_000) > 1e-6 || out.some((x) => x.netMg === netMg)) continue;
+    out.push({ label: p.label.trim(), netMg });
+  }
+  return out;
+}
+
 /** Problems with one item ([] = valid). Field names only — never the value back. */
 export function itemProblems(raw: unknown): string[] {
   if (!raw || typeof raw !== 'object') return ['item'];

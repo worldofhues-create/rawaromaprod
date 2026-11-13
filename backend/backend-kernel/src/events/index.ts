@@ -17,6 +17,7 @@ export {
   emitBridgeOutbound,
   emitBridgeToRequirement,
   emitBridgeManualEvent,
+  bridgeProductCode,
   type BridgeEmitTx,
 } from './bridge-emit.js';
 export { assertNotMacerating, macerationOnTransition, macerationProgress } from './maceration-gate.js';

@@ -19,8 +19,9 @@ const csvOf = (code, lines) => ['formula_code,material_code,percentage', ...line
 
 // The material catalogue reaches the Vault on a timer.
 await until('the catalogue on the Vault', async () => {
-  const r = await C.rp('formulator', 'GET', `/v1/vault/materials?q=${encodeURIComponent('REH-RM-196')}`, undefined, V);
-  return r.status === 200 && JSON.stringify(r.body).includes('REH-RM-196');
+  const last = Object.values(S.mat).filter((m) => !m.onFile).at(-1).code; // codes are minted, so the last one made is the one to wait for
+  const r = await C.rp('formulator', 'GET', `/v1/vault/materials?q=${encodeURIComponent(last)}`, undefined, V);
+  return r.status === 200 && JSON.stringify(r.body).includes(last);
 }, 60_000).catch(() => ev('catalogueOnVault', 'not seen by search within 60 s'));
 
 S.vault ??= {};
