@@ -13,11 +13,17 @@
  */
 import { BadRequestException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import type { Sql } from 'postgres';
-import { PG_CLIENT, type AuthPrincipal } from '@core/backend-kernel';
+import { PG_CLIENT, factoryRuleProblems, isFactoryRuleKey, type AuthPrincipal } from '@core/backend-kernel';
 import { evaluateRules, validateBody, describeRule, type PolicyBody } from './policy-engine.js';
+import { emitFactoryRulesState } from './factory-rules-state.js';
 
-/** The policies the plan names (§12.0). Other lanes evaluate these keys; nothing else exists. */
-export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework'] as const;
+/** The policies the plan names (§12.0), plus the factory rules (PROM-4 adds `fill.lot_server_assigned`) the storefront's process promises
+ *  rest on (PROM-2 `maceration.rest`, PROM-3 `qc.reference_required`; backend-kernel factory-rules.ts,
+ *  where the gates read them inside their own transactions). Other lanes evaluate these keys. */
+export const POLICY_KEYS = ['receiving.shortfall', 'floor.queue', 'procurement.payment_terms', 'planning.cover', 'qc.rework', 'maceration.rest', 'qc.reference_required', 'fill.lot_server_assigned', 'continuity.supplier_change_is_material'] as const;
+
+/** PROM-2/3: how recent a sign-in must be to save a factory rule (seconds). */
+export const FACTORY_RULE_FRESH_SECONDS = 300;
 
 /** Only these roles may override a policy on one record (§12.0). */
 export const OVERRIDE_ROLES = ['owner', 'admin'];
@@ -166,6 +172,20 @@ export class PolicyService {
     if (!why) throw new BadRequestException('Say why the rules are changing.');
     const problems = validateBody(body);
     if (problems.length) throw new BadRequestException(problems.join(' '));
+    // PROM-2/3: a factory rule's every possible value is checked before it can be in force, so a
+    // malformed rest rule is refused here rather than holding every batch on the floor.
+    const ruleProblems = factoryRuleProblems(key, body as PolicyBody);
+    if (ruleProblems.length) throw new BadRequestException(ruleProblems.join(' '));
+    // PROM-2/3 (FACTORY.md owner decision 1: "A rule that moves money or releases product needs a
+    // fresh code"): the rest and the reference rule release product, so saving one needs a sign-in
+    // proved within five minutes, the same window @FreshAuth gives early release and a reference.
+    // Here rather than on the route, which every other policy shares.
+    if (isFactoryRuleKey(key)) {
+      const age = Math.floor(Date.now() / 1000) - Number(principal.authTime);
+      if (!Number.isFinite(age) || age > FACTORY_RULE_FRESH_SECONDS || age < -5) {
+        throw new ForbiddenException(`Sign in again to save ${key}: a rule that releases product needs a sign-in from the last five minutes.`);
+      }
+    }
     await this.versionAt(key);
     return this.sql.begin(async (tx) => {
       // Serialise publishers on this policy so two saves cannot both become version N+1.
@@ -175,6 +195,9 @@ export class PolicyService {
       const next = row!.next;
       await tx`insert into platform.policy_version (policy_key, version, body, reason, created_by)
         values (${key}, ${next}, ${JSON.stringify(body)}::text::jsonb, ${why}, ${principal.userId})`;
+      // PROM-6: ALEMBIC is told the factory rules as they now stand, in this transaction, so the state
+      // and the version it describes commit together (factory-rules-state.ts).
+      if (isFactoryRuleKey(key)) await emitFactoryRulesState(tx, 'rule_change');
       return { key, version: next };
     });
   }
@@ -188,6 +211,18 @@ export class PolicyService {
 
   async override(key: string, recordType: string, recordId: string, value: unknown, reason: string, principal: AuthPrincipal) {
     this.assertOverrider(principal);
+    // PROM-2/3: no single-record value on a factory rule. A shorter rest for one batch is an early
+    // release, which needs a second person; a longer one is an extension; a QC comparison is never
+    // waived by a reason (system-led-operations.md 3.4).
+    if (isFactoryRuleKey(key)) {
+      throw new BadRequestException(key === 'maceration.rest'
+        ? 'The rest rule has no single-record override: a shorter rest for one batch is an early release (a second person approves it), a longer one is an extension.'
+        : key === 'fill.lot_server_assigned'
+          ? 'The lot rule has no single-record override: a pack never carries a lot number that no record holds.'
+          : key === 'continuity.supplier_change_is_material'
+            ? 'The supplier-change rule has no single-record override: whether a customer is told cannot depend on the batch.'
+          : 'The reference rule has no single-record override: a reason is not a test result.');
+    }
     const why = String(reason ?? '').trim();
     if (!why) throw new BadRequestException('An override needs a reason.');
     if (!String(recordType ?? '').trim() || !String(recordId ?? '').trim()) throw new BadRequestException('Name the record this override is for.');

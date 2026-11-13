@@ -36,6 +36,7 @@ import type {
   IfraCertificateValue,
   QcBatchReleasedPayload,
 } from "./compliance-events.js";
+import { checkQcPromiseBlockWire, checkFgPromiseBlockWire, type QcPromiseBlockWire, type FgPromiseBlockWire } from "./promise-events.js";
 
 /* ── 1. requirement fields ─────────────────────────────────────────────────────────────────── */
 
@@ -102,12 +103,23 @@ export interface FgBatchReceivedPayload {
    *  exactly. Sent only when the SKU's pack is a MASS on file; a volume is never sent as a mass. */
   readonly pack_count?: number;
   readonly pack_net_mg?: number;
+  /** PROM-4, optional: when the label carrying this lot was applied (ISO 8601 UTC). Absent when no label
+   *  was applied before the put-away. ALEMBIC records it as the lot's label print ("Lot printed at fill"). */
+  readonly label_applied_at?: string;
+  /** PROM-4, optional: true when RawProd's server minted the lot at fill; false for a lot made before
+   *  PROM-4, whose number was typed. Absent from an older sender. */
+  readonly lot_assigned_at_fill?: boolean;
+  /** PROM-6, optional: the process record of the compounded batch this lot was filled from (its rest, QC
+   *  rounds and reference, continuity key, opaque formula version id). Absent for a lot not made from an
+   *  oil batch, and from an older sender; ALEMBIC records the lot with those fields null. */
+  readonly promise?: FgPromiseBlockWire;
 }
 
 const isNonEmpty = (v: unknown, max = 200) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
 const isIsoInstant = (v: unknown) => typeof v === "string" && v.includes("T") && !Number.isNaN(Date.parse(v));
 
-/** Problems with an `fg.batch.received` payload ([] = valid). Exactly the six fields. */
+/** Problems with an `fg.batch.received` payload ([] = valid). The six fields, plus the optional
+ *  `qc_batch_no` and PROM-4's optional `label_applied_at` and `lot_assigned_at_fill`. */
 export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   const out: string[] = [];
   if (!isNonEmpty(p.batch_no, 64)) out.push("batch_no");
@@ -124,7 +136,10 @@ export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
     if (!whole(p.pack_net_mg)) out.push("pack_net_mg");
     if (whole(p.pack_count) && whole(p.pack_net_mg) && p.pack_count! * p.pack_net_mg! !== Math.round(p.qty_kg * 1_000_000)) out.push("pack_count x pack_net_mg is not qty_kg");
   }
-  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "pack_count", "pack_net_mg"]);
+  if (p.label_applied_at !== undefined && !isIsoInstant(p.label_applied_at)) out.push("label_applied_at");
+  if (p.lot_assigned_at_fill !== undefined && typeof p.lot_assigned_at_fill !== "boolean") out.push("lot_assigned_at_fill");
+  if (p.promise !== undefined) out.push(...checkFgPromiseBlockWire(p.promise, p.qc_batch_no ?? null));
+  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "pack_count", "pack_net_mg", "label_applied_at", "lot_assigned_at_fill", "promise"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }
@@ -191,6 +206,10 @@ export interface QcBatchReleasedWire {
   readonly best_before: string;
   readonly released_at: string;
   readonly qc_record_ref: string;
+  /** PROM-3 (promise-events.ts): optional, so an older sender still parses on ALEMBIC's side. */
+  readonly stages?: QcPromiseBlockWire["stages"];
+  readonly reference?: QcPromiseBlockWire["reference"];
+  readonly is_reference_batch?: boolean;
 }
 
 /** Specific gravity as it prints: at least three decimals, the fourth only when it is not 0
@@ -223,6 +242,8 @@ export function toQcBatchReleasedWire(
     /** The analyst's conformance calls (the internal record carries only the descriptions). */
     colourAppearancePass: boolean;
     odourPass: boolean;
+    /** PROM-3: the QC 1 / QC 2 rounds and the retained reference they compared with. */
+    promise?: QcPromiseBlockWire;
   },
 ): QcBatchReleasedWire {
   const sg = internal.results.find((r) => r.test === "specific_gravity_20_4");
@@ -263,6 +284,7 @@ export function toQcBatchReleasedWire(
     best_before: internal.bestBefore,
     released_at: internal.releasedAt,
     qc_record_ref: opts.qcRecordRef,
+    ...(opts.promise ? { stages: opts.promise.stages, reference: opts.promise.reference, is_reference_batch: opts.promise.is_reference_batch } : {}),
   };
 }
 
@@ -291,6 +313,7 @@ export function checkQcBatchReleasedWire(p: QcBatchReleasedWire): string[] {
   if (!ISO_DATE.test(p.best_before ?? "") || p.best_before <= p.production_date) out.push("best_before");
   if (!isIsoInstant(p.released_at)) out.push("released_at");
   if (!isNonEmpty(p.qc_record_ref)) out.push("qc_record_ref");
+  out.push(...checkQcPromiseBlockWire(p));
   // A passed verdict must not contradict itself: every line passed and every number in spec.
   if (p.status === "passed") {
     for (const r of p.results ?? []) {

@@ -23,6 +23,15 @@ const ALEMBIC_INBOUND_EVENT_TYPES = [
   'QcStatusChanged', 'PackagingStarted', 'FgBatchAvailable', 'AtpAllocationGranted', 'DispatchReady', 'Dispatched',
   'ProductionRequirementCancelledAck', 'ProductionRequirementCompleted',
   'qc.batch.released', 'compliance.certificate.calculated', 'fg.batch.received',
+  // PROM-2: alembic lane/prom packages/domain/src/bridge/envelope.ts (ALEMBIC accepts first, then RawProd sends).
+  'batch.rest.recorded',
+  // PROM-3: alembic lane/prom 87390015 packages/domain/src/bridge/envelope.ts.
+  'qc.reference.established',
+  // PROM-5: alembic lane/prom packages/domain/src/bridge/envelope.ts.
+  'product.continuity.current',
+  'product.material.changed',
+  // PROM-6: alembic lane/prom 5142a7df packages/domain/src/bridge/envelope.ts.
+  'factory.rules.state', 'batch.rest.started',
   'procurement.vendor.upserted', 'procurement.po.issued', 'procurement.po.amended', 'procurement.po.cancelled', 'inventory.grn.created',
   'SalesOrderManualContinuityCreated', 'SalesOrderManualContinuityConfirmed', 'SalesOrderManualContinuityItemAdded',
   // IMPORT-RP-COST (LD-156, 2026-11-13): NOT copied from an ALEMBIC commit. The lead gave both sides the

@@ -5,7 +5,7 @@
  * In-schema FK: finished_good_batch_master → finished_goods_batch_consumption.
  * package_order/product_sku/consumed_for_document/uom are id-only soft refs.
  */
-import { date, index, numeric, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
+import { boolean, date, index, integer, numeric, timestamp, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { packaging } from "./_schema.js";
 
@@ -21,6 +21,10 @@ export const finishedGoodBatchMaster = packaging.table(
     uomId: uuid("uom_id"), // soft ref → platform.uom_master
     manufacturingDate: date("manufacturing_date"),
     expiryDate: date("expiry_date"),
+    /* PROM-4: true when the server minted this lot at fill (fill.lot_server_assigned); false on a lot
+       made before PROM-4, whose number was typed. The rule version that minted it beside it. */
+    lotAssignedAtFill: boolean("lot_assigned_at_fill").notNull().default(false),
+    lotRuleVersion: integer("lot_rule_version"),
     ...metaColumns(),
   },
   (t) => [

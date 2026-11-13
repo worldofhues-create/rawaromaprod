@@ -41,7 +41,7 @@ import {
 } from '@nestjs/common';
 import { and, eq, sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { bridgeProductCode, emitBridgeManualEvent, emitBridgeOutbound, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { bridgeProductCode, emitBridgeManualEvent, emitBridgeOutbound, qcPromiseBlockOf, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import type { ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
@@ -281,6 +281,7 @@ export class CoaService {
       const wire = bridgeContracts.toQcBatchReleasedWire(payload, {
         status: 'passed', factorySku, qcRecordRef: coa.batchCoaId,
         colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+        promise: await this.promiseBlock(tx, coa.oilBatchId),
       });
       const wireProblems = bridgeContracts.checkQcBatchReleasedWire(wire);
       if (wireProblems.length > 0) throw new ConflictException(`The release could not be sent: ${wireProblems.join(', ')}.`);
@@ -342,6 +343,7 @@ export class CoaService {
         const wire = bridgeContracts.toQcBatchReleasedWire(internal, {
           status: 'failed', factorySku, qcRecordRef: coa.batchCoaId,
           colourAppearancePass: coa.colourAppearancePass, odourPass: coa.odourPass,
+          promise: await this.promiseBlock(tx, coa.oilBatchId),
         });
         if (bridgeContracts.checkQcBatchReleasedWire(wire).length === 0) {
           bridgeContracts.assertNoFormulaContent(wire);
@@ -362,6 +364,18 @@ export class CoaService {
   }
 
   /* ── helpers ─────────────────────────────────────────────────────────────────────────── */
+
+  /**
+   * PROM-3: what the lot page shows a customer about QC 1 and QC 2 -- each staged round, and the
+   * retained reference the latest round compared with (null when it compared with none: the page
+   * then says "Not on file"). `is_reference_batch` only when this batch IS an approved reference.
+   * Opaque refs and codes only: no product name, material or person crosses.
+   */
+  async promiseBlock(tx: Tx | ProductionDb, oilBatchId: string): Promise<bridgeContracts.QcPromiseBlockWire> {
+    // PROM-6: one implementation, in the kernel, shared with the finished-good receipt's promise block.
+    return qcPromiseBlockOf(tx, oilBatchId);
+  }
+
 
   /**
    * The factory SKU a QC fact names (DOCS-001 `product_ref.factory_sku`): the SKU of an ALEMBIC

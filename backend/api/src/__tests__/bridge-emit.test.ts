@@ -381,7 +381,7 @@ test('packaging BatchService.produceFinishedGoodBatch: does NOT emit FgBatchAvai
   const packageOrderId = await packageOrderFor(oilBatchId);
 
   await svc.produceFinishedGoodBatch(
-    { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: 'FG-1', producedQty: 10 },
+    { packageOrderId, productSkuId: crypto.randomUUID(), producedQty: 10 },
     principal(),
   );
 
@@ -397,7 +397,7 @@ test('packaging BatchService.produceFinishedGoodBatch: nothing emitted for a Raw
   const packageOrderId = await packageOrderFor(oilBatchId);
 
   await svc.produceFinishedGoodBatch(
-    { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: 'FG-2', producedQty: 10 },
+    { packageOrderId, productSkuId: crypto.randomUUID(), producedQty: 10 },
     principal(),
   );
   await assertOilBatchHasNoProductionOrder(oilBatchId);
@@ -508,7 +508,7 @@ test('packaging BatchService.produceFinishedGoodBatch: refused (409) on a DRAFT 
     values (${packageOrderId}, ${oilBatchId}, 'DRAFT')`;
   await assert.rejects(
     () => svc.produceFinishedGoodBatch(
-      { packageOrderId, productSkuId: crypto.randomUUID(), batchNumber: `FG-D-${packageOrderId.slice(0, 6)}`, producedQty: 1 },
+      { packageOrderId, productSkuId: crypto.randomUUID(), producedQty: 1 },
       principal(),
     ),
     (e: unknown) => e instanceof ConflictException && /status is DRAFT/.test((e as Error).message),

@@ -31,10 +31,13 @@ export const macerationRun = production.table(
     status: varchar("status", { length: 16 }).notNull().default("MACERATING"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull(),
     minDays: integer("min_days").notNull(),
-    maxDays: integer("max_days").notNull(),
+    // PROM-2: null = no maximum set (the branch rule sets none and no formula setting applies).
+    maxDays: integer("max_days"),
     extendDays: integer("extend_days").notNull().default(0),
     freezeRequired: boolean("freeze_required").notNull().default(false),
-    qc1ProductionQcId: uuid("qc1_production_qc_id").notNull(),
+    // PROM-3: QC 1 is a round (qc1_round_id) when qc.reference_required is on; a typed reading otherwise.
+    qc1ProductionQcId: uuid("qc1_production_qc_id"),
+    qc1RoundId: uuid("qc1_round_id"),
     freezeDoneAt: timestamp("freeze_done_at", { withTimezone: true }),
     freezeDoneBy: uuid("freeze_done_by"),
     alarmAt: timestamp("alarm_at", { withTimezone: true }),
@@ -42,6 +45,17 @@ export const macerationRun = production.table(
     earlyReleaseBy: uuid("early_release_by"),
     earlyReleaseReason: text("early_release_reason"),
     restartCount: integer("restart_count").notNull().default(0),
+    // PROM-2 (migration 2026-11-16-prom-2-rest-rule): the branch rule this run rests under, the
+    // two-person early release (early_release_by asks, early_release_approved_by approves, never the
+    // same person), and on close the days actually rested.
+    ruleDays: integer("rule_days"),
+    ruleVersion: integer("rule_version"),
+    ruleSource: varchar("rule_source", { length: 20 }),
+    earlyReleaseRequestedAt: timestamp("early_release_requested_at", { withTimezone: true }),
+    earlyReleaseReasonCode: varchar("early_release_reason_code", { length: 40 }),
+    earlyReleaseApprovedBy: uuid("early_release_approved_by"),
+    daysRested: integer("days_rested"),
+    restShort: boolean("rest_short"),
     closedAt: timestamp("closed_at", { withTimezone: true }),
     createdBy: uuid("created_by"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),

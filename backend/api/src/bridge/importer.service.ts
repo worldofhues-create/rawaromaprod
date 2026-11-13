@@ -22,7 +22,7 @@ import { openSecret } from './secret-box.js';
 import { verifyBody } from './signing.js';
 import {
   validateEnvelope, INBOUND_FROM_ALEMBIC, decideInbound, decideAcceptance,
-  validateInboundPayload, isPermanentDbError, BRIDGE_CODES, normalizeRequirementPayload,
+  validateInboundPayload, isPermanentDbError, BRIDGE_CODES, normalizeRequirementPayload, requirementHoldOf,
   type LocalStatus, type BridgeEnvelope, type NormalizedRequirementFields,
 } from './contract.js';
 import { convertQty } from './quantity.js';
@@ -46,6 +46,12 @@ export interface ImportResult {
     readonly permanent?: boolean;
     readonly code?: string;
   };
+}
+
+/** PROM-9: the columns a hold sets. `undefined` (no `hold` field) writes nothing. */
+function holdColumns(h: ReturnType<typeof requirementHoldOf>): { customerHoldReason?: string | null; customerHoldSince?: Date | null } {
+  if (h === undefined) return {};
+  return h === null ? { customerHoldReason: null, customerHoldSince: null } : { customerHoldReason: h.reasonCode, customerHoldSince: h.since };
 }
 
 @Injectable()
@@ -291,6 +297,9 @@ export class ImporterService {
       lotPolicy: n.lotPolicy,
       // A new need-by date may make it overdue again later: re-arm the overdue alert.
       overdueAlertedAt: n.neededBy ? null : undefined,
+      // PROM-9: ALEMBIC holds (or releases) a made-to-order requirement while the customer has not
+      // confirmed a material-change notice. Absent leaves the hold as it was.
+      ...holdColumns(requirementHoldOf(p)),
       lastAppliedVersion: sql`${productionRequirement.lastAppliedVersion} + 1`,
     }).where(eq(productionRequirement.alembicRequirementId, env.aggregate.id));
     if (bridgeContracts.isHighValue(n.priorityReason, n.orderValueInr)) {

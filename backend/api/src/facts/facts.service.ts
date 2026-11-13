@@ -200,11 +200,17 @@ export class FactsService {
         });
       }
 
+      /* PROM-3: a QC round (QC 1 / QC 2 against the retained reference) is the verdict now, so a batch
+         whose LATEST round holds or rejects it is a blocker as well as a typed reading that does. */
       const [qcHold] = (await this.sql`
-        select count(*)::int c from production.production_qc pq
-          join production.oil_batch_master ob on ob.oil_batch_id = pq.oil_batch_id
-         where ob.production_order_id = ${productionOrderId}
-           and upper(coalesce(pq.result, '')) in ('HOLD', 'FAIL', 'REJECT')`) as Array<{ c: number }>;
+        select ((select count(*) from production.production_qc pq
+                   join production.oil_batch_master ob on ob.oil_batch_id = pq.oil_batch_id
+                  where ob.production_order_id = ${productionOrderId}
+                    and upper(coalesce(pq.result, '')) in ('HOLD', 'FAIL', 'REJECT'))
+              + (select count(*) from production.oil_batch_master ob
+                  where ob.production_order_id = ${productionOrderId}
+                    and (select r.decision from quality.batch_qc_round r where r.oil_batch_id = ob.oil_batch_id order by r.round_no desc limit 1)
+                        in ('REJECT', 'HOLD_RETEST', 'HOLD_CAPA', 'REVIEW')))::int c`) as Array<{ c: number }>;
       if ((qcHold?.c ?? 0) > 0) {
         blockers.push({ kind: "qc_hold", detail: `${qcHold!.c} QC result(s) on hold or failed` });
       }
@@ -380,7 +386,19 @@ export class FactsService {
        where ob.batch_number = ${batchNumber}
        order by pq.inspection_dt desc nulls last
        limit 5`) as Array<Record<string, unknown>>;
-    if (oil.length > 0) return { batchNumber, batchType: "oil", inspections: oil };
+    /* PROM-3: the QC rounds are the verdict (QC 1 before the rest, QC 2 after it, each against the
+       retained reference). A typed reading above is only a reading, so the answer names the latest
+       round as the verdict, or none: never a reading dressed as a release. */
+    const rounds = (await this.sql`
+      select r.stage, r.decision, r.reference_basis as "referenceBasis", r.created_dt as "decidedAt"
+        from quality.batch_qc_round r
+        join production.oil_batch_master ob on ob.oil_batch_id = r.oil_batch_id
+       where ob.batch_number = ${batchNumber}
+       order by r.round_no desc
+       limit 5`) as Array<Record<string, unknown>>;
+    if (oil.length > 0 || rounds.length > 0) {
+      return { batchNumber, batchType: "oil", verdict: rounds[0] ?? null, rounds, inspections: oil };
+    }
 
     return null;
   }
@@ -616,10 +634,15 @@ export class FactsService {
          order by inspection_dt desc nulls last, created_dt desc
          limit 5`) as Array<{ result: string | null; status: string | null; inspectionDt: Date | null }>;
       const held = inspections.find((i) => /HOLD|FAIL|REJECT/i.test(i.result ?? ""));
+      /* PROM-3: the latest QC round is the verdict; a round that holds or rejects outranks a reading. */
+      const [round] = (await this.sql`
+        select stage, decision from quality.batch_qc_round where oil_batch_id = ${oil.id as string}
+         order by round_no desc limit 1`) as Array<{ stage: string | null; decision: string }>;
+      const roundHeld = round && /HOLD|REJECT/.test(round.decision) ? round.decision : null;
       const { id: _id, ...batch } = oil;
       return {
-        batchNumber, batchType: "oil", ...batch, inspections,
-        reason: quarantineReason(String(oil.status ?? ""), held?.result ?? inspections[0]?.result ?? null, null),
+        batchNumber, batchType: "oil", ...batch, inspections, latestRound: round ?? null,
+        reason: quarantineReason(String(oil.status ?? ""), roundHeld ?? held?.result ?? inspections[0]?.result ?? null, null),
       };
     }
     const [fg] = (await this.sql`

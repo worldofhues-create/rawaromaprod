@@ -51,6 +51,26 @@ export const OUTBOUND_TO_ALEMBIC = [
   // ALEMBIC allocates it to the orders waiting for it. A fact about the FG batch (aggregate
   // `fg_batch`), not a requirement step. Payload: @core/contracts bridge.FgBatchReceivedPayload.
   'fg.batch.received',
+  // PROM-2 (LD-85): a maceration run closed on release; the lot page's "Rested 45 days" comes from
+  // it. A fact about the run (aggregate `maceration_run`). Payload: @core/contracts
+  // bridge.BatchRestRecordedWire. ALEMBIC accepts it first (lane/prom), then this side sends it.
+  'batch.rest.recorded',
+  // PROM-3 (LD-85): a second person approved a batch's retained sample as its product's reference;
+  // the lot page's "This batch is the retained reference" comes from it. Aggregate `reference_standard`.
+  // Payload: @core/contracts bridge.QcReferenceEstablishedWire. ALEMBIC accepts it first (lane/prom 87390015).
+  'qc.reference.established',
+  // PROM-5 (LD-85): a product's continuity key changed, and what kind of material change that was
+  // (formula version, a raw material's supplier, the retained reference). Aggregates
+  // `product_continuity` / `material_change`. Payloads: @core/contracts bridge.ProductContinuityCurrentWire,
+  // bridge.ProductMaterialChangedWire. ALEMBIC accepts them first (lane/prom).
+  'product.continuity.current',
+  'product.material.changed',
+  // PROM-6 (LD-85): the factory's process-promise rules with the enforcement version of the code that
+  // enforces each (on every change, daily and at start; aggregate `factory_rules`), and a rest that has
+  // begun or was extended (aggregate `maceration_run`). Payloads: @core/contracts
+  // bridge.FactoryRulesStateWire, bridge.BatchRestStartedWire. ALEMBIC accepts them first (lane/prom).
+  'factory.rules.state',
+  'batch.rest.started',
   // ALEMBIC Books phase 2 (owner 2026-10-09): payables facts -- a purchase order issued, amended or
   // cancelled, and a goods receipt, each carrying its vendor -- for ALEMBIC's three-way match.
   // Emitted via backend-kernel events/payables-facts.ts; contract docs/bridge/PAYABLES_FACTS.md.
@@ -247,6 +267,30 @@ export function normalizeRequirementPayload(p: Record<string, unknown>): Normali
   return out;
 }
 
+/* PROM-9 (ALEMBIC process-promises.md PROM-9, made to order): ALEMBIC holds a requirement whose
+ * product's oil changed after the order was placed, until the customer confirms the notice, and says so
+ * on ProductionRequirementChanged as `hold: { reason_code, since } | null` (ALEMBIC
+ * packages/domain/src/bridge/outbound-payload.ts requirementHoldPayload; the shared fixture is
+ * test-support/fixtures/requirement-hold.json). A held requirement is never planned or linked to a run.
+ * The reason codes are a closed list on both sides; nothing about the customer or the notice crosses. */
+export const REQUIREMENT_HOLD_REASONS = ['material_change_unacknowledged'] as const;
+export type RequirementHoldReason = (typeof REQUIREMENT_HOLD_REASONS)[number];
+
+export function isRequirementHold(v: unknown): v is { reason_code: RequirementHoldReason; since: string } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const h = v as Record<string, unknown>;
+  if (Object.keys(h).some((k) => k !== 'reason_code' && k !== 'since')) return false;
+  return (REQUIREMENT_HOLD_REASONS as readonly unknown[]).includes(h.reason_code) && isIsoInstant(h.since);
+}
+
+/** What a Changed payload says about the hold: `undefined` = nothing (leave it), `null` = released. */
+export function requirementHoldOf(payload: Record<string, unknown>): { reasonCode: RequirementHoldReason; since: Date } | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'hold')) return undefined;
+  if (payload.hold === null) return null;
+  if (!isRequirementHold(payload.hold)) return undefined;
+  return { reasonCode: payload.hold.reason_code, since: new Date(payload.hold.since) };
+}
+
 export function validateInboundPayload(type: string, payload: Record<string, unknown>): readonly PayloadProblem[] {
   const problems: PayloadProblem[] = [];
   const present = (field: string) => {
@@ -305,6 +349,10 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       optional('uom', (v) => isNonEmptyString(v, 20) && isConvertibleUnit(v)); // FLOOR-FIX-13
       optional('needed_by', isIsoInstant);
       newFields();
+      // PROM-9: `hold` present means "held" (an object) or "released" (null); absent means unchanged.
+      if (Object.prototype.hasOwnProperty.call(payload, 'hold') && payload.hold !== null && !isRequirementHold(payload.hold)) {
+        problems.push('hold:invalid');
+      }
       break;
     case 'ProductionRequirementCancelled':
       if (sales) optional('request_ref', (v) => isNonEmptyString(v, 100));

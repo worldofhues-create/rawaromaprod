@@ -1,0 +1,10 @@
+{
+  "held": {
+    "requirement_id": "0192f5a0-7c3e-7a10-9b2d-4e5f60718293",
+    "hold": { "reason_code": "material_change_unacknowledged", "since": "2026-11-13T07:00:00.000Z" }
+  },
+  "released": {
+    "requirement_id": "0192f5a0-7c3e-7a10-9b2d-4e5f60718293",
+    "hold": null
+  }
+}

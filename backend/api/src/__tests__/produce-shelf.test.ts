@@ -113,6 +113,11 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
     // (25 kg), so the receipt names its packs: four drums of 25,000,000 mg.
     pack_count: 4, pack_net_mg: 25_000_000,
     released_at: '2026-09-21T09:30:00.000Z', _correlation_id: req.correlationId, _org_id: req.orgId,
+    // PROM-4: a lot made by this fixture was typed, not minted at fill, and carries no applied label yet.
+    lot_assigned_at_fill: false,
+    // PROM-6: the batch's process record travels with the lot. This fixture's batch has no closed rest, no
+    // staged QC round and no continuity record, so each part is null (ALEMBIC prints "Not on file").
+    promise: { oil_batch_no: fg.oilBatchNo, rest: null, qc: null, continuity_key: null, formula_version_ref: null },
   });
 
   const relay = new BridgeRelayService(bridgeDb(), new ConfigService({ DATABASE_URL: 'postgres://apple@localhost:5432/unused', JWT_SECRET: 'x'.repeat(32) }));
@@ -135,6 +140,8 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
   assert.deepEqual(env.payload, {
     batch_no: fg.fgBatchNo, qc_batch_no: fg.oilBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1], released_at: '2026-09-21T09:30:00.000Z',
     pack_count: 4, pack_net_mg: 25_000_000, // STK-21: the packs, as stored above
+    lot_assigned_at_fill: false,
+    promise: { oil_batch_no: fg.oilBatchNo, rest: null, qc: null, continuity_key: null, formula_version_ref: null },
   });
   assert.deepEqual(contracts.validateFgBatchReceived(env.payload), []);
 });

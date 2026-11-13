@@ -53,6 +53,11 @@ export const productionRequirement = bridge.table(
     produceBlockedAt: timestamp("produce_blocked_at", { withTimezone: true }),
     // Set once the requirement's "overdue" alert has been raised (so it is raised once).
     overdueAlertedAt: timestamp("overdue_alerted_at", { withTimezone: true }),
+    // PROM-9 (migration 2026-11-19-prom-9-requirement-hold.sql): ALEMBIC holds a made-to-order
+    // requirement while the customer has not confirmed a material-change notice; it is never planned
+    // or linked while held. Both null = not held. Nothing about the customer crosses.
+    customerHoldReason: varchar("customer_hold_reason", { length: 40 }),
+    customerHoldSince: timestamp("customer_hold_since", { withTimezone: true }),
 
     // Mirrors the ALEMBIC lifecycle vocabulary exactly (requirement.ts on that side),
     // so a support engineer reading either database sees the same word for the same fact.

@@ -159,6 +159,11 @@ import * as bridgeSchema from '@ra/data-bridge';
 
 // ── G3 automation layer ─────────────────────────────────────────────────────
 import { MaterialShortageService } from '../backend/api/src/automation/material-shortage.service.js';
+// PROM-2 / PROM-3: a batch is released only through QC 1 and QC 2 rounds and a served (or two-person
+// early) rest, so the demo walks that real path too.
+import { QcFloorService } from '../backend/api/src/prodfloor/qc-floor.service.js';
+import { PolicyService } from '../backend/api/src/policy/policy.service.js';
+import { MacerationService } from '../backend/api/src/floor-ops/maceration.service.js';
 import { QuarantineIntakeService } from '../backend/api/src/automation/quarantine-intake.service.js';
 import { IncomingQcOutcomeService } from '../backend/api/src/automation/incoming-qc-outcome.service.js';
 import { PackagingReleaseService } from '../backend/api/src/automation/packaging-release.service.js';
@@ -505,6 +510,8 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
     // scan() read the same "not really a Date" symptom (`r.updated_dt.toISOString is not a
     // function`) off the shared, heavily-used pool.
     const alertsService = new AutomationAlertsService(tutorialSql);
+    const qcFloorService = new QcFloorService(sql, new PolicyService(sql));
+    const macerationService = new MacerationService(sql);
 
     const svc = {
       orgService, securityService, classificationService, materialService, masterdataLookup,
@@ -516,7 +523,7 @@ export async function runDemoSeedFactory(opts: DemoSeedOptions = {}): Promise<Fa
       packagingOrdersService, packagingBatchService, reservationService, salesMastersService,
       salesOrdersService, dispatchService, packagingQcService, fgLabelService, weighingService, tutorialService, importerService,
       configAdminService, materialShortageService, quarantineIntakeService,
-      incomingQcOutcomeService, packagingReleaseService, alertsService,
+      incomingQcOutcomeService, packagingReleaseService, alertsService, qcFloorService, macerationService,
     };
 
     const ctx: Ctx = { sql, svc, bridgeHmacSecret };
@@ -653,6 +660,8 @@ interface Ctx {
     incomingQcOutcomeService: IncomingQcOutcomeService;
     packagingReleaseService: PackagingReleaseService;
     alertsService: AutomationAlertsService;
+    qcFloorService: QcFloorService;
+    macerationService: MacerationService;
   };
 }
 
@@ -1798,25 +1807,43 @@ async function ensureBridgeProductionAndFactory(
     }
     await ctx.svc.mixingService.endSession(sessionId, { sessionEndDt: ago(78 - i * 2).toISOString() }, users.compounding);
 
-    const oilBatchNumber = `DEMO-OIL-${String(i + 1).padStart(4, '0')}`;
+    // PROM-4: the server assigns the batch number; the seed reads it back.
     // STOCK-FIX-RP (STK-10, STK-11): the oil is a stock that packing draws down, so the demo's
     // quantities carry their unit (kg) from the oil batch through the package order, the fill and the
     // finished-goods batch. The figures are the demo's own, unchanged.
     const kgId = ((await ctx.sql`select uom_id::text as id from platform.uom_master where uom_code = 'KG' limit 1`)[0] as { id: string }).id;
     const oilBatch = await ctx.svc.productionBatchService.produceOilBatch({
-      productionOrderId, secureMixingSessionId: sessionId, batchNumber: oilBatchNumber,
+      productionOrderId, secureMixingSessionId: sessionId,
       producedQty: Math.floor(orderQty * 0.95), uomId: kgId, producedDt: ago(77 - i * 2).toISOString(),
     }, users.compounding);
     const oilBatchId = extractId(oilBatch, 'oilBatchId');
+    const oilBatchNumber = String((oilBatch as { batch: { batchNumber: string } }).batch.batchNumber);
     oilBatchCount++;
     await ctx.svc.productionBatchService.recordProductionQc({
       oilBatchId, observedValue: 0.97, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(76 - i * 2).toISOString(),
     }, users.qc);
+    // PROM-3: QC 1 is a full round on the product's checkpoints, which include the comparison with its
+    // retained reference. The demo establishes no reference (a reference is a physical bottle QC
+    // proposes), so every demo round records NO_REFERENCE_YET and no lot claims a comparison.
+    const qcProductId = ((await ctx.sql`select product_id::text as id from packaging.product_sku where product_sku_id = ${skuId}`)[0] as { id: string }).id;
+    const cps = await ensureDemoCheckpoints(ctx, qcProductId, users.qc);
+    const allPass = cps.map((c) => ({ checkpointId: c.id, pass: true }));
+    await ctx.svc.qcFloorService.recordRound(oilBatchId, { productId: qcProductId, results: allPass }, users.qc);
     await ctx.svc.productionBatchService.transitionOilBatch(oilBatchId, 'IN_MATURATION', users.qc);
-    // OPS-GREEN Act L: the final QC after maturation is what releases the batch.
+    // PROM-2: every batch rests 45 days. A demo cannot wait, so it takes the one honest path a real
+    // floor has: an early release asked by QC and approved by a second person (the owner), recorded as
+    // such -- the rest record it sends says early_release true, never "rested 45 days".
+    const run = (await ctx.sql`select maceration_run_id::text as id from production.maceration_run where oil_batch_id = ${oilBatchId} and status = 'MACERATING'`)[0] as { id: string };
+    await ctx.svc.macerationService.requestEarlyRelease(run.id, { reasonCode: 'other', reason: 'demo data: the showcase cannot wait for the rest' }, users.qc);
+    await ctx.svc.macerationService.approveEarlyRelease(run.id, { note: 'demo data' }, users.owner);
+    // OPS-GREEN Act L: the final QC after maturation is what releases the batch (PROM-3: QC 2, with a
+    // retained sample of the batch on file).
+    await ctx.sql`insert into quality.qc_sample_retention (oil_batch_id, sample_code, retained_dt, retained_by, status, created_by, updated_by)
+                  values (${oilBatchId}, ${'DEMO-RS-' + oilBatchNumber}, now(), ${users.qc.userId}, 'ACTIVE', ${users.qc.userId}, ${users.qc.userId})`;
     await ctx.svc.productionBatchService.recordProductionQc({
       oilBatchId, observedValue: 0.98, specMin: 0.9, specMax: 1.1, inspectedBy: users.qc.userId, inspectionDt: ago(75 - i * 2).toISOString(),
     }, users.qc);
+    await ctx.svc.qcFloorService.recordRound(oilBatchId, { results: allPass }, users.qc);
     await ctx.svc.productionBatchService.transitionOilBatch(oilBatchId, 'RELEASED', users.qc);
 
     // Lane produce: QC certification is the gate to labelling and put-away. Record the batch's
@@ -1854,9 +1881,9 @@ async function ensureBridgeProductionAndFactory(
     }, users.filling);
     await ctx.svc.packagingOrdersService.endFillingSession(fillingSessionId, { sessionEndDt: ago(56 - i * 2).toISOString() }, users.filling);
 
-    const fgBatchNumber = `DEMO-FG-${String(i + 1).padStart(4, '0')}`;
+    // PROM-4: the lot is assigned at fill by the server.
     const fgBatch = await ctx.svc.packagingBatchService.produceFinishedGoodBatch({
-      packageOrderId, productSkuId: skuId, batchNumber: fgBatchNumber, producedQty: Math.floor(orderQty * 0.88), uomId: kgId,
+      packageOrderId, productSkuId: skuId, producedQty: Math.floor(orderQty * 0.88), uomId: kgId,
       manufacturingDate: isoDate(55 - i * 2), expiryDate: isoDate(-1090),
     }, users.packaging);
     const fgBatchId = extractId(fgBatch, 'finishedGoodBatchId');
@@ -1940,6 +1967,18 @@ async function ensureBridgeProductionAndFactory(
  * ════════════════════════════════════════════════════════════════════════ */
 
 const MATERIAL_SHORTAGE_RULE = 'material_shortage_to_draft_pr';
+
+/** PROM-3: the product's checkpoint set, published once (the reference promise needs a REFERENCE
+ *  checkpoint). Run twice -> the same set, nothing added. */
+async function ensureDemoCheckpoints(ctx: Ctx, productId: string, qc: AuthPrincipal): Promise<Array<{ id: string }>> {
+  const existing = await ctx.svc.qcFloorService.checkpoints(productId);
+  if (existing.checkpoints.length) return existing.checkpoints;
+  await ctx.svc.qcFloorService.publish(productId, {
+    reason: 'Demo checkpoints: clarity, and the odour compared with the retained reference',
+    checkpoints: [{ name: 'Clarity', checkType: 'PASS_FAIL' }, { name: 'Odour against the retained reference', checkType: 'REFERENCE' }],
+  }, qc);
+  return (await ctx.svc.qcFloorService.checkpoints(productId)).checkpoints;
+}
 
 async function poisonProductionOrder(ctx: Ctx, marker: string, materialId: string): Promise<string> {
   const existing = (await ctx.sql`

@@ -7,14 +7,19 @@
  *                              transaction — record `packaging.fg_batch.created`. Published iff
  *                              the batch + consumption committed.
  *
+ * PROM-4 (LD-85, "Every pack carries a lot number tied to its batch record"): the lot is minted HERE,
+ * at fill, from the sequence `packaging.fg_lot_seq` as FG-<yymm>-<nnnnn>, and a batchNumber in the
+ * body is refused ("The lot is assigned at fill"). Never Math.random, never typed: the number on the
+ * pack is the number on the record because there is only one place it is made.
+ *
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics are
  * stringified at insert (num); ISO timestamps → Date; manufacturing/expiry are plain date
  * strings (stored as-is). package_order / product_sku / consumed_for_document / uom are
  * dict-soft refs (plain uuid, no FK at this layer).
  */
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { desc, eq, lt, sql } from 'drizzle-orm';
-import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { lotRuleInForce, recordOutbox, FILL_LOT_SERVER_ASSIGNED, type AuthPrincipal, type BridgeEmitTx } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
@@ -31,6 +36,16 @@ const { finishedGoodBatchMaster, finishedGoodsBatchConsumption, outbox, packageO
  *  started (IN_PROGRESS) or finished (COMPLETED). */
 const FG_PRODUCIBLE_ORDER_STATES = new Set(['IN_PROGRESS', 'COMPLETED']);
 
+/** PROM-4: the finished-good lot, FG-<yymm>-<nnnnn>, from a database sequence (gaps allowed, never
+ *  a repeat). The month is the fill's; the number alone is unique. */
+export async function mintFgLot(tx: BridgeEmitTx, at: Date): Promise<string> {
+  const rows = Array.from((await tx.execute(sql`select nextval('packaging.fg_lot_seq')::text as n`)) as unknown as { n: string }[]);
+  const n = rows[0]?.n;
+  if (!n) throw new Error('packaging.fg_lot_seq returned no value');
+  const yymm = at.toISOString().slice(2, 7).replace('-', '');
+  return `FG-${yymm}-${n.padStart(5, '0')}`;
+}
+
 @Injectable()
 export class BatchService {
   constructor(@Inject(PACKAGING_DB) private readonly db: PackagingDb) {}
@@ -42,6 +57,9 @@ export class BatchService {
    * emit `packaging.fg_batch.created`. All in one transaction.
    */
   async produceFinishedGoodBatch(body: ProduceFinishedGoodBatch, principal: AuthPrincipal) {
+    if (body.batchNumber !== undefined && body.batchNumber !== null) {
+      throw new BadRequestException(`The lot is assigned at fill: leave the lot number out and the server mints it (${FILL_LOT_SERVER_ASSIGNED}). A typed lot is never printed on a pack.`);
+    }
     return this.db.transaction(async (tx) => {
       /* Golden journey lane/j2: an FG batch was accepted against a DRAFT package order —
        * no materials issued, no filling session, nothing filled — i.e. finished goods that
@@ -83,6 +101,8 @@ export class BatchService {
           );
         }
       }
+      const rule = await lotRuleInForce(tx as unknown as BridgeEmitTx);
+      const batchNumber = await mintFgLot(tx as unknown as BridgeEmitTx, new Date());
       const batchId = uuidv7();
       const batch = (
         await tx
@@ -91,7 +111,9 @@ export class BatchService {
             finishedGoodBatchId: batchId,
             packageOrderId: body.packageOrderId,
             productSkuId: body.productSkuId,
-            batchNumber: body.batchNumber,
+            batchNumber,
+            lotAssignedAtFill: true,
+            lotRuleVersion: rule.version,
             producedQty: num(body.producedQty),
             uomId: body.uomId ?? null,
             manufacturingDate: body.manufacturingDate ?? null,
@@ -131,7 +153,7 @@ export class BatchService {
         {
           finishedGoodBatchId: batchId,
           packageOrderId: body.packageOrderId,
-          batchNumber: body.batchNumber,
+          batchNumber,
         },
         batchId,
       );

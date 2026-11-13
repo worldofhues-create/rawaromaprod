@@ -99,6 +99,9 @@ export const BLOCK_MESSAGES: Record<string, string> = {
   NO_FORMULA_LINK: 'Formula not on file',
   UNKNOWN_SKU: 'This SKU is not in the factory catalogue — add it on the Product SKUs screen',
   QTY_NOT_IN_KG: 'The quantity is not in a unit of mass, so a run size cannot be worked out — ask ALEMBIC to resend it in kg',
+  // PROM-9: ALEMBIC holds a made-to-order requirement while the customer has not confirmed a material-change
+  // notice. Nothing to do here: ALEMBIC releases it when the customer confirms.
+  CUSTOMER_HOLD: 'Held by ALEMBIC: the customer has not yet confirmed a change to this product. Do not plan it; it is released when they confirm',
 };
 
 interface RawQueueRow {
@@ -120,6 +123,7 @@ interface RawQueueRow {
   lot_policy: string | null;
   lifecycle_status: string;
   produce_block_reason: string | null;
+  customer_hold_reason?: string | null; // PROM-9
   production_order_id: string | null;
   run_status: string | null;
   mixing_started?: boolean | null;
@@ -147,9 +151,9 @@ export function requirementKg(qtyKg: string | null, qty: string, uom: string): n
 }
 
 /** Where a requirement stands on the floor. Pure — the queue test pins it. */
-export function queueStage(r: Pick<RawQueueRow, 'lifecycle_status' | 'produce_block_reason' | 'production_order_id' | 'run_status' | 'mixing_started' | 'oil_batch_id' | 'coa_status' | 'coa_result' | 'fg_batch_id' | 'rack'>): QueueStage {
+export function queueStage(r: Pick<RawQueueRow, 'lifecycle_status' | 'produce_block_reason' | 'production_order_id' | 'run_status' | 'mixing_started' | 'oil_batch_id' | 'coa_status' | 'coa_result' | 'fg_batch_id' | 'rack' | 'customer_hold_reason'>): QueueStage {
   if (r.lifecycle_status === 'REJECTED_MAPPING') return 'UNKNOWN_SKU';
-  if (!r.production_order_id) return r.produce_block_reason ? 'BLOCKED' : 'TO_PLAN';
+  if (!r.production_order_id) return (r.produce_block_reason || r.customer_hold_reason) ? 'BLOCKED' : 'TO_PLAN'; // PROM-9: a customer hold blocks planning
   if (r.rack) return 'ON_SHELF';
   if (r.fg_batch_id && r.coa_status === 'RELEASED') return 'READY_FOR_PUTAWAY';
   if (r.coa_status === 'REJECTED' || (r.coa_status === 'TESTED' && r.coa_result === 'FAIL')) return 'QC_FAILED';
@@ -191,7 +195,7 @@ export class ProduceQueueService {
              pm.product_code, pm.formula_id::text,
              r.qty::text, r.uom, r.qty_kg::text, r.needed_by, r.created_dt,
              r.priority_rank, r.priority_reason, r.order_value_inr::text, r.lot_policy,
-             r.lifecycle_status, r.produce_block_reason,
+             r.lifecycle_status, r.produce_block_reason, r.customer_hold_reason,
              r.production_order_id::text, o.status as run_status, o.order_qty::text as run_qty,
              exists (select 1 from production.secure_mixing_session m
                       where m.production_order_id = r.production_order_id and m.status <> 'ABORTED') as mixing_started,
@@ -261,9 +265,9 @@ export class ProduceQueueService {
         overdue: !onShelf && new Date(r.needed_by).getTime() < now,
         lifecycleStatus: r.lifecycle_status,
         stage,
-        blockReason: stage === 'UNKNOWN_SKU' ? 'UNKNOWN_SKU' : stage === 'BLOCKED' ? r.produce_block_reason : null,
+        blockReason: stage === 'UNKNOWN_SKU' ? 'UNKNOWN_SKU' : stage === 'BLOCKED' ? (r.produce_block_reason ?? (r.customer_hold_reason ? 'CUSTOMER_HOLD' : null)) : null,
         blockMessage: stage === 'UNKNOWN_SKU' ? BLOCK_MESSAGES.UNKNOWN_SKU!
-          : stage === 'BLOCKED' ? (BLOCK_MESSAGES[r.produce_block_reason ?? ''] ?? r.produce_block_reason) : null,
+          : stage === 'BLOCKED' ? (r.produce_block_reason ? (BLOCK_MESSAGES[r.produce_block_reason] ?? r.produce_block_reason) : r.customer_hold_reason ? BLOCK_MESSAGES.CUSTOMER_HOLD! : null) : null,
         productionOrderId: r.production_order_id,
         runStatus: r.run_status,
         runQty: r.run_qty,

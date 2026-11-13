@@ -325,3 +325,38 @@ test("production_requirement_status: quarantined incoming batch is a leading qc_
   // No material identity crosses the wire.
   assert.doesNotMatch(JSON.stringify(data), new RegExp(materialId));
 });
+
+/* PROM-3 (risk 7 of process-promises.md): the QC round is the release verdict now. A batch whose
+ * latest round holds it is a blocker and a held batch, even with no typed production_qc reading,
+ * and qc_status names the round as the verdict, never a typed reading. */
+test("PROM-3: a QC round that holds a batch is the verdict in qc_status, batch_quarantine and the blockers", async () => {
+  const sql = testClient();
+  const productionOrderId = randomUUID();
+  const oilBatchId = randomUUID();
+  const batchNumber = `OB-PROM3-${randomUUID().slice(0, 8)}`;
+  const orderRef = `RAC-PROM3-${randomUUID().slice(0, 8)}`;
+  await sql`insert into production.production_order (production_order_id, status) values (${productionOrderId}, 'IN_PROGRESS')`;
+  await sql`
+    insert into production.oil_batch_master (oil_batch_id, production_order_id, batch_number, status)
+    values (${oilBatchId}, ${productionOrderId}, ${batchNumber}, 'ACTIVE')`;
+  await sql`
+    insert into quality.batch_qc_round (oil_batch_id, round_no, qc_checkpoint_set_id, inspector_id, results, decision, reasons, policy_version, stage, reference_basis)
+    values (${oilBatchId}, 1, ${randomUUID()}, 'qc-1', '{"results":[],"failed":["odour"]}'::jsonb, 'HOLD_RETEST', '["odour off"]'::jsonb, 1, 'QC1', 'NO_REFERENCE_YET')`;
+  await sql`
+    insert into bridge.production_requirement
+      (alembic_requirement_id, org_id, correlation_id, order_ref, mapped_sku, qty, uom, needed_by, production_order_id)
+    values (${randomUUID()}, ${randomUUID()}, ${randomUUID()}, ${orderRef}, 'FSKU-1', 5, 'kg', now() + interval '7 days', ${productionOrderId})`;
+
+  const qc = await facts.resolve("qc_status", { batchNumber });
+  assert.ok(qc, "an oil batch with only a QC round still has a QC status");
+  assert.equal(qc!.batchType, "oil");
+  assert.equal((qc!.verdict as { stage: string; decision: string }).decision, "HOLD_RETEST");
+  assert.equal((qc!.verdict as { stage: string }).stage, "QC1");
+
+  const held = await facts.resolve("batch_quarantine", { batchNumber });
+  assert.equal((held!.reason as { quarantined: boolean }).quarantined, true);
+
+  const status = await facts.resolve("production_requirement_status", { orderRef });
+  assert.ok((status!.blockers as Array<{ kind: string }>).some((b) => b.kind === "qc_hold"));
+  assert.doesNotMatch(JSON.stringify([qc, held, status]), /formula/i);
+});

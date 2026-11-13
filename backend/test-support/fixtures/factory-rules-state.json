@@ -1,0 +1,11 @@
+{
+  "branch": null,
+  "as_of": "2026-11-13T06:00:00.000Z",
+  "reason": "rule_change",
+  "rules": {
+    "maceration.rest": { "version": 1, "enforcement_version": 1, "min_days": 45, "max_days": null, "early_release": "second_person" },
+    "qc.reference_required": { "version": 0, "enforcement_version": 1, "value": true },
+    "fill.lot_server_assigned": { "version": 0, "enforcement_version": 1, "value": true },
+    "continuity.supplier_change_is_material": { "version": 0, "enforcement_version": 1, "value": true }
+  }
+}

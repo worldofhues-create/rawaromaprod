@@ -10,12 +10,16 @@
  *                      oil_batch_event_history (eventType QC_RECORDED), then emits
  *                      production.qc.recorded.
  *
+ * PROM-4: the batch number is never typed. The floor's compound step mints B-<yymm>-<job> itself and
+ * hands it in as `assigned`; any other caller gets OB-<yymm>-<nnnnn> from `production.oil_batch_no_seq`.
+ * A batchNumber in the body is refused.
+ *
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics via num();
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
-import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, macerationOnTransition, oilBalance, recordOilMade, recordOutbox, recordRemnant, type AuthPrincipal, type RemnantDisposition } from '@core/backend-kernel';
+import { emitBridgeOutbound, lotRuleInForce, macerationOnTransition, oilBalance, recordBatchContinuity, recordOilMade, recordOutbox, recordRemnant, referenceRuleInForce, FILL_LOT_SERVER_ASSIGNED, type AuthPrincipal, type BridgeEmitTx, type RemnantDisposition } from '@core/backend-kernel';
 import { qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
@@ -154,7 +158,12 @@ export class BatchService {
     /* Final-QC gate (golden journey lane/j2): RELEASED is the state packaging consumes, and it
      * was reachable with NO production QC on file at all — live, a matured batch went straight
      * to RELEASED. The latest QC reading recorded against the batch must be a PASS. */
-    if (tgt === 'RELEASED') {
+    /* PROM-3: with qc.reference_required on, the verdict is the QC 2 ROUND against the retained
+     * reference, checked by the kernel's maceration gate inside the transaction below; a typed
+     * production_qc PASS no longer releases anything. This reading stays the verdict only when the
+     * rule is switched off. */
+    const roundsAreTheVerdict = tgt === 'RELEASED' && (await referenceRuleInForce(this.db, { oilBatchId: id })).value.required;
+    if (tgt === 'RELEASED' && !roundsAreTheVerdict) {
       const latest = (
         await this.db
           .select({ result: productionQc.result })
@@ -236,8 +245,21 @@ export class BatchService {
    * genealogy + a PRODUCED event_history row, then emits production.oil_batch.created. All in
    * one transaction.
    */
-  async produceOilBatch(body: ProduceOilBatch, principal: AuthPrincipal) {
+  async produceOilBatch(body: ProduceOilBatch, principal: AuthPrincipal, assigned?: { batchNumber: string; by: 'floor_station' }) {
+    if (body.batchNumber !== undefined && body.batchNumber !== null) {
+      throw new BadRequestException(`The batch number is assigned by the server: leave it out (${FILL_LOT_SERVER_ASSIGNED}). A typed batch number is never accepted.`);
+    }
+    if (assigned && !/^B-\d{4}-[A-Z0-9-]{1,40}$/.test(assigned.batchNumber)) {
+      throw new Error(`floor batch number ${assigned.batchNumber} is not B-<yymm>-<job>`);
+    }
     return this.db.transaction(async (tx) => {
+      await lotRuleInForce(tx as unknown as BridgeEmitTx);
+      let batchNumber = assigned?.batchNumber;
+      if (!batchNumber) {
+        const rows = Array.from((await tx.execute(sql`select nextval('production.oil_batch_no_seq')::text as n`)) as unknown as { n: string }[]);
+        if (!rows[0]?.n) throw new Error('production.oil_batch_no_seq returned no value');
+        batchNumber = `OB-${new Date().toISOString().slice(2, 7).replace('-', '')}-${rows[0].n.padStart(5, '0')}`;
+      }
       const batch = (
         await tx
           .insert(oilBatchMaster)
@@ -245,7 +267,7 @@ export class BatchService {
             oilBatchId: uuidv7(),
             productionOrderId: body.productionOrderId,
             secureMixingSessionId: body.secureMixingSessionId ?? null,
-            batchNumber: body.batchNumber,
+            batchNumber,
             producedQty: num(body.producedQty),
             uomId: body.uomId ?? null,
             producedDt: body.producedDt ? new Date(body.producedDt) : new Date(),
@@ -282,6 +304,10 @@ export class BatchService {
         madeMg = qtyToMgExact(String(body.producedQty), u?.uom_code);
       }
       if (madeMg !== null) await recordOilMade(tx, { oilBatchId, madeMg, actor: principal });
+      // PROM-5: the batch's continuity key, from the raw lots it consumed, its formula version and the
+      // product's reference; a change from the product's current key is recorded and sent now, at
+      // compounding, before any lot under the new key can be released.
+      await recordBatchContinuity(tx as unknown as BridgeEmitTx, oilBatchId, principal.userId);
 
       await tx.insert(oilBatchEventHistory).values({
         oilBatchEventHistoryId: uuidv7(),
@@ -298,7 +324,7 @@ export class BatchService {
         tx,
         outbox,
         productionEvents.oilBatchCreated,
-        { oilBatchId, productionOrderId: body.productionOrderId, batchNumber: body.batchNumber },
+        { oilBatchId, productionOrderId: body.productionOrderId, batchNumber },
         oilBatchId,
       );
 
@@ -393,6 +419,10 @@ export class BatchService {
    * All in one transaction.
    */
   async recordProductionQc(body: RecordProductionQc, principal: AuthPrincipal) {
+    // PROM-3: the inspector is the person signed in, never a name the caller types.
+    if (body.inspectedBy != null && body.inspectedBy !== principal.userId) {
+      throw new BadRequestException('The inspector is taken from your sign-in: a QC reading cannot be recorded under another person.');
+    }
     // Auto-grade against the supplied spec range (audit #8): observed value inside [min,max] = PASS.
     const graded =
       (body.specMin != null || body.specMax != null) && body.observedValue != null
@@ -411,7 +441,7 @@ export class BatchService {
             qcParameterId: body.qcParameterId ?? null,
             observedValue: num(body.observedValue),
             result: graded,
-            inspectedBy: body.inspectedBy ?? principal.userId,
+            inspectedBy: principal.userId,
             inspectionDt: body.inspectionDt ? new Date(body.inspectionDt) : new Date(),
             status: 'ACTIVE',
             createdBy: principal.userId,

@@ -132,7 +132,8 @@ const consumptionRow = z.object({
 export const produceOilBatch = z.object({
   productionOrderId: z.string().uuid(),
   secureMixingSessionId: z.string().uuid().optional(),
-  batchNumber: z.string(),
+  /** PROM-4: never accepted; present only so a typed number is refused with the reason. */
+  batchNumber: z.string().optional(),
   producedQty: z.number().positive(),
   /** STOCK-FIX-RP (STK-10): the made mass in integer mg, exact (the floor passes the sum of its
    *  weighed lines). Without it the mass is read from producedQty in a mass unit, exactly, or not at all. */

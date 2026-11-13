@@ -1,0 +1,11 @@
+{
+  "batch_no": "B-2609-0042",
+  "oil_batch_ref": "0192a6c4-8f1e-7b3a-9c2d-5e6f7a8b9c0d",
+  "reference": {
+    "ref": "R-RAC-0450-CL-1",
+    "sample_code": "RS-B-2609-0042",
+    "retained_at": "2026-10-29T09:20:00.000Z"
+  },
+  "established_at": "2026-10-30T05:00:00.000Z",
+  "replaces_ref": null
+}

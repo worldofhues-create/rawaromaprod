@@ -23,7 +23,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { assertNotMacerating, bridgeProductCode, emitBridgeManualEvent, parsePackSizeMg, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, bridgeProductCode, emitBridgeManualEvent, fgPromiseBlockOf, parsePackSizeMg, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { SHELF_DB, type ShelfDb, type ShelfTx } from './shelf.tokens.js';
 import { ShelfLayoutService, WALK_ORDER_SQL, type BinLocation } from './shelf-layout.service.js';
 import { PickLightService, colourFor, type PickLightCommand } from './pick-light.service.js';
@@ -53,6 +53,10 @@ export interface FgBatchInfo {
   qc: FgQcState;
   stocked: number;
   status: string | null;
+  /** PROM-4: the server minted this lot at fill (false on a lot made before PROM-4, whose number was typed). */
+  lotAssignedAtFill: boolean;
+  /** PROM-4: when the first APPLIED label went on this batch, or null when none has. */
+  labelAppliedAt: string | null;
 }
 
 export interface ShelfTaskRow {
@@ -100,6 +104,11 @@ export function buildFgBatchReceived(input: {
   compounded?: boolean;
   /** STOCK-FIX-RP (STK-21): one pack's net mass on file, when there is one; adds pack_count/pack_net_mg. */
   packNetMg?: number | null;
+  /** PROM-4: when the label carrying this lot was applied, and whether the server minted the lot. */
+  labelAppliedAt?: string | null;
+  lotAssignedAtFill?: boolean;
+  /** PROM-6: the compounded batch's process record (backend-kernel fgPromiseBlockOf), or null. */
+  promise?: bridgeContracts.FgPromiseBlockWire | null;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   // STOCK-FIX-RP, lead ruling LD-145: a batch counted in a MASS unit was received as BULK for later filling,
@@ -116,6 +125,11 @@ export function buildFgBatchReceived(input: {
     released_at: input.releasedAt ?? '',
     ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
     ...(bulk ? {} : packFields(qtyKg, input.packNetMg)),
+    // PROM-4: the lot's own label record. Absent (never false-filled) when no label has been applied.
+    ...(input.labelAppliedAt ? { label_applied_at: input.labelAppliedAt } : {}),
+    ...(input.lotAssignedAtFill !== undefined ? { lot_assigned_at_fill: input.lotAssignedAtFill } : {}),
+    // PROM-6: the batch's process record travels with the lot. Absent (never invented) without one.
+    ...(input.promise ? { promise: input.promise } : {}),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.
@@ -148,7 +162,9 @@ export class ShelfTaskService {
     const r = ((await q.execute(sql`
       select f.finished_good_batch_id::text as id, f.batch_number, f.produced_qty::float as qty, f.uom_id::text, u.uom_code,
              f.product_sku_id::text, s.sku_code, s.pack_size, pm.product_id::text, pm.product_code, pm.product_name,
-             f.manufacturing_date, f.expiry_date, f.status,
+             f.manufacturing_date, f.expiry_date, f.status, f.lot_assigned_at_fill,
+             (select min(lr.applied_dt) from packaging.fg_label_record lr
+               where lr.finished_good_batch_id = f.finished_good_batch_id and lr.status = 'APPLIED') as label_applied_at,
              po.oil_batch_id::text, ob.batch_number as oil_batch_number, ob.production_order_id::text, c.status as coa_status, c.overall_result, c.released_dt,
              coalesce((select sum(st.qty) from location.fg_bin_stock st where st.finished_good_batch_id = f.finished_good_batch_id), 0)::float as stocked
         from packaging.finished_good_batch_master f
@@ -177,6 +193,8 @@ export class ShelfTaskService {
       coaStatus, coaResult, releasedAt: r.released_dt ? new Date(r.released_dt as string).toISOString() : null,
       qcBatchNo: (r.oil_batch_number as string | null) ?? null,
       qc, stocked: Number(r.stocked ?? 0), status: (r.status as string | null) ?? null,
+      lotAssignedAtFill: r.lot_assigned_at_fill === true,
+      labelAppliedAt: r.label_applied_at ? new Date(r.label_applied_at as string).toISOString() : null,
     };
   }
 
@@ -346,6 +364,8 @@ export class ShelfTaskService {
     const built = buildFgBatchReceived({
       batchNo: fg.batchNumber, sku: commercial ?? fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
       rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId, packNetMg,
+      labelAppliedAt: fg.labelAppliedAt, lotAssignedAtFill: fg.lotAssignedAtFill,
+      promise: fg.oilBatchId ? await fgPromiseBlockOf(tx, fg.oilBatchId) : null,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {

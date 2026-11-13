@@ -126,7 +126,9 @@ export type ConsumptionLine = z.infer<typeof consumptionLine>;
 export const produceFinishedGoodBatch = z.object({
   packageOrderId: z.string().uuid(),
   productSkuId: z.string().uuid(),
-  batchNumber: z.string(),
+  /** PROM-4: never accepted. Kept in the shape only so a typed lot is refused with the reason
+   *  ("The lot is assigned at fill") rather than silently stripped by the parser. */
+  batchNumber: z.string().optional(),
   producedQty: z.number(),
   uomId: z.string().uuid().optional(),
   manufacturingDate: z.string().optional(),

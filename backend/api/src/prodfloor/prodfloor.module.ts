@@ -11,10 +11,12 @@ import { QcFloorService } from './qc-floor.service.js';
 import { LotTraceService } from './lot-trace.service.js';
 import { QcReviewController } from './qc-review.controller.js';
 import { QcReviewService } from './qc-review.service.js';
+import { ReferenceStandardController } from './reference-standard.controller.js';
+import { ReferenceStandardService } from './reference-standard.service.js';
 
 @Module({
   imports: [PolicyModule, FloorModule, FloorOpsModule], // SCAN-5: FloorCodeService mints the raw-lot label's L- code; FLOOR-FIX-2: PrintService queues it
-  controllers: [ProdfloorController, QcReviewController],
-  providers: [ReceivingService, PaymentReleaseService, QcFloorService, LotTraceService, QcReviewService],
+  controllers: [ProdfloorController, QcReviewController, ReferenceStandardController], // PROM-3: the retained reference
+  providers: [ReceivingService, PaymentReleaseService, QcFloorService, LotTraceService, QcReviewService, ReferenceStandardService],
 })
 export class ProdfloorModule {}

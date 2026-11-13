@@ -1945,6 +1945,10 @@ alter table bridge.production_requirement add column if not exists lot_policy va
 alter table bridge.production_requirement add column if not exists produce_block_reason varchar(60);
 alter table bridge.production_requirement add column if not exists produce_blocked_at timestamptz;
 alter table bridge.production_requirement add column if not exists overdue_alerted_at timestamptz;
+-- PROM-9 (scripts/migrations/2026-11-19-prom-9-requirement-hold.sql): ALEMBIC holds a made-to-order
+-- requirement until the customer confirms a material-change notice; the factory does not plan it.
+alter table bridge.production_requirement add column if not exists customer_hold_reason varchar(40);
+alter table bridge.production_requirement add column if not exists customer_hold_since timestamptz;
 create index if not exists bridge_production_requirement_queue_idx
   on bridge.production_requirement (priority_rank, needed_by, created_dt);
 alter table bridge.compliance_certificate add column if not exists formula_version_number integer;
@@ -2904,6 +2908,80 @@ create table if not exists production.maceration_run (
   updated_at           timestamptz not null default now()
 );
 create unique index if not exists maceration_run_open_uq on production.maceration_run (oil_batch_id) where status = 'MACERATING';
+-- PROM-2 (scripts/migrations/2026-11-16-prom-2-rest-rule.sql): the rule each run rests under, the
+-- two-person early release, and the days actually rested.
+alter table production.maceration_run alter column max_days drop not null;
+alter table production.maceration_run add column if not exists rule_days integer check (rule_days between 1 and 365);
+alter table production.maceration_run add column if not exists rule_version integer check (rule_version >= 0);
+alter table production.maceration_run add column if not exists rule_source varchar(20) check (rule_source in ('policy', 'registry_default'));
+alter table production.maceration_run add column if not exists early_release_requested_at timestamptz;
+alter table production.maceration_run add column if not exists early_release_reason_code varchar(40);
+alter table production.maceration_run add column if not exists early_release_approved_by uuid;
+alter table production.maceration_run add column if not exists days_rested integer check (days_rested >= 0);
+alter table production.maceration_run add column if not exists rest_short boolean;
+alter table production.maceration_run drop constraint if exists maceration_run_two_people_chk;
+alter table production.maceration_run add constraint maceration_run_two_people_chk
+  check (early_release_approved_by is null or early_release_by is null or early_release_approved_by <> early_release_by);
+insert into platform.policy (policy_key, title, description) values
+  ('maceration.rest', 'Rest between QC 1 and QC 2', 'Every batch rests this many days after QC 1 before QC 2 may release it. A formula may rest longer; a shorter rest for one batch is an early release, approved by a second person.')
+on conflict (policy_key) do nothing;
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('maceration.rest', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"minDays":45,"maxDays":null,"appliesTo":"every_batch","earlyRelease":"second_person"}}',
+   'Owner LD-85, 13 Nov 2026: every batch rests 45 days between QC 1 and QC 2; no maximum set', 'system')
+on conflict (policy_key, version) do nothing;
+-- scripts/migrations/2026-11-17-prom-3-reference.sql
+-- PROM-3: the retained reference for a product (one product row = one code and grade in RawProd), and
+-- the stage each QC round is taken at. One ACTIVE reference per product; proposed by QC, approved by a
+-- DIFFERENT person (the constraint, not only the service); retiring one names its successor.
+create table if not exists quality.reference_standard (
+  reference_standard_id  uuid primary key default gen_random_uuid(),
+  reference_code         varchar(80) not null unique,
+  product_id             uuid not null,
+  oil_batch_id           uuid not null,
+  qc_sample_retention_id uuid not null,
+  formula_version_ref    uuid,
+  status                 varchar(10) not null check (status in ('PENDING', 'ACTIVE', 'RETIRED', 'DECLINED')),
+  proposed_by            varchar(255) not null,
+  proposed_dt            timestamptz not null default clock_timestamp(),
+  proposal_reason        text not null check (btrim(proposal_reason) <> ''),
+  approved_by            varchar(255),
+  approved_dt            timestamptz,
+  expires_at             timestamptz,
+  replaces_id            uuid references quality.reference_standard (reference_standard_id),
+  retired_by             varchar(255),
+  retired_dt             timestamptz,
+  retired_reason         text,
+  successor_id           uuid references quality.reference_standard (reference_standard_id),
+  declined_by            varchar(255),
+  declined_dt            timestamptz,
+  declined_reason        text,
+  constraint reference_standard_two_people_chk check (approved_by is null or approved_by <> proposed_by),
+  constraint reference_standard_active_approved_chk check (status not in ('ACTIVE', 'RETIRED') or (approved_by is not null and approved_dt is not null)),
+  constraint reference_standard_retired_says_why_chk check (status <> 'RETIRED' or (retired_reason is not null and btrim(retired_reason) <> '' and successor_id is not null)),
+  constraint reference_standard_declined_says_why_chk check (status <> 'DECLINED' or (declined_reason is not null and btrim(declined_reason) <> ''))
+);
+create unique index if not exists reference_standard_one_active_uq on quality.reference_standard (product_id) where status = 'ACTIVE';
+create unique index if not exists reference_standard_one_pending_uq on quality.reference_standard (product_id) where status = 'PENDING';
+create index if not exists reference_standard_batch_idx on quality.reference_standard (oil_batch_id);
+
+alter table quality.batch_qc_round add column if not exists stage varchar(3) check (stage in ('QC1', 'QC2'));
+alter table quality.batch_qc_round add column if not exists reference_standard_id uuid references quality.reference_standard (reference_standard_id);
+alter table quality.batch_qc_round add column if not exists reference_basis varchar(20) check (reference_basis in ('REFERENCE', 'NO_REFERENCE_YET'));
+alter table quality.batch_qc_round drop constraint if exists batch_qc_round_reference_basis_chk;
+alter table quality.batch_qc_round add constraint batch_qc_round_reference_basis_chk
+  check ((reference_basis = 'REFERENCE') = (reference_standard_id is not null));
+
+-- QC 1 may now be a round rather than a typed production_qc reading.
+alter table production.maceration_run alter column qc1_production_qc_id drop not null;
+alter table production.maceration_run add column if not exists qc1_round_id uuid;
+
+insert into platform.policy (policy_key, title, description) values
+  ('qc.reference_required', 'QC against the retained reference', 'QC 1 and QC 2 are rounds on the product''s checkpoints, which include a comparison with its retained reference; a typed QC result does not release a batch.')
+on conflict (policy_key) do nothing;
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('qc.reference_required', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"required":true}}',
+   'Owner LD-85, 13 Nov 2026: every batch is checked against a retained reference before it ships', 'system')
+on conflict (policy_key, version) do nothing;
 
 create table if not exists production.maceration_event (
   maceration_event_id uuid primary key default gen_random_uuid(),
@@ -3362,6 +3440,82 @@ language sql stable as $$
    where l.rm_batch_id = p_rm_batch_id and l.event = 'LEGACY_RELEASE'
    order by l.at desc limit 1
 $$;
+
+-- scripts/migrations/2026-11-18-prom-4-fill-lot.sql
+-- PROM-4: the finished-good lot and the off-floor oil-batch number are minted by the server.
+create sequence if not exists packaging.fg_lot_seq;
+create sequence if not exists production.oil_batch_no_seq;
+alter table packaging.finished_good_batch_master add column if not exists lot_assigned_at_fill boolean not null default false;
+alter table packaging.finished_good_batch_master add column if not exists lot_rule_version integer check (lot_rule_version >= 0);
+insert into platform.policy (policy_key, title, description) values
+  ('fill.lot_server_assigned', 'Lot assigned at fill', 'The finished-good lot is minted by the server at fill and printed on every pack. It is never typed, so this rule has one valid value.')
+on conflict (policy_key) do nothing;
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('fill.lot_server_assigned', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"required":true}}',
+   'Owner LD-85, 13 Nov 2026: every pack carries a lot number tied to its batch record; the lot is assigned at fill', 'system')
+on conflict (policy_key, version) do nothing;
+
+-- scripts/migrations/2026-11-18-prom-5-material-change.sql
+-- PROM-5: continuity per batch and per product, and the record of every material change.
+-- One row per oil batch: its continuity key, or NULL with what was missing (Rule 3: no key, no claim).
+create table if not exists production.batch_continuity (
+  oil_batch_id          uuid primary key,
+  product_id            uuid,
+  continuity_key        varchar(68) check (continuity_key is null or continuity_key ~ '^ck1:[0-9a-f]{64}$'),
+  formula_version_ref   uuid,
+  reference_ref         varchar(80),
+  supplier_is_material  boolean not null,
+  supplier_rule_version integer not null check (supplier_rule_version >= 0),
+  missing               jsonb,
+  recorded_by           varchar(255) not null,
+  recorded_dt           timestamptz not null default clock_timestamp(),
+  constraint batch_continuity_key_or_why_chk check ((continuity_key is null) = (missing is not null))
+);
+create index if not exists batch_continuity_product_idx on production.batch_continuity (product_id, recorded_dt desc);
+
+-- A product's continuity over time; the latest row is current. Append-only.
+create table if not exists production.product_continuity (
+  product_continuity_id uuid primary key default gen_random_uuid(),
+  product_id            uuid not null,
+  continuity_key        varchar(68) not null check (continuity_key ~ '^ck1:[0-9a-f]{64}$'),
+  formula_version_ref   uuid not null,
+  materials             jsonb not null,
+  materials_hash        varchar(64) not null,
+  reference_ref         varchar(80),
+  source                varchar(10) not null check (source in ('batch', 'reference')),
+  first_oil_batch_id    uuid,
+  effective_from        timestamptz not null,
+  recorded_by           varchar(255) not null,
+  created_dt            timestamptz not null default clock_timestamp(),
+  constraint product_continuity_batch_named_chk check (source <> 'batch' or first_oil_batch_id is not null)
+);
+create index if not exists product_continuity_current_idx on production.product_continuity (product_id, created_dt desc);
+
+-- One row per kind of change. Plain-language kind only; no material is named. Append-only.
+create table if not exists production.material_change (
+  material_change_id    uuid primary key default gen_random_uuid(),
+  product_id            uuid not null,
+  product_code          varchar(80) not null,
+  kind                  varchar(20) not null check (kind in ('formula_version', 'supplier', 'reference')),
+  from_key              varchar(68) not null check (from_key ~ '^ck1:[0-9a-f]{64}$'),
+  to_key                varchar(68) not null check (to_key ~ '^ck1:[0-9a-f]{64}$'),
+  first_oil_batch_id    uuid,
+  first_batch_no        varchar(64),
+  approved_at           timestamptz not null,
+  recorded_by           varchar(255) not null,
+  created_dt            timestamptz not null default clock_timestamp(),
+  constraint material_change_moves_chk check (from_key <> to_key)
+);
+create index if not exists material_change_product_idx on production.material_change (product_id, created_dt desc);
+
+insert into platform.policy (policy_key, title, description) values
+  ('continuity.supplier_change_is_material', 'A supplier change is a material change', 'When a raw material comes from a different supplier than the last batch of the same code and grade, the customer is told before their next order.')
+on conflict (policy_key) do nothing;
+
+insert into platform.policy_version (policy_key, version, body, reason, created_by) values
+  ('continuity.supplier_change_is_material', 1, '{"rules":[],"hasDefault":true,"defaultValue":{"isMaterial":true}}',
+   'Owner LD-85, 13 Nov 2026 (OQ-PROM-5 default): if a raw material changes, we tell you before your next order; a supplier change counts', 'system')
+on conflict (policy_key, version) do nothing;
 
 -- IMPORT-RP (scripts/migrations/2026-11-24-imports.sql): the import job and its rows, what a dilution
 -- is made of, a density's source, a received lot's certificate reference; and the tables the import

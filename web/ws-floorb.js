@@ -359,22 +359,29 @@
     var d = data(res), last = d.rounds[d.rounds.length - 1], cps = d.checkpoints;
     var prods = cps ? [] : await getRows('/v1/product-qc-specs?limit=200');
     var needRework = last && last.decision === 'REWORK' && d.reworks.length < Number(last.reworkNo) + 1;
-    var closed = last && /APPROVE|REJECT|REVIEW|HOLD_CAPA/.test(last.decision);
-    var hist = d.rounds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:520px"><thead><tr><th>Round</th><th>Spec</th><th>Decision</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
-      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>' + esc(self.RacCode ? self.RacCode.spec(r.specProductCode, r.specVersion) : 'v' + r.specVersion) + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(r.defectType ? defWord(r.defectType) : '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
+    // PROM-3: which QC this is (QC 1 before maceration, QC 2 after the rest) is the server's answer, never chosen here.
+    var stg = d.stage || { canRecord: !(last && /APPROVE|REJECT|REVIEW|HOLD_CAPA/.test(last.decision)), next: null, note: '' };
+    var closed = !needRework && (!stg.canRecord || (last && /REJECT|REVIEW|HOLD_CAPA/.test(last.decision)));
+    var REF = d.reference || null;
+    var compared = function (r) { return r.referenceCode ? 'Retained reference ' + r.referenceCode : r.referenceBasis === 'NO_REFERENCE_YET' ? 'No retained reference yet' : ''; };
+    var hist = d.rounds.length ? '<div style="overflow-x:auto;max-width:100%"><table class="tbl" style="min-width:620px"><thead><tr><th>Round</th><th>QC</th><th>Spec</th><th>Decision</th><th>Compared with</th><th>Defect</th><th>Why</th></tr></thead><tbody>' + d.rounds.map(function (r) {
+      var q = QD[r.decision] || ['n', r.decision]; return '<tr><td>' + r.roundNo + '</td><td>' + esc(r.stage === 'QC2' ? 'QC 2' : r.stage === 'QC1' ? 'QC 1' : '') + '</td><td>' + esc(self.RacCode ? self.RacCode.spec(r.specProductCode, r.specVersion) : 'v' + r.specVersion) + '</td><td>' + chip(q[0], q[1]) + '</td><td>' + esc(compared(r)) + '</td><td>' + esc(r.defectType ? defWord(r.defectType) : '') + '</td><td>' + esc((r.reasons || []).join(' ')) + '</td></tr>';
     }).join('') + '</tbody></table></div>' : '<p>No QC round yet.</p>';
+    // PROM-3: the REFERENCE checkpoint is compared with a bottle; QC scans that bottle's sample code.
+    var refInput = function (ref) { return ref && ref.active ? '<input class="fld" data-ref autocomplete="off" data-scan placeholder="Scan ' + esc(ref.active.referenceCode) + '\'s sample code" style="width:220px">' : ''; };
+    var cpHtml = function (x, ref) { return '<div data-cp="' + x.id + '" data-type="' + x.checkType + '" style="display:flex;gap:var(--s-snug);align-items:center;flex-wrap:wrap"><strong style="min-width:160px">' + esc(x.name) + (x.critical ? ' ' + chip('r', 'critical') : '') + '</strong>' +
+      (x.checkType === 'RANGE' ? '<input class="fld" data-v inputmode="decimal" placeholder="' + esc(x.min) + ' – ' + esc(x.max) + '" style="width:140px">' : '<select class="fld" data-v><option value="">Result…</option><option value="1">Pass</option><option value="0">Fail</option></select>') +
+      (x.checkType === 'REFERENCE' ? refInput(ref) : '') + (x.photoRequired ? '<input class="fld" data-photo placeholder="Photo ref" style="width:140px">' : '') + '</div>'; };
     var form = '';
-    if (closed) form = '<p>' + chip('n', 'Last decision: ' + (QD[last.decision] || [0, last.decision])[1]) + ' No further round is taken here.</p>';
+    if (closed) form = '<p>' + (last ? chip('n', 'Last decision: ' + (QD[last.decision] || [0, last.decision])[1]) + ' ' : '') + esc(stg.note || 'No further round is taken here.') + '</p>';
     else if (needRework) form = '<form id="fb-rw">' + row(field('Adjustment (g added or removed)', '<input id="fb-rwg" class="fld" inputmode="decimal" style="width:140px">') + field('Raw lot used (optional)', '<input id="fb-rwlot" data-scan class="fld" autocomplete="off" placeholder="scan or type the lot number">') + field('What was adjusted', '<input id="fb-rwnote" class="fld" style="min-width:240px">') + '<button type="submit" class="btn p">Record rework</button>') + '<div id="fb-qerr" role="alert" style="color:var(--red);min-height:16px"></div></form>';
     else {
       var cpList = cps;
       form = '<form id="fb-qr" style="display:flex;flex-direction:column;gap:var(--s-snug)">' +
         (cps ? '' : row(field('Product (pins its current checkpoint version)', pick('fb-qprod', prods, 'productId', function (p) { return (self.RacCode ? self.RacCode.line(p.productCode, null) : (p.productCode || '')) + ' ' + (p.productName || ''); }, 'Choose…')))) +
-        '<div id="fb-qcps">' + (cpList ? cpList.map(function (c) {
-          return '<div data-cp="' + c.id + '" data-type="' + c.checkType + '" style="display:flex;gap:var(--s-snug);align-items:center;flex-wrap:wrap"><strong style="min-width:160px">' + esc(c.name) + (c.critical ? ' ' + chip('r', 'critical') : '') + '</strong>' +
-            (c.checkType === 'RANGE' ? '<input class="fld" data-v inputmode="decimal" placeholder="' + esc(c.min) + ' – ' + esc(c.max) + '" style="width:140px">' : '<select class="fld" data-v><option value="">Result…</option><option value="1">Pass</option><option value="0">Fail</option></select>') +
-            (c.photoRequired ? '<input class="fld" data-photo placeholder="Photo ref" style="width:140px">' : '') + '</div>';
-        }).join('') : '<p class="t-cap">Choose the product to load its checkpoints.</p>') + '</div>' +
+        (stg.next ? '<p class="t-cap">' + esc(stg.next === 'QC2' ? 'QC 2: the rest has ended. Compare with the same retained reference.' : 'QC 1: before maceration.') + '</p>' : '') +
+        '<p class="t-cap" id="fb-qref">' + esc(REF ? REF.note : '') + '</p>' +
+        '<div id="fb-qcps">' + (cpList ? cpList.map(function (c) { return cpHtml(c, REF); }).join('') : '<p class="t-cap">Choose the product to load its checkpoints.</p>') + '</div>' +
         row(field('Defect type (if anything failed)', '<select id="fb-qdef" class="fld"><option value="">—</option>' + DEFECTS.map(function (x) { return '<option value="' + x + '">' + esc(defWord(x)) + '</option>'; }).join('') + '</select>') +
           field('Faulty raw lot (scan or type the lot number)', '<input id="fb-qlot" data-scan class="fld" autocomplete="off">') +
           '<label style="display:flex;gap:6px;align-items:center"><input type="checkbox" id="fb-qdoubt"> Instrument doubt</label>') +
@@ -382,19 +389,45 @@
     }
     // SCAN-11: the QC-approved mark (QC 1 or QC 2), once the last round approves.
     var qa = last && last.decision === 'APPROVE' ? '<p>' + SB('fb-qa', { labelKind: 'qc_approved', subjectRef: d.batch.batchNumber, code: d.batch.batchNumber, title: 'QC APPROVED', defaultStation: 'QC lab', lines: [['Round', last.roundNo], ['Spec', self.RacCode ? self.RacCode.spec(last.specProductCode, last.specVersion) : 'v' + last.specVersion]] }) + '</p>' : '';
-    host.innerHTML = card('Batch ' + esc(d.batch.batchNumber || '') + (d.hold ? ' · ON HOLD' : ''), hist + qa, d.hold ? esc(d.hold.reason) : '') + card(needRework ? 'Rework' : 'QC round', form, 'Every round tests every checkpoint, after a rework too.');
+    // PROM-3: the product's retained reference -- proposed by QC from an approved batch with a kept sample, approved by a second person.
+    var refCard = '';
+    if (REF && d.productId) {
+      var lastOk = last && last.decision === 'APPROVE';
+      var refBody = '<p>' + esc(REF.note) + '</p>' +
+        (REF.pending ? '<p>' + chip('a', REF.pending.referenceCode + ' waiting for a second person') + ' ' +
+          (can('quality:reference_standard:approve') ? '<button type="button" class="btn sm" id="fb-ref-ok">Approve</button> ' : '') +
+          (can('quality:reference_standard:write') ? '<button type="button" class="btn sm" id="fb-ref-no">Decline</button>' : '') + '</p>'
+        : lastOk && d.retainedSample && can('quality:reference_standard:write') ? '<p><button type="button" class="btn sm" id="fb-ref-new">Propose this batch as the retained reference</button> <span class="t-cap">Sample ' + esc(d.retainedSample.sampleCode || 'code not on file') + '</span></p>'
+        : lastOk && !d.retainedSample ? '<p class="t-cap">Retain a sample of this batch first: the reference is that bottle.</p>' : '');
+      refCard = card('Retained reference', refBody, 'One per product. QC 1 and QC 2 compare every batch with it.');
+    }
+    host.innerHTML = card('Batch ' + esc(d.batch.batchNumber || '') + (d.hold ? ' · ON HOLD' : ''), hist + qa, d.hold ? esc(d.hold.reason) : '') + refCard + card(needRework ? 'Rework' : 'QC round', form, 'Every round tests every checkpoint, after a rework too.');
+    var rNew = $('fb-ref-new');
+    if (rNew) rNew.onclick = function () { askReason('Propose the retained reference', 'Why this batch is the reference', 'Propose', function (why) {
+      return tunnel('/v1/prodfloor/qc/references', { method: 'POST', body: { oilBatchId: id, reason: why } }).then(function (r) { if (r.status < 400) { toast('Proposed. A second person approves it.', 'good'); loadQc(id); } return r; }); }); };
+    var rOk = $('fb-ref-ok');
+    if (rOk) rOk.onclick = function () {
+      var go = function (why) { return tunnel('/v1/prodfloor/qc/references/' + REF.pending.referenceStandardId + '/approve', { method: 'POST', body: why ? { retireReason: why } : {} }).then(function (r) { if (r.status < 400) { toast('Approved: this is the product\'s retained reference.', 'good'); loadQc(id); } return r; }); };
+      if (REF.active) askReason('Approve and retire ' + REF.active.referenceCode, 'Why ' + REF.active.referenceCode + ' is retired', 'Approve', go);
+      else go(null).then(function (r) { if (r.status >= 400) toast(err(r, 'Not approved.'), 'bad'); });
+    };
+    var rNo = $('fb-ref-no');
+    if (rNo) rNo.onclick = function () { askReason('Decline the proposed reference', 'Why', 'Decline', function (why) {
+      return tunnel('/v1/prodfloor/qc/references/' + REF.pending.referenceStandardId + '/decline', { method: 'POST', body: { reason: why } }).then(function (r) { if (r.status < 400) loadQc(id); return r; }); }); };
     var sel = $('fb-qprod');
     if (sel) sel.onchange = async function () {
       var r = await tunnel('/v1/prodfloor/qc/checkpoints/' + sel.value); var c = r.status < 400 ? data(r).checkpoints : [];
-      $('fb-qcps').innerHTML = c.length ? c.map(function (x) { return '<div data-cp="' + x.id + '" data-type="' + x.checkType + '" style="display:flex;gap:var(--s-snug);align-items:center;flex-wrap:wrap"><strong style="min-width:160px">' + esc(x.name) + '</strong>' + (x.checkType === 'RANGE' ? '<input class="fld" data-v inputmode="decimal" placeholder="' + esc(x.min) + ' – ' + esc(x.max) + '" style="width:140px">' : '<select class="fld" data-v><option value="">Result…</option><option value="1">Pass</option><option value="0">Fail</option></select>') + (x.photoRequired ? '<input class="fld" data-photo placeholder="Photo ref" style="width:140px">' : '') + '</div>'; }).join('') : '<p>This product has no checkpoints published yet.</p>';
+      var cx = await tunnel('/v1/prodfloor/qc/batches/' + id + '/context?productId=' + encodeURIComponent(sel.value)); REF = cx.status < 400 ? data(cx).reference : null;
+      $('fb-qref').textContent = REF ? REF.note : '';
+      $('fb-qcps').innerHTML = c.length ? c.map(function (x) { return cpHtml(x, REF); }).join('') : '<p>This product has no checkpoints published yet.</p>';
     };
     var qr = $('fb-qr');
     if (qr) qr.onsubmit = function (e) {
       e.preventDefault();
       var results = [].map.call(host.querySelectorAll('[data-cp]'), function (el) {
-        var v = el.querySelector('[data-v]').value, ph = el.querySelector('[data-photo]'), o = { checkpointId: el.getAttribute('data-cp') };
+        var v = el.querySelector('[data-v]').value, ph = el.querySelector('[data-photo]'), rf = el.querySelector('[data-ref]'), o = { checkpointId: el.getAttribute('data-cp') };
         if (el.getAttribute('data-type') === 'RANGE') o.value = v === '' ? null : Number(v); else if (v !== '') o.pass = v === '1';
-        if (ph) o.photoRef = ph.value; return o;
+        if (ph) o.photoRef = ph.value; if (rf) o.referenceSampleCode = rf.value.trim(); return o;
       });
       var body = { results: results, defectType: $('fb-qdef').value || undefined, instrumentDoubt: $('fb-qdoubt').checked, rmBatchId: $('fb-qlot').value || undefined, productId: sel ? sel.value : undefined };
       tunnel('/v1/prodfloor/qc/batches/' + id + '/rounds', { method: 'POST', body: body }).then(function (r) {
