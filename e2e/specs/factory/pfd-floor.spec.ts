@@ -47,9 +47,11 @@ test('stock cover: held with no rule, then a reasoned suggestion a planner appro
   await noSideScroll(page);
   await page.screenshot({ path: info.outputPath('cover-held.png'), fullPage: true });
 
-  // an admin publishes a rule for this product (the Rules screen is lane A's walk)
+  // an admin publishes a rule for this product (the Rules screen is lane A's walk). STAGE-2-RP: defaultLeadDays only applies while
+  // no station or QC time is measured; the walks before this one now finish real batches (QC rounds seconds after the mix), so QC
+  // days ARE measured here and read 0. extraDays applies either way, so the walk's premise (a rule that names a lead) holds in any order.
   await must('owner', 'POST', '/v1/policies/planning.cover/versions', {
-    body: { rules: [{ id: 'walk-' + code, scope: 'global', when: [{ field: 'sku', op: 'eq', value: p.sku }], then: { mode: 'dynamic', defaultLeadDays: 21 } }], hasDefault: false },
+    body: { rules: [{ id: 'walk-' + code, scope: 'global', when: [{ field: 'sku', op: 'eq', value: p.sku }], then: { mode: 'dynamic', defaultLeadDays: 21, extraDays: 21 } }], hasDefault: false },
     reason: 'walk: one product dynamic' });
   await page.reload();
   await openNav(page, 'Stock cover');
