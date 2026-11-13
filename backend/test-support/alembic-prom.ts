@@ -103,7 +103,7 @@ export function parseBatchRestRecorded(raw: unknown): { ok: true; record: BatchR
      the record's own dates contradict, which the lot page would print and P-01 would count. */
   else if (ISO_INSTANT(r.started_at) && ISO_INSTANT(r.closed_at)
     && (r.days_rested as number) > Math.floor((Date.parse(r.closed_at) - Date.parse(r.started_at)) / (24 * 60 * 60 * 1000))) {
-    problems.push("days_rested is more than the days between started_at and closed_at");
+    problems.push("the days rested are more than the days between the rest's start and its close");
   }
   if (!count(r.required_days, 1, 365)) problems.push("required_days must be 1 to 365");
   if (!count(r.rule_days, 1, 365)) problems.push("rule_days must be 1 to 365");
