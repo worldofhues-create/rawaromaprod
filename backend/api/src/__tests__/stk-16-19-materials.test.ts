@@ -158,12 +158,12 @@ test('STK-30: a name already on file is that material, named and left alone, and
   // names one of them was refused WHOLE ("already on file"), so not one of its other rows could be loaded.
   const fam = await family();
   const x = t();
-  const held = await materials.createMaterial({ materialCode: `S30-${x}`, materialName: `Probe Hedione ${x}` }, buyer);
+  const held = await materials.createMaterial({ materialCode: `S30-${x}`, materialName: `Probe Alpha ${x}` }, buyer);
   const csv = [
     'material_name,material_code,family',
-    `Probe Hedione ${x},,${fam}`, // on file: nothing to make, and it gets the floor code it lacked
-    `Probe Calone ${x},,${fam}`,
-    `Probe Galbanum ${x},,`,
+    `Probe Alpha ${x},,${fam}`, // on file: nothing to make, and it gets the floor code it lacked
+    `Probe Beta ${x},,${fam}`,
+    `Probe Gamma ${x},,`,
   ].join('\n');
   const dry = await importer.import({ csv }, buyer);
   assert.equal(dry.errorCount, 0, JSON.stringify(dry.rows));
@@ -185,7 +185,7 @@ test('STK-30: a name already on file is that material, named and left alone, and
   assert.equal(again.existing[0]!.floorCode, r.existing[0]!.floorCode, 'a floor code on file is kept');
   assert.equal((await sql()`select count(*)::int as n from masterdata.material`)[0]!.n, before + 2);
   // A row that gives the material on file ANOTHER code is a contradiction, and still refuses the file.
-  const other = await importer.import({ csv: `material_name,material_code\nProbe Hedione ${x},S30-OTHER-${x}\n`, commit: true }, buyer);
+  const other = await importer.import({ csv: `material_name,material_code\nProbe Alpha ${x},S30-OTHER-${x}\n`, commit: true }, buyer);
   assert.equal(other.committed, false);
   assert.match(other.rows[0]!.errors.join(), /already on file as S30-/);
 });
