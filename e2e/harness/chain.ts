@@ -207,21 +207,75 @@ export async function orderWithIssuedStock(qty = 5) {
     items: [{ materialId: mat, inventoryBatchId: invBatch, uomId: kg }] });
   return { order, invBatch, qty };
 }
-/** Mixed, QC'd, matured and released oil. */
-export async function releasedOil(batchNumber: string, qty = 5) {
-  const { kg, qcParam } = await master();
+/* ── STAGE-2-RP: the release as the merged branch enforces it ────────────────────────────────────────
+ * The chain made a batch the way the factory did before the promises: a typed batch number, a typed QC
+ * pass, IN_MATURATION and RELEASED one after the other. The server refuses each of those now, so nine
+ * walks never reached their screen. This drives the real process, by the routes the screens call:
+ *
+ *   the number      the server assigns it (PROM-4); the chain reads it back and hands it to the walk
+ *   QC 1            a round on the product's published checkpoints, which include the comparison with
+ *                   the retained reference (PROM-3). The chain product has no retained reference (that is
+ *                   a physical bottle two people approve), so the round records NO_REFERENCE_YET
+ *   the rest        every batch rests 45 days (PROM-2). A walk cannot wait and must not weaken the rule,
+ *                   so it takes the path the floor has: QC ASKS for an early release with a reason, and a
+ *                   SECOND person (the owner) approves it. The rule itself is left at 45 days
+ *   QC 2            a retained sample of this batch on file, then a round taken after the rest ended
+ *   release         IN_MATURATION -> RELEASED, which closes the rest and sends its record
+ */
+type Cp = { id: string; checkType: string; min: number | null; max: number | null; photoRequired?: boolean };
+/** The chain product's checkpoints: the version in force, or (the first time) one published as QC would. */
+async function qcCheckpoints(): Promise<{ product: string; results: Array<Record<string, unknown>> }> {
+  const { product } = await sku();
+  const read = async () => ((await must('qc', 'GET', `/v1/prodfloor/qc/checkpoints/${product}`)).checkpoints ?? []) as Cp[];
+  let cps = await read();
+  if (!cps.length) {
+    await must('qc', 'POST', `/v1/prodfloor/qc/checkpoints/${product}`, { reason: 'browser suite: the first version',
+      checkpoints: [{ name: 'Odour profile', checkType: 'PASS_FAIL', critical: true }, { name: 'Against the retained reference', checkType: 'REFERENCE' }] });
+    cps = await read();
+  }
+  // Every checkpoint answered as passing: a range by its midpoint, a photo by a reference to one.
+  const results = cps.map((c) => ({ checkpointId: c.id, pass: true,
+    ...(c.checkType === 'RANGE' && c.min != null && c.max != null ? { value: (c.min + c.max) / 2 } : {}), ...(c.photoRequired ? { photoRef: 'walk-photo' } : {}) }));
+  return { product, results };
+}
+/** One QC round on the batch; the walk stops if QC did not approve it. */
+async function qcRound(oil: string, stage: 'QC 1' | 'QC 2', body: Record<string, unknown>) {
+  const r = await must('qc', 'POST', `/v1/prodfloor/qc/batches/${oil}/rounds`, body);
+  if (r?.decision && r.decision !== 'APPROVE') throw new Error(`chain: ${stage} on ${oil} was ${r.decision}, not APPROVE: ${JSON.stringify(r).slice(0, 300)}`);
+}
+/** A batch that has been mixed and recorded: the server's number, nothing decided yet (QC_PENDING). */
+export async function mixedOil(qty = 5) {
+  const { kg } = await master();
   const { order } = await orderWithIssuedStock(qty);
   const mix = (await must('compounding', 'POST', '/v1/mixing-sessions', { productionOrderId: order })).secureMixingSessionId;
   await must('compounding', 'POST', `/v1/mixing-sessions/${mix}/weighings`, { sequenceNo: 1, grossQty: qty + 0.45, tareQty: 0.45, scaleRef: 'BAL-01' });
   await must('compounding', 'POST', `/v1/mixing-sessions/${mix}/steps`, { stepSequence: 1, stepDescription: 'charge per coded instruction' });
   await must('compounding', 'POST', `/v1/mixing-sessions/${mix}/end`, {});
-  const oil = (await must('compounding', 'POST', '/v1/oil-batches', { productionOrderId: order, secureMixingSessionId: mix, batchNumber, producedQty: qty, uomId: kg })).batch.oilBatchId;
-  const qcBody = { oilBatchId: oil, qcParameterId: qcParam, observedValue: 1.47, specMin: 1.46, specMax: 1.48 };
-  await must('qc', 'POST', '/v1/production-qc', qcBody);
-  await must('compounding', 'POST', `/v1/oil-batches/${oil}/transition`, { status: 'IN_MATURATION' });
-  await must('qc', 'POST', '/v1/production-qc', qcBody);
-  await must('compounding', 'POST', `/v1/oil-batches/${oil}/transition`, { status: 'RELEASED' });
-  return { oil: oil as string, order, mix };
+  const made = (await must('compounding', 'POST', '/v1/oil-batches', { productionOrderId: order, secureMixingSessionId: mix, producedQty: qty, uomId: kg })).batch;
+  return { oil: made.oilBatchId as string, batchNumber: made.batchNumber as string, order, mix };
+}
+/** QC 1 approved and the batch resting: the rest run is open. */
+export async function restingOil(qty = 5) {
+  const { qcParam } = await master();
+  const b = await mixedOil(qty);
+  const { product, results } = await qcCheckpoints();
+  await must('qc', 'POST', '/v1/production-qc', { oilBatchId: b.oil, qcParameterId: qcParam, observedValue: 1.47, specMin: 1.46, specMax: 1.48 });
+  await qcRound(b.oil, 'QC 1', { productId: product, results });
+  await must('compounding', 'POST', `/v1/oil-batches/${b.oil}/transition`, { status: 'IN_MATURATION' });
+  const run = await until('the rest run', async () => (((await must('qc', 'GET', '/v1/maceration/runs')).items ?? []) as any[]).find((r) => (r.oilBatchId ?? r.oil_batch_id) === b.oil));
+  return { ...b, run: (run.macerationRunId ?? run.maceration_run_id) as string, product, results };
+}
+/** Mixed, QC 1, rested (an early release by two people), QC 2 and released. */
+export async function releasedOil(qty = 5) {
+  const { qcParam } = await master();
+  const b = await restingOil(qty);
+  await must('qc', 'POST', `/v1/maceration/runs/${b.run}/release-early`, { reasonCode: 'other', reason: 'browser suite: a walk cannot wait 45 days for the rest' });
+  await must('owner', 'POST', `/v1/maceration/runs/${b.run}/release-early/approve`, { note: 'browser suite: second person' });
+  await must('qc', 'POST', '/v1/qc-sample-retentions', { oilBatchId: b.oil, sampleCode: `RS-${b.batchNumber}`, retainedDt: new Date().toISOString() });
+  await must('qc', 'POST', '/v1/production-qc', { oilBatchId: b.oil, qcParameterId: qcParam, observedValue: 1.47, specMin: 1.46, specMax: 1.48 });
+  await qcRound(b.oil, 'QC 2', { results: b.results });
+  await must('compounding', 'POST', `/v1/oil-batches/${b.oil}/transition`, { status: 'RELEASED' });
+  return { oil: b.oil, order: b.order, mix: b.mix, batchNumber: b.batchNumber };
 }
 /** QC's release of the oil batch: the gate labels now stand behind. */
 export async function releasedCoa(oil: string) {
@@ -235,34 +289,39 @@ export async function releasedCoa(oil: string) {
 export const sku = () => stage('sku', async () => {
   const { pcs } = await master();
   const product = (await must('owner', 'POST', '/v1/products', { productCode: 'CH-PRD-1', productName: 'Chain oil 1 kg' })).productId;
-  const skuId = (await must('owner', 'POST', '/v1/product-skus', { skuCode: 'CH-SKU-1', productId: product })).productSkuId;
+  const skuId = (await must('owner', 'POST', '/v1/product-skus', { skuCode: 'CH-SKU-1', productId: product,
+    // STAGE-2-RP: units are real. A pack that holds no stated mass cannot be sized against the oil it draws down,
+    // and its label refuses to print a net quantity it does not hold. This SKU is "Chain oil 1 kg", so it says so.
+    netContentMg: 1_000_000 })).productSkuId;
   const pm = (await must('owner', 'POST', '/v1/packaging-materials', { packagingMaterialCode: 'CH-PM-1', packagingMaterialName: '1 kg aluminium bottle', uomId: pcs })).packagingMaterialId;
   await must('owner', 'POST', '/v1/packaging-boms', { productSkuId: skuId, packagingMaterialId: pm, requiredQty: 1, uomId: pcs });
   await must('warehouse', 'POST', '/v1/inventory-batches', { materialId: pm, quantityOnHand: 500, uomId: pcs });
   return { product, skuId, pm };
 });
 /** A package order with materials issued and its fill finished. */
-export async function filledPackageOrder(oilBatchNumber: string, qty = 5) {
+export async function filledPackageOrder(qty = 5) {
   const { kg, skuId } = { ...(await master()), ...(await sku()) };
-  const { oil } = await releasedOil(oilBatchNumber, qty);
+  const { oil, batchNumber: oilBatchNumber } = await releasedOil(qty);
   const pkg = (await must('packaging', 'POST', '/v1/package-orders', { productSkuId: skuId, oilBatchId: oil, orderQty: qty, uomId: kg })).order.packageOrderId as string;
   await must('packaging', 'POST', `/v1/package-orders/${pkg}/issue-materials`, {});
   const fill = (await must('filling', 'POST', '/v1/filling-sessions', { packageOrderId: pkg })).fillingSessionId as string;
   await must('filling', 'POST', `/v1/filling-sessions/${fill}/details`, { filledQty: qty, rejectedQty: 0, uomId: kg });
   await must('filling', 'POST', `/v1/filling-sessions/${fill}/end`, {});
-  return { pkg, oil, fill, qty, skuId };
+  return { pkg, oil, oilBatchNumber, fill, qty, skuId };
 }
 /** A finished batch: labelled, packaging QC passed, released. */
-export async function releasedFinishedBatch(fgNumber: string, qty = 5) {
+export async function releasedFinishedBatch(qty = 5) {
   const { kg } = await master();
-  const { pkg, skuId, oil } = await filledPackageOrder(`OB-${fgNumber}`, qty);
+  const { pkg, skuId, oil, oilBatchNumber } = await filledPackageOrder(qty);
   await releasedCoa(oil);
-  const fg = (await must('packaging', 'POST', '/v1/finished-good-batches', { packageOrderId: pkg, productSkuId: skuId, batchNumber: fgNumber, producedQty: qty, uomId: kg, manufacturingDate: today(), expiryDate: plusDays(700) })).batch.finishedGoodBatchId as string;
+  // PROM-4: the lot is assigned by the server at fill; the walk reads it, as a person reads it off the screen.
+  const made = (await must('packaging', 'POST', '/v1/finished-good-batches', { packageOrderId: pkg, productSkuId: skuId, producedQty: qty, uomId: kg, manufacturingDate: today(), expiryDate: plusDays(700) })).batch;
+  const fg = made.finishedGoodBatchId as string, fgNumber = made.batchNumber as string;
   await must('packaging', 'POST', `/v1/finished-good-batches/${fg}/labels`, { labelCount: 1 });
   await must('packaging', 'POST', `/v1/package-orders/${pkg}/complete`, {});
   await must('packaging', 'POST', '/v1/packaging-qc', { finishedGoodBatchId: fg, leakageCheck: 'PASS', labelCheck: 'PASS', cartonCheck: 'PASS' });
   await until('FG release', async () => (await find('packaging', '/v1/finished-good-batches', (x) => x.finishedGoodBatchId === fg))?.status === 'RELEASED');
-  return { fg, skuId, pkg, qty };
+  return { fg, fgNumber, oilBatchNumber, skuId, pkg, qty };
 }
 
 export const BRIDGE_SECRET = 'browser-suite-bridge-secret-not-a-real-credential';

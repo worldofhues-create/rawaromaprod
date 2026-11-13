@@ -61,8 +61,7 @@ test('a production order shows its number on its list and on the issue', async (
 });
 
 test('finished stock shows its batch number and readable times', async ({ page }) => {
-  const number = `FGD${Date.now().toString(36).toUpperCase()}`;
-  const { fg } = await releasedFinishedBatch(number);
+  const { fg, fgNumber: number } = await releasedFinishedBatch(); // the lot the server assigned at fill (PROM-4)
   await must('packaging', 'POST', '/v1/fg-reservations', { finishedGoodBatchId: fg, reservedQty: 1 });
   await signIn(page, 'factory', 'packaging');
   await openNav(page, 'Reserved finished stock');

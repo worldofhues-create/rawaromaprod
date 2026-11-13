@@ -4,12 +4,15 @@ import { filledPackageOrder, master, releasedCoa, sku, releasedFinishedBatch } f
 import { createViaForm, expectRefused, fillForm, openNav, rowAction, signIn, sql, uniq } from '../../harness/walk';
 
 test('packaging records a finished batch and labels it; packaging QC cannot pass before the label', async ({ page }, info) => {
-  const fg = uniq('FG-', info);
   await master(); await sku();
-  const { pkg, oil } = await filledPackageOrder(`OB-${fg}`, 2);
+  const { pkg, oil } = await filledPackageOrder(2);
   await signIn(page, 'factory', 'packaging');
   await openNav(page, 'Finished batches');
-  await createViaForm(page, { packageOrderId: pkg, productSkuId: { label: 'CH-SKU-1' }, batchNumber: fg, producedQty: 2, manufacturingDate: '2031-01-01', expiryDate: '2033-01-01' });
+  // PROM-4: the form has no lot number field; the server assigns the lot at fill and the list shows it.
+  await createViaForm(page, { packageOrderId: pkg, productSkuId: { label: 'CH-SKU-1' }, producedQty: 2, manufacturingDate: '2031-01-01', expiryDate: '2033-01-01' });
+  const fg = sql(`select batch_number from packaging.finished_good_batch_master where package_order_id='${pkg}'`);
+  expect(fg, 'a lot the server made').toMatch(/^[A-Z0-9][A-Z0-9-]{5,}$/);
+  expect(sql(`select lot_assigned_at_fill from packaging.finished_good_batch_master where package_order_id='${pkg}'`)).toBe('t');
   await expect(page.locator('#ra-results')).toContainText(fg);
   expect(sql(`select count(*) from packaging.finished_good_batch_master where batch_number='${fg}'`)).toBe('1');
   await openNav(page, 'Packaging QC');
@@ -33,8 +36,7 @@ test('packaging records a finished batch and labels it; packaging QC cannot pass
 });
 
 test('a released batch can be reserved on screen and the reservation reads back; filling cannot', async ({ page }, info) => {
-  const fg = uniq('FGR-', info);
-  const { fg: id } = await releasedFinishedBatch(fg, 2);
+  const { fg: id, fgNumber: fg } = await releasedFinishedBatch(2);
   await signIn(page, 'factory', 'packaging');
   await openNav(page, 'Reserved finished stock');
   await createViaForm(page, { finishedGoodBatchId: { label: fg }, reservedQty: 1, channel: 'OFFLINE' });

@@ -4,12 +4,11 @@ import { releasedFinishedBatch } from '../../harness/chain';
 import { expectRefused, openNav, rowAction, signIn, sql, uniq } from '../../harness/walk';
 
 test('owner traces a released batch to its oil and raw material; filling is refused', async ({ page }, info) => {
-  const fgNo = uniq('FGT-', info);
-  const { fg } = await releasedFinishedBatch(fgNo, 2);
+  const { fg, fgNumber: fgNo, oilBatchNumber } = await releasedFinishedBatch(2); // both numbers are the server's (PROM-4)
   await signIn(page, 'factory', 'owner');
   await openNav(page, 'Trace a batch');
   await rowAction(page, fgNo, 'Trace');
-  await expect(page.locator('#ra-trace')).toContainText(`OB-${fgNo}`);
+  await expect(page.locator('#ra-trace')).toContainText(oilBatchNumber);
   await expect(page.locator('#ra-trace')).toContainText('CH-RM-1');
   await expect(page.locator('#ra-trace')).toContainText('Chain Aromatics');
   // The lot issued to this order, not merely some lot of the same material: this line is the recall.

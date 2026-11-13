@@ -5,9 +5,8 @@ import { createViaForm, expectRefused, openNav, rowById, confirmDialog, signIn, 
 import { must } from '../../harness/chain';
 
 test('packaging raises an order against released oil and filling ends a ticket; both read back', async ({ page }, info) => {
-  const batch = uniq('OBP-', info);
   await master(); await sku();
-  const { oil } = await releasedOil(batch, 2);
+  const { oil, batchNumber: batch } = await releasedOil(2); // the number the server assigned (PROM-4)
   await signIn(page, 'factory', 'packaging');
   await openNav(page, 'Packing orders');
   await createViaForm(page, { productSkuId: { label: 'CH-SKU-1' }, oilBatchId: { label: batch }, orderQty: 2 });
@@ -24,9 +23,9 @@ test('packaging raises an order against released oil and filling ends a ticket; 
   await page.reload();
   await expect(page.locator('#ra-title')).toHaveText('Fill tickets');
   await rowById(page, fill).getByRole('button', { name: 'Record fill', exact: true }).click();
-  await page.getByLabel('Filled quantity').fill('1.75');
+  await page.getByLabel('Filled quantity').fill('1'); // units are real: a pack is counted whole, and the SKU holds 1 kg a pack (1.75 packs is refused)
   await page.getByRole('button', { name: 'Save fill', exact: true }).click();
-  await expect.poll(() => sql(`select filled_qty::numeric from packaging.filling_session_details where filling_session_id='${fill}'`)).toMatch(/^1\.750*$/);
+  await expect.poll(() => sql(`select filled_qty::numeric from packaging.filling_session_details where filling_session_id='${fill}'`)).toMatch(/^1(\.0+)?$/);
   await rowById(page, fill).getByRole('button', { name: 'End fill', exact: true }).click();
   await confirmDialog(page, 'End fill');
   await expect.poll(() => sql(`select status from packaging.filling_session where filling_session_id='${fill}'`), { timeout: 20_000 }).toBe('DONE');

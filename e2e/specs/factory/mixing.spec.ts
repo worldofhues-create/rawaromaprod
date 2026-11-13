@@ -6,7 +6,6 @@ import { confirmDialog, createViaForm, expectRefused, openNav, rowById, signIn, 
 test('compounding opens a session, weighs, ends it and records the oil batch; it all reads back', async ({ page }, info) => {
   await master();
   const { order, qty } = await orderWithIssuedStock(3);
-  const batch = uniq('OB-', info);
   await signIn(page, 'factory', 'compounding');
   await openNav(page, 'Mixing sessions');
   await createViaForm(page, { productionOrderId: order });
@@ -25,7 +24,11 @@ test('compounding opens a session, weighs, ends it and records the oil batch; it
   await expect.poll(() => sql(`select status from production.secure_mixing_session where secure_mixing_session_id='${session}'`), { timeout: 20_000 }).toBe('COMPLETED');
 
   await openNav(page, 'Oil batches');
-  await createViaForm(page, { productionOrderId: order, batchNumber: batch, producedQty: qty });
+  // PROM-4: the form has no batch number field; the server assigns the number and the list shows it.
+  await expect(page.locator('#ra-new')).toBeVisible();
+  await createViaForm(page, { productionOrderId: order, producedQty: qty });
+  const batch = sql(`select batch_number from production.oil_batch_master where production_order_id='${order}'`);
+  expect(batch, 'a number the server made, not an empty one').toMatch(/^[A-Z0-9][A-Z0-9-]{5,}$/);
   await expect(page.locator('#ra-results')).toContainText(batch);
   expect(sql(`select count(*) from production.oil_batch_master where batch_number='${batch}'`)).toBe('1');
   await page.reload();

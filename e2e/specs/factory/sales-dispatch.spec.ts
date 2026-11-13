@@ -5,7 +5,7 @@ import { createDoc, createViaForm, expectRefused, openNav, signIn, sql, uniq } f
 
 test('a hand-entered sales order (with its reason), a dispatch, and a document on it all read back', async ({ page }, info) => {
   const c = uniq('SO', info);
-  const { fg } = await releasedFinishedBatch(uniq('FGS-', info), 2);
+  const { fg } = await releasedFinishedBatch(2);
   const customer = (await must('sales', 'POST', '/v1/customers', { customerCode: `C${c}`, customerName: `Customer ${c}` })).customerId;
   await signIn(page, 'factory', 'owner');
   await openNav(page, 'Sales orders');
