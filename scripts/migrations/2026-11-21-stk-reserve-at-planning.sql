@@ -23,4 +23,11 @@ alter table production.production_order_ingredients add column if not exists res
 alter table production.production_order_ingredients drop constraint if exists production_order_ingredients_mg_chk;
 alter table production.production_order_ingredients add constraint production_order_ingredients_mg_chk
   check ((required_mg is null or required_mg > 0) and (reserved_mg is null or (reserved_mg >= 0 and (required_mg is null or reserved_mg <= required_mg))));
-create index if not exists stock_reservation_document_idx on inventory.stock_reservation (reserved_for_document_id) where released_dt is null;
+-- STAGE-2-RP: this file used to end with
+--   create index if not exists stock_reservation_document_idx ... where released_dt is null;
+-- which created nothing on any database: 0006_inventory.sql already makes an index of that name (on
+-- the same column, without the WHERE), so IF NOT EXISTS skipped it. But the rollback DROPPED that
+-- name, taking 0006's index with it, and the next db:migrate then made the partial one: a database
+-- that had been rolled back and re-applied no longer matched one that never was (found by the
+-- release's down-and-up proof). 0006's index serves the lookup by order, so nothing is added here
+-- and nothing is dropped there.
