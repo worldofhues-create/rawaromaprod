@@ -8,6 +8,7 @@ import type { Sql } from 'postgres';
 import { DomainError, IMPORT_MAX_BYTES, ImportEngine, PG_CLIENT, type AuthPrincipal, type ImportContext } from '@core/backend-kernel';
 import { MaterialImportService } from '../floor/material-import.service.js';
 import { factoryKinds } from './factory-kinds.js';
+import { PurchasePriceService } from './purchase-price.service.js';
 
 /** The uploaded file out of a JSON body. The console's channel carries JSON only, so a file travels as
  *  base64; the size cap is checked on the text before a byte is decoded. */
@@ -26,8 +27,8 @@ export const contextOf = (principal: AuthPrincipal): ImportContext => ({ princip
 @Injectable()
 export class ImportsService {
   readonly engine: ImportEngine;
-  constructor(@Inject(PG_CLIENT) private readonly sql: Sql, materialImport: MaterialImportService) {
-    this.engine = new ImportEngine(sql, 'platform', factoryKinds(sql, materialImport));
+  constructor(@Inject(PG_CLIENT) private readonly sql: Sql, materialImport: MaterialImportService, prices: PurchasePriceService) {
+    this.engine = new ImportEngine(sql, 'platform', factoryKinds(sql, materialImport, prices));
   }
 
   /** The history with each uploader's and committer's name, where the id is a user on file. */

@@ -7,10 +7,12 @@ import { Module } from '@nestjs/common';
 import { FloorModule } from '../floor/floor.module.js';
 import { ImportsController } from './imports.controller.js';
 import { ImportsService } from './imports.service.js';
+import { PurchasePriceController } from './purchase-price.controller.js';
+import { PurchasePriceService } from './purchase-price.service.js';
 
 @Module({
   imports: [FloorModule],
-  controllers: [ImportsController],
-  providers: [ImportsService],
+  controllers: [ImportsController, PurchasePriceController],
+  providers: [ImportsService, PurchasePriceService],
 })
 export class ImportsModule {}

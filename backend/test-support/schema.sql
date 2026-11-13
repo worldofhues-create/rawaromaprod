@@ -3409,3 +3409,22 @@ create table if not exists inventory.stock_adjustment (
   status varchar(30), created_dt timestamptz not null default now(), updated_dt timestamptz not null default now(),
   created_by varchar(255), updated_by varchar(255)
 );
+
+-- IMPORT-RP-COST (scripts/migrations/2026-11-25-material-purchase-price.sql).
+create table if not exists procurement.material_purchase_price (
+  material_purchase_price_id uuid primary key, material_id uuid not null, vendor_id uuid,
+  unit varchar(8) not null check (unit in ('kg', 'g', 'L', 'ml', 'unit')),
+  list_price_paise bigint not null check (list_price_paise > 0),
+  discount_bps integer not null default 0 check (discount_bps between 0 and 10000),
+  net_price_paise bigint not null check (net_price_paise >= 0 and net_price_paise <= list_price_paise),
+  gst_rate_pct numeric(5,2) check (gst_rate_pct is null or (gst_rate_pct >= 0 and gst_rate_pct <= 100)),
+  hsn_code varchar(8) check (hsn_code is null or hsn_code ~ '^([0-9]{4}|[0-9]{6}|[0-9]{8})$'),
+  effective_from date not null, note text, source varchar(8) not null check (source in ('import', 'screen')),
+  job_ref uuid, created_by varchar(255) not null, created_dt timestamptz not null default now()
+);
+create unique index if not exists material_purchase_price_key_uq
+  on procurement.material_purchase_price (material_id, coalesce(vendor_id, '00000000-0000-0000-0000-000000000000'::uuid), effective_from);
+create table if not exists procurement.purchase_price_setting (
+  key varchar(60) primary key, value_pct numeric(6,2) not null check (value_pct > 0 and value_pct <= 1000),
+  updated_by varchar(255), updated_dt timestamptz not null default now()
+);

@@ -113,3 +113,29 @@ export function casValid(cas: string): boolean {
   const digits = (m[1]! + m[2]!).split('').reverse();
   return digits.reduce((a, d, i) => a + Number(d) * (i + 1), 0) % 10 === Number(m[3]);
 }
+
+/**
+ * Rupees as a person types them ("1,250.50", "₹ 500", "Rs 80") into INTEGER PAISE, once. Blank is
+ * null, and the caller says what a blank means (for a price it is "no change", never zero). More than
+ * two decimals is refused, not rounded: there is no such thing as a fraction of a paisa to store.
+ */
+export function cellRupees(text: string, header: string): Cell<bigint | null> {
+  const t = text.trim().replace(/^(₹|rs\.?|inr)\s*/i, '').replace(/,/g, '').trim();
+  if (t === '') return ok(null);
+  const m = /^(\d{1,12})(?:\.(\d{1,2}))?$/.exec(t);
+  if (!m) {
+    return /^-/.test(t)
+      ? bad(`"${header}": "${text}" is below zero.`)
+      : bad(`"${header}": "${text}" is not an amount in rupees and paise. Write it like 1250 or 1,250.50 (two decimals at most).`);
+  }
+  return ok(BigInt(m[1]!) * 100n + BigInt((m[2] ?? '').padEnd(2, '0')));
+}
+
+/** A percentage with at most two decimals ("12.5", "18%") as basis points (hundredths of a percent). */
+export function cellPercentBps(text: string, header: string): Cell<number | null> {
+  const t = text.trim().replace(/%$/, '').trim();
+  if (t === '') return ok(null);
+  const m = /^(\d{1,3})(?:\.(\d{1,2}))?$/.exec(t);
+  if (!m) return bad(`"${header}": "${text}" must be a percentage with at most two decimals, like 12.5.`);
+  return ok(Number(m[1]) * 100 + Number((m[2] ?? '').padEnd(2, '0')));
+}

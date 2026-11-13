@@ -60,6 +60,10 @@ export const OUTBOUND_TO_ALEMBIC = [
   'procurement.po.amended',
   'procurement.po.cancelled',
   'inventory.grn.created',
+  // IMPORT-RP-COST (owner 2026-11-13, LD-156): a material's purchase price as recorded (a sheet or the
+  // screen), for Books. One fact per price row; its own aggregate (`material_cost`, the price row's
+  // id). Body: api/src/imports/purchase-price.service.ts costFact(). Never a formula or a quantity.
+  'material.cost.recorded',
 ] as const;
 export type OutboundToAlembic = (typeof OUTBOUND_TO_ALEMBIC)[number];
 

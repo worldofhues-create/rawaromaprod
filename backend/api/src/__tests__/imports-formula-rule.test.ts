@@ -364,5 +364,5 @@ test('a log: nothing written to stdout, stderr or the console while formulas wer
 test('the version and its lines can be found by the people who may read a formula, and by nobody through the import', async () => {
   const lines = await db.select().from(formulaSchema.formulaIngredients).where(eq(formulaSchema.formulaIngredients.createdBy, formulator.userId));
   assert.ok(lines.length >= 6);
-  assert.equal(lines.every((l) => typeof l.encPayload === 'string' && l.encPayload.length > 0 && l.materialId == null), true, 'sealed lines carry ciphertext and no material id');
+  assert.equal(lines.every((l) => typeof l.encPayload === 'string' && l.encPayload.length > 0 && !('materialId' in l) && !('percentage' in l)), true, 'sealed lines carry ciphertext: the row has no material and no percentage column at all');
 });

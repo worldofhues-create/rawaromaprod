@@ -197,7 +197,7 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 323 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 325 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
@@ -214,7 +214,8 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
   //      only for the mixer assigned to an active batch) and masterdata:material_import:write.
   // 323: + IMPORT-RP's eight main-box permissions (scripts/imp-grants.ts): the dilution read and write and
   // six import kinds. Its ninth, vault:formula_import:write, is the formulator's and never the owner's.
-  assert.equal(ownerGrant.length, 323);
+  // 325: + IMPORT-RP-COST's procurement:material_purchase_price:read and :write (LD-156).
+  assert.equal(ownerGrant.length, 325);
   for (const p of ['production:oil_batch_balance:read', 'production:oil_batch_remnant:write', 'production:oil_batch:write_off', 'production:floor_mix:reveal_name', 'masterdata:material_import:write']) assert.ok(ownerGrant.includes(p), p);
   for (const p of ['quality:temperature:read', 'quality:temperature:write', 'quality:storage_zone:write', 'quality:temperature_limit:write']) assert.ok(ownerGrant.includes(p), p);
   // Named, so a different 29 cannot stand in for these: each must be the owner's.

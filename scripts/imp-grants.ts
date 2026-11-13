@@ -22,6 +22,10 @@ export const IMP_PERMISSIONS = [
   // The Vault's formulas import. `vault:` so that no blanket grant reaches it (the owner's excludes
   // every vault:* permission) and so that it rides in the access token, as the Vault box needs.
   'vault:formula_import:write',
+  // IMPORT-RP-COST (LD-156): a material's purchase price, read and recorded. One write permission for
+  // the sheet and the screen: purchasing (through its procurement:* grant) and finance (below).
+  'procurement:material_purchase_price:read',
+  'procurement:material_purchase_price:write',
 ] as const;
 
 /** import permission -> the single-record permission whose holders it must match exactly. */
@@ -38,6 +42,8 @@ export const IMPORT_MIRRORS: Record<string, string> = {
   'packaging:packaging_material_import:write': 'packaging:packaging_material_master:write',
   // Sealing a recipe is the formulator's alone; so is uploading one.
   'vault:formula_import:write': 'formula:formula_ingredients:write',
+  // One permission for the sheet and for the single price typed on screen (LD-156): it mirrors itself.
+  'procurement:material_purchase_price:write': 'procurement:material_purchase_price:write',
 };
 
 // procurement holds procurement:vendor_import:write, and packaging holds
@@ -49,6 +55,8 @@ const GRANTS: Record<string, readonly string[]> = {
   receiving: ['inventory:grn_import:write', 'inventory:rm_batch_import:write'],
   warehouse: ['inventory:stock_adjustment_import:write'],
   formulator: ['vault:formula_import:write'],
+  // Finance holds no procurement write but this one: it records and reads what a material costs.
+  finance: ['procurement:material_purchase_price:read', 'procurement:material_purchase_price:write'],
 };
 
 /** true -> `role` holds `permission` under IMPORT-RP's grants. */

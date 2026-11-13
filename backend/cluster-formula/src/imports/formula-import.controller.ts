@@ -12,6 +12,11 @@
  *   POST /v1/imports/jobs/:id/problems    { format, fileBase64 }: the rows to fix, read from the file
  *                                         the person sends again, returned to them and kept nowhere
  *
+ * THERE IS NO EXPORT ROUTE HERE, deliberately. The factory box's import offers "export what is on
+ * file" for a kind that defines it; a filled export of formulas would be recipes in a spreadsheet.
+ * The formulas kind defines none and this controller mounts no route for one. A person who may read
+ * a formula reads it on the Vault's own audited screen.
+ *
  * THE ANSWER TO `problems` IS THE ONE ANSWER HERE THAT HOLDS RECIPE LINES (the person's own refused
  * rows). The Vault's idempotency interceptor stores a write's answer so a re-sent request is not run
  * twice; @NoStoredReply() keeps this one out of that store. Every other answer on this controller

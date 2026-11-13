@@ -32,7 +32,8 @@ import { VendorService, procurementSchema } from '@ra/cluster-procurement';
 import { BatchService, GrnService, StockService, inventorySchema } from '@ra/cluster-inventory';
 import { CatalogService, packagingSchema } from '@ra/cluster-packaging';
 import type { MaterialChecked, MaterialImportService } from '../floor/material-import.service.js';
-import { DILUTIONS, INGREDIENTS, PACKAGING_MATERIALS, RAW_STOCK_ADJUSTMENT, RAW_STOCK_OPENING, SUPPLIERS, SUPPLIER_LOTS } from './kind-specs.js';
+import { DILUTIONS, INGREDIENTS, MATERIAL_PURCHASE_PRICES, PACKAGING_MATERIALS, RAW_STOCK_ADJUSTMENT, RAW_STOCK_OPENING, SUPPLIERS, SUPPLIER_LOTS } from './kind-specs.js';
+import type { PriceRecord, PurchasePriceService } from './purchase-price.service.js';
 
 /* ── small tools ──────────────────────────────────────────────────────────────────────────── */
 
@@ -488,8 +489,33 @@ function packagingMaterials(sql: Sql): ImportKindHandler<PackagingInput> {
   };
 }
 
-export function factoryKinds(sql: Sql, materialImport: MaterialImportService): ImportKindHandler[] {
-  return [ingredients(materialImport), suppliers(sql), supplierLots(sql), dilutions(sql), rawStockOpening(sql), rawStockAdjustment(sql), packagingMaterials(sql)] as ImportKindHandler[];
+/* ── material purchase prices (IMPORT-RP-COST) ────────────────────────────────────────────── */
+
+/** Judged and written by PurchasePriceService, the function the single-price route calls. */
+function materialPurchasePrices(prices: PurchasePriceService): ImportKindHandler<PriceRecord> {
+  return {
+    spec: MATERIAL_PURCHASE_PRICES,
+    async plan(rows, ctx) {
+      const v = (r: ImportTableRow, k: string) => r.values[k] ?? '';
+      const judged = await prices.judge(rows.map((r) => ({
+        line: r.row, materialCode: v(r, 'material'), unit: v(r, 'unit'), supplier: v(r, 'supplier'), listPrice: v(r, 'listPrice'), discountPercent: v(r, 'discount'),
+        gstRate: v(r, 'gst'), hsn: v(r, 'hsn'), effectiveFrom: v(r, 'effectiveFrom'), note: v(r, 'note'),
+      })), ctx.today);
+      return rows.map((r, i) => {
+        const j = judged[i]!;
+        return { row: r.row, outcome: j.outcome, naturalKey: j.key, label: j.label, problems: j.problems, notes: j.notes, input: j.record, cells: r.cells };
+      });
+    },
+    async writeUnit(tx, rows, ctx) {
+      for (const r of rows) await prices.record(tx, r.input!, 'import', ctx.jobId ?? null, ctx.principal);
+    },
+    exportRows: (ctx) => prices.exportRows(ctx.today),
+  };
+}
+
+export function factoryKinds(sql: Sql, materialImport: MaterialImportService, prices?: PurchasePriceService): ImportKindHandler[] {
+  return [ingredients(materialImport), suppliers(sql), supplierLots(sql), dilutions(sql), rawStockOpening(sql), rawStockAdjustment(sql), packagingMaterials(sql),
+    ...(prices ? [materialPurchasePrices(prices)] : [])] as ImportKindHandler[];
 }
 
 export type { AuthPrincipal, ImportContext };

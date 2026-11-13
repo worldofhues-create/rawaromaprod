@@ -705,14 +705,14 @@ export const ROLES: RoleDef[] = [
     code: 'finance',
     name: 'Finance',
     view: 'finance',
-    select: oneOf(
+    select: anyOf(impGrant('finance') /* IMPORT-RP-COST: what a material costs, read and recorded */, oneOf(
       'procurement:purchase_order:read', 'procurement:purchase_order_items:read', 'procurement:vendor_details:read',
       'procurement:vendor_credit_note:read', 'procurement:vendor_credit_notes_allocation:read', 'inventory:grn_master:read',
       'platform:policy:read',
       // PROD-B-5 + PROD-A-9: finance sees supplier payments and, per plan 10, requests, approves and releases
       // them under lane B's per-payment maker-checker (payment-gate.ts). Never PO create/edit (PROD-A-9).
       'procurement:po_payment_release:read', 'procurement:po_payment_release:write',
-    ),
+    )),
     sampleEmail: 'finance@rawaroma.local',
     passwordEnv: 'BOOTSTRAP_FINANCE_PASSWORD',
   },

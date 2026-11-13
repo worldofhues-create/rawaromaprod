@@ -7,6 +7,7 @@
  *   GET  /v1/imports/kinds                the kinds this person may run, with their columns
  *   GET  /v1/imports/history?kind=        every import of those kinds: who, when, the counts
  *   GET  /v1/imports/:kind/template       the template (?format=xlsx|csv), as { fileName, mime, base64 }
+ *   GET  /v1/imports/:kind/export         what is on file, in the template's columns (a kind that offers it)
  *   POST /v1/imports/:kind/preview        { fileName, fileBase64 }: judged, nothing written but the job
  *   GET  /v1/imports/jobs/:id             a job and its rows (the uploader only)
  *   POST /v1/imports/jobs/:id/commit      { fileBase64, mode }: the same file again; refused if it changed
@@ -59,6 +60,12 @@ export class ImportsController {
   @Get('v1/imports/:kind/template')
   template(@Param('kind') kind: string, @Query('format') format: string | undefined, @CurrentUser() p: AuthPrincipal) {
     return this.imports.engine.template(kind, s(format), p);
+  }
+
+  @DynamicPermission(WHY)
+  @Get('v1/imports/:kind/export')
+  exportFilled(@Param('kind') kind: string, @Query('format') format: string | undefined, @CurrentUser() p: AuthPrincipal) {
+    return this.imports.engine.exportFilled(kind, s(format), contextOf(p));
   }
 
   @DynamicPermission(WHY)

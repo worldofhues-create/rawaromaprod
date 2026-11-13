@@ -50,6 +50,17 @@ export function templateCsv(spec: ImportKindSpec): Buffer {
   return Buffer.from('﻿' + toCsv(dataSheet(spec).rows), 'utf8');
 }
 
+/** What is on file, in the template's own columns: the Instructions sheet, then the rows. No example row. */
+function filledTable(spec: ImportKindSpec, rows: readonly Readonly<Record<string, string>>[]): string[][] {
+  return [spec.columns.map((c) => c.header), ...rows.map((r) => spec.columns.map((c) => r[c.key] ?? ''))];
+}
+export function filledXlsx(spec: ImportKindSpec, rows: readonly Readonly<Record<string, string>>[]): Buffer {
+  return writeWorkbook([instructionsSheet(spec), { name: DATA_SHEET, rows: filledTable(spec, rows) }]);
+}
+export function filledCsv(spec: ImportKindSpec, rows: readonly Readonly<Record<string, string>>[]): Buffer {
+  return Buffer.from('\uFEFF' + toCsv(filledTable(spec, rows)), 'utf8');
+}
+
 export interface ImportProblemRow {
   readonly cells: Readonly<Record<string, string>>;
   readonly problems: readonly string[];

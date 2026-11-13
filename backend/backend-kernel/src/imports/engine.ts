@@ -34,12 +34,14 @@ import {
 } from './model.js';
 import { readImportFile } from './sheet.js';
 import { readImportTable, type ImportTableRow } from './table.js';
-import { EXAMPLE_ROW_PROBLEM, isExampleRow, problemsCsv, problemsXlsx, templateCsv, templateXlsx } from './template.js';
+import { EXAMPLE_ROW_PROBLEM, filledCsv, filledXlsx, isExampleRow, problemsCsv, problemsXlsx, templateCsv, templateXlsx } from './template.js';
 
 export interface ImportContext {
   readonly principal: AuthPrincipal;
   /** Today as YYYY-MM-DD, read once at the edge: a rule about "the future" is a rule about a day. */
   readonly today: string;
+  /** The import job being committed (set by the engine for a writer that records where a row came from). */
+  readonly jobId?: string;
 }
 
 export interface ImportKindHandler<I = unknown> {
@@ -53,6 +55,13 @@ export interface ImportKindHandler<I = unknown> {
   writeUnit?(tx: TransactionSql, rows: readonly ImportRowPlan<I>[], ctx: ImportContext): Promise<void>;
   /** Write every accepted row in the writer's own transaction (all of them or none). */
   writeAll?(rows: readonly ImportRowPlan<I>[], ctx: ImportContext): Promise<void>;
+  /**
+   * EXPORT WHAT IS ON FILE (LD-156): one row per existing record with its current values, by column
+   * key, in the template's own columns, so a person fills the empty cells and uploads the sheet back.
+   * Only a kind whose rule lets a row be added to (a new price from a later date) offers it. A kind
+   * that does not define this has no export at all: the formulas kind never does.
+   */
+  exportRows?(ctx: ImportContext): Promise<Record<string, string>[]>;
 }
 
 export interface ImportJobView {
@@ -139,8 +148,8 @@ export class ImportEngine {
   /* ── who may run what ─────────────────────────────────────────────────────────────────── */
 
   /** The kinds this person may run, with their columns: what the panel offers. */
-  kindsFor(principal: AuthPrincipal): ImportKindSpec[] {
-    return [...this.kinds.values()].map((k) => k.spec).filter((s) => principal.permissions.includes(s.permission));
+  kindsFor(principal: AuthPrincipal): Array<ImportKindSpec & { exportable: boolean }> {
+    return [...this.kinds.values()].filter((k) => principal.permissions.includes(k.spec.permission)).map((k) => ({ ...k.spec, exportable: !!k.exportRows }));
   }
   private handler(kind: string, principal: AuthPrincipal): ImportKindHandler {
     const h = this.kinds.get(kind);
@@ -158,6 +167,16 @@ export class ImportEngine {
     return format === 'csv'
       ? { fileName: `${spec.kind}-template.csv`, mime: CSV_MIME, base64: templateCsv(spec).toString('base64') }
       : { fileName: `${spec.kind}-template.xlsx`, mime: XLSX_MIME, base64: templateXlsx(spec).toString('base64') };
+  }
+
+  /** The kind's own sheet filled with what is on file. Same permission as the kind; every cell guarded. */
+  async exportFilled(kind: string, format: string, ctx: ImportContext): Promise<ImportDownload> {
+    const h = this.handler(kind, ctx.principal);
+    if (!h.exportRows) throw DomainError.notFound(`${h.spec.title} has no export of what is on file.`);
+    const rows = await h.exportRows(ctx);
+    return format === 'csv'
+      ? { fileName: `${h.spec.kind}-on-file.csv`, mime: CSV_MIME, base64: filledCsv(h.spec, rows).toString('base64') }
+      : { fileName: `${h.spec.kind}-on-file.xlsx`, mime: XLSX_MIME, base64: filledXlsx(h.spec, rows).toString('base64') };
   }
 
   /* ── reading and judging ──────────────────────────────────────────────────────────────── */
@@ -279,7 +298,7 @@ export class ImportEngine {
         await tx`select pg_advisory_xact_lock(hashtext(${'import_job:' + jobId}))`;
         const [now] = await tx`select status from ${this.jobs} where import_job_id = ${jobId}`;
         if (now?.status !== 'previewed') throw DomainError.conflict('This import was committed by another request. Look at the history.');
-        try { await h.writeAll!(accepted, ctx); }
+        try { await h.writeAll!(accepted, { ...ctx, jobId }); }
         catch (err) { throw DomainError.conflict(`${writeProblem(err, secret)} Nothing was imported.`); }
         await finish(tx);
       });
@@ -289,7 +308,7 @@ export class ImportEngine {
         const [locked] = await tx`select status from ${this.jobs} where import_job_id = ${jobId} for update`;
         if (locked?.status !== 'previewed') throw DomainError.conflict('This import was committed by another request. Look at the history.');
         for (const unit of units) {
-          try { await tx.savepoint((sp) => h.writeUnit!(sp, unit, ctx)); }
+          try { await tx.savepoint((sp) => h.writeUnit!(sp, unit, { ...ctx, jobId })); }
           catch (err) {
             const why = failUnit(unit, err);
             if (mode === 'all_or_nothing') throw DomainError.conflict(`Row ${unit[0]!.row}: ${why} Nothing was imported.`);

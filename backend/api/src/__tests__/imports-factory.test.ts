@@ -20,6 +20,7 @@ import { FloorCodeService } from '../floor/floor-code.service.js';
 import { MaterialImportService } from '../floor/material-import.service.js';
 import { factoryKinds, gstinValid } from '../imports/factory-kinds.js';
 import { FACTORY_IMPORT_SPECS, INGREDIENTS } from '../imports/kind-specs.js';
+import { PurchasePriceService } from '../imports/purchase-price.service.js';
 import { ensureSchema, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 
 const sql = () => testClient();
@@ -45,7 +46,7 @@ let family: string;
 before(async () => {
   await ensureSchema();
   codes = new FloorCodeService(sql());
-  engine = new ImportEngine(sql(), 'platform', factoryKinds(sql(), new MaterialImportService(sql(), codes)));
+  engine = new ImportEngine(sql(), 'platform', factoryKinds(sql(), new MaterialImportService(sql(), codes), new PurchasePriceService(sql())));
   drizzle(sql(), { schema: masterdataSchema }); // as the cluster module does at boot: dates come back as text
   for (const u of ['kg', 'g', 'ml']) await sql()`insert into platform.uom_master (uom_code, uom_name, status) values (${u}, ${u}, 'ACTIVE') on conflict (uom_code) do nothing`;
   family = `fam_${t().toLowerCase()}`;

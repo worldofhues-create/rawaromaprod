@@ -152,4 +152,34 @@ export const PACKAGING_MATERIALS: ImportKindSpec = {
   refuses: ['a code twice in the file', 'a code on file under another name', 'a unit not on file'],
 };
 
-export const FACTORY_IMPORT_SPECS = [INGREDIENTS, SUPPLIERS, SUPPLIER_LOTS, DILUTIONS, RAW_STOCK_OPENING, RAW_STOCK_ADJUSTMENT, PACKAGING_MATERIALS] as const;
+/* IMPORT-RP-COST (LD-156). One permission for the sheet and for the single price typed on screen: the
+   same people do both (purchasing and finance), through the same function. */
+export const MATERIAL_PURCHASE_PRICES: ImportKindSpec = {
+  kind: 'material-purchase-prices', title: 'Material purchase prices',
+  permission: 'procurement:material_purchase_price:write', mirrors: ['procurement:material_purchase_price:write'],
+  exampleKey: 'material',
+  columns: [
+    col('material', 'Material code', true, 'The material\'s code, as on file. This is what identifies the row.', 'EXAMPLE-RM', ['Code', 'Ingredient code']),
+    col('name', 'Material name', false, 'For you to read. It is not imported and changes nothing.', 'Example material (delete this row)', ['Name']),
+    col('unit', 'Unit', false, 'What the price is per: kg, g, L, ml or unit. Empty means the material\'s own unit.', 'kg', ['UOM', 'Per']),
+    col('supplier', 'Supplier code', false, 'The supplier this price is from: their code or exact name. Empty means no supplier is named.', '', ['Supplier', 'Vendor', 'Vendor code']),
+    col('listPrice', 'List purchase price (Rs per unit)', false, 'The supplier\'s price in rupees, before discount: 1250 or 1,250.50. LEAVE IT EMPTY FOR "NO CHANGE": an empty cell is never read as zero.', '1250.00', ['List price', 'Purchase price', 'Price', 'Rate']),
+    col('discount', 'Purchase discount %', false, 'The discount off the list price: 5 or 7.5. Empty means none.', '5', ['Discount', 'Discount %', 'Purchase discount']),
+    col('gst', 'GST rate %', false, 'Only if you hold it: 18. Empty stays empty.', '', ['GST', 'GST rate', 'GST %']),
+    col('hsn', 'HSN code', false, 'Only if you hold it: 4, 6 or 8 digits. Empty stays empty.', '', ['HSN']),
+    col('effectiveFrom', 'Effective from', false, 'The day this price starts. Day first: 01/12/2026. Needed with a price.', '01/12/2026', ['Effective date', 'From', 'Valid from']),
+    col('note', 'Note', false, 'Anything worth keeping with the price: the quotation number, who agreed it.', '', ['Remarks', 'Notes']),
+  ],
+  instructions: [
+    'Use "Export what is on file" to get this sheet with every material already in it. Fill in the prices you have and upload it back; rows you leave without a price are passed over.',
+    'The net price (list less discount) is worked out once when the price is recorded, rounded to the paisa, and kept beside the two figures you gave.',
+    'A price on file is never rewritten. To change a price, give the new one a later "Effective from"; the earlier one stays in the history.',
+    'A row that moves a price by more than the limit set for large changes is listed in the preview for you to check. It is not refused.',
+    'Every price recorded is sent to Books (the finance console) as it is recorded.',
+  ],
+  naturalKey: 'Material, supplier and effective date.',
+  rule: 'Adds to the price history. The same price from the same date is skipped; a later date supersedes; an empty price cell changes nothing.',
+  refuses: ['a material or supplier not on file', 'a price of zero or below, or with more than two decimals', 'a discount or GST rate over 100%', 'an HSN code that is not 4, 6 or 8 digits', 'a price with no effective date, or one more than 90 days ahead', 'a different price for a material, supplier and date already on file', 'a unit a price cannot be per'],
+};
+
+export const FACTORY_IMPORT_SPECS = [INGREDIENTS, SUPPLIERS, SUPPLIER_LOTS, DILUTIONS, RAW_STOCK_OPENING, RAW_STOCK_ADJUSTMENT, PACKAGING_MATERIALS, MATERIAL_PURCHASE_PRICES] as const;
