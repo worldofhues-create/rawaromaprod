@@ -15,7 +15,7 @@
  * window the client can stretch.
  */
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { CurrentUser, DomainError, FreshAuth, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, DomainError, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { ComplianceService } from '../compliance/compliance.service.js';
 import {
   approveBatchBody,
@@ -51,6 +51,11 @@ export class FormulaSetupController {
     return this.setup.recipes();
   }
 
+  // IMPORT-RP (the formula rule): this answer is the uploader's own recipe lines, material and
+  // percentage, and every console write carries an Idempotency-Key, so the interceptor was storing
+  // each preview in formula.idempotency_key in plain text. It is shown to the uploader and kept
+  // nowhere. A re-sent commit runs again and is refused by the seal ("already has sealed ingredients").
+  @NoStoredReply()
   @Permissions('formula:formula_ingredients:write')
   @Post('v1/formula-recipes/import')
   importRecipes(@Body(new ZodValidationPipe(recipeImportBody)) body: RecipeImportBody, @CurrentUser() principal: AuthPrincipal) {

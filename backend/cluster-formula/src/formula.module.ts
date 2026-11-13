@@ -62,6 +62,8 @@ import { ComplianceService } from './compliance/compliance.service.js';
 import { FormulaSetupController } from './setup/formula-setup.controller.js';
 import { FormulaSetupService } from './setup/formula-setup.service.js';
 import { RuhVaultService } from './setup/ruh-vault.service.js';
+import { FormulaImportController } from './imports/formula-import.controller.js';
+import { FormulaImportService } from './imports/formula-import.service.js';
 import { KMS_PORT, type KmsPort } from './crypto/kms.port.js';
 import { EnvKmsAdapter } from './crypto/env-kms.adapter.js';
 import { FileKmsAdapter } from './crypto/file-kms.adapter.js';
@@ -117,7 +119,7 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
   imports: VAULT_MODE ? [] : [ClusterMasterdataModule],
   // VAULT_MODE=false (main app box): zero formula HTTP routes exist in this process.
   controllers: VAULT_MODE
-    ? [CatalogController, FormulasController, ApprovalsController, ComplianceController, FormulaSetupController]
+    ? [CatalogController, FormulasController, ApprovalsController, ComplianceController, FormulaSetupController, FormulaImportController]
     : [],
   providers: [
     {
@@ -151,6 +153,9 @@ export function resolveKmsAdapter(config: ConfigService): KmsPort {
     ComplianceService,
     FormulaSetupService,
     RuhVaultService,
+    // IMPORT-RP: the formulas import (spreadsheet template, preview, seal through importRecipes).
+    // Its routes exist only on the Vault box (controllers above); the service is inert elsewhere.
+    FormulaImportService,
     VaultSecurityAuditSink,
     { provide: SECURITY_AUDIT_SINK, useExisting: VaultSecurityAuditSink },
   ],
