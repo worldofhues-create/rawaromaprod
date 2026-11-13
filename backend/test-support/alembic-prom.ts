@@ -99,6 +99,12 @@ export function parseBatchRestRecorded(raw: unknown): { ok: true; record: BatchR
   if (!ISO_INSTANT(r.closed_at)) problems.push("closed_at must be a timestamp");
   else if (ISO_INSTANT(r.started_at) && Date.parse(r.closed_at) < Date.parse(r.started_at)) problems.push("closed_at must not be before started_at");
   if (!count(r.days_rested)) problems.push("days_rested must be a whole number of days");
+  /* PROM-REVIEW: the factory counts the whole days between the two instants. More than that is a rest
+     the record's own dates contradict, which the lot page would print and P-01 would count. */
+  else if (ISO_INSTANT(r.started_at) && ISO_INSTANT(r.closed_at)
+    && (r.days_rested as number) > Math.floor((Date.parse(r.closed_at) - Date.parse(r.started_at)) / (24 * 60 * 60 * 1000))) {
+    problems.push("days_rested is more than the days between started_at and closed_at");
+  }
   if (!count(r.required_days, 1, 365)) problems.push("required_days must be 1 to 365");
   if (!count(r.rule_days, 1, 365)) problems.push("rule_days must be 1 to 365");
   if (!count(r.rule_version)) problems.push("rule_version must be a whole number");
@@ -361,6 +367,10 @@ export const FACTORY_RULE_INTRODUCED_AT: Readonly<Record<FactoryRuleKey, number>
 
 /** How old a rules state may be before no promise may rest on it (process-promises.md section 4). */
 export const FACTORY_RULES_STATE_MAX_AGE_MS = 48 * 60 * 60 * 1000;
+/** PROM-REVIEW: how far ahead of the reader's clock a state may be dated and still count. Both systems
+ *  run on one box today; five minutes covers a skewed clock, never a state from next week, whose
+ *  negative age would otherwise pass the 48-hour test for as long as its future lasted. */
+export const FACTORY_RULES_STATE_MAX_SKEW_MS = 5 * 60 * 1000;
 
 export const FACTORY_RULES_STATE_REASONS = ["rule_change", "daily", "startup"] as const;
 
@@ -449,6 +459,9 @@ export function factoryRuleEnforced(state: FactoryRulesState | null, key: Factor
   if (!state) return { enforced: false, reason: "No factory rules state on file" };
   const age = now.getTime() - Date.parse(state.asOf);
   if (!(age <= FACTORY_RULES_STATE_MAX_AGE_MS)) return { enforced: false, reason: "The factory rules state is more than 48 hours old" };
+  /* PROM-REVIEW: a state dated ahead of now has a negative age, which the line above lets through
+     for as long as its future lasts, so a factory that went silent after one would keep every flag on. */
+  if (age < -FACTORY_RULES_STATE_MAX_SKEW_MS) return { enforced: false, reason: "The factory rules state is dated in the future, so it proves nothing about now" };
   const rule = state.rules[key];
   if (rule === undefined) return { enforced: false, reason: `The factory did not send ${key}` };
   if (rule === null) return { enforced: false, reason: `The factory could not read ${key}, so it holds` };
