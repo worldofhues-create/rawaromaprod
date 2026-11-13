@@ -30,6 +30,8 @@ const ALEMBIC_INBOUND_EVENT_TYPES = [
   // PROM-5: alembic lane/prom packages/domain/src/bridge/envelope.ts.
   'product.continuity.current',
   'product.material.changed',
+  // PROM-6: alembic lane/prom 5142a7df packages/domain/src/bridge/envelope.ts.
+  'factory.rules.state', 'batch.rest.started',
   'procurement.vendor.upserted', 'procurement.po.issued', 'procurement.po.amended', 'procurement.po.cancelled', 'inventory.grn.created',
   'SalesOrderManualContinuityCreated', 'SalesOrderManualContinuityConfirmed', 'SalesOrderManualContinuityItemAdded',
 ];
