@@ -263,6 +263,30 @@ export function normalizeRequirementPayload(p: Record<string, unknown>): Normali
   return out;
 }
 
+/* PROM-9 (ALEMBIC process-promises.md PROM-9, made to order): ALEMBIC holds a requirement whose
+ * product's oil changed after the order was placed, until the customer confirms the notice, and says so
+ * on ProductionRequirementChanged as `hold: { reason_code, since } | null` (ALEMBIC
+ * packages/domain/src/bridge/outbound-payload.ts requirementHoldPayload; the shared fixture is
+ * test-support/fixtures/requirement-hold.json). A held requirement is never planned or linked to a run.
+ * The reason codes are a closed list on both sides; nothing about the customer or the notice crosses. */
+export const REQUIREMENT_HOLD_REASONS = ['material_change_unacknowledged'] as const;
+export type RequirementHoldReason = (typeof REQUIREMENT_HOLD_REASONS)[number];
+
+export function isRequirementHold(v: unknown): v is { reason_code: RequirementHoldReason; since: string } {
+  if (typeof v !== 'object' || v === null || Array.isArray(v)) return false;
+  const h = v as Record<string, unknown>;
+  if (Object.keys(h).some((k) => k !== 'reason_code' && k !== 'since')) return false;
+  return (REQUIREMENT_HOLD_REASONS as readonly unknown[]).includes(h.reason_code) && isIsoInstant(h.since);
+}
+
+/** What a Changed payload says about the hold: `undefined` = nothing (leave it), `null` = released. */
+export function requirementHoldOf(payload: Record<string, unknown>): { reasonCode: RequirementHoldReason; since: Date } | null | undefined {
+  if (!Object.prototype.hasOwnProperty.call(payload, 'hold')) return undefined;
+  if (payload.hold === null) return null;
+  if (!isRequirementHold(payload.hold)) return undefined;
+  return { reasonCode: payload.hold.reason_code, since: new Date(payload.hold.since) };
+}
+
 export function validateInboundPayload(type: string, payload: Record<string, unknown>): readonly PayloadProblem[] {
   const problems: PayloadProblem[] = [];
   const present = (field: string) => {
@@ -321,6 +345,10 @@ export function validateInboundPayload(type: string, payload: Record<string, unk
       optional('uom', (v) => isNonEmptyString(v, 20) && isConvertibleUnit(v)); // FLOOR-FIX-13
       optional('needed_by', isIsoInstant);
       newFields();
+      // PROM-9: `hold` present means "held" (an object) or "released" (null); absent means unchanged.
+      if (Object.prototype.hasOwnProperty.call(payload, 'hold') && payload.hold !== null && !isRequirementHold(payload.hold)) {
+        problems.push('hold:invalid');
+      }
       break;
     case 'ProductionRequirementCancelled':
       if (sales) optional('request_ref', (v) => isNonEmptyString(v, 100));

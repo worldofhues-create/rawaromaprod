@@ -58,6 +58,7 @@ interface RequirementRow {
   qty: string;
   uom: string;
   qty_kg: string | null;
+  customer_hold_reason: string | null;
   needed_by: Date | string;
 }
 
@@ -79,7 +80,7 @@ export class ProducePlanService {
   async planRequirement(alembicRequirementId: string, principal: AuthPrincipal): Promise<PlanResult> {
     const req = ((await this.db.execute(sql`
       select alembic_requirement_id::text, lifecycle_status, production_order_id::text, mapped_sku, pack_size,
-             qty::text, uom, qty_kg::text, needed_by
+             qty::text, uom, qty_kg::text, needed_by, customer_hold_reason
         from bridge.production_requirement where alembic_requirement_id = ${alembicRequirementId}::uuid
     `)) as unknown as RequirementRow[])[0];
     if (!req) throw new NotFoundException(`No sales requirement ${alembicRequirementId}.`);
@@ -90,6 +91,8 @@ export class ProducePlanService {
     if (req.lifecycle_status !== 'ACCEPTED') {
       throw new ConflictException(`This requirement is ${req.lifecycle_status}; only an accepted, open requirement can be planned.`);
     }
+    // PROM-9: ALEMBIC holds it until the customer confirms a change to this product. Nothing is created.
+    if (req.customer_hold_reason) throw new PlanBlockedException('CUSTOMER_HOLD', BLOCK_MESSAGES.CUSTOMER_HOLD!);
 
     const kg = requirementKg(req.qty_kg, req.qty, req.uom);
     if (kg === null || !(kg > 0)) throw new PlanBlockedException('QTY_NOT_IN_KG', BLOCK_MESSAGES.QTY_NOT_IN_KG!);

@@ -262,11 +262,12 @@ export class PlanningService {
        where alembic_requirement_id = ${alembicRequirementId}
          and production_order_id is null
          and lifecycle_status = 'ACCEPTED'
+         and customer_hold_reason is null
        returning alembic_requirement_id
     `)) as unknown as Array<{ alembic_requirement_id: string }>;
     if (linked.length === 0) {
       throw new ConflictException(
-        `Bridge requirement ${alembicRequirementId} could not be linked to a new production order: it does not exist, is not in ACCEPTED lifecycle status, or is already linked to another order.`,
+        `Bridge requirement ${alembicRequirementId} could not be linked to a new production order: it does not exist, is not in ACCEPTED lifecycle status, is already linked to another order, or is held by ALEMBIC until the customer confirms a change to this product.`,
       );
     }
   }

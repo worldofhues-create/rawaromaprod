@@ -1873,6 +1873,10 @@ alter table bridge.production_requirement add column if not exists lot_policy va
 alter table bridge.production_requirement add column if not exists produce_block_reason varchar(60);
 alter table bridge.production_requirement add column if not exists produce_blocked_at timestamptz;
 alter table bridge.production_requirement add column if not exists overdue_alerted_at timestamptz;
+-- PROM-9 (scripts/migrations/2026-11-19-prom-9-requirement-hold.sql): ALEMBIC holds a made-to-order
+-- requirement until the customer confirms a material-change notice; the factory does not plan it.
+alter table bridge.production_requirement add column if not exists customer_hold_reason varchar(40);
+alter table bridge.production_requirement add column if not exists customer_hold_since timestamptz;
 create index if not exists bridge_production_requirement_queue_idx
   on bridge.production_requirement (priority_rank, needed_by, created_dt);
 alter table bridge.compliance_certificate add column if not exists formula_version_number integer;
