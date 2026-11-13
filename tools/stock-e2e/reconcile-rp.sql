@@ -72,9 +72,65 @@ select ob.batch_number, ob.status, (ob.produced_qty * m.f)::bigint as oil_mg,
   left join packaging.product_sku s on s.product_sku_id = fg.product_sku_id
  order by ob.batch_number;
 
-\echo '== R6 anything that records a loss, a yield or a write-off'
+\echo '== R6 anything that records a loss, a yield or a write-off (STOCK-FIX-RP: production.oil_batch_movement and oil_batch_remnant)'
 select table_schema || '.' || table_name as candidate from information_schema.columns
  where table_schema in ('production', 'packaging', 'inventory')
-   and (column_name ~ '(yield|loss|scrap|wastage|write_?off|remnant|variance)')
+   and (column_name ~ '(yield|loss|scrap|wastage|write_?off|remnant|variance)' or table_name in ('oil_batch_movement', 'oil_batch_remnant'))
  group by 1 order by 1;
+\echo '== R7 the finished side (STOCK-FIX-RP, STK-10/11): made = packed + rejected + loss + written off + remaining, per oil batch (mg)'
+-- Each figure is read twice where it can be: from the oil ledger and from the record it should agree with
+-- (the floor's weighed lines; the filling records x the pack's net content). A row with any check <> 0,
+-- a FAILED batch with oil still on the book, or a remnant nobody has decided, is an open item.
+with net as (
+  select s.product_sku_id,
+         coalesce(s.net_content_mg,
+           case when s.pack_size ~* '^\s*[0-9]+(\.[0-9]+)?\s*(mg|g|gm|gms|gram|grams|kg|kgs)\s*$' then
+             (substring(s.pack_size from '^\s*([0-9]+(?:\.[0-9]+)?)')::numeric
+               * case lower(substring(s.pack_size from '([a-zA-Z]+)\s*$')) when 'kg' then 1000000 when 'kgs' then 1000000 when 'mg' then 1 else 1000 end)::bigint end) as net_mg
+    from packaging.product_sku s),
+fills as (
+  select po.oil_batch_id, sum(coalesce(d.filled_qty, 0) * n.net_mg)::bigint as filled_mg, sum(coalesce(d.rejected_qty, 0) * n.net_mg)::bigint as rejected_mg,
+         sum(d.filled_qty)::bigint as filled_units, count(*) filter (where n.net_mg is null) as fills_unsized
+    from packaging.filling_session_details d
+    join packaging.filling_session fs on fs.filling_session_id = d.filling_session_id
+    join packaging.package_order po on po.package_order_id = fs.package_order_id
+    left join net n on n.product_sku_id = po.product_sku_id
+   group by po.oil_batch_id),
+fg as (
+  select po.oil_batch_id, sum(f.produced_qty)::bigint as fg_units
+    from packaging.finished_good_batch_master f join packaging.package_order po on po.package_order_id = f.package_order_id
+   where coalesce(f.status, '') not in ('REJECTED', 'CANCELLED') group by po.oil_batch_id),
+led as (
+  select oil_batch_id,
+         sum(delta_mg) filter (where kind = 'MADE')::bigint as made_mg,
+         coalesce(-sum(delta_mg) filter (where kind = 'PACKED'), 0)::bigint as packed_mg,
+         coalesce(-sum(delta_mg) filter (where kind = 'PACK_REJECTED'), 0)::bigint as rejected_mg,
+         coalesce(-sum(delta_mg) filter (where kind = 'LOSS'), 0)::bigint as loss_mg,
+         coalesce(-sum(delta_mg) filter (where kind = 'WRITE_OFF'), 0)::bigint as written_off_mg,
+         sum(delta_mg)::bigint as remaining_mg
+    from production.oil_batch_movement group by oil_batch_id),
+floor as (
+  select j.oil_batch_id, sum(fl.target_mg)::bigint as target_mg, sum(fl.actual_mg)::bigint as weighed_mg
+    from production.floor_job j join production.floor_line fl on fl.floor_job_id = j.floor_job_id
+   where j.oil_batch_id is not null group by j.oil_batch_id)
+select ob.batch_number, ob.status, fl.target_mg, fl.weighed_mg, l.made_mg, l.packed_mg, l.rejected_mg, l.loss_mg, l.written_off_mg, l.remaining_mg,
+       case when l.made_mg is null then null else round(l.packed_mg * 10000.0 / nullif(l.made_mg, 0))::int end as yield_bp,
+       (select r.disposition from production.oil_batch_remnant r where r.oil_batch_id = ob.oil_batch_id order by r.decided_dt desc limit 1) as remnant,
+       l.made_mg - fl.weighed_mg as chk_made_vs_weighed,
+       l.packed_mg - coalesce(f.filled_mg, 0) as chk_packed_vs_fills,
+       l.rejected_mg - coalesce(f.rejected_mg, 0) as chk_rejected_vs_fills,
+       l.made_mg - (l.packed_mg + l.rejected_mg + l.loss_mg + l.written_off_mg + l.remaining_mg) as chk_equation,
+       coalesce(f.filled_units, 0) - coalesce(g.fg_units, 0) as filled_not_in_fg_units,
+       coalesce(f.fills_unsized, 0) as fills_unsized,
+       case when l.made_mg is null then 'NOT MEASURED'
+            when upper(coalesce(ob.status, '')) = 'FAILED' and l.remaining_mg > 0 then 'FAILED, NOT WRITTEN OFF'
+            when l.remaining_mg < 0 then 'NEGATIVE'
+            when l.remaining_mg > 0 and not exists (select 1 from production.oil_batch_remnant r where r.oil_batch_id = ob.oil_batch_id) then 'REMNANT UNDECIDED'
+            else 'ok' end as open_item
+  from production.oil_batch_master ob
+  left join led l on l.oil_batch_id = ob.oil_batch_id
+  left join floor fl on fl.oil_batch_id = ob.oil_batch_id
+  left join fills f on f.oil_batch_id = ob.oil_batch_id
+  left join fg g on g.oil_batch_id = ob.oil_batch_id
+ order by ob.batch_number;
 rollback;

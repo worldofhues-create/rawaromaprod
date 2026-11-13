@@ -19,7 +19,7 @@
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { and, desc, eq, inArray, lt, sql } from 'drizzle-orm';
-import { emitBridgeOutbound, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
+import { assertOilCanCover, emitBridgeOutbound, recordOilPacked, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { netQty, notTotalled, signOf, uuidv7, type QtyPart } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
 import { packagingEvents } from '../packaging.events.js';
@@ -80,6 +80,12 @@ export class OrdersService {
           `Cannot open a package order against oil batch ${body.oilBatchId}: status is ${oil[0].status ?? '(none)'} (must be RELEASED).`,
         );
       }
+
+      /* STOCK-FIX-RP (STK-11): a package order promises oil, so it may not promise more than the batch
+       * holds less what open orders already promised. Rehearsal: 14 x 50 g (700,000 mg) ordered and
+       * filled from 499,676 mg. Sized in mg from the order's unit: a mass, or packs x the SKU's net
+       * content; an order that cannot be sized is refused rather than left unbounded. */
+      await assertOilCanCover(tx, { oilBatchId: body.oilBatchId, productSkuId: body.productSkuId, orderQty: body.orderQty, uomId: body.uomId ?? null });
 
       const orderId = uuidv7();
       const order = (
@@ -606,6 +612,12 @@ export class OrdersService {
     }
 
     return this.db.transaction(async (tx) => {
+      const [po] = (await tx.execute(sql`
+        select package_order_id::text, oil_batch_id::text, product_sku_id::text, uom_id::text
+          from packaging.package_order where package_order_id = ${session.packageOrderId}::uuid`)) as unknown as Array<{
+        package_order_id: string; oil_batch_id: string | null; product_sku_id: string | null; uom_id: string | null }>;
+      if (!po) throw new NotFoundException(`package_order not found for filling session ${sessionId}`);
+      if (!po.oil_batch_id) throw new ConflictException(`Package order ${po.package_order_id} names no oil batch, so a fill cannot draw any oil down.`);
       const detailId = uuidv7();
       const detail = (
         await tx
@@ -624,6 +636,15 @@ export class OrdersService {
           .returning()
       )[0];
       if (!detail) throw new Error('insert failed: filling_session_details');
+
+      /* STOCK-FIX-RP (STK-10, STK-11): packing draws the oil down, by packs x the pack's net content
+       * (rejected packs too: their oil is in a reject, not in the batch), and is refused past what
+       * remains. Before this the oil's produced_qty never moved, whatever was filled. */
+      await recordOilPacked(tx, {
+        oilBatchId: po.oil_batch_id, packageOrderId: po.package_order_id, productSkuId: po.product_sku_id,
+        fillingSessionDetailId: detailId, filledQty: body.filledQty ?? null, rejectedQty: body.rejectedQty ?? null,
+        uomId: body.uomId ?? po.uom_id, actor: principal,
+      });
 
       await recordOutbox(
         tx,

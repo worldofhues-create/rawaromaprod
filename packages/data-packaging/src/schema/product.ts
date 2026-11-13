@@ -6,7 +6,7 @@
  * downstream order tables reference product_sku as a SOFT ref (id-only), as do formula/brand/
  * location/oil_batch/uom — all cross-schema soft refs (no cross-schema FK).
  */
-import { index, numeric, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
+import { bigint, index, numeric, uniqueIndex, uuid, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { packaging } from "./_schema.js";
 
@@ -53,6 +53,9 @@ export const productSku = packaging.table(
     productId: uuid("product_id").references(() => productMaster.productId),
     skuCode: varchar("sku_code", { length: 50 }),
     packSize: varchar("pack_size", { length: 255 }),
+    // STOCK-FIX-RP (STK-11, STK-20): what one pack holds, in integer mg. Null reads pack_size when it
+    // is a plain mass ("100 g"); a size in ml is never converted (no density on file).
+    netContentMg: bigint("net_content_mg", { mode: "number" }),
     uomId: uuid("uom_id"), // soft ref → platform.uom_master
     ...metaColumns(),
   },

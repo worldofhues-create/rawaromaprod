@@ -37,6 +37,7 @@ import {
   principal,
   closeTestClient,
 } from '../../../test-support/db.js';
+import { measureOil, skuWithNetContent } from '../../../test-support/oil-fixtures.js';
 
 before(async () => {
   await ensureSchema();
@@ -335,6 +336,7 @@ async function releasedOilBatchFor(orderId: string | null): Promise<string> {
   const oilBatchId = crypto.randomUUID();
   await sql`insert into production.oil_batch_master (oil_batch_id, production_order_id, status)
     values (${oilBatchId}, ${orderId}, 'RELEASED')`;
+  await measureOil(oilBatchId); // STK-10: a package order draws on measured oil
   return oilBatchId;
 }
 
@@ -345,7 +347,7 @@ test('packaging OrdersService.createPackageOrder: emits PackagingStarted when th
   await linkRequirement(alembicRequirementId, orderId);
   const oilBatchId = await releasedOilBatchFor(orderId);
 
-  await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 10 }, principal());
+  await svc.createPackageOrder({ productSkuId: await skuWithNetContent(), oilBatchId, orderQty: 10 }, principal());
 
   const rows = await outboxRowsFor(alembicRequirementId);
   assert.equal(rows.length, 1);
@@ -355,7 +357,7 @@ test('packaging OrdersService.createPackageOrder: emits PackagingStarted when th
 test('packaging OrdersService.createPackageOrder: nothing emitted for RawProd-internal oil', async () => {
   const svc = new OrdersService(packagingDb());
   const oilBatchId = await releasedOilBatchFor(null);
-  await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 10 }, principal());
+  await svc.createPackageOrder({ productSkuId: await skuWithNetContent(), oilBatchId, orderQty: 10 }, principal());
   await assertOilBatchHasNoProductionOrder(oilBatchId);
 });
 

@@ -26,6 +26,9 @@ export * from './edge/index.js';
 // Events (bus + outbox)
 export * from './events/index.js';
 
+// Stock (STOCK-FIX-RP: the oil ledger, called inside each cluster's own transaction)
+export * from './stock/index.js';
+
 // Flags (in-memory snapshot)
 export * from './flags/index.js';
 

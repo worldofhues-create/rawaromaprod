@@ -19,6 +19,7 @@ import assert from 'node:assert/strict';
 import { ConflictException, NotFoundException } from '@nestjs/common';
 import { OrdersService } from '../../../cluster-packaging/src/orders/orders.service.js';
 import { ensureSchema, packagingDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
+import { measureOil, skuWithNetContent } from '../../../test-support/oil-fixtures.js';
 
 let svc: OrdersService;
 
@@ -35,13 +36,14 @@ async function releasedOilBatch() {
   const sql = testClient();
   const id = crypto.randomUUID();
   await sql`insert into production.oil_batch_master (oil_batch_id, status) values (${id}, 'RELEASED')`;
+  await measureOil(id); // STK-10: a package order draws on measured oil
   return id;
 }
 
 async function freshOrderWithItem(materialAvailable: number, requiredQty: number) {
   const sql = testClient();
   const oilBatchId = await releasedOilBatch();
-  const order = await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 100 }, principal());
+  const order = await svc.createPackageOrder({ productSkuId: await skuWithNetContent(), oilBatchId, orderQty: 100 }, principal());
   const materialId = crypto.randomUUID();
   await sql`insert into packaging.package_order_item
     (package_order_item_id, package_order_id, packaging_material_id, required_qty, issued_qty, status)
@@ -202,7 +204,7 @@ test('package order: security review R1 #2 — concurrent issue-materials on TWO
 
   async function orderNeeding(qty: number) {
     const oilBatchId = await releasedOilBatch();
-    const order = await svc.createPackageOrder({ productSkuId: crypto.randomUUID(), oilBatchId, orderQty: 100 }, principal());
+    const order = await svc.createPackageOrder({ productSkuId: await skuWithNetContent(), oilBatchId, orderQty: 100 }, principal());
     await sql`insert into packaging.package_order_item
       (package_order_item_id, package_order_id, packaging_material_id, required_qty, issued_qty, status)
       values (${crypto.randomUUID()}, ${order.order.packageOrderId}, ${materialId}, ${qty}, false, 'ACTIVE')`;

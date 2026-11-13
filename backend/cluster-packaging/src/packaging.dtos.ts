@@ -40,6 +40,8 @@ export const createProductSku = z.object({
   productId: z.string().uuid().optional(),
   skuCode: z.string(),
   packSize: z.string().optional(),
+  /** STOCK-FIX-RP (STK-11): one pack's net content in integer mg; packing draws the oil down by it. */
+  netContentMg: z.number().int().positive().optional(),
   uomId: z.string().uuid().optional(),
 });
 export type CreateProductSku = z.infer<typeof createProductSku>;

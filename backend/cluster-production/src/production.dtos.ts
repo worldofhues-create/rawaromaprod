@@ -134,6 +134,9 @@ export const produceOilBatch = z.object({
   secureMixingSessionId: z.string().uuid().optional(),
   batchNumber: z.string(),
   producedQty: z.number().positive(),
+  /** STOCK-FIX-RP (STK-10): the made mass in integer mg, exact (the floor passes the sum of its
+   *  weighed lines). Without it the mass is read from producedQty in a mass unit, exactly, or not at all. */
+  producedMg: z.number().int().positive().optional(),
   uomId: z.string().uuid().optional(),
   producedDt: isoDateish(),
   consumption: z.array(consumptionRow).optional(),
@@ -161,6 +164,15 @@ export const transitionOilBatch = z.object({
   status: z.enum(['IN_MATURATION', 'MATURING', 'RELEASED', 'HOLD', 'REWORK', 'FAILED']),
 });
 export type TransitionOilBatch = z.infer<typeof transitionOilBatch>;
+
+/** STOCK-FIX-RP (STK-10): a remnant count and its decision. Integer mg, as the scale reads. */
+export const recordOilRemnant = z.object({
+  weighedMg: z.number().int().nonnegative(),
+  disposition: z.enum(['KEEP', 'HOLD', 'WRITE_OFF']),
+  reason: z.string().max(500).optional(),
+});
+export type RecordOilRemnant = z.infer<typeof recordOilRemnant>;
+export const uuidParam = z.string().uuid();
 
 /* ── weighing (OPS-GREEN Act L) ─────────────────────────────────────────── */
 

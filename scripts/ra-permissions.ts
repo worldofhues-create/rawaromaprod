@@ -3,6 +3,7 @@
 // Seeded into iam.permission_master (permission_code) and granted to the owner role.
 import { PFC_PERMISSIONS } from './pfc-grants.js';
 import { PFD_PERMISSIONS } from './pfd-grants.js';
+import { STK_PERMISSIONS } from './stk-grants.js';
 
 export const RA_PERMISSIONS: string[] = [
   'formula:actual:read',
@@ -330,4 +331,5 @@ export const RA_PERMISSIONS: string[] = [
   ...PFC_PERMISSIONS,
   // Lane pf-d (order intelligence, QC review decision): scripts/pfd-grants.ts.
   ...PFD_PERMISSIONS,
+  ...STK_PERMISSIONS,
 ];

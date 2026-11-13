@@ -13,10 +13,10 @@
  * Pre-generated ids use uuidv7(); created_by/updated_by = principal.userId; numerics via num();
  * ISO timestamps → Date. order/session/uom/user/parameter/document refs are id-only soft refs.
  */
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { and, desc, eq, gte, inArray, lt } from 'drizzle-orm';
-import { emitBridgeOutbound, macerationOnTransition, recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
-import { uuidv7 } from '@core/data-kernel';
+import { ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { and, desc, eq, gte, inArray, lt, sql } from 'drizzle-orm';
+import { emitBridgeOutbound, macerationOnTransition, oilBalance, recordOilMade, recordOutbox, recordRemnant, type AuthPrincipal, type RemnantDisposition } from '@core/backend-kernel';
+import { qtyToMgExact, uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
 import { productionEvents } from '../production.events.js';
 import { paginate, num, type Page } from '../_helpers.js';
@@ -273,6 +273,16 @@ export class BatchService {
         });
       }
 
+      /* STOCK-FIX-RP (STK-10): the oil is a stock from the moment it is made. MADE is the exact mass:
+       * the floor's sum of weighed lines, else producedQty when its unit is a mass. Anything else is not
+       * measured, and nothing can be packed from it until it is (fail closed, never a guess). */
+      let madeMg: number | null = body.producedMg ?? null;
+      if (madeMg === null && body.uomId) {
+        const [u] = (await tx.execute(sql`select uom_code from platform.uom_master where uom_id = ${body.uomId}::uuid`)) as unknown as Array<{ uom_code: string | null }>;
+        madeMg = qtyToMgExact(String(body.producedQty), u?.uom_code);
+      }
+      if (madeMg !== null) await recordOilMade(tx, { oilBatchId, madeMg, actor: principal });
+
       await tx.insert(oilBatchEventHistory).values({
         oilBatchEventHistoryId: uuidv7(),
         oilBatchId,
@@ -293,6 +303,43 @@ export class BatchService {
       );
 
       return { batch, consumptionCount: (body.consumption ?? []).length };
+    });
+  }
+
+  /* ── STOCK-FIX-RP (STK-10): the oil's own balance, and its remnant ── */
+
+  /** GET /v1/oil-batches/:id/balance — made, packed, rejected, loss, written off, remaining, yield. */
+  async oilBatchBalance(id: string) {
+    const bal = await this.db.transaction(async (tx) => oilBalance(tx, id));
+    if (!bal) throw new NotFoundException(`oil_batch_master not found: ${id}`);
+    return bal;
+  }
+
+  /**
+   * POST /v1/oil-batches/:id/remnant — count what is left and decide it: KEEP (pack later), HOLD, or
+   * WRITE_OFF. The shortfall against the book is recorded as a LOSS with its reason. A write-off needs
+   * `production:oil_batch:write_off` (a named role: production manager, admin, owner), checked here as
+   * well as at the route, because KEEP and HOLD share the route with a lesser permission.
+   */
+  async recordOilRemnant(id: string, body: { weighedMg: number; disposition: RemnantDisposition; reason?: string | null }, principal: AuthPrincipal) {
+    if (body.disposition === 'WRITE_OFF' && !principal.permissions.includes('production:oil_batch:write_off')) {
+      throw new ForbiddenException('Writing oil off needs production:oil_batch:write_off (production manager or admin).');
+    }
+    return this.db.transaction(async (tx) => {
+      const bal = await recordRemnant(tx, { oilBatchId: id, weighedMg: body.weighedMg, disposition: body.disposition, reason: body.reason, actor: principal });
+      if (!bal) throw new NotFoundException(`oil_batch_master not found: ${id}`);
+      await tx.insert(oilBatchEventHistory).values({
+        oilBatchEventHistoryId: uuidv7(),
+        oilBatchId: id,
+        eventType: body.disposition === 'WRITE_OFF' ? 'WRITTEN_OFF' : `REMNANT_${body.disposition}`,
+        eventDt: new Date(),
+        performedBy: principal.userId,
+        remarks: body.reason ? String(body.reason).trim().slice(0, 500) : null,
+        status: 'ACTIVE',
+        createdBy: principal.userId,
+        updatedBy: principal.userId,
+      });
+      return bal;
     });
   }
 

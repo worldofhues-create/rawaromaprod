@@ -16,10 +16,13 @@ import { BatchService } from './batch.service.js';
 import {
   listQuery,
   produceOilBatch,
+  recordOilRemnant,
   recordProductionQc,
+  uuidParam,
   transitionOilBatch,
   type ListQuery,
   type ProduceOilBatch,
+  type RecordOilRemnant,
   type RecordProductionQc,
   type TransitionOilBatch,
 } from '../production.dtos.js';
@@ -61,6 +64,26 @@ export class BatchController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.batch.transitionOilBatch(id, body.status, principal);
+  }
+
+  /* ── STOCK-FIX-RP (STK-10): the oil's balance and its remnant ─────── */
+
+  @Permissions('production:oil_batch_balance:read')
+  @Get('v1/oil-batches/:id/balance')
+  oilBatchBalance(@Param('id', new ZodValidationPipe(uuidParam)) id: string) {
+    return this.batch.oilBatchBalance(id);
+  }
+
+  /** KEEP and HOLD need `production:oil_batch_remnant:write`; WRITE_OFF also needs
+   *  `production:oil_batch:write_off`, which the service checks. */
+  @Permissions('production:oil_batch_remnant:write')
+  @Post('v1/oil-batches/:id/remnant')
+  recordOilRemnant(
+    @Param('id', new ZodValidationPipe(uuidParam)) id: string,
+    @Body(new ZodValidationPipe(recordOilRemnant)) body: RecordOilRemnant,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.batch.recordOilRemnant(id, body, principal);
   }
 
   /* ── oil batch consumption ───────────────────────────────────────── */

@@ -1,5 +1,6 @@
 import { pfcGrant } from './pfc-grants.js';
 import { pfdGrant } from './pfd-grants.js';
+import { stkGrant } from './stk-grants.js';
 
 // RA role catalog — the role → permission-subset matrix seeded into iam.role_master +
 // role_permission_mapping. Each role's `select(permissionCode)` decides which of the 263
@@ -222,6 +223,7 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       pfcGrant('admin'),
       pfdGrant('admin'),
+      stkGrant('admin'),
       startsWith('iam:'),
       oneOf('packaging:finished_good_batch_master:read', MANUAL_CONTINUITY_PERMISSION),
       // The Setup and Records entries on Admin's rail. Reference data: no formula and no material
@@ -252,6 +254,7 @@ export const ROLES: RoleDef[] = [
     view: 'procurement',
     select: anyOf(
       pfcGrant('procurement'), // SCAN-9: print the PO label
+      stkGrant('procurement'),
       pfdGrant('procurement'),
       startsWith('procurement:'),
       (p) => p.startsWith('masterdata:') && isRead(p),
@@ -304,6 +307,7 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       pfcGrant('qc'),
       pfdGrant('qc'),
+      stkGrant('qc'),
       startsWith('quality:'),
       oneOf(
         'production:production_qc:read',
@@ -383,6 +387,7 @@ export const ROLES: RoleDef[] = [
     name: 'Compounding',
     view: 'compounding',
     select: anyOf(
+      stkGrant('compounding'),
       oneOf(
         'platform:uom_master:read', // units only: the Unit list on the oil batch was empty without it
         'production:production_order:read',
@@ -424,6 +429,7 @@ export const ROLES: RoleDef[] = [
     select: anyOf(
       pfcGrant('production'),
       pfdGrant('production'),
+      stkGrant('production'),
       oneOf(
         'platform:uom_master:read', // units only: the Unit list on the order form was empty without it
         'production:production_plan:read',
@@ -476,6 +482,7 @@ export const ROLES: RoleDef[] = [
     name: 'Filling',
     view: 'filling',
     select: anyOf(
+      stkGrant('filling'),
       oneOf(
         'production:oil_batch_master:read',
         'production:production_order:read',
@@ -500,6 +507,7 @@ export const ROLES: RoleDef[] = [
     view: 'packaging',
     select: anyOf(
       pfcGrant('packaging'),
+      stkGrant('packaging'),
       startsWith('packaging:'),
       // Units: the Unit list on the package order was empty without it.
       oneOf('production:oil_batch_master:read', 'sales:dispatch_master:read', 'sales:dispatch_items:read', 'platform:uom_master:read', REVEAL),
@@ -649,6 +657,7 @@ export const ROLES: RoleDef[] = [
     name: 'Mixer',
     view: 'mixer',
     select: anyOf(
+      stkGrant('mixer'),
       oneOf('production:floor_queue:read', 'production:floor_mix:write', 'production:floor_label:write',
         'inventory:lot_barcode:resolve', 'masterdata:floor_code:read'),
       (p) => p.startsWith('location:') && isRead(p),
@@ -662,7 +671,7 @@ export const ROLES: RoleDef[] = [
     code: 'packing',
     name: 'Packing',
     view: 'packing',
-    select: anyOf(pfcGrant('packing'), oneOf(
+    select: anyOf(pfcGrant('packing'), stkGrant('packing'), oneOf(
       'packaging:package_order:read', 'packaging:package_order_item:read', 'packaging:filling_session:read',
       'packaging:filling_session:write', 'packaging:filling_session_details:read', 'packaging:filling_session_details:write',
       'packaging:finished_good_batch_master:read', 'packaging:product_sku:read', 'inventory:lot_barcode:resolve',

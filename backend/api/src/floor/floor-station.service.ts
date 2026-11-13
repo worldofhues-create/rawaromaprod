@@ -697,6 +697,7 @@ export class FloorStationService {
         secureMixingSessionId: j.mixing_session_id,
         batchNumber: batchNo,
         producedQty: producedMg / 1000,
+        producedMg, // STOCK-FIX-RP (STK-10): the oil ledger's MADE row, exact in mg
         uomId: g?.uom_id,
         consumption: ls.map((l) => ({ consumedForDocumentId: l.picked_batch_id!, consumedQty: Number(l.actual_mg) / 1000, uomId: g?.uom_id })),
       } as never, principal);

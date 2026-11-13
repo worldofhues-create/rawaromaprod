@@ -724,6 +724,52 @@ create table if not exists production.oil_batch_master (
   updated_by varchar(255)
 );
 
+-- STOCK-FIX-RP (STK-10, STK-11): schema part of scripts/migrations/2026-11-20-stk-oil-ledger.sql (its
+-- backfill and app-role grant left out). The oil a batch made, as a stock that moves, in integer mg.
+create table if not exists production.oil_batch_movement (
+  oil_batch_movement_id    uuid primary key,
+  oil_batch_id             uuid not null,
+  kind                     varchar(20) not null check (kind in ('MADE', 'PACKED', 'PACK_REJECTED', 'LOSS', 'WRITE_OFF')),
+  delta_mg                 bigint not null,
+  package_order_id         uuid,
+  ref_id                   uuid,
+  reason                   text,
+  recorded_by              varchar(255) not null,
+  recorded_role            varchar(200),
+  recorded_dt              timestamptz not null default clock_timestamp(),
+  constraint oil_batch_movement_sign_chk check ((kind = 'MADE' and delta_mg >= 0) or (kind <> 'MADE' and delta_mg <= 0)),
+  constraint oil_batch_movement_reason_chk check (kind not in ('LOSS', 'WRITE_OFF') or (reason is not null and btrim(reason) <> ''))
+);
+create unique index if not exists oil_batch_movement_made_uq on production.oil_batch_movement (oil_batch_id) where kind = 'MADE';
+create unique index if not exists oil_batch_movement_ref_uq on production.oil_batch_movement (kind, ref_id) where ref_id is not null;
+create index if not exists oil_batch_movement_batch_idx on production.oil_batch_movement (oil_batch_id);
+create index if not exists oil_batch_movement_order_idx on production.oil_batch_movement (package_order_id) where package_order_id is not null;
+create table if not exists production.oil_batch_remnant (
+  oil_batch_remnant_id     uuid primary key,
+  oil_batch_id             uuid not null,
+  weighed_mg               bigint not null check (weighed_mg >= 0),
+  book_mg                  bigint not null check (book_mg >= 0),
+  loss_mg                  bigint not null check (loss_mg >= 0),
+  disposition              varchar(12) not null check (disposition in ('KEEP', 'HOLD', 'WRITE_OFF')),
+  reason                   text,
+  decided_by               varchar(255) not null,
+  decided_role             varchar(200),
+  decided_dt               timestamptz not null default clock_timestamp(),
+  constraint oil_batch_remnant_sum_chk check (book_mg = weighed_mg + loss_mg),
+  constraint oil_batch_remnant_reason_chk check ((loss_mg = 0 and disposition <> 'WRITE_OFF') or (reason is not null and btrim(reason) <> ''))
+);
+create index if not exists oil_batch_remnant_batch_idx on production.oil_batch_remnant (oil_batch_id, decided_dt desc);
+create or replace function production.stk_append_only() returns trigger language plpgsql as $$
+begin
+  raise exception '% is append-only: a stock movement is corrected by a new row, never rewritten', tg_table_name;
+end $$;
+drop trigger if exists oil_batch_movement_append_only on production.oil_batch_movement;
+create trigger oil_batch_movement_append_only before update or delete on production.oil_batch_movement
+  for each row execute function production.stk_append_only();
+drop trigger if exists oil_batch_remnant_append_only on production.oil_batch_remnant;
+create trigger oil_batch_remnant_append_only before update or delete on production.oil_batch_remnant
+  for each row execute function production.stk_append_only();
+
 create table if not exists production.oil_batch_consumption (
   oil_batch_consumption_id uuid primary key,
   oil_batch_id uuid references production.oil_batch_master(oil_batch_id),
@@ -897,6 +943,10 @@ create table if not exists packaging.product_sku (
   created_by varchar(255),
   updated_by varchar(255)
 );
+-- STOCK-FIX-RP (STK-11, STK-20): the pack's net content (2026-11-20-stk-oil-ledger.sql).
+alter table packaging.product_sku add column if not exists net_content_mg bigint;
+alter table packaging.product_sku drop constraint if exists product_sku_net_content_mg_chk;
+alter table packaging.product_sku add constraint product_sku_net_content_mg_chk check (net_content_mg is null or net_content_mg > 0);
 
 create table if not exists packaging.packaging_bom_master (
   packaging_bom_id uuid primary key default gen_random_uuid(),

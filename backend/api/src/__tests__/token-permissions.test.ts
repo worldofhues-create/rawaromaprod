@@ -197,7 +197,7 @@ class OtherProcessResolver extends RolePermissionResolver {
 // compliance permissions are never the owner's. 263 → 265: lane produce's location:shelf_task
 // read/write (put-away / pick / move at the physical shelves). 265 → 267: lane vaultsetup's
 // packaging:product_formula_link read/write (the guarded product -> formula link + Ruh's shells).
-test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 310 of the '
+test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: all 315 of the '
   + "owner's permissions still resolve from its roles", async (t) => {
   const ownerGrant = seedGrant('owner');
   // 269: + platform:ruh_setting:read|write (always-on Ruh's thresholds, 2026-10-06).
@@ -209,7 +209,11 @@ test('an owner access token is under 2 KB (was 12,355 bytes) and loses nothing: 
   //      both review signatures included (the owner is still one person: confirm needs another).
   // 306: + lane floor-gaps' inventory:lot_split:write (R8) and location:fg_zone:write (F7).
   // 310: + FLOOR-TEMP-1's quality:temperature:read|write, quality:storage_zone:write, quality:temperature_limit:write.
-  assert.equal(ownerGrant.length, 310);
+  // 315: + STOCK-FIX-RP's production:oil_batch_balance:read, production:oil_batch_remnant:write,
+  //      production:oil_batch:write_off (the oil ledger), production:floor_mix:reveal_name (honoured
+  //      only for the mixer assigned to an active batch) and masterdata:material_import:write.
+  assert.equal(ownerGrant.length, 315);
+  for (const p of ['production:oil_batch_balance:read', 'production:oil_batch_remnant:write', 'production:oil_batch:write_off', 'production:floor_mix:reveal_name', 'masterdata:material_import:write']) assert.ok(ownerGrant.includes(p), p);
   for (const p of ['quality:temperature:read', 'quality:temperature:write', 'quality:storage_zone:write', 'quality:temperature_limit:write']) assert.ok(ownerGrant.includes(p), p);
   // Named, so a different 29 cannot stand in for these: each must be the owner's.
   for (const p of ['platform:policy:read', 'platform:policy:write', 'platform:policy_override:write', 'masterdata:floor_code:read',

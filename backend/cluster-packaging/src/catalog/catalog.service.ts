@@ -125,6 +125,7 @@ export class CatalogService {
           productId: body.productId ?? null,
           skuCode: body.skuCode,
           packSize: body.packSize ?? null,
+          netContentMg: body.netContentMg ?? null,
           uomId: body.uomId ?? null,
           status: 'ACTIVE',
           createdBy: principal.userId,
