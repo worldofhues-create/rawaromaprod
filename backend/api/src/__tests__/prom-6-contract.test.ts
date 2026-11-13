@@ -88,7 +88,7 @@ test('pure: the reading is the cautious one across every case a version can prod
   const someOff = { rules: [{ id: 'r1', when: [{ field: 'product', op: 'eq', value: 'P-1' }], then: { required: false } }], hasDefault: true, defaultValue: { required: true } };
   assert.deepEqual(factoryRuleReading('qc.reference_required', { version: 7, body: JSON.stringify(someOff) }), { version: 7, enforcement_version: 1, value: false });
   // The rest's minimum is the smallest any case rests under; one case with no maximum means none is promised.
-  const twoRests = { rules: [{ id: 'r1', when: [], then: { minDays: 60, maxDays: 90, appliesTo: 'every_batch', earlyRelease: 'second_person' } }], hasDefault: true, defaultValue: REST_45.defaultValue };
+  const twoRests = { rules: [{ id: 'r1', scope: 'global' as const, when: [], then: { minDays: 60, maxDays: 90, appliesTo: 'every_batch', earlyRelease: 'second_person' } }], hasDefault: true, defaultValue: REST_45.defaultValue };
   assert.deepEqual(factoryRuleReading('maceration.rest', { version: 4, body: twoRests }), { version: 4, enforcement_version: 1, min_days: 45, max_days: null, early_release: 'second_person' });
   // A version whose values cannot be used holds every batch; nothing is claimed for it.
   assert.equal(factoryRuleReading('maceration.rest', { version: 5, body: { rules: [], hasDefault: true, defaultValue: { minDays: 0 } } }), null);
