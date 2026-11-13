@@ -6,3 +6,4 @@ alter table production.production_order_ingredients drop constraint if exists pr
 alter table production.production_order_ingredients drop column if exists reserved_batch_id;
 alter table production.production_order_ingredients drop column if exists reserved_mg;
 alter table production.production_order_ingredients drop column if exists required_mg;
+delete from public.schema_migrations where id like '2026-11-21-stk-reserve-at-planning%';

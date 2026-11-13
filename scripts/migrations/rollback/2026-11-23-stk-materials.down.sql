@@ -10,3 +10,4 @@ alter table masterdata.material drop column if exists hazard_class;
 drop index if exists inventory.rm_batch_master_supplier_lot_idx;
 alter table inventory.rm_batch_master drop column if exists supplier_lot_ref;
 alter table inventory.grn_items drop column if exists supplier_lot_ref;
+delete from public.schema_migrations where id like '2026-11-23-stk-materials%';
