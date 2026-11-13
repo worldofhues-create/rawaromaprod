@@ -11,6 +11,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { ensureSchema, testClient, productionDb, principal, closeTestClient } from '../../../test-support/db.js';
+import { signedTyped } from '../../../test-support/typed-check-fixtures.js';
 import { PickingService, MixingService, BatchService } from '@ra/cluster-production';
 import type { VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { FloorCodeService } from '../floor/floor-code.service.js';
@@ -85,7 +86,7 @@ async function jobAtMix() {
   const lines = (await stations.pickView(job.floorJobId)).lines;
   for (const [i, l] of lines.entries()) await stations.pickLine(job.floorJobId, l.floorLineId, { bin: mats[i]!.lot.bin, barcode: mats[i]!.lot.barcode }, picker);
   await stations.completePick(job.floorJobId, { tote: `T-${tag()}` }, picker);
-  for (const l of (await stations.verifyView(job.floorJobId)).lines) await stations.verifyLine(job.floorJobId, l.floorLineId, { actualMg: l.targetMg }, verifier);
+  for (const l of (await stations.verifyView(job.floorJobId)).lines) await stations.verifyLine(job.floorJobId, l.floorLineId, { actualMg: l.targetMg, ...(await signedTyped(l.targetMg, verifier)) }, verifier);
   await stations.completeVerify(job.floorJobId, verifier);
   return { job, mats };
 }

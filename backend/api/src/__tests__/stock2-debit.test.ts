@@ -9,6 +9,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { ensureSchema, testClient, productionDb, principal, closeTestClient } from '../../../test-support/db.js';
+import { signedTyped } from '../../../test-support/typed-check-fixtures.js';
 import { PickingService, MixingService, BatchService } from '@ra/cluster-production';
 import type { VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { ConsumptionService } from '../consumption/consumption.service.js';
@@ -102,7 +103,8 @@ async function picked(s: Awaited<ReturnType<typeof floorJob>>) {
   await stations.completePick(s.job.floorJobId, { tote: `T-${tag()}` }, picker);
   return line!.floorLineId;
 }
-const reading = (s: { job: { floorJobId: string } }, lineId: string, actualMg: number) => stations.verifyLine(s.job.floorJobId, lineId, { actualMg, source: 'typed' }, verifier);
+// STOCK-FIX-RP (STK-27): a typed weight carries a second person's sign-off.
+const reading = async (s: { job: { floorJobId: string } }, lineId: string, actualMg: number) => stations.verifyLine(s.job.floorJobId, lineId, { actualMg, ...(await signedTyped(actualMg, verifier)) }, verifier);
 
 /* ── STOCK2-1: the ledger ends on the verified weight ─────────────────────────────────────── */
 
@@ -301,7 +303,7 @@ test('STOCK2-2 floor: two lines of one material on one lot debit and verify line
   const issue = await issueOf(t.o.orderId);
   await apply(issue);
   assert.equal(await onHand(t.l.id), '870.0000');
-  await stations.verifyLine(job.floorJobId, lines[1]!.floorLineId, { actualMg: 29_900 }, verifier);
+  await stations.verifyLine(job.floorJobId, lines[1]!.floorLineId, { actualMg: 29_900, ...(await signedTyped(29_900, verifier)) }, verifier);
   assert.equal(await onHand(t.l.id), '870.1000', 'only line 2 moved');
 });
 

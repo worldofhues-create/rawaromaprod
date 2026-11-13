@@ -500,9 +500,9 @@
       $('fl-lo-lot').value = ''; $('fl-lo-wt').value = ''; $('fl-lo-bin').value = ''; $('fl-lo-err').textContent = '';
       listReturns();
     };
-    var f = $('fl-w'), reading = null;
+    var f = $('fl-w'), reading = null, verifyTyped = null; // STK-27: the typed weight's sign-off, once asked
     if (f) {
-      $('fl-wt').oninput = function () { reading = null; $('fl-wsrc').textContent = 'typed'; };
+      $('fl-wt').oninput = function () { reading = null; verifyTyped = null; $('fl-wsrc').textContent = 'typed'; };
       $('fl-wsc').onclick = async function () {
         // The kiosk's station when this tablet is paired as one, else the floor's own station name.
         var k = null; try { k = JSON.parse(localStorage.getItem('ra.kiosk') || 'null'); } catch (x) { /* private mode */ }
@@ -518,8 +518,24 @@
       e.preventDefault();
       var u2 = W.lineUnit(next.targetMg, 'g'), mg = reading ? reading.mg : W.parseToMg($('fl-wt').value, u2);
       if (mg === null || mg <= 0) { $('fl-err').textContent = 'Type the weight as a number, e.g. 125.5.'; return; }
+      // STOCK-FIX-RP (STK-27): a typed weight is accepted only once a second person has signed it
+      // (FLOOR-FIX-3): the first press asks for the sign-off, the press after it is signed sends it.
+      var typedBody = null;
+      if (!reading) {
+        if (!(verifyTyped && verifyTyped.mg === mg)) {
+          var kq = null; try { kq = JSON.parse(localStorage.getItem('ra.kiosk') || 'null'); } catch (x) { /* private mode */ }
+          var c = await call('/v1/scales/typed-checks', { method: 'POST', body: { station: (kq && kq.station) || 'Floor', mg: mg, reason: 'Typed at the verify station: no stable scale reading' } });
+          if (c.status >= 400) { $('fl-err').textContent = err(c, 'The sign-off was not asked for.'); return; }
+          verifyTyped = { mg: mg, checkId: (data(c) || {}).checkId };
+          $('fl-wsrc').textContent = 'typed · waiting for a verifier or supervisor to sign it (Floor devices, Typed weights)';
+          $('fl-err').textContent = 'Ask a verifier or supervisor who did not type it to sign this weight, then press again.';
+          return;
+        }
+        typedBody = { actualMg: mg, source: 'typed', weightCheckId: verifyTyped.checkId };
+      }
       var r = await call('/v1/floor/jobs/' + id + '/verify/lines/' + next.floorLineId, { method: 'POST',
-        body: reading ? { actualMg: mg, source: 'scale', scaleRef: reading.scaleReadingId } : { actualMg: mg, source: 'typed' } });
+        body: reading ? { actualMg: mg, source: 'scale', scaleRef: reading.scaleReadingId } : typedBody });
+      if (!reading && r.status < 400) verifyTyped = null;
       if (r.status >= 400) { $('fl-err').textContent = err(r, 'That weight was not recorded.'); return; }
       var x = data(r);
       if (x.overPick) { verifyJobView(V, id); return; } // STOCK2-1: the row and the alert carry it from here

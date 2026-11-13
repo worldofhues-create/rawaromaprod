@@ -7,7 +7,7 @@
  * below: each makes a child lot with its own L- code and label, in the genealogy, ledger balanced. */
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { master, must, receivedLot } from '../../harness/chain';
+import { master, must, receivedLot, signedTypedE2e } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { jobDecodes, labelWindows, printedJob, reprintWithReason, wedge, windowDecodes } from '../../harness/labels';
 
@@ -293,7 +293,7 @@ async function finishedJob(info: Parameters<Parameters<typeof test>[1]>[1]) {
   await must('picker', 'POST', `/v1/floor/jobs/${j.floorJobId}/pick/lines/${pv.lines[0]!.floorLineId}`, { bin: take.bin, barcode: take.barcode });
   await must('picker', 'POST', `/v1/floor/jobs/${j.floorJobId}/pick/complete`, { tote: ('T-' + letters()).toUpperCase() });
   const vv = (await must('verifier', 'GET', `/v1/floor/jobs/${j.floorJobId}/verify`)) as { lines: Array<{ floorLineId: string; targetMg: number }> };
-  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${j.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, source: 'typed' });
+  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${j.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, ...(await signedTypedE2e(l.targetMg)) });
   await must('verifier', 'POST', `/v1/floor/jobs/${j.floorJobId}/verify/complete`, {});
   const mv = (await must('mixer', 'GET', `/v1/floor/jobs/${j.floorJobId}/mix`)) as { steps: Array<{ seq: number }> };
   for (const st of mv.steps) await must('mixer', 'POST', `/v1/floor/jobs/${j.floorJobId}/mix/steps/${st.seq}`, {});

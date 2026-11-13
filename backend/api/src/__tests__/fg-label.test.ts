@@ -43,7 +43,11 @@ test('a label is composed from the records — product, batch, pack size, net qt
   assert.equal(c.batchNumber, fg.fgBatchNo);
   assert.equal(c.manufacturingDate, '2026-09-22');
   assert.equal(c.expiryDate, '2028-09-20');
-  assert.equal(c.netQuantity, '4');
+  // STOCK-FIX-RP (STK-20): the net quantity is ONE pack's (25 kg); this line asserted the lot's total (4),
+  // which is the defect. The lot's total is its own field.
+  assert.equal(c.netQuantity, '25');
+  assert.equal(c.unit, 'kg');
+  assert.equal(c.lotQuantity, '4');
   assert.equal(c.productCode, fg.productCode);
   assert.equal(c.productName, 'Althair');
   assert.equal(c.packSize, '25 kg');

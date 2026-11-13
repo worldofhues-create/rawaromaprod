@@ -522,6 +522,25 @@ export class FloorStationService {
     }
   }
 
+  /**
+   * STOCK-FIX-RP (STK-27): a typed verify weight is accepted only on a second person's signed check
+   * (FLOOR-FIX-3's platform.typed_weight_check): the verifier asks (POST /v1/scales/typed-checks), a
+   * verifier, supervisor or admin who did not type it signs, and the check is used once, for this
+   * figure, by its typist. Locked so two lines cannot spend one sign-off.
+   */
+  private async useTypedCheck(tx: TransactionSql, checkId: unknown, mg: number, principal: AuthPrincipal, usedFor: string): Promise<void> {
+    const id = typeof checkId === 'string' ? checkId : '';
+    if (!/^[0-9a-f-]{36}$/i.test(id)) throw new ConflictException('A typed weight needs a second person: ask a verifier or supervisor to sign it (Floor devices, Typed weights), then send it with its sign-off.');
+    const [c] = await tx<{ status: string; typed_by: string; mg: string }[]>`
+      select status, typed_by::text, mg::text from platform.typed_weight_check where check_id = ${id}::uuid for update`;
+    if (!c) throw new ConflictException('That typed-weight sign-off was not found.');
+    if (c.status === 'PENDING') throw new ConflictException('This typed weight is not signed yet: a verifier or supervisor signs it first.');
+    if (c.status === 'USED') throw new ConflictException('That sign-off was already used. Ask for a new one.');
+    if (c.typed_by !== principal.userId) throw new ConflictException('That sign-off is for a weight someone else typed.');
+    if (Number(c.mg) !== mg) throw new ConflictException('The weight does not match the signed figure.');
+    await tx`update platform.typed_weight_check set status = 'USED', used_at = now(), used_for = ${usedFor} where check_id = ${id}::uuid and status = 'APPROVED'`;
+  }
+
   private async assertScaleReading(ref: unknown, mg: number): Promise<void> {
     const id = typeof ref === 'string' ? ref : '';
     if (!/^[0-9a-f-]{36}$/i.test(id)) throw new BadRequestException('A weight from the scale names its reading (scaleRef).');
@@ -534,10 +553,13 @@ export class FloorStationService {
     if (Number(r.mg) !== mg) throw new ConflictException('The weight does not match the scale reading.');
   }
 
-  async verifyLine(jobId: string, lineId: string, body: { actualMg?: unknown; source?: string; scaleRef?: string }, principal: AuthPrincipal) {
+  async verifyLine(jobId: string, lineId: string, body: { actualMg?: unknown; source?: string; scaleRef?: string; weightCheckId?: string }, principal: AuthPrincipal) {
     const actual = Number(body.actualMg);
     if (!Number.isSafeInteger(actual) || actual <= 0) throw new BadRequestException('Enter the weight on the scale.');
-    const source = body.source === 'scale' ? 'scale' : 'typed';
+    // STOCK-FIX-RP (STK-27): the source is said, never assumed. A missing source used to read as typed,
+    // and a typed weight needed nobody's signature (FACTORY.md: readings are never typed; the typed
+    // check is a signed fallback). Checked inside the transaction, after the stage and station checks.
+    const source = body.source === 'scale' ? 'scale' : body.source === 'typed' ? 'typed' : null;
     // JOURNEY-FIX: a weight filed as from the scale names a fresh, stable reading of exactly this
     // weight from a scale that is not revoked -- packing's resolveWeight rule. Before, any scaleRef
     // (or none) was taken on the client's word, so a typed weight could be filed as weighed.
@@ -551,6 +573,8 @@ export class FloorStationService {
       const l = ls.find((x) => x.floor_line_id === lineId);
       if (!l) throw new NotFoundException('That line is not on this job.');
       if (l.actual_mg !== null) throw new ConflictException(`Line ${l.seq} is already verified.`);
+      if (!source) throw new BadRequestException('Say where the weight came from: the scale (with its reading) or typed (with a second person\'s sign-off).');
+      if (source === 'typed') await this.useTypedCheck(tx, body.weightCheckId, actual, principal, `${j.job_no} line ${l.seq}`);
       const target = Number(l.target_mg);
       const ok = withinToleranceMg(actual, target, l.tolerance_ppm);
       let sessionId = j.mixing_session_id;

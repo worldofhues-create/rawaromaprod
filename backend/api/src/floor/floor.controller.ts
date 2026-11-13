@@ -150,7 +150,7 @@ export class FloorController {
   @Permissions('production:floor_verify:write')
   @Post('v1/floor/jobs/:id/verify/lines/:line')
   verifyLine(@Param('id', ParseUUIDPipe) id: string, @Param('line', ParseUUIDPipe) line: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
-    return this.stations.verifyLine(id, line, { actualMg: b?.actualMg, source: s(b?.source), scaleRef: b?.scaleRef ? s(b.scaleRef) : undefined }, p);
+    return this.stations.verifyLine(id, line, { actualMg: b?.actualMg, source: b?.source === undefined ? undefined : s(b.source), scaleRef: b?.scaleRef ? s(b.scaleRef) : undefined, weightCheckId: b?.weightCheckId ? s(b.weightCheckId) : undefined }, p);
   }
 
   // FLOOR-LOT-STOP-1: the supervisor's permission (the one that answers for a held reading) resumes a

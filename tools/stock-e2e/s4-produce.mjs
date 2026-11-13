@@ -98,12 +98,20 @@ if (!B.picked) {
 }
 
 /* ── 2 Verify (issue by the weighed grams) ── */
+// STOCK-FIX-RP (STK-27): the rehearsal has no scale, so every weight is typed, and a typed weight is
+// accepted only with a second person's sign-off: the verifier asks, the admin (not the typist) signs.
+async function typed(mg) {
+  const c = await C.must('verifier', 'POST', '/v1/scales/typed-checks', { station: 'Floor', mg, reason: 'rehearsal: no scale connected' });
+  await C.must('admin', 'POST', `/v1/scales/typed-checks/${c.checkId}/sign`, {});
+  return { source: 'typed', weightCheckId: c.checkId };
+}
 if (!B.verified) {
   const v = await C.must('verifier', 'GET', `/v1/floor/jobs/${B.job}/verify`);
   const probes = {};
   const first = v.lines.find((l) => !l.verified);
   probes.pickerVerifies = (await C.rp('picker', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${first.floorLineId}`, { actualMg: first.targetMg, source: 'typed' })).status;
-  const out = await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${first.floorLineId}`, { actualMg: first.targetMg + first.toleranceMg + 1, source: 'typed' });
+  probes.typedUnsigned = (await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${first.floorLineId}`, { actualMg: first.targetMg, source: 'typed' })).status;
+  const out = await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${first.floorLineId}`, { actualMg: first.targetMg + first.toleranceMg + 1, ...(await typed(first.targetMg + first.toleranceMg + 1)) });
   probes.outOfTolerance = { status: out.status, verified: out.body?.verified ?? null };
   const tally = {}; B.weighed = {};
   for (const [i, l] of v.lines.entries()) {
@@ -111,7 +119,7 @@ if (!B.verified) {
     // Every third line weighs a little under its target (inside tolerance): the ledger must end on the reading.
     const under = i % 3 === 1 ? Math.min(l.toleranceMg, Math.floor(l.targetMg / 500)) : 0;
     const actual = l.targetMg - under;
-    const r = await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${l.floorLineId}`, { actualMg: actual, source: 'typed' });
+    const r = await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/verify/lines/${l.floorLineId}`, { actualMg: actual, ...(await typed(actual)) });
     const k = `${r.status}:${r.body?.verified}`; tally[k] = (tally[k] ?? 0) + 1;
     if (r.body?.verified) B.weighed[l.floorLineId] = { seq: l.seq, targetMg: l.targetMg, actualMg: actual };
     else tally[`why:${r.status}`] = (r.body?.message ?? r.error?.message ?? '').slice(0, 140);

@@ -12,7 +12,7 @@ export class InventoryViewController {
 
   @Permissions('inventory:inventory_batch:read')
   @Get('v1/inventory-availability')
-  availability(@Query('limit') limit?: string, @Query('materialId') materialId?: string) {
-    return this.svc.availability({ limit: limit ? Number(limit) : 100, materialId });
+  availability(@Query('limit') limit?: string, @Query('materialId') materialId?: string, @Query('cursor') cursor?: string) {
+    return this.svc.availability({ limit: limit ? Number(limit) : 100, materialId, cursor: cursor || undefined });
   }
 }

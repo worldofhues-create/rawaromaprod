@@ -45,6 +45,12 @@ export async function must(role: string, method: string, path: string, body?: un
   if (r.status >= 300) throw new Error(`chain: ${role} ${method} ${path} -> ${r.status} ${JSON.stringify(r.error)}`);
   return r.body;
 }
+/** STOCK-FIX-RP (STK-27): a typed verify weight with a second person's sign-off (verifier asks, admin signs). */
+export async function signedTypedE2e(mg: number): Promise<{ source: 'typed'; weightCheckId: string }> {
+  const c = (await must('verifier', 'POST', '/v1/scales/typed-checks', { station: 'Floor', mg, reason: 'e2e: no scale connected' })) as { checkId: string };
+  await must('admin', 'POST', `/v1/scales/typed-checks/${c.checkId}/sign`, {});
+  return { source: 'typed', weightCheckId: c.checkId };
+}
 export async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 60_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {

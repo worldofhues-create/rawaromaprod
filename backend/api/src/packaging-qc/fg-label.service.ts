@@ -40,8 +40,13 @@ export interface LabelContent {
   batchNumber: string;
   manufacturingDate: string;
   expiryDate: string;
+  /** STOCK-FIX-RP (STK-20): ONE PACK's net content, as the pack declares it ("100" with unit "g"). It
+   *  printed the lot's total (49 for 49 x 100 g) with the unit pcs, which no pack holds. */
   netQuantity: string;
   unit: string | null;
+  /** The lot's total, in the batch's own unit: a carton and lot field, never the pack's net quantity. */
+  lotQuantity: string;
+  lotUnit: string | null;
   productCode: string | null;
   productName: string | null;
   packSize: string | null;
@@ -142,13 +147,19 @@ export class FgLabelService {
         `)) as unknown as Array<Record<string, string | null>>)[0]
       : undefined;
     const where = await this.shelf.whereIs(fg.id);
+    const [sku] = fg.productSkuId
+      ? await this.sql<{ net_content_mg: string | null }[]>`select net_content_mg::text from packaging.product_sku where product_sku_id = ${fg.productSkuId}`
+      : [];
+    const net = packNetContent(sku?.net_content_mg ?? null, fg.packSize);
     const content: LabelContent = {
       skuCode: String(fg.skuCode ?? ''),
       batchNumber: String(fg.batchNumber ?? ''),
       manufacturingDate: fg.manufacturingDate ?? '',
       expiryDate: fg.expiryDate ?? '',
-      netQuantity: fg.producedQty ? String(Number(fg.producedQty)) : '',
-      unit: fg.uomCode ? String(fg.uomCode) : null,
+      netQuantity: net?.value ?? '',
+      unit: net?.unit ?? null,
+      lotQuantity: fg.producedQty ? String(Number(fg.producedQty)) : '',
+      lotUnit: fg.uomCode ? String(fg.uomCode) : null,
       productCode: fg.productCode,
       productName: fg.productName,
       packSize: fg.packSize,
@@ -166,8 +177,28 @@ export class FgLabelService {
       zone: await zoneOfFgBatch(this.sql, fg.id),
     };
     assertLabelFields(fg);
+    if (!net) throw new ConflictException(`SKU ${fg.skuCode ?? fg.productSkuId ?? ''} has no net content on file${fg.packSize ? ` and its pack size "${fg.packSize}" is not a quantity with a unit` : ''}: a label is never printed without the pack's net quantity.`);
     return content;
   }
+}
+
+/**
+ * STOCK-FIX-RP (STK-20): one pack's declared net content. The SKU's net_content_mg (shown in kg, g or
+ * mg, whichever holds it as a whole or shortest number), else its pack size when it is a number and a
+ * mass or volume unit ("100 g", "50 ml"). A volume is printed as a volume: it is never turned into a
+ * mass (no density on file). Null when neither says.
+ */
+export function packNetContent(netContentMg: string | number | null, packSize: string | null): { value: string; unit: string } | null {
+  const mg = netContentMg === null || netContentMg === undefined ? null : Number(netContentMg);
+  if (mg !== null && Number.isSafeInteger(mg) && mg > 0) {
+    if (mg % 1_000_000 === 0) return { value: String(mg / 1_000_000), unit: 'kg' };
+    if (mg % 1000 === 0 || mg >= 1000) return { value: String(mg / 1000), unit: 'g' };
+    return { value: String(mg), unit: 'mg' };
+  }
+  const m = /^\s*(\d+(?:\.\d+)?)\s*(mg|g|gm|kg|ml|l|ltr|litre|litres)\s*$/i.exec(String(packSize ?? ''));
+  if (!m) return null;
+  const u = m[2]!.toLowerCase();
+  return { value: String(Number(m[1])), unit: u === 'gm' ? 'g' : ['l', 'ltr', 'litre', 'litres'].includes(u) ? 'L' : u };
 }
 
 /** A label is never printed with a blank field the batch record should carry. */

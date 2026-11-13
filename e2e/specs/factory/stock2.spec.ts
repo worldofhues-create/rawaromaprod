@@ -4,7 +4,7 @@
  *   STOCK2-5  at 375 Scan a lot's cards keep their padding, and "Exit focus mode" never sits on a card. */
 import { expect, test, type Page, type TestInfo } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { must } from '../../harness/chain';
+import { signedTypedE2e, must } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { wedge } from '../../harness/labels';
 
@@ -166,7 +166,7 @@ async function staged(info: TestInfo) {
   await pick(verifyJ);
   await pick(mixJ);
   const vv = (await must('verifier', 'GET', `/v1/floor/jobs/${mixJ.floorJobId}/verify`)) as { lines: Array<{ floorLineId: string; targetMg: number }> };
-  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${mixJ.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, source: 'typed' });
+  for (const l of vv.lines) await must('verifier', 'POST', `/v1/floor/jobs/${mixJ.floorJobId}/verify/lines/${l.floorLineId}`, { actualMg: l.targetMg, ...(await signedTypedE2e(l.targetMg)) });
   await must('verifier', 'POST', `/v1/floor/jobs/${mixJ.floorJobId}/verify/complete`, {});
   return { pickJ, verifyJ, mixJ };
 }

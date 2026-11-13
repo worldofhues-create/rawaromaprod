@@ -6,6 +6,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { ensureSchema, testClient, productionDb, principal, closeTestClient } from '../../../test-support/db.js';
+import { signedTyped } from '../../../test-support/typed-check-fixtures.js';
 import { PickingService, MixingService, BatchService } from '@ra/cluster-production';
 import type { VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { FloorCodeService, HAZARD_PENDING, qtyToMg } from '../floor/floor-code.service.js';
@@ -261,18 +262,18 @@ test('verifier: cannot verify own pick; out-of-tolerance kept on file and refuse
   assert.equal(l1!.targetMg, 125500);
   assert.equal(l1!.toleranceMg, 1255);
   await assert.rejects(() => stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 125500 }, picker), /picked this job/);
-  const out = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126756 }, verifier);
+  const out = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126756, ...(await signedTyped(126756, verifier)) }, verifier);
   assert.equal(out.verified, false);
   const kept = await sql()`select status from production.weighing_record w join production.floor_job j on j.mixing_session_id = w.secure_mixing_session_id where j.floor_job_id = ${s.job.floorJobId}`;
   assert.deepEqual(kept.map((r) => r.status), ['OUT_OF_TOLERANCE']);
   // STOCK2-1: the top of the window is still inside tolerance on the exact mg, but over the pick, so it
   // is held for a supervisor; the bottom of the window is what a verifier can tick alone.
-  const top = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126755 }, verifier);
+  const top = await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 126755, ...(await signedTyped(126755, verifier)) }, verifier);
   assert.deepEqual([top.withinTolerance, top.verified], [true, false]);
-  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124244 }, verifier)).withinTolerance, false);
-  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124245 }, verifier)).verified, true);
+  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124244, ...(await signedTyped(124244, verifier)) }, verifier)).withinTolerance, false);
+  assert.equal((await stations.verifyLine(s.job.floorJobId, l1!.floorLineId, { actualMg: 124245, ...(await signedTyped(124245, verifier)) }, verifier)).verified, true);
   await assert.rejects(() => stations.completeVerify(s.job.floorJobId, verifier), /not weighed yet: 2/);
-  await stations.verifyLine(s.job.floorJobId, l2!.floorLineId, { actualMg: 2250 }, verifier);
+  await stations.verifyLine(s.job.floorJobId, l2!.floorLineId, { actualMg: 2250, ...(await signedTyped(2250, verifier)) }, verifier);
   const done = await stations.completeVerify(s.job.floorJobId, verifier);
   assert.equal(done.label.kind, 'VERIFIED');
 });
@@ -280,7 +281,7 @@ test('verifier: cannot verify own pick; out-of-tolerance kept on file and refuse
 test('mixer: cannot mix what they verified; steps in order; MIXED creates the oil batch with one consumption row per lot', async () => {
   const s = await setup();
   await picked(s);
-  for (const l of (await stations.verifyView(s.job.floorJobId)).lines) await stations.verifyLine(s.job.floorJobId, l.floorLineId, { actualMg: l.targetMg }, verifier);
+  for (const l of (await stations.verifyView(s.job.floorJobId)).lines) await stations.verifyLine(s.job.floorJobId, l.floorLineId, { actualMg: l.targetMg, ...(await signedTyped(l.targetMg, verifier)) }, verifier);
   await stations.completeVerify(s.job.floorJobId, verifier);
   const m = await stations.mixView(s.job.floorJobId);
   assert.equal(m.steps.length, 3); // add line 1, add line 2, the production note

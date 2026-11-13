@@ -14,6 +14,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { convertQty, mgToQty, qtyToMgExact } from '@core/data-kernel';
 import { ensureSchema, testClient, productionDb, principal, closeTestClient } from '../../../test-support/db.js';
+import { signedTyped } from '../../../test-support/typed-check-fixtures.js';
 import { PickingService, MixingService, BatchService } from '@ra/cluster-production';
 import type { VaultPort } from '../../../cluster-formula/src/vault-port.js';
 import { ConsumptionService } from '../consumption/consumption.service.js';
@@ -262,7 +263,7 @@ test('floor: a line finer than a mg is refused when the job is made, not truncat
 async function finished(lotQty = '1000.0000', lotUnit = 'g', pick = '125.5', pickUnit = 'g') {
   const s = await floorJob(lotQty, lotUnit, pick, pickUnit);
   await picked(s);
-  for (const l of (await stations.verifyView(s.job.floorJobId)).lines) await stations.verifyLine(s.job.floorJobId, l.floorLineId, { actualMg: l.targetMg }, verifier);
+  for (const l of (await stations.verifyView(s.job.floorJobId)).lines) await stations.verifyLine(s.job.floorJobId, l.floorLineId, { actualMg: l.targetMg, ...(await signedTyped(l.targetMg, verifier)) }, verifier);
   await stations.completeVerify(s.job.floorJobId, verifier);
   for (const st of (await stations.mixView(s.job.floorJobId)).steps) await stations.doStep(s.job.floorJobId, st.seq, mixer);
   const done = await stations.completeMix(s.job.floorJobId, mixer);
