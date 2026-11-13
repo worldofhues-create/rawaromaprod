@@ -8,7 +8,7 @@
  * lanes); their Print buttons and the scan into Batch QC are walked in the browser. */
 import { expect, test } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
-import { must, signTypedOnScreen } from '../../harness/chain';
+import { must, signTypedOnScreen, typedThenSigned } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 import { jobDecodes, labelWindows, printedJob, reprintWithReason, wedge, windowDecodes } from '../../harness/labels';
 
@@ -39,20 +39,6 @@ async function floorJob(info: Parameters<Parameters<typeof test>[1]>[1], grams =
 
 const staged: string[] = [];
 test.afterEach(() => { while (staged.length) sql(staged.shift()!); });
-
-/* STAGE-2-RP (STK-44): this walk stopped at the Packing station. A weight typed there (no scale is
- * connected in the walk) is accepted only once a second person has signed it (FLOOR-FIX-3/16): the
- * first press asks why it was typed and files the weight for a sign-off, and the press after the
- * sign-off records it. The walk pressed once and waited for the row, which is not what the screen
- * asks of a person. It now does both halves: the packer answers the question, the admin signs the
- * pending weight (what Floor devices, Typed weights, Sign does), and the packer presses again. */
-async function typedThenSigned(page: Page, button: string, field: string, mg: number) {
-  await page.getByRole('button', { name: button }).click();
-  await page.getByRole('button', { name: 'Ask for a sign-off', exact: true }).click();
-  await expect(page.locator(`#${field}-src`)).toContainText('waiting for a second person to sign');
-  await signTypedOnScreen(mg);
-  await page.getByRole('button', { name: button }).click();
-}
 
 test('finished flow: every step prints both codes, reprints with a reason, and its label scans at the next step', async ({ page }, info) => {
   test.setTimeout(240_000);

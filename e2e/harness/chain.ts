@@ -37,7 +37,7 @@ export async function rp(role: string, method: string, path: string, body?: unkn
     ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const text = await res.text();
   let j: any = {}; try { j = JSON.parse(text); } catch { j = { data: text }; }
-  return { status: res.status, body: j.data, error: j.error };
+  return { status: res.status, body: j.data, error: j.error, cursor: (j.meta?.cursor ?? null) as string | null };
 }
 /** A precondition that fails stops the walk loudly: it must never read as the flow passing. */
 export async function must(role: string, method: string, path: string, body?: unknown, opts: { vault?: boolean } = {}) {
@@ -67,6 +67,20 @@ export async function signTypedOnScreen(mg: number): Promise<void> {
   }, 15_000);
   for (const c of pending) await must('admin', 'POST', `/v1/scales/typed-checks/${c.checkId}/sign`, {});
 }
+/**
+ * STAGE-2-RP (STK-44): a weight typed at the PACKING station (no scale is connected in a walk) is accepted
+ * only once a second person has signed it (FLOOR-FIX-3/16). The first press asks why it was typed and files
+ * the weight for a sign-off; the press after the sign-off sends it. Two walks pressed once and waited for the
+ * result, which is not what the screen asks of a person. Both halves: the packer answers the question, the
+ * admin signs the pending weight (Floor devices, Typed weights, Sign), and the packer presses again.
+ */
+export async function typedThenSigned(page: import('@playwright/test').Page, button: string, field: string, mg: number): Promise<void> {
+  await page.getByRole('button', { name: button }).click();
+  await page.getByRole('button', { name: 'Ask for a sign-off', exact: true }).click();
+  await page.locator(`#${field}-src`).filter({ hasText: 'waiting for a second person to sign' }).waitFor({ timeout: 15_000 });
+  await signTypedOnScreen(mg);
+  await page.getByRole('button', { name: button }).click();
+}
 export async function until<T>(what: string, fn: () => Promise<T | null | undefined | false>, ms = 60_000): Promise<T> {
   const end = Date.now() + ms;
   for (;;) {
@@ -76,7 +90,22 @@ export async function until<T>(what: string, fn: () => Promise<T | null | undefi
     await new Promise((r) => setTimeout(r, 500));
   }
 }
-const find = async (role: string, path: string, hit: (r: any) => boolean) => ((await must(role, 'GET', `${path}${path.includes('?') ? '&' : '?'}limit=100`)) as any[]).find(hit);
+/* STAGE-2-RP: this read the first 100 rows and stopped. Lists are newest id first, and the floor walks
+ * insert lots and inspections by SQL with random ids, most of which sort ahead of the server's time-ordered
+ * ones; past a hundred of those, a lot received a second ago was on page two and every chain walk timed out
+ * "waiting for the incoming inspection". It reads every page, as the consoles do (WALK-RP: lists read every page). */
+const find = async (role: string, path: string, hit: (r: any) => boolean) => {
+  let cursor: string | null = null;
+  for (let page = 0; page < 200; page++) {
+    const r = await rp(role, 'GET', `${path}${path.includes('?') ? '&' : '?'}limit=100${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ''}`);
+    if (r.status >= 300) throw new Error(`chain: ${role} GET ${path} -> ${r.status} ${JSON.stringify(r.error)}`);
+    const found = ((r.body ?? []) as any[]).find(hit);
+    if (found) return found;
+    cursor = r.cursor;
+    if (!cursor) return undefined;
+  }
+  return undefined;
+};
 
 const FILE = join(RUN, 'chain.json');
 type S = Record<string, any>;
@@ -94,7 +123,11 @@ const today = () => new Date().toISOString().slice(0, 10);
 const plusDays = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
 export const master = () => stage('master', async () => {
-  const kg = (await must('owner', 'POST', '/v1/uoms', { uomCode: 'CH-KG', uomName: 'Kilogram' })).uomId;
+  // STAGE-2-RP: the chain's kilogram was a made-up unit, 'CH-KG'. Since STK-8 a batch is ordered in a unit
+  // the factory weighs in (kg, g or mg), so every walk that raised a production order through the chain
+  // was refused at its first step: eleven walks, red on the stock lane itself. It is the real unit now,
+  // found if a walk before this one put it on file, made if not.
+  const kg = ((await find('owner', '/v1/uoms', (u) => String(u.uomCode ?? '').toLowerCase() === 'kg')) ?? (await must('owner', 'POST', '/v1/uoms', { uomCode: 'kg', uomName: 'Kilogram' }))).uomId as string;
   const pcs = (await must('owner', 'POST', '/v1/uoms', { uomCode: 'CH-PCS', uomName: 'Pieces' })).uomId;
   const mat = (await must('owner', 'POST', '/v1/materials', { materialCode: 'CH-RM-1', materialName: 'Chain raw material', uomId: kg, qcRequired: true, shelfLifeDays: 730 })).materialId;
   await must('owner', 'POST', '/v1/rm-aliases', { materialId: mat, aliasName: 'CH-RX-1', aliasType: 'FLOOR_CODE' });
@@ -149,6 +182,16 @@ export async function releasedStock(qty: number) {
   const inv = await until('released stock', () => find('warehouse', '/v1/inventory-batches', (b) => b.rmBatchId === lot.rmBatch));
   return { ...lot, invBatch: inv.inventoryBatchId as string };
 }
+/**
+ * STAGE-2-RP: stock for an order is reserved when the order is planned (STK-7 to STK-9); nobody reserves it by
+ * hand afterwards. The chain still did, found nothing left to reserve ("only 0 kg available") and stopped
+ * every walk that makes a batch. It now checks that planning reserved the order's stock, and reserves by hand
+ * only for an order planning could not cover (which the old step was for).
+ */
+export async function reservedFor(order: string, invBatch: string, qty: number, uomId: string): Promise<void> {
+  const held = await find('warehouse', '/v1/stock-reservations', (r) => r.reservedForDocumentId === order && !r.releasedDt);
+  if (!held) await must('warehouse', 'POST', '/v1/stock-reservations', { inventoryBatchId: invBatch, reservedQty: qty, uomId, reservedForDocumentId: order });
+}
 /** A production order with reserved, picked and issued stock: ready to weigh. */
 export async function orderWithIssuedStock(qty = 5) {
   const { fv, kg, mat } = { ...(await formula()), ...(await master()) };
@@ -158,7 +201,7 @@ export async function orderWithIssuedStock(qty = 5) {
   const plan = (await must('production', 'POST', '/v1/production-plans', { planDate: today() })).productionPlanId;
   const line = (await must('production', 'POST', '/v1/production-plan-items', { productionPlanId: plan, formulaId, plannedQty: qty, uomId: kg })).productionPlanItemId;
   const order = (await must('production', 'POST', '/v1/production-orders', { formulaVersionId: fv, productionPlanItemId: line, orderQty: qty, uomId: kg })).order.productionOrderId as string;
-  await must('warehouse', 'POST', '/v1/stock-reservations', { inventoryBatchId: invBatch, reservedQty: qty, uomId: kg, reservedForDocumentId: order });
+  await reservedFor(order, invBatch, qty, kg);
   const pl = await must('production', 'POST', `/v1/production-orders/${order}/pick-list`, { pickListDate: today() });
   await must('compounding', 'POST', '/v1/material-issues', { productionOrderId: order, materialPickListId: pl.pickList.materialPickListId,
     items: [{ materialId: mat, inventoryBatchId: invBatch, uomId: kg }] });

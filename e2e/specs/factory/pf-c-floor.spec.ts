@@ -9,6 +9,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { randomUUID } from 'node:crypto';
 import { URLS } from '../../harness/config.mjs';
+import { typedThenSigned } from '../../harness/chain';
 import { openNav, signIn, sql, uniq } from '../../harness/walk';
 
 async function noSideScroll(page: Page) {
@@ -79,10 +80,11 @@ test('Packing then Logistics: unit, carton, finish, carton check, documents, AWB
   await page.locator('#fo-u-tol').fill('0.1');
   await page.locator('#fo-u-w').fill('10.2');
   await page.locator('#fo-u-seal').check();
-  await page.getByRole('button', { name: 'Record unit + print label' }).click();
+  // STK-44: each typed weight is signed by a second person before the station takes it (chain.typedThenSigned).
+  await typedThenSigned(page, 'Record unit + print label', 'fo-u-w', 10200);
   await expect(page.locator('.toast, [role=status]').filter({ hasText: /tolerance/ }).first()).toBeVisible(); // 10.2 g is outside 10 ± 0.1
   await page.locator('#fo-u-w').fill('10.05');
-  await page.getByRole('button', { name: 'Record unit + print label' }).click();
+  await typedThenSigned(page, 'Record unit + print label', 'fo-u-w', 10050);
   await expect(page.locator('tr', { hasText: 'not in a carton' })).toBeVisible();
   const unitCode = sql(`select unit_code from sales.shipment_unit u join sales.shipment s using (shipment_id) where s.sales_order_id='${so}'`);
   expect(sql(`select net_mg || ' ' || weight_source from sales.shipment_unit where unit_code='${unitCode}'`)).toBe('10050 typed');
@@ -92,7 +94,7 @@ test('Packing then Logistics: unit, carton, finish, carton check, documents, AWB
   await page.getByRole('button', { name: 'Add to carton' }).click();
   await expect(page.locator('tr', { hasText: 'in carton 1' })).toBeVisible();
   await page.locator('#fo-c-w').fill('60');
-  await page.getByRole('button', { name: 'Weigh + close carton' }).click();
+  await typedThenSigned(page, 'Weigh + close carton', 'fo-c-w', 60000);
   await expect(page.locator('tr', { hasText: 'Closed' })).toBeVisible();
   await page.getByRole('button', { name: /Finish packing/ }).click();
   await expect(page.locator('.chip', { hasText: 'Packed' })).toBeVisible();

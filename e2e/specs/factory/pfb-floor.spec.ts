@@ -70,6 +70,16 @@ test('QC checkpoints: publishing makes version 1, with its reason', async ({ pag
   const before = Number(sql(`select count(*) from quality.qc_checkpoint_set where product_id = '${product}'`));
   await page.locator('[data-cprow] [data-f="name"]').first().fill('Odour profile ' + info.project.name);
   await page.locator('[data-cprow] [data-f="critical"]').first().check();
+  // PROM-3 (STAGE-2-RP): with the factory rule qc.reference_required on, a set with no comparison to the
+  // retained reference is refused in a sentence. The walk published one and waited for "Version 1"; it now
+  // reads the refusal, adds the REFERENCE checkpoint a person would, and publishes.
+  await page.locator('#fb-cpwhy').fill('Walk ' + info.project.name);
+  await page.locator('#fb-cpsave').click();
+  await expect(page.locator('#ra-view')).toContainText('add a REFERENCE checkpoint');
+  expect(Number(sql(`select count(*) from quality.qc_checkpoint_set where product_id = '${product}'`))).toBe(before);
+  await page.locator('#fb-cpadd').click();
+  await page.locator('[data-cprow] [data-f="name"]').last().fill('Against the retained reference');
+  await page.locator('[data-cprow] [data-f="checkType"]').last().selectOption('REFERENCE');
   await page.locator('#fb-cpwhy').fill('Walk ' + info.project.name);
   await page.locator('#fb-cpsave').click();
   await expect(page.getByText('Version ' + (before + 1), { exact: true })).toBeVisible();

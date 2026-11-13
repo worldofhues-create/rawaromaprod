@@ -1,14 +1,14 @@
 /* Factory: pick lists and material issue. The pick list is generated on screen. Compounding issues it on screen,
  * naming lines and a lot: it is masked and never holds a material id. */
 import { expect, test } from '@playwright/test';
-import { formula, master, must, releasedStock, rp } from '../../harness/chain';
+import { formula, master, must, releasedStock, reservedFor, rp } from '../../harness/chain';
 import { expectRefused, openNav, rowById, signIn, sql } from '../../harness/walk';
 
 test('production generates the pick list on screen; the issue reads back on Material issues, code names only', async ({ page }) => {
   const { fv } = await formula(); const { kg, mat } = await master();
   const { invBatch } = await releasedStock(4);
   const order = (await must('production', 'POST', '/v1/production-orders', { formulaVersionId: fv, orderQty: 4, uomId: kg })).order.productionOrderId;
-  await must('warehouse', 'POST', '/v1/stock-reservations', { inventoryBatchId: invBatch, reservedQty: 4, uomId: kg, reservedForDocumentId: order });
+  await reservedFor(order, invBatch, 4, kg); // STK-7 to STK-9: planning reserved it; the chain only confirms
   await signIn(page, 'factory', 'production');
   await openNav(page, 'Production orders');
   await rowById(page, order).getByRole('button', { name: 'Generate pick list', exact: true }).click();

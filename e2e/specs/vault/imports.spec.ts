@@ -45,7 +45,12 @@ test('a formulator uploads a recipe from a sheet; it is sealed and sent for revi
   // What the import kept: no cell, and not the ingredient's code.
   expect(sql(`select count(*) from formula.import_job_row where cells is not null`, 'vault')).toBe('0');
   expect(sql(`select count(*) from (select row_to_json(x)::text j from formula.import_job_row x) y where j like '%CH-RM-1%'`, 'vault')).toBe('0');
-  expect(sql(`select count(*) from (select row_to_json(x)::text j from formula.idempotency_key x) y where j like '%CH-RM-1%'`, 'vault')).toBe('0');
+  // STAGE-2-RP: this counted every stored answer that names CH-RM-1, and in a whole run the compliance walk's
+  // allergen upload (another route, about a material's own composition, before this walk) had left two. The
+  // claim here is the recipe import's: no stored answer names this formula, and none but an allergen answer
+  // names the ingredient.
+  expect(sql(`select count(*) from (select row_to_json(x)::text j from formula.idempotency_key x) y where j like '%${code}%' and j like '%CH-RM-1%'`, 'vault')).toBe('0');
+  expect(sql(`select count(*) from (select row_to_json(x)::text j from formula.idempotency_key x) y where j like '%CH-RM-1%' and j not like '%"kind": "allergen"%'`, 'vault')).toBe('0');
   expect(errors).toEqual([]);
 });
 
