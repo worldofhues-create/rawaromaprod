@@ -49,7 +49,8 @@ if (!S.receipt) {
   const gate = await C.must('receiving', 'POST', '/v1/gate-entries', { vendorId: vendor, purchaseOrderId: poId, vehicleNumber: 'MP09RH0001', entryDt: new Date().toISOString() });
   const gateId = gate.gateEntry?.gateEntryId ?? gate.gateEntryId;
   const grn = await C.rp('receiving', 'POST', '/v1/grns', { gateEntryId: gateId, purchaseOrderId: poId, vendorId: vendor, grnDate: today(),
-    items: lines.map((l, i) => ({ purchaseOrderItemId: po.items[i].purchaseOrderItemId, materialId: S.mat[l.k].id, receivedQty: l.qtyG, acceptedQty: l.qtyG, rejectedQty: 0, uomId: g, manufacturingDate: l.mfg, expiryDate: l.expiry })) });
+    // STOCK-FIX-RP (STK-16): each line names the supplier's own lot (a scratch reference: the sheet has none).
+    items: lines.map((l, i) => ({ purchaseOrderItemId: po.items[i].purchaseOrderItemId, materialId: S.mat[l.k].id, receivedQty: l.qtyG, acceptedQty: l.qtyG, rejectedQty: 0, uomId: g, manufacturingDate: l.mfg, expiryDate: l.expiry, supplierLotRef: `SUP-REH-${String(i + 1).padStart(4, '0')}` })) });
   if (grn.status >= 300) { ev('grn', { status: grn.status, error: grn.error }); process.exit(1); }
   S.receipt = { poId, gateId, grnId: grn.body.grn.grnId, lines: lines.map((l, i) => ({ k: l.k, qtyG: l.qtyG, expiry: l.expiry, probe: l.probe ?? null, rmBatch: grn.body.batches[i]?.rmBatchId, batchNumber: grn.body.batches[i]?.batchNumber })) };
   ev('grn', { status: grn.status, batches: grn.body.batches.length, seconds: Math.round((Date.now() - t0) / 1000) });

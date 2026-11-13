@@ -13,11 +13,12 @@ async function probe(fid, qty, uomKey, tag) {
   const o = await C.must('production', 'POST', '/v1/production-orders', { formulaVersionId: S.vault[fid].fv, orderQty: qty, uomId: uom });
   const id = o.order.productionOrderId;
   await C.must('production', 'POST', `/v1/production-orders/${id}/pick-list`, { pickListDate: today });
-  const rows = q(`select i.material_id || '|' || i.picked_qty from production.material_pick_list_items i join production.material_pick_list p on p.material_pick_list_id = i.material_pick_list_id where p.production_order_id = '${id}'`).split('\n').map((l) => l.split('|'));
+  // STOCK-FIX-RP (STK-7): a line is kept in the order's unit when four places hold it, else in g: read each line in its own unit.
+  const rows = q(`select i.material_id || '|' || i.picked_qty || '|' || lower(u.uom_code) from production.material_pick_list_items i join production.material_pick_list p on p.material_pick_list_id = i.material_pick_list_id left join platform.uom_master u on u.uom_id = i.uom_id where p.production_order_id = '${id}'`).split('\n').map((l) => l.split('|'));
   let off = 0, maxOff = 0, sysTot = 0, exTot = 0, fracMg = 0;
   for (const l of S.vault[fid].lines) {
     const exact = (l.mg * qty * factor) / f.totalMg; exTot += exact; if (!Number.isInteger(exact)) fracMg++;
-    const r = rows.find((x) => x[0] === S.mat[l.k].id); const sys = Math.round(Number(r[1]) * factor); sysTot += sys;
+    const r = rows.find((x) => x[0] === S.mat[l.k].id); const sys = Math.round(Number(r[1]) * ({ kg: 1_000_000, g: 1000, mg: 1 }[r[2]] ?? factor)); sysTot += sys;
     if (Math.abs(sys - exact) > 1e-9) { off++; maxOff = Math.max(maxOff, Math.abs(sys - exact)); }
   }
   const job = await C.rp('production', 'POST', '/v1/floor/jobs', { productionOrderId: id });
@@ -30,9 +31,11 @@ await probe('F2', 333, 'g', 'P3-F2-333g');
 await probe('F1', 2500, 'g', 'P4-F1-2.5kg-in-g');
 // Pack without a lot: an FG batch with no number, on the probe package order.
 const B5 = S.batch.B5;
+if (B5?.pkg) {
 const fg = await C.rp('packaging', 'POST', '/v1/finished-good-batches', { packageOrderId: B5.pkg, productSkuId: S.sku.a9pm.sku, producedQty: 1, uomId: S.masters.pcs });
 const fg2 = await C.rp('packaging', 'POST', '/v1/finished-good-batches', { packageOrderId: B5.pkg, productSkuId: S.sku.a9pm.sku, batchNumber: 'FG-B1-TYPED', producedQty: 1, uomId: S.masters.pcs });
 console.log('P5-fg-without-lot', fg.status, fg.error?.message?.slice(0, 120) ?? null, '| reuse of another batch number', fg2.status, fg2.error?.message?.slice(0, 100) ?? null);
+} else console.log('P5-fg-without-lot', 'no package order on B5: the over-order was refused (STK-11)');
 // Pick more than on hand: a direct reservation beyond a lot.
 const lot = S.receipt.lines.find((l) => l.invBatch);
 const r = await C.rp('warehouse', 'POST', '/v1/stock-reservations', { inventoryBatchId: lot.invBatch, reservedQty: 999999, uomId: S.masters.g, reservedForDocumentId: B5.order });

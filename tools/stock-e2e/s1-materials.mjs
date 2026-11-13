@@ -25,32 +25,42 @@ if (!S.masters) {
   const qcParam = (await C.must('qc', 'POST', '/v1/qc-parameters', { parameterCode: 'REH-RI', parameterName: 'Refractive index' })).qcParameterId;
   S.masters = { g, kg, pcs, vendor, qcParam }; st.save(S);
 }
-// The floor's colour families: the sheet names none. One family for everything, Signal for the solvents (D-2).
+// The floor's colour families: the sheet names none. STOCK-FIX-RP (STK-19): the nine D-2 families are seeded
+// by migration (Signal for the solvents among them); one more holds everything the sheet does not sort.
 const fams = await C.must('owner', 'GET', '/v1/floor/families');
 ev('familiesBefore', (Array.isArray(fams) ? fams : fams.items ?? []).length);
-for (const [code, name, colour, hex, initial] of [['solvent', 'Solvent', 'Signal', '#2F5DFF', 'S'], ['unsorted', 'Not yet sorted (rehearsal)', 'Grey', '#8A8A8A', 'G']]) {
+for (const [code, name, colour, hex, initial] of [['unsorted', 'Not yet sorted (rehearsal)', 'Olive', '#6B7A2A', 'V']]) {
   const r = await C.rp('owner', 'PUT', `/v1/floor/families/${code}`, { familyName: name, colourName: colour, colourHex: hex, initial });
   if (r.status >= 300 && r.status !== 409) throw new Error(`family ${code}: ${r.status} ${JSON.stringify(r.error)}`);
 }
 
-// One material per name after trimming and case. A code is minted here because the sheet has none.
+// One material per name after trimming and case. STOCK-FIX-RP (STK-17): ONE file through the raw-material
+// import, a dry run then the commit, codes minted in order and floor codes filed with them. The file is
+// built here, in memory, from the sheet, sent to the scratch API, and never written anywhere.
 S.mat ??= {};
 const tStart = Date.now(); let created = 0, refused = [];
 const keys = [...spell.keys()];
 const SOLVENT = new Set(['dpg', 'ipm', 'dep', 'tec', 'ethanol', 'benzyl benzoate']);
-for (const [i, k] of keys.entries()) {
-  if (S.mat[k]) continue;
-  const name = [...spell.get(k)][0].trim();
-  const code = `REH-RM-${String(i + 1).padStart(3, '0')}`;
-  const r = await C.rp('owner', 'POST', '/v1/materials', { materialCode: code, materialName: name, uomId: S.masters.g, qcRequired: true, shelfLifeDays: 730 });
-  if (r.status >= 300) { refused.push({ index: i + 1, status: r.status, code: r.error?.code }); continue; }
-  const fc = await C.rp('owner', 'POST', '/v1/floor/codes', { materialId: r.body.materialId, familyCode: SOLVENT.has(k) ? 'solvent' : 'unsorted' });
-  S.mat[k] = { id: r.body.materialId, code, floor: fc.body?.code ?? null, floorStatus: fc.status };
-  created++;
+const csvCell = (v) => (/[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v);
+const todo = keys.filter((k) => !S.mat[k]);
+if (todo.length) {
+  const csv = ['material_name,family', ...todo.map((k) => `${csvCell([...spell.get(k)][0].trim())},${SOLVENT.has(k) ? 'solvent' : 'unsorted'}`)].join('\n');
+  const dry = await C.must('procurement', 'POST', '/v1/materials/import', { csv });
+  ev('importDryRun', { rows: dry.rows.length, errorCount: dry.errorCount, warningCount: dry.warningCount,
+    errorKinds: [...new Set(dry.rows.flatMap((r) => r.errors.map((e) => e.replace(/".*"|line \d+|[A-Z]+-\d+/g, '_'))))],
+    warningKinds: [...new Set(dry.rows.flatMap((r) => r.warnings.map((e) => e.replace(/".*"|line \d+|[A-Z]+-\d+/g, '_'))))], committed: dry.committed });
+  const done = await C.rp('procurement', 'POST', '/v1/materials/import', { csv, commit: true });
+  if (done.status >= 300 || !done.body.committed) { ev('importCommit', { status: done.status, errorCount: done.body?.errorCount ?? null }); process.exit(1); }
+  for (const c of done.body.created) {
+    const k = todo[c.line - 2];
+    S.mat[k] = { id: c.materialId, code: c.materialCode, floor: c.floorCode, floorStatus: c.floorCode ? 201 : null };
+    created++;
+  }
 }
 st.save(S);
-ev('materials', { created, refused, apiCallsPerMaterial: 2, seconds: Math.round((Date.now() - tStart) / 1000),
-  withFloorCode: Object.values(S.mat).filter((m) => m.floor).length, floorCodeStatuses: [...new Set(Object.values(S.mat).map((m) => m.floorStatus))] });
+const codesInOrder = Object.values(S.mat).map((m) => m.floor).filter(Boolean);
+ev('materials', { created, refused, apiCalls: 2, seconds: Math.round((Date.now() - tStart) / 1000),
+  withFloorCode: codesInOrder.length, floorNumbersInOrder: codesInOrder.every((c, i, a) => i === 0 || a[i - 1].split('-')[0] !== c.split('-')[0] || Number(c.split('-')[1]) > Number(a[i - 1].split('-')[1])) });
 // A second material with the same code, and one with the same name: does the master refuse either?
 const dupCode = await C.rp('owner', 'POST', '/v1/materials', { materialCode: 'REH-RM-001', materialName: 'duplicate code probe', uomId: S.masters.g });
 const firstName = [...spell.get(keys[0])][0].trim();

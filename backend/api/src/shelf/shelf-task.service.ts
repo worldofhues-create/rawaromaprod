@@ -102,15 +102,20 @@ export function buildFgBatchReceived(input: {
   packNetMg?: number | null;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
+  // STOCK-FIX-RP, lead ruling LD-145: a batch counted in a MASS unit was received as BULK for later filling,
+  // so it names no pack (no pack fields, and no pack_size that reads as a mass): Alembic keeps it as loose
+  // stock any line can draw from. A batch counted in packs (pcs, drums) was FILLED, and names its packs.
+  const bulk = bridgeContracts.kgPerUnit(input.uomCode) !== null;
+  const packSize = input.packSize && input.packSize.trim() ? input.packSize.trim() : null;
   const payload: bridgeContracts.FgBatchReceivedPayload = {
     batch_no: input.batchNo ?? '',
     sku: input.sku ?? '',
-    pack_size: input.packSize && input.packSize.trim() ? input.packSize.trim() : null,
+    pack_size: bulk && packSize && bridgeContracts.packSizeKg(packSize) !== null ? null : packSize,
     qty_kg: qtyKg ?? 0,
     rack: input.rack ?? '',
     released_at: input.releasedAt ?? '',
     ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
-    ...packFields(qtyKg, input.packNetMg),
+    ...(bulk ? {} : packFields(qtyKg, input.packNetMg)),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.

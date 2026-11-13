@@ -104,6 +104,8 @@ test('fg.batch.received: a mass unit converts; a count with no mass pack size is
   assert.ok(g.ok && g.payload.qty_kg === 2.5 && g.payload.pack_size === null);
   const kg = buildFgBatchReceived({ batchNo: 'B', sku: 'S', packSize: '5 kg', qty: 12.5, uomCode: 'KG', rack: 'A-1', releasedAt: '2026-02-15T09:30:00.000Z' });
   assert.ok(kg.ok && kg.payload.qty_kg === 12.5, 'a batch counted in kg is not multiplied by its pack');
+  // STOCK-FIX-RP, LD-145: a batch counted in kg is BULK: it names no pack, so no mass pack_size and no pack fields.
+  assert.ok(kg.ok && kg.payload.pack_size === null && !('pack_count' in kg.payload));
   const bad = buildFgBatchReceived({ batchNo: 'B', sku: 'S', packSize: '1 carton', qty: 3, uomCode: 'EA', rack: 'A-1', releasedAt: '2026-02-15T09:30:00.000Z' });
   assert.equal(bad.ok, false);
   const noRelease = buildFgBatchReceived({ batchNo: 'B', sku: 'S', packSize: '5 kg', qty: 1, uomCode: 'EA', rack: 'A-1', releasedAt: null });

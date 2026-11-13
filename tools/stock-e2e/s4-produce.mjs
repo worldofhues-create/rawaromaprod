@@ -22,7 +22,8 @@ if (!B.order) {
   if (o.status >= 300) { step('order', { status: o.status, error: o.error }); process.exit(1); }
   B.order = o.body.order.productionOrderId; B.plan = plan; B.planItem = item;
   const ings = o.body.ingredients ?? o.body.order?.ingredients ?? [];
-  step('order', { status: o.status, orderNumber: o.body.order.orderNumber, ingredientsReturned: Array.isArray(ings) ? ings.length : null, bodyKeys: Object.keys(o.body) });
+  step('order', { status: o.status, orderNumber: o.body.order.orderNumber, ingredientsReturned: Array.isArray(ings) ? ings.length : null, bodyKeys: Object.keys(o.body),
+    reservation: o.body.reservation ? { linesReserved: o.body.reservation.linesReserved, shortLines: o.body.reservation.shortLines } : null });
 }
 // Reservation at planning (LD-19): is anything reserved by the order itself?
 const resv = (await C.all('warehouse', '/v1/stock-reservations')).filter((r) => r.reservedForDocumentId === B.order);
@@ -44,7 +45,19 @@ if (!B.pickList) {
 
 if (!B.job) {
   const j = await C.rp('production', 'POST', '/v1/floor/jobs', { productionOrderId: B.order });
-  if (j.status >= 300) { step('job', { status: j.status, error: j.error }); process.exit(1); }
+  // STOCK-FIX-RP (STK-9): a short order is known at planning and kept off the floor (no picker is sent to an empty shelf).
+  if (j.status >= 300) {
+    step('job', { status: j.status, error: j.error?.message?.replace(/[A-Z]+-\d{4}/g, 'CODE').slice(0, 160) ?? null });
+    if (mode === 'short' && j.status === 409) {
+      // The short order is cancelled, which releases what it did hold, so the later batches are not starved by a probe.
+      const held = (await C.all('warehouse', '/v1/stock-reservations')).filter((r) => r.reservedForDocumentId === B.order && !r.releasedDt).length;
+      const c = await C.rp('production', 'POST', `/v1/production-orders/${B.order}/cancel`, { reason: 'rehearsal: shortfall probe' });
+      const after = (await C.all('warehouse', '/v1/stock-reservations')).filter((r) => r.reservedForDocumentId === B.order && !r.releasedDt).length;
+      step('cancel', { status: c.status, holdsBefore: held, released: c.body?.reservationsReleased ?? null, holdsAfter: after });
+      process.exit(0);
+    }
+    process.exit(1);
+  }
   B.job = j.body.floorJobId; step('job', { status: j.status, jobNo: j.body.jobNo, lines: j.body.lines, steps: j.body.steps });
 }
 
@@ -142,8 +155,26 @@ if (!B.oil) {
   probes.mixerSeesName = exact.some((e) => { const n = formulas.flatMap((x) => x.lines).find((l) => normName(l.name) === e.k)?.name.trim(); return n && n.length > 3 && leak.includes(n); });
   probes.mixerSeesPercent = /%|percent/i.test(leak);
   probes.stepShape = Object.keys(m.steps[0] ?? {}).join(',');
+  // STOCK-FIX-RP (STK-15, D-1): the scoped reveal, tried as the floor would try it. Statuses only; the name is
+  // checked to be present or absent, never printed.
+  if (process.env.REVEAL_PROBE === label) {
+    // The mixer's user id: the subject of the access token the mixer already holds (it read the mix view above).
+    const tok = C.tokens.get('mixer|factory')?.token;
+    const mixerId = tok ? JSON.parse(Buffer.from(tok.split('.')[1], 'base64url').toString('utf8')).sub : null;
+    probes.revealUnassigned = (await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {})).status;
+    probes.assign = (await C.rp('production', 'POST', `/v1/floor/jobs/${B.job}/mix/assign`, { userId: mixerId })).status;
+    const rv = await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {});
+    const k = exact[0]?.k; const name = k ? formulas.flatMap((x) => x.lines).find((l) => normName(l.name) === k)?.name.trim() : null;
+    probes.reveal = { status: rv.status, seq: rv.body?.seq ?? null, nameIsLine1s: !!(name && rv.body?.name === name), fields: Object.keys(rv.body ?? {}).sort().join(',') };
+    probes.revealFutureStep = (await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, { seq: 2 })).status;
+    probes.revealPicker = (await C.rp('picker', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {})).status;
+    probes.revealVerifier = (await C.rp('verifier', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {})).status;
+    const log = await C.must('production', 'GET', `/v1/floor/jobs/${B.job}/mix/reveals`);
+    probes.revealLog = { views: log.items.length, logCarriesName: !!(name && JSON.stringify(log).includes(name)) };
+  }
   let ok = 0;
   for (const s of m.steps) { const r = await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/steps/${s.seq}`, {}); if (r.status < 300) ok++; }
+  if (process.env.REVEAL_PROBE === label) probes.revealAfterLastStep = (await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/reveal`, {})).status;
   const done = await C.rp('mixer', 'POST', `/v1/floor/jobs/${B.job}/mix/complete`, {});
   B.oil = done.body?.oilBatchId; B.oilNo = done.body?.batchNo;
   step('mix', { probes, steps: m.steps.length, stepsDone: ok, complete: done.status, batchNo: done.body?.batchNo ?? null, err: done.error?.message?.slice(0, 160) ?? null });

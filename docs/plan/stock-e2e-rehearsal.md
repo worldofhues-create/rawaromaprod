@@ -105,35 +105,35 @@ Severity: **G** blocks go-live, **N** wrong number, **M** missing step, **A** aw
 
 | # | Sev | What | Where | Smallest fix | Status |
 |---|---|---|---|---|---|
-| STK-1 | G | A QC release for a factory SKU made on RawProd (not by Alembic's factory-catalogue sync) parks on Alembic `unknown_aggregate`: `product_ref` carries only `factory_sku`, which needs a `bridge_sku_mapping`, while `fg.batch.received` finds the same SKU by its code. The lot is received QUARANTINE and never released | Alembic `apps/api/src/compliance/service.ts:1061` `skuByFactorySku`; RawProd `qc.batch.released` payload (`cluster-production/src/coa/coa.service.ts`) | RawProd sends `product_ref.sku` (its sku code IS the commercial code, `factory-setup/catalogue.contract.ts:17`); or Alembic falls back to `skuByCode`. One release, both repos | Work order WO-STK-1 |
+| STK-1 | G | A QC release for a factory SKU made on RawProd (not by Alembic's factory-catalogue sync) parks on Alembic `unknown_aggregate`: `product_ref` carries only `factory_sku`, which needs a `bridge_sku_mapping`, while `fg.batch.received` finds the same SKU by its code. The lot is received QUARANTINE and never released | Alembic `apps/api/src/compliance/service.ts:1061` `skuByFactorySku`; RawProd `qc.batch.released` payload (`cluster-production/src/coa/coa.service.ts`) | RawProd sends `product_ref.sku` (its sku code IS the commercial code, `factory-setup/catalogue.contract.ts:17`); or Alembic falls back to `skuByCode`. One release, both repos | No RawProd wire change: Alembic resolves `factory_sku` like `fg.batch.received` (`stock-bridge-contract.md` section 1, STOCK-FIX-A) |
 | STK-2 | G | A fact Alembic parked can never be applied: RawProd received 200 and marked it delivered, Alembic has only a read of unprocessed events | Alembic `apps/api/src/server.ts:12769` `unprocessed-events` (GET only) | An admin "re-apply" that runs the same handler on the stored envelope | WO-STK-2 |
 | STK-3 | N | A return restocked the ORDERED mass onto the lot, not what left it (1,000,000 mg back from a 900,000 mg shipment) | `apps/api/src/services/goods-return.ts:114` `returnQtyMg(line.qtyMg` | Cap the inspection's movement at the line's confirmed holds less earlier returns | **Fixed** `e0b7ac8a` (test first) |
 | STK-4 | N | An FG batch could hold more than its package order filled (59 accepted on 14 filled) | `backend/cluster-packaging/src/batch/batch.service.ts` `produceFinishedGoodBatch` | Bound by filled, less rejected, less batches already made, in the same unit | **Fixed** RawProd `6f0e355`; re-proved through the API: 409 on 10 of 2, 201 on 2 |
-| STK-5 | N | The Vault accepts and approves a recipe that does not total 100 % (99.96 % committed with a warning, approved). VAULT.md rule 2 says the wizard refuses it | `backend/cluster-formula/src/setup/formula-setup.service.ts:415` (warning); `approvals.service.ts` `approveVersion` (no total) | Error at import; at approve, the Vault sums the sealed lines inside its own decrypt. Fixtures approve 12.5 % recipes (`vault-sod.test.ts`), so the Vault lane changes them with the decision | WO-STK-5 |
+| STK-5 | N | The Vault accepts and approves a recipe that does not total 100 % (99.96 % committed with a warning, approved). VAULT.md rule 2 says the wizard refuses it | `backend/cluster-formula/src/setup/formula-setup.service.ts:415` (warning); `approvals.service.ts` `approveVersion` (no total) | Error at import; at approve, the Vault sums the sealed lines inside its own decrypt. Fixtures approve 12.5 % recipes (`vault-sod.test.ts`), so the Vault lane changes them with the decision | **Fixed** STOCK-FIX-RP `d766fd6`: refused at commit and at approval unless exactly 100 % |
 | STK-6 | N | A version with nothing sealed on it was approved | `approvals.service.ts` `approveVersion` | Refuse when no ingredient and no stage ingredient is sealed | **Fixed** RawProd `f57efcc`; re-proved: 409 |
-| STK-7 | N | The pick list rounds each line to 4 decimals of the ORDER's unit: F1 at 5 kg ordered in kg totals 5,000,100 mg; in g it is exact | `backend/cluster-formula/src/pick-quantity.ts:45` `pickLineRequiredQty` | Compute lines in mg, or refuse an order whose lines do not total its quantity | WO-STK-7 |
-| STK-8 | A | A batch size off the mg grid (F2 at 333 g) is refused only at the floor job, with "Correct the pick list", which nobody can | `backend/api/src/floor/floor-station.service.ts:205` | Refuse at order creation and name the nearest sizes that work | WO-STK-8 |
-| STK-9 | M | Nothing is reserved at planning (LD-19, WO-STOCK-1): 0 reservations for every order; a shortfall order (B4) is created and its floor job opened; the queue then shows `waitingOn` | `backend/cluster-production/src/planning/planning.service.ts:172` | Reserve formula grams x batch size per lot (FEFO) at order creation, in one transaction | WO-STOCK-1 |
-| STK-10 | M | No loss, yield, remnant or write-off is recorded: compounding loss is 0 by construction, packing never draws the oil down, a FAILED batch writes nothing off (WO-STOCK-3) | `floor-station.service.ts:693`; `packaging` schema | Batch close: formula vs weighed per line, oil made vs packed, the remnant and the loss each a recorded movement | WO-STOCK-3 |
-| STK-11 | N | A package order and its fill are not bounded by the oil batch: 700,000 mg packed from 499,676 mg | `backend/cluster-packaging/src/orders/orders.service.ts:69` | Refuse packs whose mass exceeds the oil remaining (needs STK-10's oil balance) | WO-STOCK-3 |
+| STK-7 | N | The pick list rounds each line to 4 decimals of the ORDER's unit: F1 at 5 kg ordered in kg totals 5,000,100 mg; in g it is exact | `backend/cluster-formula/src/pick-quantity.ts:45` `pickLineRequiredQty` | Compute lines in mg, or refuse an order whose lines do not total its quantity | **Fixed** `46f3cc8`: the Vault splits the order in integer mg (largest remainder); re-run R4/R8: 0 mg off on every order |
+| STK-8 | A | A batch size off the mg grid (F2 at 333 g) is refused only at the floor job, with "Correct the pick list", which nobody can | `backend/api/src/floor/floor-station.service.ts:205` | Refuse at order creation and name the nearest sizes that work | **Fixed** `46f3cc8`: refused at order creation with the sizes that work; 333 g now plans (333,000 mg) |
+| STK-9 | M | Nothing is reserved at planning (LD-19, WO-STOCK-1): 0 reservations for every order; a shortfall order (B4) is created and its floor job opened; the queue then shows `waitingOn` | `backend/cluster-production/src/planning/planning.service.ts:172` | Reserve formula grams x batch size per lot (FEFO) at order creation, in one transaction | **Fixed** `46f3cc8`: reserved at planning (FEFO lot per line), short known at planning, cancel releases, issue consumes |
+| STK-10 | M | No loss, yield, remnant or write-off is recorded: compounding loss is 0 by construction, packing never draws the oil down, a FAILED batch writes nothing off (WO-STOCK-3) | `floor-station.service.ts:693`; `packaging` schema | Batch close: formula vs weighed per line, oil made vs packed, the remnant and the loss each a recorded movement | **Fixed** `c0cabdd`: the oil ledger (made, packed, rejected, loss, write-off, remnant); R7 balances every batch |
+| STK-11 | N | A package order and its fill are not bounded by the oil batch: 700,000 mg packed from 499,676 mg | `backend/cluster-packaging/src/orders/orders.service.ts:69` | Refuse packs whose mass exceeds the oil remaining (needs STK-10's oil balance) | **Fixed** `c0cabdd`: re-run: 14 x 50 g on 499,676 mg refused 409 |
 | STK-12 | G | Maceration skipped: HOLD then RELEASED on one QC PASS on a formula with a 45-day rest (LD-85, LD-99) | `cluster-production/src/batch/batch.service.ts:42`; `backend-kernel/src/events/maceration-gate.ts:144` | as built on `lane/promises-rp` | Fixed on `lane/promises-rp` (PROM-2), not in production |
 | STK-13 | G | The FG lot number is typed and can repeat another lot's (`FG-B1-TYPED` accepted twice) | `cluster-packaging/src/batch/batch.service.ts:94` `batchNumber: body.batchNumber` | as built on `lane/promises-rp` | Fixed on `lane/promises-rp` (PROM-4: minted at fill) |
 | STK-14 | A | Early release of a resting batch is one person (admin) with a reason | `backend/api/src/floor-ops/maceration.service.ts:128` | as built on `lane/promises-rp` | Fixed on `lane/promises-rp` (PROM-2) |
-| STK-15 | M | D-1 (LD-35) is not built: the mixer sees "Add line N: CODE" only; no scoped reveal on the current step, no reveal log | `floor-station.service.ts:215` | WO-FLOOR-6 | WO-FLOOR-6 |
-| STK-16 | M | No supplier lot at goods receipt, so a raw lot cannot be traced to the supplier's batch | `backend/cluster-inventory/src/*.dtos.ts:71` `grnItemInput` | A `supplierLotRef` on the GRN line, carried to the RM batch | WO-STK-16 (PROM-1 names it) |
-| STK-17 | A | No bulk import for raw materials: 196 materials are 392 calls (create, then floor code) | no route (grep for an import under `cluster-masterdata`) | A CSV import with a dry run, as the recipe import has | WO-STK-17 |
-| STK-18 | A | The master takes a second material with the same name (201), has no hazard class field, and a sheet's total row becomes a material | `backend/cluster-masterdata/src/*.dtos.ts:53` `createMaterial` | Refuse a duplicate normalised name; the import (STK-17) flags total rows and spelling variants | WO-STK-17 |
-| STK-19 | A | No floor-code families are seeded, not even Signal (D-2); each of 196 materials needs a family a person chooses; numbers are drawn at random 1 to 9999 | `backend/api/src/floor/floor-code.service.ts:72` | Seed the owner's families; the import takes a family column | WO-STK-17 |
-| STK-20 | N | The FG label's "net quantity" is the lot's total (49 for 49 x 100 g), with the unit `pcs`, not the pack's net content | `backend/api/src/packaging-qc/fg-label.service.ts:150` | Print the pack size as net content; the lot total is a carton/lot field | WO-STK-20 |
-| STK-21 | G | Three pack vocabularies do not meet: RawProd `pack_size` is free text ("100 g"), the RAC register's packs are g/kg/ml with `net_qty_mg` empty on all 21,650 variants, Alembic's fragrance-oil ladders sell 10/25/50 ml retail and 1/5/25 kg trade. The sale link accepted RAC 100 g -> `abf` (201) and that variant is "price on request" for ever | `apps/api/src/storefront/sf-link-routes.ts:517` `linkVariantToSku`; refusal at order `packages/domain/src/pricing/authority.ts:596` | Refuse a link whose size the SKU's ladder does not sell; one pack list shared by RawProd SKUs, the register and the ladders | WO-STK-21 |
+| STK-15 | M | D-1 (LD-35) is not built: the mixer sees "Add line N: CODE" only; no scoped reveal on the current step, no reveal log | `floor-station.service.ts:215` | WO-FLOOR-6 | **Fixed** `4cd8035`: assigned mixer, current step, logged; hostile cases refused |
+| STK-16 | M | No supplier lot at goods receipt, so a raw lot cannot be traced to the supplier's batch | `backend/cluster-inventory/src/*.dtos.ts:71` `grnItemInput` | A `supplierLotRef` on the GRN line, carried to the RM batch | **Fixed** `f1b7392` |
+| STK-17 | A | No bulk import for raw materials: 196 materials are 392 calls (create, then floor code) | no route (grep for an import under `cluster-masterdata`) | A CSV import with a dry run, as the recipe import has | **Fixed** `f1b7392`: `POST /v1/materials/import`, 196 materials in 2 calls |
+| STK-18 | A | The master takes a second material with the same name (201), has no hazard class field, and a sheet's total row becomes a material | `backend/cluster-masterdata/src/*.dtos.ts:53` `createMaterial` | Refuse a duplicate normalised name; the import (STK-17) flags total rows and spelling variants | **Fixed** `f1b7392` |
+| STK-19 | A | No floor-code families are seeded, not even Signal (D-2); each of 196 materials needs a family a person chooses; numbers are drawn at random 1 to 9999 | `backend/api/src/floor/floor-code.service.ts:72` | Seed the owner's families; the import takes a family column | **Fixed** `f1b7392`: nine D-2 families seeded; numbers in order |
+| STK-20 | N | The FG label's "net quantity" is the lot's total (49 for 49 x 100 g), with the unit `pcs`, not the pack's net content | `backend/api/src/packaging-qc/fg-label.service.ts:150` | Print the pack size as net content; the lot total is a carton/lot field | **Fixed** `9cec9ec` |
+| STK-21 | G | Three pack vocabularies do not meet: RawProd `pack_size` is free text ("100 g"), the RAC register's packs are g/kg/ml with `net_qty_mg` empty on all 21,650 variants, Alembic's fragrance-oil ladders sell 10/25/50 ml retail and 1/5/25 kg trade. The sale link accepted RAC 100 g -> `abf` (201) and that variant is "price on request" for ever | `apps/api/src/storefront/sf-link-routes.ts:517` `linkVariantToSku`; refusal at order `packages/domain/src/pricing/authority.ts:596` | Refuse a link whose size the SKU's ladder does not sell; one pack list shared by RawProd SKUs, the register and the ladders | RawProd side done `a91f565` + LD-145: `pack_count`/`pack_net_mg` for filled lots (contract section 2); the pack list itself is Alembic and the owner |
 | STK-22 | G | No density on any of the 45 fragrance-oil SKUs, so a millilitre retail order of a mass lot is refused (correctly, fail closed) | `packages/domain/src/inventory/shopify-stock.ts:27` | Owner data: sourced densities | Owner (LD-49) |
 | STK-23 | G | No HSN code on 89 of 89 SKUs, so no tax invoice can be raised (correctly refused) | `apps/api/src/sales-docs/store.ts:147` and the invoice path | Owner data: HSN per SKU | Owner (LD-49) |
 | STK-24 | N | A 1 kg trade line held 900 g from a lot of 100 g bottles was paid in full, packed and delivered with 100 g still backordered, with no part-shipment record. Alembic stock is mass per SKU; the bottle is not modelled | `PATCH /api/v1/orders/:n` status `packed` (no backorder check) | Refuse packed while a line's holds are under its mass, unless a person records a part-shipment | WO-STK-24 |
 | STK-25 | M | The lot is not on the customer's documents: the invoice code has no lot field, the shipment view names none | `apps/api/src/services/raise-invoice.ts` (no lot or batch field) | The documents lane prints the lot per line (PROM-7) | PROM-7 |
-| STK-26 | A | RawProd parks every fact not tied to a requirement (QC release, GRN, PO) as `bad_org_id` unless `ALEMBIC_ASSERTION_TENANT_ID` is set. Production sets it (`infra/aws/env/render-env.sh:78`); the e2e stand-up does not, so no local stack rehearses make-to-stock | `backend/api/src/bridge/relay.service.ts:67` `fallbackOrgId` | Set it in `e2e/harness/up.mjs` | WO-STK-26 |
-| STK-27 | A | A verifier's weight may be typed (`source` defaults to typed) with no signature; FACTORY.md says readings are never typed and the typed check is a signed fallback | `floor-station.service.ts:502` | Accept a typed weight only with a signed typed-check id | WO-STK-27 |
-| STK-28 | A | Material names are readable by warehouse, QC and RawProd sales (`GET /v1/materials`, and a warehouse lot scan); floor roles are refused. Not the formula, but tied to a job's lots it names the ingredients | `scripts/ra-roles.ts` (role grants) | Decide per FACTORY.md "who sees what" | Decision for the lead |
-| STK-29 | A | `GET /v1/inventory-availability` stops at 200 rows with no cursor (224 lots: 24 never shown) | `backend/api/src/inventory-view/inventory-view.service.ts:21` | Cursor pagination | WO-STK-29 |
+| STK-26 | A | RawProd parks every fact not tied to a requirement (QC release, GRN, PO) as `bad_org_id` unless `ALEMBIC_ASSERTION_TENANT_ID` is set. Production sets it (`infra/aws/env/render-env.sh:78`); the e2e stand-up does not, so no local stack rehearses make-to-stock | `backend/api/src/bridge/relay.service.ts:67` `fallbackOrgId` | Set it in `e2e/harness/up.mjs` | **Fixed** `a91f565` (e2e stand-up) |
+| STK-27 | A | A verifier's weight may be typed (`source` defaults to typed) with no signature; FACTORY.md says readings are never typed and the typed check is a signed fallback | `floor-station.service.ts:502` | Accept a typed weight only with a signed typed-check id | **Fixed** `9cec9ec`: typed needs a signed check; no source refused |
+| STK-28 | A | Material names are readable by warehouse, QC and RawProd sales (`GET /v1/materials`, and a warehouse lot scan); floor roles are refused. Not the formula, but tied to a job's lots it names the ingredients | `scripts/ra-roles.ts` (role grants) | Decide per FACTORY.md "who sees what" | Owner's decision: options in section 9.2; nothing changed |
+| STK-29 | A | `GET /v1/inventory-availability` stops at 200 rows with no cursor (224 lots: 24 never shown) | `backend/api/src/inventory-view/inventory-view.service.ts:21` | Cursor pagination | **Fixed** `9cec9ec`: keyset cursor |
 
 Counts: **G 7** (STK-1, 2, 12, 13, 21, 22, 23), **N 8** (STK-3, 4, 5, 6, 7, 11, 20, 24), **M 5** (STK-9, 10, 15, 16,
 25), **A 9** (STK-8, 14, 17, 18, 19, 26, 27, 28, 29). Fixed here: STK-3, STK-4, STK-6. Fixed on `lane/promises-rp`
@@ -185,3 +185,52 @@ It reads the sheet with Python's standard library, prints counts, row numbers an
 run directory inside either repository (the state it keeps there is formula-derived). The two reconciliation
 queries are `tools/stock-e2e/reconcile-rp.sql` (RawProd) and `ops/scripts/stock-e2e/reconcile-alembic.sql`
 (Alembic). Afterwards: stop the PIDs in the run directory, delete the run directory, drop `stock_e2e*`.
+
+## 9. STOCK-FIX-RP (13 Nov 2026): what was fixed, and the rehearsal again
+
+Branch `lane/stock-e2e-rp`, commits `c0cabdd` (STK-10/11), `46f3cc8` (STK-7/8/9), `d766fd6` (STK-5),
+`4cd8035` (STK-15), `f1b7392` (STK-16/17/18/19), `9cec9ec` (STK-20/27/29), `a91f565` (STK-21/26), and the
+LD-145 bulk rule with this section. Migrations `2026-11-20-stk-oil-ledger`, `2026-11-21-stk-reserve-at-planning`,
+`2026-11-22-stk-mixer-reveal`, `2026-11-23-stk-materials`, each with a rollback; grants in
+`docs/releases/stock-fix-rp-2026-11-13-permission-grants.sql` (5 codes, 21 grants).
+
+### 9.1 The RawProd leg again (`tools/stock-e2e/rehearse-rp.sh`, scratch PostgreSQL 17, every migration from empty)
+
+The chain now runs from raw material to a labelled, released, QC-passed finished lot on every batch it is
+meant to, and stops only where it is told to: B4 is kept off the floor because it is short (and cancelled,
+releasing 66 holds), B5's over-order is refused at the package order, B3 failed QC and is written off. The
+bridge leg (`rehearse.sh`, which needs an Alembic scratch database) was not re-run in this unit.
+
+| Batch | Status | Formula target | Weighed = made | Packed | Rejected | Loss | Written off | Remaining (remnant) | Yield |
+|---|---|---|---|---|---|---|---|---|---|
+| B1 (F1 5 kg) | RELEASED | 5,000,000 | 4,998,822 | 4,900,000 (49 x 100 g) | 0 | 0 | 0 | 98,822 (KEEP) | 98.02 % |
+| B2 (F2 1 kg) | RELEASED | 1,000,000 | 999,345 | 950,000 (19 x 50 g) | 0 | 345 | 49,000 | 0 (WRITE_OFF) | 95.06 % |
+| B3 (F2, QC 1 fail) | FAILED | 1,000,000 | 999,335 | 0 | 0 | 0 | 999,335 | 0 (WRITE_OFF) | 0 |
+| B4 (F3, short) | not made | 1,000,000 | | | | | | refused at the floor: one line 16,000 mg on one lot, best lot 8,000 | |
+| B5 (F2 500 g) | RELEASED | 500,000 | 499,676 | 0 (14 x 50 g refused) | 0 | 0 | 0 | 499,676 (HOLD) | 0 |
+| B6 (F1 1 kg) | RELEASED | 1,000,000 | 999,784 | 900,000 (9 x 100 g) | 0 | 0 | 0 | 99,784 (KEEP) | 90.02 % |
+
+R1: 224 raw lots, received 17,965,000, issued 8,496,962 = weighed 8,496,962, on hand 9,468,038, 0 lots not
+balancing. R7: `chk_equation` 0 and `open_item` ok on all five oil batches; packed equals the filling records
+x net content on every batch. R4/R8: every order's lines total the order, 0 mg (F1 at 5 kg in kg: 5,000,000).
+
+### 9.2 STK-28: who may read a material name (the owner's decision; nothing changed)
+
+Today `masterdata:material:read` (and so `GET /v1/materials` with names) is held by owner, procurement,
+receiving, qc, warehouse, packaging, sales and showcase; the warehouse lot scan names the material for
+warehouse. Floor roles see codes only; since D-1 the mixer sees one name, on its current step only.
+
+| Role | What it needs the name for | Option A: keep (today) | Option B: codes, name on request | Option C: codes only |
+|---|---|---|---|---|
+| procurement | buying from a supplier who knows the material by name | keep | keep (it buys) | cannot buy |
+| receiving | matching the supplier's label and CoA at the gate | keep | name on the GRN line only | matches by supplier code and lot only |
+| qc | incoming QC against the supplier's CoA and spec | keep | keep | tests against a coded spec |
+| warehouse | putting away and finding a drum labelled by the supplier | keep | lot scan names it, the list does not | finds by floor code and bin |
+| packaging | the product name on the label (not a raw material) | product only, raw names not needed | codes | codes |
+| sales | none for raw materials (it sells finished products) | drop raw names | codes | codes |
+| showcase | the demo only | demo data only | codes | codes |
+
+The risk the rehearsal named: a role that reads the names AND a job's lots can rebuild which materials a
+formula uses (never the amounts). Option B removes that from sales and packaging and keeps the people who
+must handle a supplier's drum able to.
+

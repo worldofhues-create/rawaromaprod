@@ -18,8 +18,17 @@ test('nine 100 g bottles: pack_count 9, pack_net_mg 100000, qty_kg 0.9, and the 
   assert.deepEqual(contracts.validateFgBatchReceived(r.payload), []);
 });
 
+test('LD-145: a lot counted in a mass unit is BULK: no pack fields and no mass pack_size, even when the SKU has a pack', () => {
+  const r = buildFgBatchReceived({ ...base, packSize: '100 g', qty: 0.9, uomCode: 'kg', packNetMg: 100_000 });
+  assert.ok(r.ok);
+  assert.equal(r.payload.pack_size, null);
+  assert.equal('pack_count' in r.payload, false);
+  const drum = buildFgBatchReceived({ ...base, packSize: '25 kg', qty: 4, uomCode: 'DRUM', packNetMg: 25_000_000 });
+  assert.ok(drum.ok && drum.payload.pack_count === 4 && drum.payload.pack_net_mg === 25_000_000, 'a drum that is itself the sale pack is a filled pack');
+});
+
 test('no mass pack on file, a volume, or a part of a pack: neither field, exactly as today', () => {
-  for (const [packSize, qty, uomCode, packNetMg] of [['25 kg', 4, 'DRUM', null], ['50 ml', 3, 'kg', null], ['100 g', 2.55, 'kg', 100_000]] as const) {
+  for (const [packSize, qty, uomCode, packNetMg] of [['25 kg', 4, 'DRUM', null], ['100 g', 3, 'pcs', 40_000]] as const) {
     const r = buildFgBatchReceived({ ...base, packSize, qty, uomCode, packNetMg });
     assert.ok(r.ok, JSON.stringify(r));
     assert.equal('pack_count' in r.payload, false);

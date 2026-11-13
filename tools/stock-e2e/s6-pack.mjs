@@ -28,7 +28,8 @@ const K = S.sku[skuCode];
 // Package order in units of the pack.
 const orderQty = probe === 'over' ? units + 5 : units;
 const po = await C.rp('packaging', 'POST', '/v1/package-orders', { productSkuId: K.sku, oilBatchId: B.oil, orderQty, uomId: pcs });
-if (po.status >= 300) { step('packageOrder', { status: po.status, err: po.error?.message?.slice(0, 200) }); process.exit(1); }
+// STOCK-FIX-RP (STK-11): the over-order probe is refused at the package order; that is the probe's answer.
+if (po.status >= 300) { step('packageOrder', { status: po.status, err: po.error?.message?.slice(0, 200) }); process.exit(probe === 'over' && po.status === 409 ? 0 : 1); }
 const pkg = po.body.order.packageOrderId;
 const issue = await C.rp('packaging', 'POST', `/v1/package-orders/${pkg}/issue-materials`, {});
 const fs = await C.must('filling', 'POST', '/v1/filling-sessions', { packageOrderId: pkg });
