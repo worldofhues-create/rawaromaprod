@@ -102,7 +102,7 @@ test('STK-17: the dry run reports every problem and writes nothing; total rows, 
     `  probe   citral ${x.toLowerCase()} ,,,,,`, // the same name again
     `Probe Citrall ${x},,,,,`, // one letter more
     `TOTAL (g),,,,,`, // the sheet's total row
-    `Probe Musk ${x},,,,,`, // already on file
+    `Probe Musk ${x},,,,,`, // already on file: that material, not an error (STK-30)
     `Probe Vetiver ${x},${taken.materialCode},,,,`, // a code taken
     `Probe Iris ${x},,no_such_family,,,`,
     `Probe Rose ${x},,,5392-40-4,,`, // bad check digit
@@ -117,7 +117,8 @@ test('STK-17: the dry run reports every problem and writes nothing; total rows, 
   assert.match(at(3).errors.join(), /same material as line 2/);
   assert.match(at(4).warnings.join(), /one letter from line 2/);
   assert.match(at(5).errors.join(), /total row/);
-  assert.match(at(6).errors.join(), /already on file/);
+  assert.deepEqual(at(6).errors, [], 'STK-30: a name on file is that material; it no longer refuses the file');
+  assert.equal(at(6).onFile?.materialCode, taken.materialCode);
   assert.match(at(7).errors.join(), /already on file/);
   assert.match(at(8).errors.join(), /no floor family/);
   assert.match(at(9).errors.join(), /not a CAS number/);
@@ -143,9 +144,50 @@ test('STK-17 + STK-19: a clean file commits in one go: codes minted in order, fl
   assert.deepEqual(r.created.map((c) => c.floorCode?.slice(-4) ?? null), ['0001', '0002', null]);
   const outbox = await sql()`select count(*)::int as n from masterdata.outbox where type = 'masterdata.material.created' and aggregate_id = any(${r.created.map((c) => c.materialId)}::uuid[])`;
   assert.equal(outbox[0]!.n, 3, 'each material announced as MaterialService does');
-  // The same file again is all errors now: every name is on file.
+  // The same file again: every name is on file, so every row is named as the material it is and nothing is
+  // made (STK-30; it used to be three errors, which also refused any file that overlapped the master).
   const again = await importer.import({ csv }, buyer);
-  assert.equal(again.rows.filter((x) => /already on file/.test(x.errors.join())).length, 3);
+  assert.equal(again.rows.filter((x) => x.onFile !== null).length, 3);
+  assert.equal(again.errorCount, 0);
+});
+
+/* ── STK-30 (STOCK-E2E-2, the joint run) ──────────────────────────────────────────────────────── */
+
+test('STK-30: a name already on file is that material, named and left alone, and the rest of the file is imported', async () => {
+  // Production's factory already holds the materials Alembic's catalogue sent it. A sheet of raw materials that
+  // names one of them was refused WHOLE ("already on file"), so not one of its other rows could be loaded.
+  const fam = await family();
+  const x = t();
+  const held = await materials.createMaterial({ materialCode: `S30-${x}`, materialName: `Probe Hedione ${x}` }, buyer);
+  const csv = [
+    'material_name,material_code,family',
+    `Probe Hedione ${x},,${fam}`, // on file: nothing to make, and it gets the floor code it lacked
+    `Probe Calone ${x},,${fam}`,
+    `Probe Galbanum ${x},,`,
+  ].join('\n');
+  const dry = await importer.import({ csv }, buyer);
+  assert.equal(dry.errorCount, 0, JSON.stringify(dry.rows));
+  assert.equal(dry.rows[0]!.onFile?.materialCode, held.materialCode, 'the dry run names the material it found');
+  assert.equal(dry.rows[1]!.onFile, null);
+  const before = (await sql()`select count(*)::int as n from masterdata.material`)[0]!.n;
+  const r = await importer.import({ csv, commit: true }, buyer);
+  assert.equal(r.committed, true, JSON.stringify(r.rows));
+  assert.deepEqual(r.created.map((c) => c.line), [3, 4]);
+  assert.deepEqual(r.existing.map((e) => [e.line, e.materialId, e.materialCode]), [[2, held.materialId, held.materialCode]]);
+  assert.match(r.existing[0]!.floorCode ?? '', /-0001$/, 'the material on file had no floor code, the row names its family, so it is filed first');
+  assert.match(r.created[0]!.floorCode ?? '', /-0002$/);
+  assert.equal((await sql()`select count(*)::int as n from masterdata.material`)[0]!.n, before + 2, 'never a second material of the same name');
+  // The same file again changes nothing, and says so.
+  const again = await importer.import({ csv, commit: true }, buyer);
+  assert.equal(again.committed, true);
+  assert.equal(again.created.length, 0);
+  assert.equal(again.existing.length, 3);
+  assert.equal(again.existing[0]!.floorCode, r.existing[0]!.floorCode, 'a floor code on file is kept');
+  assert.equal((await sql()`select count(*)::int as n from masterdata.material`)[0]!.n, before + 2);
+  // A row that gives the material on file ANOTHER code is a contradiction, and still refuses the file.
+  const other = await importer.import({ csv: `material_name,material_code\nProbe Hedione ${x},S30-OTHER-${x}\n`, commit: true }, buyer);
+  assert.equal(other.committed, false);
+  assert.match(other.rows[0]!.errors.join(), /already on file as S30-/);
 });
 
 test('CAS check digit', () => {

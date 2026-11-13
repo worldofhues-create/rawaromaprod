@@ -46,7 +46,7 @@ const todo = keys.filter((k) => !S.mat[k]);
 if (todo.length) {
   const csv = ['material_name,family', ...todo.map((k) => `${csvCell([...spell.get(k)][0].trim())},${SOLVENT.has(k) ? 'solvent' : 'unsorted'}`)].join('\n');
   const dry = await C.must('procurement', 'POST', '/v1/materials/import', { csv });
-  ev('importDryRun', { rows: dry.rows.length, errorCount: dry.errorCount, warningCount: dry.warningCount,
+  ev('importDryRun', { rows: dry.rows.length, errorCount: dry.errorCount, warningCount: dry.warningCount, onFile: dry.rows.filter((r) => r.onFile).length,
     errorKinds: [...new Set(dry.rows.flatMap((r) => r.errors.map((e) => e.replace(/".*"|line \d+|[A-Z]+-\d+/g, '_'))))],
     warningKinds: [...new Set(dry.rows.flatMap((r) => r.warnings.map((e) => e.replace(/".*"|line \d+|[A-Z]+-\d+/g, '_'))))], committed: dry.committed });
   const done = await C.rp('procurement', 'POST', '/v1/materials/import', { csv, commit: true });
@@ -56,6 +56,12 @@ if (todo.length) {
     S.mat[k] = { id: c.materialId, code: c.materialCode, floor: c.floorCode, floorStatus: c.floorCode ? 201 : null };
     created++;
   }
+  // STK-30: a name the factory already holds (the catalogue Alembic sent) is that material; it is used, not remade.
+  for (const c of done.body.existing ?? []) {
+    const k = todo[c.line - 2];
+    S.mat[k] = { id: c.materialId, code: c.materialCode, floor: c.floorCode, floorStatus: c.floorCode ? 200 : null, onFile: true };
+  }
+  ev('alreadyOnFile', { rows: (done.body.existing ?? []).length, withFloorCode: (done.body.existing ?? []).filter((c) => c.floorCode).length });
 }
 st.save(S);
 const codesInOrder = Object.values(S.mat).map((m) => m.floor).filter(Boolean);

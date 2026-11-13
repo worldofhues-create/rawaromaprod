@@ -11,12 +11,20 @@
  *   cas (or cas_number)                  optional: checked by its check digit
  *   hazard_class, hazard_source          optional: a UN class needs the source it was read from
  *
- * Every line is checked before anything is written: a total row, a name already on file or twice in
- * the file (case and spaces aside), a code taken, a family not on file, a bad CAS number, a class with
- * no source are ERRORS and block the whole file; a name that only looks like another (one letter, or
- * the same letters and digits) is a WARNING for a person to decide, never merged. `commit: true` with
- * no errors writes every material, its outbox event (as MaterialService does) and its floor code in ONE
- * transaction. Nothing from the file is logged.
+ * Every line is checked before anything is written: a total row, a name twice in the file (case and
+ * spaces aside), a code taken, a family not on file, a bad CAS number, a class with no source are ERRORS
+ * and block the whole file; a name that only looks like another (one letter, or the same letters and
+ * digits) is a WARNING for a person to decide, never merged. `commit: true` with no errors writes every
+ * material, its outbox event (as MaterialService does) and its floor code in ONE transaction. Nothing
+ * from the file is logged.
+ *
+ * STK-30 (STOCK-E2E-2): A NAME ALREADY ON FILE IS THAT MATERIAL, not an error. The row is reported with
+ * the code it is on file under (`onFile`), nothing is made for it, and the rest of the file is imported;
+ * so the same file a second time changes nothing and says so. It used to refuse the WHOLE file, and the
+ * factory already holds every material Alembic's catalogue sent it: a sheet of 196 raw materials that
+ * named two of them could not load the other 194. One thing still refuses: a row that gives the material
+ * on file a DIFFERENT code. A material on file with no floor code gets one when the row names its family
+ * (a material with no floor code cannot be put on a floor job); a floor code on file is never changed.
  */
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import type { Sql, TransactionSql } from 'postgres';
@@ -35,6 +43,8 @@ export interface MaterialImportRow {
   hazardClass: string | null;
   errors: string[];
   warnings: string[];
+  /** The material this name is already on file as (nothing is made for the row), or null: a new material. */
+  onFile: { materialCode: string | null } | null;
 }
 export interface MaterialImportResult {
   committed: boolean;
@@ -42,6 +52,8 @@ export interface MaterialImportResult {
   errorCount: number;
   warningCount: number;
   created: Array<{ line: number; materialId: string; materialCode: string; floorCode: string | null }>;
+  /** Rows whose material was on file already: its id and codes, so a caller can use it as it uses a new one. */
+  existing: Array<{ line: number; materialId: string; materialCode: string | null; floorCode: string | null }>;
 }
 
 const MAX_ROWS = 5000;
@@ -92,13 +104,14 @@ export class MaterialImportService {
       hazardClass: pick(r.cells, 'hazard_class')?.toUpperCase() ?? null,
       errors: [],
       warnings: [],
+      onFile: null,
       hazardSource: pick(r.cells, 'hazard_source'),
     })) as Array<MaterialImportRow & { hazardSource: string | null }>;
 
     const names = rows.map((r) => materialNameKey(r.materialName)).filter(Boolean);
     const onFile = names.length
-      ? await this.sql.unsafe<{ key: string; material_name: string; material_code: string | null }[]>(
-        `select ${MATERIAL_NAME_KEY_TEXT} as key, material_name, material_code from masterdata.material`)
+      ? await this.sql.unsafe<{ key: string; material_id: string; material_name: string; material_code: string | null }[]>(
+        `select ${MATERIAL_NAME_KEY_TEXT} as key, material_id::text, material_name, material_code from masterdata.material`)
       : [];
     const byKey = new Map(onFile.map((m) => [m.key, m]));
     const byLoose = new Map(onFile.map((m) => [looseKey(m.material_name), m]));
@@ -118,7 +131,12 @@ export class MaterialImportService {
       if (dupe !== undefined) r.errors.push(`the same material as line ${dupe} (only case or spaces differ): one material, one name`);
       else seenKey.set(key, r.line);
       const existing = byKey.get(key);
-      if (existing) r.errors.push(`already on file as ${existing.material_code ?? 'a material with no code'}`);
+      if (existing && dupe === undefined) {
+        // STK-30: the material itself, unless the row contradicts it with another code.
+        if (r.materialCode && r.materialCode.toUpperCase() !== (existing.material_code ?? '').toUpperCase()) {
+          r.errors.push(`already on file as ${existing.material_code ?? 'a material with no code'}: it cannot be given the code ${r.materialCode}`);
+        } else r.onFile = { materialCode: existing.material_code };
+      }
       const loose = looseKey(r.materialName);
       const nearLine = seenLoose.get(loose);
       if (dupe === undefined && nearLine !== undefined) r.warnings.push(`looks like line ${nearLine}: check it is a different material`);
@@ -128,7 +146,7 @@ export class MaterialImportService {
         if (close) r.warnings.push(`one letter from line ${close[1]}: check it is a different material, not a spelling`);
       }
       if (!seenLoose.has(loose)) seenLoose.set(loose, r.line);
-      if (r.materialCode) {
+      if (r.materialCode && !r.onFile) {
         const c = r.materialCode.toUpperCase();
         if (codesTaken.has(c)) r.errors.push(`the code ${r.materialCode} is already on file`);
         const other = seenCode.get(c);
@@ -145,12 +163,18 @@ export class MaterialImportService {
 
     const errorCount = rows.reduce((n, r) => n + r.errors.length, 0);
     const warningCount = rows.reduce((n, r) => n + r.warnings.length, 0);
-    const out = (committed: boolean, created: MaterialImportResult['created'] = []) => ({
-      committed, errorCount, warningCount, created,
+    const out = (committed: boolean, created: MaterialImportResult['created'] = [], existing: MaterialImportResult['existing'] = []) => ({
+      committed, errorCount, warningCount, created, existing,
       rows: rows.map(({ ...r }) => { delete (r as { hazardSource?: unknown }).hazardSource; return r; }),
     });
     if (body.commit !== true || errorCount > 0) return out(false);
 
+    const floorCodeOf = async (tx: TransactionSql, materialId: string): Promise<string | null> => {
+      const [fc] = await tx<{ colour_name: string; number: number }[]>`
+        select f.colour_name, c.number from masterdata.floor_code c join masterdata.floor_family_colour f on f.family_code = c.family_code where c.material_id = ${materialId}`;
+      return fc ? `${fc.colour_name.toUpperCase().replace(/[^A-Z]/g, '')}-${String(fc.number).padStart(4, '0')}` : null;
+    };
+    const existing: MaterialImportResult['existing'] = [];
     const created = await this.sql.begin(async (tx) => {
       // One import at a time takes minted codes and floor numbers in order.
       await tx`select pg_advisory_xact_lock(hashtext('masterdata.material.import'))`;
@@ -158,7 +182,16 @@ export class MaterialImportService {
       let nextCode = await this.nextMintedCode(tx);
       for (const r of rows as Array<MaterialImportRow & { hazardSource: string | null }>) {
         await tx`select pg_advisory_xact_lock(hashtext(${'masterdata.material.name:' + materialNameKey(r.materialName)}))`;
-        const [clash] = await tx.unsafe(`select 1 from masterdata.material where ${MATERIAL_NAME_KEY_TEXT} = $1 limit 1`, [materialNameKey(r.materialName)]);
+        const [clash] = await tx.unsafe<{ material_id: string; material_code: string | null }[]>(
+          `select material_id::text, material_code from masterdata.material where ${MATERIAL_NAME_KEY_TEXT} = $1 limit 1`, [materialNameKey(r.materialName)]);
+        if (r.onFile) {
+          // STK-30: on file at the dry run, so nothing is made. Gone since then is as much a change as added since then.
+          if (!clash) throw new BadRequestException(`Line ${r.line}: the material this name was on file as is no longer there. Run the dry run again.`);
+          let floorCode = await floorCodeOf(tx, clash.material_id);
+          if (!floorCode && r.family) { await this.codes.assignCodeTx(tx, clash.material_id, r.family, principal.userId); floorCode = await floorCodeOf(tx, clash.material_id); }
+          existing.push({ line: r.line, materialId: clash.material_id, materialCode: clash.material_code, floorCode });
+          continue;
+        }
         if (clash) throw new BadRequestException(`Line ${r.line}: a material of that name was added while this file was checked. Run the dry run again.`);
         const materialId = uuidv7();
         const code = r.materialCode ?? `RM-${String(nextCode++).padStart(5, '0')}`;
@@ -168,15 +201,13 @@ export class MaterialImportService {
         let floorCode: string | null = null;
         if (r.family) {
           await this.codes.assignCodeTx(tx, materialId, r.family, principal.userId);
-          const [fc] = await tx<{ colour_name: string; number: number }[]>`
-            select f.colour_name, c.number from masterdata.floor_code c join masterdata.floor_family_colour f on f.family_code = c.family_code where c.material_id = ${materialId}`;
-          floorCode = fc ? `${fc.colour_name.toUpperCase().replace(/[^A-Z]/g, '')}-${String(fc.number).padStart(4, '0')}` : null;
+          floorCode = await floorCodeOf(tx, materialId);
         }
         made.push({ line: r.line, materialId, materialCode: code, floorCode });
       }
       return made;
     });
-    return out(true, created);
+    return out(true, created, existing);
   }
 
   /** The next RM-nnnnn number, in order after every code of that shape on file. */

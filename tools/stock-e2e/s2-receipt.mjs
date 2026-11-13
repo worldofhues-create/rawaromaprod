@@ -9,7 +9,10 @@ const today = () => new Date().toISOString().slice(0, 10);
 const plusDays = (n) => new Date(Date.now() + n * 86_400_000).toISOString().slice(0, 10);
 
 // What the rehearsal will make: F1 at 5 kg and F2 at 1 kg twice (one to fail QC), F3 at 1 kg (shortfall probe).
-const PLAN = [['F1', 5_000_000], ['F2', 1_000_000], ['F2', 1_000_000], ['F3', 1_000_000]];
+// STOCK-E2E-2: the joint run makes other batches; SE2E_PLAN="F1:5000000,F2:7000000,..." (formula:mg) says which.
+const PLAN = process.env.SE2E_PLAN
+  ? process.env.SE2E_PLAN.split(',').map((x) => { const [f, mg] = x.split(':'); return [f, Number(mg)]; })
+  : [['F1', 5_000_000], ['F2', 1_000_000], ['F2', 1_000_000], ['F3', 1_000_000]];
 const needMg = new Map();
 for (const [fid, batchMg] of PLAN) {
   const f = formulas.find((x) => x.id === fid);
@@ -18,7 +21,7 @@ for (const [fid, batchMg] of PLAN) {
 const keys = [...new Set(formulas.flatMap((f) => f.lines.map((l) => normName(l.name))))];
 const F1keys = new Set(formulas[0].lines.map((l) => normName(l.name)));
 // F3 is received at exactly the 1 kg need on one material, so the shortfall probe has something to find.
-const shortKey = formulas[2].lines.map((l) => normName(l.name)).find((k) => !F1keys.has(k) && !formulas[1].lines.some((x) => normName(x.name) === k));
+const shortKey = process.env.SE2E_NO_SHORT ? null : formulas[2].lines.map((l) => normName(l.name)).find((k) => !F1keys.has(k) && !formulas[1].lines.some((x) => normName(x.name) === k));
 S.shortKey = shortKey;
 
 if (!S.receipt) {
