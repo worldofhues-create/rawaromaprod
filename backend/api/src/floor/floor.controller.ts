@@ -61,7 +61,12 @@ export class FloorController {
 
   /* ── lots ───────────────────────────────────────────────────────────────────────────── */
 
+  /* STAGE-2-RP: @NoStoredReply. The answer is the lot's label, and for a role that may read names it
+   * carries the material's name; the idempotency store kept it in plain text. Nothing needs it kept:
+   * a lot has one barcode (lotBarcode is a get-or-create), so a re-send that runs again returns the
+   * same label. */
   @Permissions('inventory:lot_barcode:write')
+  @NoStoredReply()
   @Post('v1/floor/lots/:id/barcode')
   async mintLot(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() p: AuthPrincipal) {
     const barcode = await this.codes.lotBarcode(id, p);

@@ -11,7 +11,7 @@
  */
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { z } from 'zod';
-import { CurrentUser, FreshAuth, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { ComplianceService } from './compliance.service.js';
 import { IFRA_RESTRICTION_TYPES } from './compliance-calc.js';
 
@@ -93,7 +93,13 @@ export class ComplianceController {
 
   /** CSV import: `commit: false` previews every row with its errors; `commit: true` applies the
    *  file only when it has none. */
+  /* STAGE-2-RP: @NoStoredReply. The answer lists every row of the sheet: a material's code and name
+   * with its allergen or IFRA figures. The Vault's idempotency store kept that in plain text for the
+   * preview and for the commit. Nothing needs it kept: a preview only reads, and a commit REPLACES each
+   * material's rows with the file's, so a re-send that runs again leaves the same data (and one more
+   * audit line, which is true: it ran again). */
   @Permissions('vault:rm_compliance:write')
+  @NoStoredReply()
   @Post('v1/compliance/import')
   import(@Body(new ZodValidationPipe(importBody)) body: z.infer<typeof importBody>, @CurrentUser() principal: AuthPrincipal) {
     return this.compliance.importCsv(body.kind, body.csv, body.commit, principal);
