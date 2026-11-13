@@ -14,6 +14,11 @@ export const productionEvents = {
     'production.order.created',
     z.object({ productionOrderId: uuid, formulaVersionId: uuid, ingredientCount: z.number().int() }),
   ),
+  // STOCK-FIX-RP (STK-9): a planned order cancelled, its reservations released. Not relayed.
+  orderCancelled: defineEvent(
+    'production.order.cancelled',
+    z.object({ productionOrderId: uuid, reason: z.string() }),
+  ),
   materialsIssued: defineEvent(
     'production.materials.issued',
     z.object({ productionOrderId: uuid, materialIssueId: uuid }),

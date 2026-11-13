@@ -5,7 +5,7 @@
  * are id-only soft refs per the locked dictionary (no cross-schema FK). Note: IssuedQty
  * on production_order_ingredients is BOOLEAN per the locked dictionary.
  */
-import { boolean, date, index, numeric, timestamp, uuid, uniqueIndex, varchar } from "drizzle-orm/pg-core";
+import { bigint, boolean, date, index, numeric, timestamp, uuid, uniqueIndex, varchar } from "drizzle-orm/pg-core";
 import { dictPk, metaColumns } from "@core/data-kernel";
 import { production } from "./_schema.js";
 
@@ -76,6 +76,11 @@ export const productionOrderIngredients = production.table(
     requiredQty: numeric("required_qty", { precision: 18, scale: 4 }),
     issuedQty: boolean("issued_qty"), // STOCK3-2: true once the line is covered, not once anything was issued
     issuedAmount: numeric("issued_amount", { precision: 28, scale: 10 }), // STOCK3-2: what really left, in this line's unit; null on an old row nobody can work out
+    // STOCK-FIX-RP (STK-7, STK-9): the line in integer mg (lines total the order), what planning
+    // reserved for it and on which raw lot. Null on a line planned before the rule.
+    requiredMg: bigint("required_mg", { mode: "number" }),
+    reservedMg: bigint("reserved_mg", { mode: "number" }),
+    reservedBatchId: uuid("reserved_batch_id"),
     uomId: uuid("uom_id"), // soft ref → platform.uom_master
     ...metaColumns(),
   },

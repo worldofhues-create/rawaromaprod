@@ -123,7 +123,7 @@ export class MaterialShortageService implements OnModuleInit, OnModuleDestroy {
     // STOCK2-3: a line in g against lots in kg was compared as raw numbers, so 500 g read as short of
     // 2 kg and a purchase request went out for stock on the shelf. Netted exactly in the line's unit.
     // A line that cannot be compared raises no figure: it is named in the decision instead.
-    const positions = await stockPosition(tx, [...new Set(ingredients.map((i) => i.material_id))]);
+    const positions = await stockPosition(tx, [...new Set(ingredients.map((i) => i.material_id))], { exceptDocumentId: productionOrderId });
     const notCompared: string[] = [];
     const short = ingredients.flatMap((i) => {
       const p = positions.get(i.material_id);

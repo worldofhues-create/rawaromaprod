@@ -225,6 +225,18 @@ export class ConsumptionService implements OnModuleInit, OnModuleDestroy {
         }
         applied++;
       }
+      // STOCK-FIX-RP (STK-9): planning reserved each line on one lot. A picker may take another lot of the
+      // same material with a reason (off-FEFO), so the planned hold on the lot NOT taken is consumed with
+      // the issue too: the order's need for that material is met, and the hold must not outlive it.
+      const orderId = rows.find((r) => r.order_id)?.order_id ?? null;
+      if (applied && orderId) {
+        await tx`
+          update inventory.stock_reservation r
+             set released_dt = now(), status = 'CONSUMED', updated_by = 'consumption:material_issue', updated_dt = now()
+            from inventory.inventory_batch ib
+           where ib.inventory_batch_id = r.inventory_batch_id and r.reserved_for_document_id = ${orderId} and r.released_dt is null
+             and ib.material_id in (select mii.material_id from production.material_issue_item mii where mii.material_issue_id = ${issueId})`;
+      }
       await tx`update inventory.material_issue_applied set item_count = ${applied} where material_issue_id = ${issueId}`;
       if (applied) this.logger.log(`consumption: issue ${issueId.slice(0, 8)} → ${applied} batch(es) decremented`);
     });

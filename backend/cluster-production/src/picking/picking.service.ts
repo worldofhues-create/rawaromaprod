@@ -22,6 +22,7 @@ import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../productio
 import { productionEvents } from '../production.events.js';
 import { drizzleTag, settleIssued } from './issued-amount.js';
 import { paginate, type Page } from '../_helpers.js';
+import { reserveOrderTx, type Shortfall } from '../planning/reserve.js';
 import type { CreateIssue, GeneratePickList, ListQuery } from '../production.dtos.js';
 
 const {
@@ -47,6 +48,14 @@ export class PickingService {
     @Inject(PRODUCTION_DB) private readonly db: ProductionDb,
     @Inject(VAULT_PORT) private readonly formula: VaultPort,
   ) {}
+
+  /**
+   * STOCK-FIX-RP (STK-9): reserve whatever lines of an order are still short (stock may have arrived
+   * since it was planned). The floor calls this before it opens a job and refuses while any is short.
+   */
+  async topUpReservations(orderId: string, userId: string): Promise<{ reserved: number; short: Shortfall[] }> {
+    return this.db.transaction((tx) => reserveOrderTx(tx, orderId, userId));
+  }
 
   /* ── material pick list (CRUD reads) ─────────────────────────────── */
 

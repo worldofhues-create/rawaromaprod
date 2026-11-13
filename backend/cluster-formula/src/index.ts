@@ -18,7 +18,7 @@ export {
   type ReadContext,
   FORMULA_LOOKUP,
 } from './public-api.js';
-export { PICK_QUANTITY_SCALE, instructionQuantity, pickLineRequiredQty } from './pick-quantity.js';
+export { PICK_QUANTITY_SCALE, instructionQuantity, pickLineRequiredQty, pickLinesMg } from './pick-quantity.js';
 export { materialRef, materialRefKey } from './material-ref.js';
 // Non-recipe reads the main box's screens make over the signed channel (codes/statuses, never a
 // formula name), and the material catalogue the main box pushes to the Vault's picker.

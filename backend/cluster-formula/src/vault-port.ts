@@ -60,6 +60,8 @@ export interface PickLine {
   materialId: string;
   /** Decimal string at production_order_ingredients.required_qty's scale (pick-quantity.ts). */
   requiredQty: string;
+  /** STOCK-FIX-RP (STK-7): the line in integer mg, totalling the order exactly (pickLinesMg). */
+  requiredMg?: number;
   sequenceNo: number | null;
 }
 
@@ -79,7 +81,7 @@ export interface VaultPort {
    * The bill of materials for a production order of `orderQty`, one line per ingredient in
    * sequence order. null if the version doesn't exist; 403 if it isn't approved/locked.
    */
-  resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext): Promise<PickLine[] | null>;
+  resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext, orderMg?: number): Promise<PickLine[] | null>;
 }
 
 /** The internal paths the Vault box serves (vault-port-internal.controller.ts). */
@@ -125,10 +127,11 @@ function throwForStatus(status: number, message: string): never {
 export class VaultApiClient {
   constructor(@Inject(ConfigService) private readonly config: ConfigService) {}
 
-  async pickList(formulaVersionId: string, orderQty: number, ctx: ReadContext): Promise<CodedPickLine[] | null> {
+  async pickList(formulaVersionId: string, orderQty: number, ctx: ReadContext, orderMg?: number): Promise<CodedPickLine[] | null> {
     const data = await this.post<{ result: CodedPickLine[] | null }>(VAULT_INTERNAL_PATHS.pickList, {
       formulaVersionId,
       orderQty,
+      ...(orderMg !== undefined ? { orderMg } : {}),
       ctx,
     });
     return data?.result ?? null;

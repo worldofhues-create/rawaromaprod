@@ -59,6 +59,9 @@ export interface CodedPickLine {
    * `production_order_ingredients.required_qty`'s scale (numeric(18,4)) — see pick-quantity.ts.
    */
   requiredQty: string;
+  /** STOCK-FIX-RP (STK-7): the line in integer mg when the order was sized in mg (`orderMg`), by
+   *  `pickLinesMg`: the lines total the order exactly. Absent for an order with no mass unit. */
+  requiredMg?: number;
   sequenceNo: number | null;
 }
 
@@ -99,7 +102,7 @@ export interface FormulaLookup {
    * Audited as `formula.picklist.read`. Returns null only if the version row doesn't exist;
    * throws (refuses, also audited) if it exists but isn't approved/locked yet.
    */
-  resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext): Promise<CodedPickLine[] | null>;
+  resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext, orderMg?: number): Promise<CodedPickLine[] | null>;
   /**
    * `resolveManufacturingInstruction`'s lines for the main box (see `CodedMaterialLine`): same
    * audit action, same approval rule, same quantities — keyed material references instead of

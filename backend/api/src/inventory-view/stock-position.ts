@@ -12,8 +12,10 @@ import type { Sql, TransactionSql } from 'postgres';
 export interface StockPosition { onHand: QtyPart[]; reserved: QtyPart[] }
 
 /** One material's stock, by unit. `ids` null reads every material. */
-export async function stockPosition(q: Sql | TransactionSql, ids: string[] | null): Promise<Map<string, StockPosition>> {
+export async function stockPosition(q: Sql | TransactionSql, ids: string[] | null, opts: { exceptDocumentId?: string } = {}): Promise<Map<string, StockPosition>> {
   const only = ids ? q`and ib.material_id = any(${ids}::uuid[])` : q``;
+  // STOCK-FIX-RP (STK-9): a production order's own planned holds are its stock, not a claim against it.
+  const except = opts.exceptDocumentId ? q`and r.reserved_for_document_id is distinct from ${opts.exceptDocumentId}::uuid` : q``;
   const held = await q<{ material_id: string; uom: string | null; qty: string }[]>`
     select ib.material_id::text, u.uom_code as uom, sum(ib.quantity_on_hand)::text as qty
       from inventory.inventory_batch ib left join platform.uom_master u on u.uom_id = ib.uom_id
@@ -25,7 +27,7 @@ export async function stockPosition(q: Sql | TransactionSql, ids: string[] | nul
       join inventory.inventory_batch ib on ib.inventory_batch_id = r.inventory_batch_id
       left join platform.uom_master ru on ru.uom_id = r.uom_id
       left join platform.uom_master lu on lu.uom_id = ib.uom_id
-     where r.released_dt is null and ib.material_id is not null ${only}
+     where r.released_dt is null and ib.material_id is not null ${only} ${except}
      group by 1, 2`;
   const out = new Map<string, StockPosition>();
   const at = (id: string) => { let p = out.get(id); if (!p) out.set(id, p = { onHand: [], reserved: [] }); return p; };

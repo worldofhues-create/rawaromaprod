@@ -22,7 +22,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { bridge as contracts } from '@core/contracts';
-import type { PickLine, VaultPort } from '@ra/cluster-formula';
+import { pickLinesMg, type PickLine, type VaultPort } from '@ra/cluster-formula';
 import { PlanningService } from '../../../cluster-production/src/planning/planning.service.js';
 import { ProducePlanService, PlanBlockedException } from '../../../cluster-production/src/produce/produce-plan.service.js';
 import { ProduceQueueService } from '../../../cluster-production/src/produce/produce-queue.service.js';
@@ -59,9 +59,11 @@ const vaultApi = {
 let materials: string[] = [];
 const vaultPort: VaultPort = {
   async resolveManufacturingInstruction() { return null; },
-  async resolvePickList(formulaVersionId, orderQty): Promise<PickLine[]> {
+  async resolvePickList(formulaVersionId, orderQty, _ctx, orderMg): Promise<PickLine[]> {
     pickCalls.push({ formulaVersionId, orderQty });
-    return materials.map((materialId, i) => ({ materialId, requiredQty: (orderQty * (i + 1) / 10).toFixed(4), sequenceNo: i + 1 }));
+    // STOCK-FIX-RP (STK-7): the real Vault also splits an order sized in mg (pickLinesMg); so does this stub.
+    const mg = orderMg !== undefined ? pickLinesMg(orderMg, materials.map((_, i) => (i + 1) * 10)) : null;
+    return materials.map((materialId, i) => ({ materialId, requiredQty: (orderQty * (i + 1) / 10).toFixed(4), ...(mg ? { requiredMg: mg[i]! } : {}), sequenceNo: i + 1 }));
   },
 };
 

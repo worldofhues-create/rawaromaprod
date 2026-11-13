@@ -95,6 +95,8 @@ const manufacturingLinesBody = z.object({
 const pickListBody = z.object({
   formulaVersionId: z.string().uuid(),
   orderQty: z.number().finite().positive(),
+  /** STOCK-FIX-RP (STK-7): the order in integer mg; the lines come back in mg, totalling it exactly. */
+  orderMg: z.number().int().positive().optional(),
   ctx: readContext,
 });
 
@@ -217,7 +219,7 @@ export class VaultPortInternalController {
   async resolvePickList(
     @Body(new ZodValidationPipe(pickListBody)) body: z.infer<typeof pickListBody>,
   ): Promise<{ result: CodedPickLine[] | null }> {
-    const result = await this.formula.resolvePickList(body.formulaVersionId, body.orderQty, body.ctx);
+    const result = await this.formula.resolvePickList(body.formulaVersionId, body.orderQty, body.ctx, body.orderMg);
     return { result };
   }
 

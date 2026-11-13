@@ -43,8 +43,8 @@ export class ProductionVaultPort implements VaultPort {
     @Inject(ConfigService) private readonly config: ConfigService,
   ) {}
 
-  async resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext): Promise<PickLine[] | null> {
-    const lines = await this.client.pickList(formulaVersionId, orderQty, ctx);
+  async resolvePickList(formulaVersionId: string, orderQty: number, ctx: ReadContext, orderMg?: number): Promise<PickLine[] | null> {
+    const lines = await this.client.pickList(formulaVersionId, orderQty, ctx, orderMg);
     if (!lines) return null;
     const index = await this.materialIndex(lines.map((l) => l.materialRef));
     const unknown = lines.filter((l) => !index.has(l.materialRef));
@@ -57,6 +57,7 @@ export class ProductionVaultPort implements VaultPort {
     return lines.map((l) => ({
       materialId: index.get(l.materialRef)!.materialId,
       requiredQty: l.requiredQty,
+      ...(l.requiredMg !== undefined ? { requiredMg: l.requiredMg } : {}),
       sequenceNo: l.sequenceNo,
     }));
   }

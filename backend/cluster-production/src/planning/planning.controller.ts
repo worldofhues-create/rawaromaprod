@@ -14,6 +14,9 @@ import {
 } from '@core/backend-kernel';
 import { PlanningService } from './planning.service.js';
 import {
+  cancelOrder,
+  type CancelOrder,
+  uuidParam,
   createOrder,
   createPlan,
   createPlanItem,
@@ -97,6 +100,24 @@ export class PlanningController {
     @CurrentUser() principal: AuthPrincipal,
   ) {
     return this.planning.createOrder(body, principal);
+  }
+
+  /** STOCK-FIX-RP (STK-9): what the order holds on the shelf, line by line (ids and mg; no names). */
+  @Permissions('production:production_order:read')
+  @Get('v1/production-orders/:id/reservation')
+  orderReservation(@Param('id', new ZodValidationPipe(uuidParam)) id: string) {
+    return this.planning.orderReservation(id);
+  }
+
+  /** STOCK-FIX-RP (STK-9): cancel a planned order and release every reservation it holds. */
+  @Permissions('production:production_order:write')
+  @Post('v1/production-orders/:id/cancel')
+  cancelOrder(
+    @Param('id', new ZodValidationPipe(uuidParam)) id: string,
+    @Body(new ZodValidationPipe(cancelOrder)) body: CancelOrder,
+    @CurrentUser() principal: AuthPrincipal,
+  ) {
+    return this.planning.cancelOrder(id, body.reason, principal);
   }
 
   /* ── production order ingredients (reads) ─────────────────────────── */

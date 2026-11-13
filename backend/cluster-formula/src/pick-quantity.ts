@@ -41,6 +41,43 @@ export function roundDecimalHalfAwayFromZero(value: number, scale: number): stri
   return scaled === 0n ? body : `${sign}${body}`;
 }
 
+/**
+ * STOCK-FIX-RP (STK-7): a batch's lines in integer milligrams, whose total is ALWAYS the batch.
+ *
+ * `pickLineRequiredQty` rounds each line on its own to 4 decimals of the ORDER's unit, so the lines
+ * do not add up to the order: the rehearsal's F1 at 5 kg, ordered in kg, carried 5,000,100 mg of
+ * targets (two lines rounded up 50 mg each), and the same batch ordered in g was exact. Here every
+ * line is computed from the formula's share in exact integer arithmetic (a percentage is held to 6
+ * decimals, VAULT.md / recipe-csv.ts, so a share is a whole number of micro-percent), each line is
+ * floored to a whole mg, and the milligrams the floors leave over are handed out one at a time to the
+ * lines with the largest remainders (the largest-remainder or Hamilton method; a tie goes to the
+ * earlier line). Each line is then within 1 mg of its exact share, and the lines total
+ * `orderMg x (sum of shares) / 100` rounded half up, which is `orderMg` itself for a recipe at 100 %.
+ * `percentages` are in the recipe's own order; the result is in the same order.
+ */
+export function pickLinesMg(orderMg: number, percentages: number[]): number[] {
+  if (!Number.isSafeInteger(orderMg) || orderMg <= 0) throw new RangeError(`not a whole number of mg: ${orderMg}`);
+  const micro = percentages.map((p) => {
+    if (!Number.isFinite(p) || p < 0) throw new RangeError(`not a share: ${p}`);
+    return BigInt(Math.round(p * 1_000_000));
+  });
+  const SCALE = 100_000_000n; // 100 % in micro-percent
+  const order = BigInt(orderMg);
+  const exact = micro.map((m) => order * m);
+  const floors = exact.map((e) => e / SCALE);
+  const sum = micro.reduce((a, m) => a + m, 0n);
+  const target = (order * sum * 2n + SCALE) / (2n * SCALE); // half up
+  let left = target - floors.reduce((a, f) => a + f, 0n);
+  const byRemainder = exact.map((e, i) => ({ i, r: e % SCALE })).sort((a, b) => (a.r === b.r ? a.i - b.i : a.r > b.r ? -1 : 1));
+  const out = floors.map((f) => f);
+  for (const { i } of byRemainder) {
+    if (left <= 0n) break;
+    out[i] = out[i]! + 1n;
+    left -= 1n;
+  }
+  return out.map((v) => Number(v));
+}
+
 /** The required quantity of one ingredient at `percentage` % of an order of `orderQty`. */
 export function pickLineRequiredQty(orderQty: number, percentage: number): string {
   return roundDecimalHalfAwayFromZero((orderQty * percentage) / 100, PICK_QUANTITY_SCALE);

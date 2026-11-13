@@ -174,6 +174,10 @@ export const recordOilRemnant = z.object({
 export type RecordOilRemnant = z.infer<typeof recordOilRemnant>;
 export const uuidParam = z.string().uuid();
 
+/** STOCK-FIX-RP (STK-9): cancelling a planned order, with its reason. */
+export const cancelOrder = z.object({ reason: z.string().min(1).max(500) });
+export type CancelOrder = z.infer<typeof cancelOrder>;
+
 /* ── weighing (OPS-GREEN Act L) ─────────────────────────────────────────── */
 
 export const recordWeighing = z.object({

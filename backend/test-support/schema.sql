@@ -421,6 +421,14 @@ create table if not exists production.material_issue_item (
 );
 alter table production.material_issue_item add column if not exists material_pick_list_item_id uuid;
 alter table production.production_order_ingredients add column if not exists issued_amount numeric(28,10);
+-- STOCK-FIX-RP (STK-7, STK-9): schema part of scripts/migrations/2026-11-21-stk-reserve-at-planning.sql.
+alter table production.production_order_ingredients add column if not exists required_mg bigint;
+alter table production.production_order_ingredients add column if not exists reserved_mg bigint;
+alter table production.production_order_ingredients add column if not exists reserved_batch_id uuid;
+alter table production.production_order_ingredients drop constraint if exists production_order_ingredients_mg_chk;
+alter table production.production_order_ingredients add constraint production_order_ingredients_mg_chk
+  check ((required_mg is null or required_mg > 0) and (reserved_mg is null or (reserved_mg >= 0 and (required_mg is null or reserved_mg <= required_mg))));
+create index if not exists stock_reservation_document_idx on inventory.stock_reservation (reserved_for_document_id) where released_dt is null;
 
 create table if not exists production.secure_mixing_session (
   secure_mixing_session_id uuid primary key,

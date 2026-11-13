@@ -127,7 +127,7 @@ export class ProducePlanService {
 
     if (open) {
       const newQty = round4(Number(open.order_qty) + kg);
-      const picks = await this.planning.resolvePicks(approved.formulaVersionId, newQty, principal);
+      const picks = await this.planning.resolvePicks(approved.formulaVersionId, newQty, principal, kgUomId);
       return this.db.transaction(async (tx) => {
         const { ingredientCount } = await this.planning.extendOrderTx(tx, open.production_order_id, open.order_qty, newQty, picks, principal);
         let planId: string | null = null;
@@ -148,7 +148,7 @@ export class ProducePlanService {
       });
     }
 
-    const picks = await this.planning.resolvePicks(approved.formulaVersionId, kg, principal);
+    const picks = await this.planning.resolvePicks(approved.formulaVersionId, kg, principal, kgUomId);
     return this.db.transaction(async (tx) => {
       const planId = await this.todaysPlan(tx, principal);
       const item = (await tx.insert(productionPlanItems).values({

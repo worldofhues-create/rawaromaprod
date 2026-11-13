@@ -14,7 +14,7 @@ import { Inject, Injectable, Optional } from '@nestjs/common';
 import { ConfigService } from '@core/backend-kernel';
 import { MASTERDATA_LOOKUP, type MasterdataLookup } from '@ra/cluster-masterdata';
 import { VaultService } from './vault.service.js';
-import { instructionQuantity, pickLineRequiredQty } from './pick-quantity.js';
+import { instructionQuantity, pickLineRequiredQty, pickLinesMg } from './pick-quantity.js';
 import { materialRef, materialRefKey } from './material-ref.js';
 import type {
   CodedInstruction,
@@ -133,6 +133,7 @@ export class FormulaLookupService implements FormulaLookup {
     formulaVersionId: string,
     orderQty: number,
     ctx: ReadContext,
+    orderMg?: number,
   ): Promise<CodedPickLine[] | null> {
     const key = this.refKey();
     const ingredients = await this.vault.decryptVersion(formulaVersionId, {
@@ -144,9 +145,12 @@ export class FormulaLookupService implements FormulaLookup {
       ip: ctx.ip,
     });
     if (!ingredients) return null;
-    return ingredients.map((i) => ({
+    // STOCK-FIX-RP (STK-7): with the order in mg, every line is a whole mg and the lines total the order.
+    const mg = orderMg !== undefined ? pickLinesMg(orderMg, ingredients.map((i) => i.percentage)) : null;
+    return ingredients.map((i, n) => ({
       materialRef: materialRef(key, i.materialId),
       requiredQty: pickLineRequiredQty(orderQty, i.percentage),
+      ...(mg ? { requiredMg: mg[n]! } : {}),
       sequenceNo: i.sequenceNo,
     }));
   }

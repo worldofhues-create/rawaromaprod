@@ -193,6 +193,14 @@ export class FloorStationService {
        where i.material_pick_list_id = ${pl.material_pick_list_id} and coalesce(i.status, 'ACTIVE') = 'ACTIVE'
        order by i.created_dt, i.material_pick_list_item_id`;
     if (!items.length) throw new ConflictException('The pick list has no lines.');
+    // STOCK-FIX-RP (STK-9): the order's lines are reserved at planning. Anything still short (stock may
+    // have arrived since) is reserved now; a line no lot can hold keeps the job off the floor, so the
+    // picker is never sent to an empty shelf. Coded: no material name, no share.
+    const topUp = await this.picking.topUpReservations(productionOrderId, principal.userId);
+    if (topUp.short.length) {
+      const named = await Promise.all(topUp.short.map(async (s) => `${(await this.codes.codeFor(s.materialId))?.code ?? `line ${s.line}`} needs ${s.needMg.toLocaleString('en-US')} mg on one lot (best lot has ${s.bestLotFreeMg.toLocaleString('en-US')} mg free)`));
+      throw new ConflictException(`This order is short of stock, so it cannot go to the floor: ${named.join('; ')}. Receive or release stock, then open the job.`);
+    }
     const lines: Array<{ id: string; materialId: string; mg: number; code: string }> = [];
     for (const [i, it] of items.entries()) {
       if (!it.material_id) throw new ConflictException(`Line ${i + 1} names no material.`);
@@ -351,7 +359,7 @@ export class FloorStationService {
     const ls = await this.lines(this.sql, jobId);
     for (const l of ls) {
       const fc = await this.codes.codeFor(l.material_id);
-      const lot = l.picked_batch_id ? null : await this.directedLot(this.sql, l, ls);
+      const lot = l.picked_batch_id ? null : await this.directedLot(this.sql, l, ls, j.production_order_id);
       out.push({
         floorLineId: l.floor_line_id, seq: l.seq, floorCode: fc?.code ?? null, colourName: fc?.colourName ?? null, colourHex: fc?.colourHex ?? null, initial: fc?.initial ?? null,
         picked: !!l.picked_batch_id, offFefoReason: l.pick_off_fefo_reason,
@@ -368,13 +376,41 @@ export class FloorStationService {
     return ls.reduce((a, x) => (x.floor_line_id !== l.floor_line_id && x.picked_batch_id === batchId ? a + Number(x.target_mg) : a), 0);
   }
 
-  /** The lot the picker must take: first FEFO lot holding at least the line's target. */
-  private async directedLot(sql: Sql | TransactionSql, l: LineRow, ls: LineRow[]) {
+  /**
+   * STOCK-FIX-RP (STK-9): what other orders (and any other document) hold on a lot, in mg. This order's
+   * own reservation is not subtracted: it is the stock being picked. A hold that does not convert
+   * exactly counts as the whole lot.
+   */
+  private async heldElsewhereMg(sql: Sql | TransactionSql, batchId: string, lotUom: string | null, orderId: string): Promise<number> {
+    const held = await sql<{ qty: string | null; uom: string | null }[]>`
+      select r.reserved_qty::text as qty, coalesce(ru.uom_code, ${lotUom}) as uom
+        from inventory.stock_reservation r left join platform.uom_master ru on ru.uom_id = r.uom_id
+       where r.inventory_batch_id = ${batchId} and r.released_dt is null and r.reserved_for_document_id is distinct from ${orderId}::uuid`;
+    let mg = 0;
+    for (const h of held) { const v = qtyToMgExact(h.qty, h.uom); if (v === null) return Number.MAX_SAFE_INTEGER; mg += v; }
+    return mg;
+  }
+
+  /** The lot planning reserved for this line's material on this order, if any. */
+  private async reservedLot(sql: Sql | TransactionSql, orderId: string, materialId: string): Promise<string | null> {
+    const [r] = await sql<{ id: string | null }[]>`
+      select reserved_batch_id::text as id from production.production_order_ingredients
+       where production_order_id = ${orderId} and material_id = ${materialId} and coalesce(reserved_mg, 0) > 0 limit 1`;
+    return r?.id ?? null;
+  }
+
+  /** The lot the picker must take: the lot planning reserved for the line (STK-9), else the first
+   *  FEFO lot holding at least the line's target after what other orders hold on it. */
+  private async directedLot(sql: Sql | TransactionSql, l: LineRow, ls: LineRow[], orderId?: string) {
     const need = Number(l.target_mg);
-    for (const lot of await PICKABLE_LOTS(sql, l.material_id)) {
+    const lots = await PICKABLE_LOTS(sql, l.material_id);
+    const reserved = orderId ? await this.reservedLot(sql, orderId, l.material_id) : null;
+    const ordered = reserved ? [...lots.filter((x) => x.inventory_batch_id === reserved), ...lots.filter((x) => x.inventory_batch_id !== reserved)] : lots;
+    for (const lot of ordered) {
       const mg = qtyToMg(lot.qty, lot.uom_code);
+      const elsewhere = orderId && mg !== null ? await this.heldElsewhereMg(sql, lot.inventory_batch_id, lot.uom_code, orderId) : 0;
       // STOCK-UNITS: a lot that cannot hold the line exactly in its own unit would be refused at the debit.
-      if (mg !== null && mg - this.takenOnJob(ls, l, lot.inventory_batch_id) >= need && mgToQty(need, lot.uom_code) !== null) {
+      if (mg !== null && mg - elsewhere - this.takenOnJob(ls, l, lot.inventory_batch_id) >= need && mgToQty(need, lot.uom_code) !== null) {
         return { inventoryBatchId: lot.inventory_batch_id, batchNumber: lot.batch_number, bin: lot.bin_code, binId: lot.bin_id, expiry: lot.expiry_date, barcode: await this.codes.lotBarcode(lot.inventory_batch_id, null) };
       }
     }
@@ -400,7 +436,7 @@ export class FloorStationService {
           join inventory.inventory_batch ib on ib.inventory_batch_id = lb.inventory_batch_id
           left join inventory.rm_batch_master rb on rb.rm_batch_id = ib.rm_batch_id
          where lb.barcode = ${barcode}`;
-      const directedFirst = await this.directedLot(tx, l, ls);
+      const directedFirst = await this.directedLot(tx, l, ls, j.production_order_id);
       const expect = directedFirst ? `${fc?.code ?? 'this line'}: lot ${directedFirst.batchNumber ?? directedFirst.barcode}` : (fc?.code ?? null);
       // FLOOR-LOT-STOP-1: each of these is a wrong lot. Refused, and the line stops (stopLine commits the
       // stop on its own; this transaction is left by the throw and writes nothing).
@@ -419,7 +455,9 @@ export class FloorStationService {
         throw new BadRequestException('That lot is empty. Take the lot the screen names.');
       }
       const mg = qtyToMg(scanned.qty, scanned.uom_code);
-      if (mg === null || mg - this.takenOnJob(ls, l, scan.inventory_batch_id) < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line. Take the lot the screen names.');
+      // STK-9: what another order holds on the lot is not this line's to take.
+      const elsewhere = mg === null ? 0 : await this.heldElsewhereMg(tx, scan.inventory_batch_id, scanned.uom_code, j.production_order_id);
+      if (mg === null || mg - elsewhere - this.takenOnJob(ls, l, scan.inventory_batch_id) < Number(l.target_mg)) throw new BadRequestException('That lot does not hold enough for this line once other orders\' holds are counted. Take the lot the screen names.');
       if (mgToQty(Number(l.target_mg), scanned.uom_code) === null) throw new BadRequestException(`A lot kept in ${scanned.uom_code} cannot hold this line's weight exactly, so it cannot be debited. Take a lot kept in g, or ask the supervisor.`);
       if (scanned.bin_code && bin.toUpperCase() !== scanned.bin_code.toUpperCase()) {
         throw new BadRequestException(bin ? `Wrong bin: that lot is in ${scanned.bin_code}, you scanned ${bin}.` : `Scan the bin first: that lot is in ${scanned.bin_code}.`);

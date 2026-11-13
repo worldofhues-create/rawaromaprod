@@ -133,4 +133,17 @@ select ob.batch_number, ob.status, fl.target_mg, fl.weighed_mg, l.made_mg, l.pac
   left join fills f on f.oil_batch_id = ob.oil_batch_id
   left join fg g on g.oil_batch_id = ob.oil_batch_id
  order by ob.batch_number;
+\echo '== R8 planning (STOCK-FIX-RP, STK-7/9): lines total the order; what each order holds on the shelf (mg)'
+select po.order_number, po.status, (po.order_qty * m.f)::bigint as order_mg,
+       sum(i.required_mg)::bigint as lines_mg, (po.order_qty * m.f)::bigint - sum(i.required_mg)::bigint as order_minus_lines_mg,
+       sum(coalesce(i.reserved_mg, 0))::bigint as reserved_at_planning_mg,
+       count(*) filter (where i.required_mg is not null and coalesce(i.reserved_mg, 0) < i.required_mg) as lines_short,
+       (select count(*) from inventory.stock_reservation r where r.reserved_for_document_id = po.production_order_id and r.released_dt is null) as holds_open,
+       (select count(*) from inventory.stock_reservation r where r.reserved_for_document_id = po.production_order_id and r.status = 'CONSUMED') as holds_consumed,
+       (select count(*) from inventory.stock_reservation r where r.reserved_for_document_id = po.production_order_id and r.status = 'RELEASED') as holds_released
+  from production.production_order po
+  left join _mg m on m.uom_id = po.uom_id
+  join production.production_order_ingredients i on i.production_order_id = po.production_order_id
+ group by po.production_order_id, po.order_number, po.status, po.order_qty, m.f
+ order by po.order_number;
 rollback;
