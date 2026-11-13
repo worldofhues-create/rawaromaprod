@@ -179,7 +179,7 @@ function quantityIn(r: ImportTableRow, p: { problems: string[] }, uoms: Map<stri
   const qty = decimalText(q.value);
   if (mat?.uom) {
     const c = convertQty(qty, uom.code, mat.uom);
-    if ('refused' in c) { p.problems.push(`${mat.code} is kept in ${mat.uom}. ${sentence(c.refused)}`); return null; }
+    if ('refused' in c) { p.problems.push(`${mat.code} is kept in ${mat.uom}: ${c.refused}`); return null; }
   }
   return { qty, uomId: uom.id };
 }
@@ -424,7 +424,7 @@ function rawStockAdjustment(sql: Sql): ImportKindHandler<AdjustInput> {
         if (p.problems.length || !at || !ch.ok || !ch.value) return p;
         const magnitude = decimalText({ ...ch.value, negative: false });
         const c = convertQty(magnitude, unit, at.uom);
-        if ('refused' in c) { p.problems.push(at.uom ? `The lot is kept in ${at.uom}. ${sentence(c.refused)}` : 'The lot has no unit on file, so a change in a unit cannot be applied to it.'); return p; }
+        if ('refused' in c) { p.problems.push(at.uom ? `The lot is kept in ${at.uom}: ${c.refused}` : 'The lot has no unit on file, so a change in a unit cannot be applied to it.'); return p; }
         const before = running.get(at.id) ?? '0';
         const change = [{ qty: c.qty, uom: at.uom }];
         const after = ch.value.negative ? netQty([{ qty: before, uom: at.uom }], change, at.uom) : netQty([{ qty: before, uom: at.uom }, ...change], [], at.uom);

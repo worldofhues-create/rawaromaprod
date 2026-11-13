@@ -120,7 +120,8 @@ export function formulasKind(sql: Sql, setup: FormulaSetupService): ImportKindHa
       const groups = new Map<string, Parsed[]>();
       for (const p of parsed) { const k = `${p.formula.toUpperCase()}|${p.version ?? '?'}`; groups.set(k, [...(groups.get(k) ?? []), p]); }
       const versionsOfFormula = new Map<string, Set<number | null>>();
-      for (const p of parsed) versionsOfFormula.set(p.formula.toUpperCase(), (versionsOfFormula.get(p.formula.toUpperCase()) ?? new Set()).add(p.version));
+      // A version cell that could not be read is its own row's problem, not a second version of the formula.
+      for (const p of parsed) if (p.version !== null) versionsOfFormula.set(p.formula.toUpperCase(), (versionsOfFormula.get(p.formula.toUpperCase()) ?? new Set<number | null>()).add(p.version));
 
       // What is on file: each formula's versions and whether anything is sealed in them. Codes and
       // version numbers only, which the formula directory already shows.

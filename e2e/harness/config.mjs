@@ -24,8 +24,9 @@ export const DB_USER = process.env.BS_PG_USER || process.env.USER || 'postgres';
 export const DB_PASS = process.env.BS_PG_PASSWORD || '';
 const cred = DB_PASS ? `${DB_USER}:${encodeURIComponent(DB_PASS)}` : DB_USER;
 export const dbUrl = (name) => `postgres://${cred}@${DB_HOST}:${PORTS.pg}/${name}`;
-export const MAIN_DB = 'rawprod_cov';
-export const VAULT_DB = 'rawprod_cov_vault';
+// BS_MAIN_DB / BS_VAULT_DB: a lane standing the stack up beside another names its own databases.
+export const MAIN_DB = process.env.BS_MAIN_DB || 'rawprod_cov';
+export const VAULT_DB = process.env.BS_VAULT_DB || 'rawprod_cov_vault';
 export const URLS = {
   factory: `http://127.0.0.1:${PORTS.factory}`,
   platform: `http://127.0.0.1:${PORTS.platform}`,

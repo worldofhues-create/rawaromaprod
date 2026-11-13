@@ -374,7 +374,7 @@ test('supplier lots: one receipt per supplier and day through GrnService; every 
   const r3 = rowOf(pre, 3).problems.join(' ');
   for (const re of [/No ingredient with the code NOPE-1/, /No supplier "Nobody Ltd"/, /must be more than zero/, /unit "barrel" is not in the unit list/, /received date is in the future/]) assert.match(r3, re);
   const r4 = rowOf(pre, 4).problems.join(' ');
-  for (const re of [/is kept in kg\. .*do not convert without a density/, /manufacture date is after the day it was received/, /expiry date is before the day it was received/]) assert.match(r4, re);
+  for (const re of [/is kept in kg: ml and kg do not convert without a density/, /manufacture date is after the day it was received/, /expiry date is before the day it was received/]) assert.match(r4, re);
   assert.match(rowOf(pre, 5).problems.join(' '), /"Received date": "11\/13\/2026" is not a date/);
   assert.match(rowOf(pre, 6).problems.join(' '), /"Unit" is empty: a quantity needs its unit.*"Received date" is empty/);
   assert.equal(rowOf(pre, 7).outcome, 'create');
@@ -493,7 +493,7 @@ test('raw stock adjustments: a ledger row through the adjustment service; below 
   assert.match(rowOf(pre, 8).problems.join(' '), /not released to stock yet \(it is held for QC\)/);
   assert.match(rowOf(pre, 9).problems.join(' '), /is not a lot of/);
   assert.match(rowOf(pre, 10).problems.join(' '), /change of zero changes nothing/);
-  assert.match(rowOf(pre, 11).problems.join(' '), /The lot is kept in kg\. .*do not convert without a density/);
+  assert.match(rowOf(pre, 11).problems.join(' '), /The lot is kept in kg: ml and kg do not convert without a density/);
   const last = rowOf(pre, 12).problems.join(' ');
   for (const re of [/No lot NOPE-/, /"Reason" is empty/, /"Reference" is empty/]) assert.match(last, re);
   assert.equal(await onHand(lot1), 11.25, 'a preview moved nothing');
