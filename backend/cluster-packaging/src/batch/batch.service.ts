@@ -13,7 +13,7 @@
  * dict-soft refs (plain uuid, no FK at this layer).
  */
 import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { desc, eq, lt } from 'drizzle-orm';
+import { desc, eq, lt, sql } from 'drizzle-orm';
 import { recordOutbox, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PACKAGING_DB, packagingSchema, type PackagingDb } from '../packaging.tokens.js';
@@ -61,6 +61,27 @@ export class BatchService {
           `Cannot produce a finished-good batch on package order ${body.packageOrderId}: status is ${orderStatus} `
             + '(must be IN_PROGRESS or COMPLETED — issue materials and run a filling session first).',
         );
+      }
+      /* STOCK-E2E-1 (STK-4): finished stock is this batch's producedQty, so it may not exceed what the
+       * order's filling sessions recorded as filled (rejected units are not finished goods), across every
+       * batch already made on the order. Rehearsal: 14 units filled, a batch of 59 accepted, 45 units of
+       * stock that were never filled. Compared only in the same unit; a fill recorded in another unit
+       * cannot be checked here and is left to the batch-close reconciliation (WO-STK-RECON). */
+      const [fill] = (await tx.execute(sql`
+        select coalesce(sum(d.filled_qty), 0)::text as filled, count(*)::int as n,
+               count(*) filter (where d.uom_id is distinct from ${body.uomId ?? null}::uuid)::int as other_unit,
+               (select coalesce(sum(f.produced_qty), 0)::text from packaging.finished_good_batch_master f
+                 where f.package_order_id = ${body.packageOrderId}::uuid and coalesce(f.status, '') not in ('REJECTED', 'CANCELLED')) as made
+          from packaging.filling_session s join packaging.filling_session_details d on d.filling_session_id = s.filling_session_id
+         where s.package_order_id = ${body.packageOrderId}::uuid`)) as unknown as Array<{ filled: string; n: number; other_unit: number; made: string }>;
+      if (fill && fill.n > 0 && fill.other_unit === 0) {
+        const filled = Number(fill.filled), made = Number(fill.made), asked = Number(body.producedQty);
+        if (made + asked > filled) {
+          throw new ConflictException(
+            `Package order ${body.packageOrderId} filled ${filled}; ${made} already made into finished-goods batches, so a batch of ${asked} `
+              + `would hold ${made + asked - filled} that were never filled. Record the fill first.`,
+          );
+        }
       }
       const batchId = uuidv7();
       const batch = (
