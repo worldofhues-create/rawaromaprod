@@ -97,6 +97,11 @@ export interface FgBatchReceivedPayload {
   /** QC-GATE: the compounded batch number `qc.batch.released` was sent under. ALEMBIC names the
    *  lot after `batch_no` and needs this to find the release; without it the lot stays held. */
   readonly qc_batch_no?: string;
+  /** STOCK-FIX-RP (STK-21; docs/plan/stock-bridge-contract.md section 2): the packs, both or neither.
+   *  pack_count packs of pack_net_mg mg each (100 g = 100000); pack_count x pack_net_mg = qty_kg in mg,
+   *  exactly. Sent only when the SKU's pack is a MASS on file; a volume is never sent as a mass. */
+  readonly pack_count?: number;
+  readonly pack_net_mg?: number;
 }
 
 const isNonEmpty = (v: unknown, max = 200) => typeof v === "string" && v.trim().length > 0 && v.length <= max;
@@ -112,7 +117,14 @@ export function validateFgBatchReceived(p: FgBatchReceivedPayload): string[] {
   if (!isNonEmpty(p.rack, 120)) out.push("rack");
   if (!isIsoInstant(p.released_at)) out.push("released_at");
   if (p.qc_batch_no !== undefined && !isNonEmpty(p.qc_batch_no, 64)) out.push("qc_batch_no");
-  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no"]);
+  if ((p.pack_count === undefined) !== (p.pack_net_mg === undefined)) out.push("pack_count/pack_net_mg: both or neither");
+  else if (p.pack_count !== undefined) {
+    const whole = (v: unknown) => typeof v === "number" && Number.isSafeInteger(v) && v > 0;
+    if (!whole(p.pack_count)) out.push("pack_count");
+    if (!whole(p.pack_net_mg)) out.push("pack_net_mg");
+    if (whole(p.pack_count) && whole(p.pack_net_mg) && p.pack_count! * p.pack_net_mg! !== Math.round(p.qty_kg * 1_000_000)) out.push("pack_count x pack_net_mg is not qty_kg");
+  }
+  const allowed = new Set(["batch_no", "sku", "pack_size", "qty_kg", "rack", "released_at", "qc_batch_no", "pack_count", "pack_net_mg"]);
   for (const k of Object.keys(p)) if (!allowed.has(k)) out.push(`unexpected:${k}`);
   return out;
 }

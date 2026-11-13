@@ -30,10 +30,11 @@ function subjectOf(email: string) {
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-8${h.slice(17, 20)}-${h.slice(20, 32)}`;
 }
 export function mintAssertion(email: string, target: ConsoleName, over: Record<string, unknown> = {}) {
-  const { signingKey } = JSON.parse(readFileSync(join(RUN, 'keys.json'), 'utf8'));
+  const { signingKey, tenantId } = JSON.parse(readFileSync(join(RUN, 'keys.json'), 'utf8')) as { signingKey: string; tenantId?: string };
   const key = createPrivateKey({ key: Buffer.from(signingKey, 'base64'), format: 'der', type: 'pkcs8' });
   const now = Math.floor(Date.now() / 1000);
-  const claims = { iss: 'alembic', aud: 'rawprod', sub: subjectOf(email), tenant_id: 'rac', org_id: 'rac', email, roles: ['admin'],
+  // STK-26: the tenant the stand-up configured (as production does); 'rac' for a stack started before it.
+  const claims = { iss: 'alembic', aud: 'rawprod', sub: subjectOf(email), tenant_id: tenantId ?? 'rac', org_id: tenantId ?? 'rac', email, roles: ['admin'],
     target, auth_time: now, iat: now, exp: now + 45, jti: randomUUID(), env: 'production', ...over };
   const signingInput = `${b64u(JSON.stringify({ alg: 'EdDSA', typ: 'JWT' }))}.${b64u(JSON.stringify(claims))}`;
   return `${signingInput}.${b64u(sign(null, Buffer.from(signingInput), key))}`;

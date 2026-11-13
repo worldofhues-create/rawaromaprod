@@ -72,8 +72,12 @@ for (const r of ROLE_ENVS) seedEnv[`BOOTSTRAP_${r}_PASSWORD`] = b64(24); // the 
 execFileSync('pnpm', ['db:seed'], { ...quiet, env: seedEnv });
 
 const secrets = { JWT_SECRET: b64(48), FORMULA_KEK: b64(32), BRIDGE_HMAC_KEK: b64(32), INTERNAL_BRIDGE_KEY: b64(32) };
+// STOCK-FIX-RP (STK-26): production sets ALEMBIC_ASSERTION_TENANT_ID (infra/aws/env/render-env.sh). Without it a
+// fact not tied to a requirement (a QC release, a GRN, a PO) has no org and parks bad_org_id, so no local stack
+// rehearsed make-to-stock. The stand-up sets it as production does, and its assertions carry the same tenant.
+const tenantId = process.env.E2E_ALEMBIC_TENANT_ID || '0f1e2d3c-4b5a-4968-8776-655443322110';
 const common = {
-  ...base, ...secrets, NODE_ENV: 'development', APP_ENV: 'dev', ALEMBIC_ASSERTION_VERIFY_KEY: verifyKey,
+  ...base, ...secrets, NODE_ENV: 'development', APP_ENV: 'dev', ALEMBIC_ASSERTION_VERIFY_KEY: verifyKey, ALEMBIC_ASSERTION_TENANT_ID: tenantId,
   OUTBOX_POLL_MS: '1000', BRIDGE_WEBHOOK_ALLOWED_HOSTS: `127.0.0.1:${PORTS.deadPeer}`, AUTOMATION_POLL_MS: '1000', CONSUMPTION_POLL_MS: '1000', VAULT_API_INTERNAL_URL: `http://127.0.0.1:${PORTS.vaultApi}`, VAULT_CATALOGUE_SYNC_MS: '2000', VAULT_COMPLIANCE_SYNC_MS: '2000',
 };
 const apiDir = join(ROOT, 'backend/api');
@@ -82,7 +86,7 @@ start('vault-api', 'node', [...reg, 'src/vault-main.ts'], apiDir, { ...common, P
 // As production: the main box has no route to the formula database.
 start('api', 'node', [...reg, 'src/main.ts'], apiDir, { ...common, PORT: String(PORTS.api), RUN_WORKER_IN_PROCESS: 'true', DATABASE_URL: dbUrl(MAIN_DB), FORMULA_DATABASE_URL: 'postgres://ra_vault@127.0.0.1:1/unreachable_from_main' });
 start('consoles', 'node', [join(ROOT, 'e2e/harness/consoles.mjs')], ROOT, base);
-writeFileSync(join(RUN, 'keys.json'), JSON.stringify({ signingKey }), { mode: 0o600 });
+writeFileSync(join(RUN, 'keys.json'), JSON.stringify({ signingKey, tenantId }), { mode: 0o600 });
 
 await waitFor(`http://127.0.0.1:${PORTS.api}/health`, 'main API');
 await waitFor(`http://127.0.0.1:${PORTS.vaultApi}/health`, 'Vault API');

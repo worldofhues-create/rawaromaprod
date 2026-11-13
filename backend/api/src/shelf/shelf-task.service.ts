@@ -23,7 +23,7 @@
 import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import { bridge as bridgeContracts } from '@core/contracts';
-import { assertNotMacerating, emitBridgeManualEvent, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
+import { assertNotMacerating, emitBridgeManualEvent, parsePackSizeMg, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { SHELF_DB, type ShelfDb, type ShelfTx } from './shelf.tokens.js';
 import { ShelfLayoutService, WALK_ORDER_SQL, type BinLocation } from './shelf-layout.service.js';
 import { PickLightService, colourFor, type PickLightCommand } from './pick-light.service.js';
@@ -98,6 +98,8 @@ export function buildFgBatchReceived(input: {
   qcBatchNo?: string | null;
   /** Made from an oil batch: ALEMBIC releases it against qc_batch_no, so the field is required. */
   compounded?: boolean;
+  /** STOCK-FIX-RP (STK-21): one pack's net mass on file, when there is one; adds pack_count/pack_net_mg. */
+  packNetMg?: number | null;
 }): { ok: true; payload: bridgeContracts.FgBatchReceivedPayload } | { ok: false; problems: string[] } {
   const qtyKg = bridgeContracts.fgQtyKg(input.qty, input.uomCode, input.packSize);
   const payload: bridgeContracts.FgBatchReceivedPayload = {
@@ -108,6 +110,7 @@ export function buildFgBatchReceived(input: {
     rack: input.rack ?? '',
     released_at: input.releasedAt ?? '',
     ...(input.qcBatchNo ? { qc_batch_no: input.qcBatchNo } : {}),
+    ...packFields(qtyKg, input.packNetMg),
   };
   const problems = bridgeContracts.validateFgBatchReceived(payload);
   // FLOOR-FIX-9 (ALEMBIC doc 17 §5.4): without qc_batch_no ALEMBIC holds a compounded lot forever.
@@ -116,6 +119,13 @@ export function buildFgBatchReceived(input: {
   if (problems.length) return { ok: false, problems: [...new Set(problems)] };
   bridgeContracts.assertNoFormulaContent(payload);
   return { ok: true, payload };
+}
+
+/** STOCK-FIX-RP (STK-21, bridge contract section 2): the packs, only when qty_kg is a whole number of them. */
+function packFields(qtyKg: number | null, packNetMg: number | null | undefined): { pack_count?: number; pack_net_mg?: number } {
+  if (qtyKg === null || !packNetMg || !Number.isSafeInteger(packNetMg) || packNetMg <= 0) return {};
+  const mg = Math.round(qtyKg * 1_000_000);
+  return mg > 0 && mg % packNetMg === 0 ? { pack_count: mg / packNetMg, pack_net_mg: packNetMg } : {};
 }
 
 @Injectable()
@@ -321,9 +331,14 @@ export class ShelfTaskService {
    * production/warehouse consoles get an alert saying why.
    */
   private async emitReceived(tx: ShelfTx, fg: FgBatchInfo, qty: number, bin: BinLocation) {
+    // STOCK-FIX-RP (STK-21): the pack's net mass, from the SKU's net_content_mg or a pack size that is a plain mass.
+    const [sku] = fg.productSkuId
+      ? ((await tx.execute(sql`select net_content_mg::text as n from packaging.product_sku where product_sku_id = ${fg.productSkuId}::uuid`)) as unknown as Array<{ n: string | null }>)
+      : [];
+    const packNetMg = sku?.n != null ? Number(sku.n) : parsePackSizeMg(fg.packSize);
     const built = buildFgBatchReceived({
       batchNo: fg.batchNumber, sku: fg.skuCode, packSize: fg.packSize, qty, uomCode: fg.uomCode,
-      rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId,
+      rack: bin.label, releasedAt: fg.releasedAt, qcBatchNo: fg.qcBatchNo, compounded: !!fg.oilBatchId, packNetMg,
     });
     if (!built.ok) {
       await recordProduceAlert(tx, {

@@ -109,6 +109,9 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
   const stored = rows[0]!.payload as Record<string, unknown>;
   assert.deepEqual(stored, {
     batch_no: fg.fgBatchNo, qc_batch_no: fg.oilBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1],
+    // STOCK-FIX-RP (STK-21, Alembic stock-bridge-contract section 2): the SKU's pack is a mass on file
+    // (25 kg), so the receipt names its packs: four drums of 25,000,000 mg.
+    pack_count: 4, pack_net_mg: 25_000_000,
     released_at: '2026-09-21T09:30:00.000Z', _correlation_id: req.correlationId, _org_id: req.orgId,
   });
 
@@ -131,6 +134,7 @@ test('put-away → fg.batch.received: exact payload on the requirement\'s journe
   assert.equal(env.org_id, req.orgId);
   assert.deepEqual(env.payload, {
     batch_no: fg.fgBatchNo, qc_batch_no: fg.oilBatchNo, sku: product.skuCode, pack_size: '25 kg', qty_kg: 100, rack: r1.bins[1], released_at: '2026-09-21T09:30:00.000Z',
+    pack_count: 4, pack_net_mg: 25_000_000, // STK-21: the packs, as stored above
   });
   assert.deepEqual(contracts.validateFgBatchReceived(env.payload), []);
 });
