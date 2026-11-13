@@ -2483,6 +2483,7 @@
       var next = newBtn ? 'Use ' + escHtml(newLabel.replace(/^\+ /, '')) + ' to add the first one.' : escHtml(origin || 'Rows appear here as soon as there is something to show.');
       V.innerHTML = '<div class="card empty"><h3>Nothing in ' + escHtml(item[1]) + ' yet</h3><p style="margin:var(--s-tight) auto 0;max-width:46ch;color:var(--ink-2)">' + next + '</p>' + (newBtn ? '<div style="margin-top:var(--s-base)">' + newBtn + '</div>' : '') + '</div>';
       var nb0 = $('ra-new'); if (nb0) nb0.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
+      if (window.RaImports) RaImports.mount(item[3], V); // IMPORT-RP: "Import from a sheet" on the lists that have a template (ws-imports.js)
       return;
     }
     var shell = '<div class="card">' +
@@ -2492,6 +2493,7 @@
       '<div id="ra-results"></div></div>';
     V.innerHTML = kpiBand + shell;
     paintResults();
+    if (window.RaImports) RaImports.mount(item[3], V); // IMPORT-RP (ws-imports.js)
     if (st.ref) focusRef(st.ref);
     var nb = $('ra-new'); if (nb) nb.onclick = function () { cdef.open ? cdef.open() : CREATE_DOC[item[3]] ? openCreateDoc(item[3]) : openCreate(item[3]); };
     var si = $('ra-search'); if (si) {
