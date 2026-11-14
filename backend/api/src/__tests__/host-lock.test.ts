@@ -45,6 +45,8 @@ function host(availableMb: number | null = 2000) {
   stub(bin, 'sudo', `echo "sudo $*" >> "${calls}"\nwhile [[ "$1" == -* || "$1" == rawprod || "$1" == env || "$1" == *=* ]]; do shift; done\nexec "$@"`);
   stub(bin, 'pnpm', `echo "pnpm $*" >> "${calls}"`);
   stub(bin, 'systemctl', `echo "systemctl $*" >> "${calls}"`);
+  // VAULT-FIT: the vault role migrates from its staged tree through systemd-run.
+  stub(bin, 'systemd-run', `echo "systemd-run $*" >> "${calls}"`);
   stub(bin, 'curl', 'printf 200');
   stub(bin, 'psql', "printf '%s\\n' 0001.sql");
   stub(bin, 'sleep', '');
