@@ -110,6 +110,11 @@ as_user() { sudo -u "$RUN_USER" "$@"; }
 # pnpm as the app user, with node 22's directory first on PATH. Without it, sudo's secure_path finds
 # no node on the vault box and pnpm's `#!/usr/bin/env node` fails: "env: node: No such file".
 pn() { sudo -u "$RUN_USER" env "PATH=$TOOL_PATH" COREPACK_ENABLE_DOWNLOAD_PROMPT=0 "$PNPM" "$@"; }
+# ...and FROM the tree it works on. A corepack pnpm picks its version from the package.json in the
+# current directory, not from -C: run from / (where SSM leaves a shell) it is corepack's default
+# pnpm, which refuses this repository's packageManager (ERR_PNPM_BAD_PM_VERSION). Found by the
+# vault rehearsal of 14 Nov; the October deploys worked because they were typed after `cd /srv/rawprod/app`.
+pn_in() { local dir="$1"; shift; ( cd "$dir" && pn -C "$dir" "$@" ); }
 
 # VAULT-FIT: node 22 and pnpm, wherever this host keeps them, as a PAIR: the first directory holding
 # both a node 22 and a pnpm. The order keeps the main box exactly as it was (its pair is in /usr/bin,
@@ -143,7 +148,7 @@ find_tools() {
   TOOL_PATH="$NODE_BIN:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
   # It must RUN as the app user, not merely exist: the 14 Nov failure was a pnpm that existed.
   local v
-  v=$(cd / && pn --version 2>&1) || die "pnpm at $PNPM does not run as $RUN_USER with node from $NODE_BIN: $v. Nothing was changed"
+  v=$(cd "$APP" && pn --version 2>&1) || die "pnpm at $PNPM does not run as $RUN_USER with node from $NODE_BIN: $v. Nothing was changed"
   say "tools: node $("$NODE_BIN/node" -v) ($NODE_BIN), pnpm $v ($PNPM)"
 }
 
@@ -295,7 +300,7 @@ EOM
   sudo -u rawprod git -C "$APP" checkout --quiet --detach "$full"
 
   say "installing dependencies"
-  pn -C "$APP" install --frozen-lockfile >/dev/null
+  pn_in "$APP" install --frozen-lockfile >/dev/null
 
   say "build"
   # Required: a failed or OOM-killed build stops here, before migrations and the restart. The API
@@ -337,7 +342,7 @@ EOM
 # and it cannot build) and @core/api's `nest build` (nothing runs its output, and it writes compiled
 # files beside the sources).
 build_in() { # tree
-  pn -C "$1" -r --workspace-concurrency=1 --filter '!@core/admin-shell' --filter '!@core/api' build
+  pn_in "$1" -r --workspace-concurrency=1 --filter '!@core/admin-shell' --filter '!@core/api' build
 }
 
 record_green() { # full sha, rollback yes|no
@@ -398,7 +403,7 @@ deploy_staged() { # full sha, rollback yes|no, current sha
   as_user git -C "$stage" checkout --quiet --detach "$full" || stage_fail "could not check out $full in the stage"
 
   say "installing dependencies (in the stage)"
-  pn -C "$stage" install --frozen-lockfile >/dev/null || stage_fail "pnpm install failed in the stage"
+  pn_in "$stage" install --frozen-lockfile >/dev/null || stage_fail "pnpm install failed in the stage"
 
   say "build (in the stage)"
   build_in "$stage" || rc=$?

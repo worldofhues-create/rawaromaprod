@@ -47,6 +47,7 @@ function box(o: Box = {}) {
   const git = (cwd: string, ...args: string[]) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' }).trim();
   git(app, 'init', '--quiet');
   file(join(app, 'scripts/migrations/0001.sql'), '-- one\n', 0o644);
+  file(join(app, 'package.json'), '{"packageManager":"pnpm@10.34.5"}\n', 0o644);
   file(join(app, 'web/admin/.next/BUILD_ID'), 'built-in-git\n', 0o644);
   git(app, 'add', '.');
   git(app, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '--quiet', '-m', 'october');
@@ -77,7 +78,10 @@ const a = process.argv.slice(2);
 let cwd = process.cwd(); const c = a.indexOf('-C'); if (c >= 0) { cwd = a[c + 1]; a.splice(c, 2); }
 const head = () => cp.execFileSync('git', ['-C', cwd, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
 fs.appendFileSync(${JSON.stringify(log)}, 'pnpm ' + a.join(' ') + ' @' + (a[0] === '--version' ? '-' : head().slice(0, 8)) + ' in ' + path.basename(cwd) + '\\n');
-if (a[0] === '--version') { console.log('10.34.5'); process.exit(0); }
+// As corepack's pnpm: the version comes from the package.json in the CURRENT directory, not from -C.
+const pinned = fs.existsSync(path.join(process.cwd(), 'package.json'));
+if (a[0] === '--version') { console.log(pinned ? '10.34.5' : '12.11.2'); process.exit(0); }
+if (!pinned) { console.error('ERR_PNPM_BAD_PM_VERSION: this project is configured to use 10.34.5 of pnpm'); process.exit(1); }
 if (a[0] === 'install') {
   if (${o.failInstall ? 'true' : 'false'}) { console.error('ERR_PNPM_FETCH_404'); process.exit(1); }
   fs.mkdirSync(path.join(cwd, 'node_modules'), { recursive: true });
@@ -147,7 +151,8 @@ printf 200
     RAWPROD_RUN_USER: 'rawprod',
   };
   const run = (args: string[], extra: Record<string, string> = {}) => {
-    const r = spawnSync('/bin/bash', [SCRIPT, ...args], { encoding: 'utf8', env: { ...env, ...extra } });
+    // From /, where an SSM shell starts: nothing may depend on the caller's directory.
+    const r = spawnSync('/bin/bash', [SCRIPT, ...args], { cwd: '/', encoding: 'utf8', env: { ...env, ...extra } });
     return { code: r.status, out: `${r.stdout}${r.stderr}` };
   };
   const lines = () => readFileSync(log, 'utf8').split('\n').filter(Boolean);
