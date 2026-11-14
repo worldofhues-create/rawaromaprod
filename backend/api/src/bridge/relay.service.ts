@@ -26,6 +26,7 @@ import { BRIDGE_DB, bridgeSchema, type BridgeDb } from './bridge.tokens.js';
 import { openSecret } from './secret-box.js';
 import { signBody } from './signing.js';
 import { decideFailedDelivery, describeFailure, type DeliveryFailure } from './contract.js';
+import { signGcmsFileUrl } from './file-url.js';
 
 const { outbox, connectorConfig, productionRequirement, auditEvents } = bridgeSchema;
 
@@ -132,6 +133,30 @@ export class BridgeRelayService implements OnModuleDestroy {
       delete rawPayload._bridge_version;
       delete rawPayload._correlation_id;
       delete rawPayload._org_id;
+      // FACTORY-DOCS: a GC-MS fact's file link is minted HERE, fresh at every attempt, never stored:
+      // a link baked in at attach time would have expired by the time a backed-off retry went out,
+      // and ALEMBIC would answer 502 to every retry until the event parked.
+      const gcmsReportId = typeof rawPayload[bridgeContracts.GCMS_REPORT_META_KEY] === 'string'
+        ? rawPayload[bridgeContracts.GCMS_REPORT_META_KEY] as string : null;
+      delete rawPayload[bridgeContracts.GCMS_REPORT_META_KEY];
+      if (ev.type === bridgeContracts.QC_GCMS_ATTACHED) {
+        const base = this.config?.get('BRIDGE_FILE_BASE_URL');
+        const sha = typeof rawPayload.sha256 === 'string' ? rawPayload.sha256 : null;
+        if (!base || !gcmsReportId || !sha) {
+          // Not sent: a fact whose file ALEMBIC cannot open would be refused. Backs off, then parks
+          // where an operator sees it, replayable once the base URL is configured.
+          await this.recordFailure(ev, {}, !base
+            ? 'BRIDGE_FILE_BASE_URL is not set: the GC-MS file link cannot be formed'
+            : 'the queued GC-MS fact names no report or sha256');
+          continue;
+        }
+        rawPayload.file = {
+          url: signGcmsFileUrl({
+            baseUrl: base, reportId: gcmsReportId, sha256: sha, nowMs: Date.now(),
+            ttlSeconds: bridgeContracts.GCMS_FILE_URL_TTL_SECONDS, connectorSecret: secret,
+          }),
+        };
+      }
 
       const req = ev.aggregateId
         ? (await this.db.select({ orgId: productionRequirement.orgId }).from(productionRequirement)

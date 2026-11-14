@@ -252,6 +252,11 @@ export const configSchema = z.object({
   /** How often the main box's worker pulls newly calculated IFRA/allergen certificates from the
    *  Vault (`ComplianceCertificateSyncService`) and emits them toward ALEMBIC. */
   VAULT_COMPLIANCE_SYNC_MS: z.coerce.number().int().min(1000).default(30_000),
+  /** FACTORY-DOCS: the https origin ALEMBIC can reach this box's API at (production:
+   *  https://rawfactory.huecycle.in, whose nginx proxies /v1/ to the API). The bridge relay builds
+   *  each `qc.gcms.attached` fact's signed `file.url` on it. Unset = a GC-MS fact is not sent: it
+   *  backs off, parks, and is replayable once this is set (never a link ALEMBIC cannot open). */
+  BRIDGE_FILE_BASE_URL: z.string().url().startsWith('https://').optional(),
 });
 
 export type AppConfig = z.infer<typeof configSchema>;

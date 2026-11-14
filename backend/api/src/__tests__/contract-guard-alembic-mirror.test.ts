@@ -39,6 +39,9 @@ const ALEMBIC_INBOUND_EVENT_TYPES = [
   // lands, replace this note with its commit. Until ALEMBIC accepts the type a fact waits parked in
   // bridge.outbox and is replayed under the same event id, so RawProd must not go live with this first.
   'material.cost.recorded',
+  // FACTORY-DOCS: alembic st4/docs-auto @ 1ac64c85a packages/domain/src/bridge/envelope.ts:46 (handleGcmsFact,
+  // apps/api/src/compliance/gcms.ts). Not yet on ALEMBIC's release branch: until it is, a sent fact parks here.
+  'qc.gcms.attached',
 ];
 const ALEMBIC_RAWPROD_FACT_KINDS = [
   'production_requirement_status', 'material_availability', 'po_status', 'grn_status', 'qc_status', 'fg_atp', 'dispatch_status',

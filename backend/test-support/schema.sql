@@ -1907,6 +1907,23 @@ create table if not exists production.batch_coa_photo (
   updated_by varchar(255),
   constraint batch_coa_photo_ref_chk check (document_id is not null or url is not null)
 );
+-- FACTORY-DOCS: scripts/migrations/2026-11-27-batch-gcms-report.sql
+create table if not exists production.batch_gcms_report (
+  batch_gcms_report_id uuid primary key,
+  batch_coa_id uuid not null references production.batch_coa (batch_coa_id),
+  oil_batch_id uuid not null,
+  sha256 char(64) not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  pdf bytea not null,
+  byte_size integer not null check (byte_size > 0 and byte_size <= 5242880),
+  file_name varchar(200),
+  lab_name varchar(200) not null check (length(btrim(lab_name)) > 0),
+  report_ref varchar(120) not null check (length(btrim(report_ref)) > 0),
+  analysed_on date not null,
+  attached_by varchar(255) not null,
+  attached_dt timestamptz not null default now()
+);
+create unique index if not exists batch_gcms_report_batch_sha_uq on production.batch_gcms_report (oil_batch_id, sha256);
+create index if not exists batch_gcms_report_coa_idx on production.batch_gcms_report (batch_coa_id, attached_dt desc);
 create table if not exists bridge.compliance_certificate (
   certificate_id uuid primary key,
   vault_seq bigint not null,

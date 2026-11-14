@@ -157,6 +157,42 @@ Control Room ("A formula calculation (v3) supersedes the issued values").
 Compliance re-issues; the new version is drawn from the calculation. Versions
 already issued stay exactly as they were.
 
+## `qc.gcms.attached` (FACTORY-DOCS)
+
+Contract: ALEMBIC `docs/plan/program/documents-automation.md` > "What RawProd must send", fact 3
+(confirmed by the lead 14 Nov 2026; ALEMBIC side `handleGcmsFact`, st4/docs-auto). Sent when QC attaches a
+lab's GC-MS PDF to a batch on the batch certificates screen (row action **Attach GC-MS**,
+`POST /v1/batch-coas/:id/gcms`, permission `production:batch_coa:write`; not on a rejected batch).
+
+```jsonc
+"aggregate": { "type": "qc_batch", "id": "<RawProd batch COA uuid>" },   // same aggregate as the batch's QC verdict
+"payload": {
+  "batch_no": "A140226",                       // == the batch number qc.batch.released carries
+  "product_ref": { "factory_sku": "FG-ALT-001" },
+  "file": { "url": "https://rawfactory.huecycle.in/v1/bridge/files/gcms/<report uuid>?sha=..&exp=..&sig=.." },
+  "sha256": "<hex SHA-256 of the PDF bytes>",
+  "lab_name": "Indore Analytical Lab",
+  "report_ref": "IAL/26/0412",
+  "analysed_on": "2026-02-15",
+  "attached_at": "2026-02-15T10:00:00.000Z"
+}
+```
+
+- **The file.** RawProd had no binary store, so the PDF (at most 5 MB, `%PDF-` checked) is kept in
+  `production.batch_gcms_report` (migration `2026-11-27-batch-gcms-report.sql`) and served only through
+  `file.url`: a link signed with a key derived from the bridge connector secret, naming the report and its
+  exact bytes, valid for **60 minutes**. The relay mints a fresh link at **every delivery attempt** (the
+  stored outbox row has no `file`), so a retry after backoff never carries a dead link. ALEMBIC fetches on
+  receipt; a failed fetch is its 502, which the relay retries; an unknown batch is parked there with the
+  bytes kept, so the link need not outlive the first successful fetch.
+- **Idempotency.** `event_id`; and here (batch, sha256) is unique: attaching the same file to the same
+  batch again records nothing and sends nothing. A different file is a new report; ALEMBIC keeps the one
+  with the latest `attached_at`.
+- **Configuration.** `BRIDGE_FILE_BASE_URL` (the https origin ALEMBIC reaches this API at). Unset: the
+  fact is not sent; it backs off and parks with the reason, replayable once it is set.
+- **Order.** Until ALEMBIC's release accepts the type, a sent fact is refused as unknown and parks in
+  `bridge.outbox`, replayable under the same event id.
+
 ## Responses
 
 | Status | `outcome` | Meaning for the sender |

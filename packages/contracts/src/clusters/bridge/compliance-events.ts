@@ -19,7 +19,10 @@
 
 export const QC_BATCH_RELEASED = 'qc.batch.released' as const;
 export const COMPLIANCE_CERTIFICATE_CALCULATED = 'compliance.certificate.calculated' as const;
-export const COMPLIANCE_EVENT_TYPES = [QC_BATCH_RELEASED, COMPLIANCE_CERTIFICATE_CALCULATED] as const;
+/** FACTORY-DOCS: a lab's GC-MS report attached to a finished oil batch (ALEMBIC
+ *  docs/plan/program/documents-automation.md > "What RawProd must send", fact 3). */
+export const QC_GCMS_ATTACHED = 'qc.gcms.attached' as const;
+export const COMPLIANCE_EVENT_TYPES = [QC_BATCH_RELEASED, COMPLIANCE_CERTIFICATE_CALCULATED, QC_GCMS_ATTACHED] as const;
 
 /** The envelope `aggregate.type` each compliance event is reported under — DOCS-001 (ALEMBIC
  *  docs/bridge/COMPLIANCE_FACTS.md): `qc_batch` + RawProd's batch COA uuid for a QC verdict,
@@ -28,6 +31,9 @@ export const COMPLIANCE_EVENT_TYPES = [QC_BATCH_RELEASED, COMPLIANCE_CERTIFICATE
 export const COMPLIANCE_AGGREGATE_TYPES: Record<(typeof COMPLIANCE_EVENT_TYPES)[number], string> = {
   [QC_BATCH_RELEASED]: 'qc_batch',
   [COMPLIANCE_CERTIFICATE_CALCULATED]: 'product',
+  // FACTORY-DOCS: the same aggregate as the batch's QC verdict (RawProd's batch COA uuid), so the relay
+  // holds a GC-MS fact behind a parked release of the same batch rather than sending it first.
+  [QC_GCMS_ATTACHED]: 'qc_batch',
 };
 
 /* ── qc.batch.released ─────────────────────────────────────────────────────────────────────── */
@@ -195,5 +201,57 @@ export function validateComplianceCertificate(p: ComplianceCertificatePayload): 
   }
   if (!isIso(p.calculatedAt)) out.push('calculatedAt');
   if (!/^fvr_[0-9a-f]{32}$/.test(p.formulaVersionRef ?? '')) out.push('formulaVersionRef');
+  return out;
+}
+
+/* ── qc.gcms.attached (FACTORY-DOCS) ───────────────────────────────────────────────────────── */
+
+/** The largest GC-MS PDF QC may attach: it rides the console's encrypted channel as base64 inside
+ *  JSON (about 1.8x on the wire), which has to stay under nginx's 12 MB client_max_body_size. */
+export const GCMS_MAX_BYTES = 5 * 1024 * 1024;
+
+/** How long a signed GC-MS file link lives. ALEMBIC asks for at least 15 minutes and fetches the
+ *  file on receipt; the relay mints a fresh link at every delivery attempt, so a retry hours later
+ *  still carries a live one. */
+export const GCMS_FILE_URL_TTL_SECONDS = 60 * 60;
+
+/** The relay's transport metadata on a queued `qc.gcms.attached` row: the report whose file the
+ *  relay links at send time. Stripped before the body is signed; never reaches ALEMBIC. */
+export const GCMS_REPORT_META_KEY = '_gcms_report_id' as const;
+
+/** The DOCS wire shape ALEMBIC parses (`parseQcGcmsAttached`). snake_case; the file is reached at
+ *  `file.url`, a signed https link (ALEMBIC cannot fetch a RawProd asset_ref). */
+export interface QcGcmsAttachedWire {
+  readonly batch_no: string;
+  readonly product_ref: { readonly factory_sku: string };
+  readonly file: { readonly url: string };
+  /** Lower-case hex SHA-256 of the PDF bytes. */
+  readonly sha256: string;
+  readonly lab_name: string;
+  readonly report_ref: string;
+  /** yyyy-mm-dd */
+  readonly analysed_on: string;
+  /** ISO 8601 UTC; the latest wins per batch on ALEMBIC's side. */
+  readonly attached_at: string;
+}
+
+/** True when the bytes start with the PDF header ALEMBIC checks (`%PDF-`). */
+export function isPdfBytes(bytes: Uint8Array): boolean {
+  return bytes.length > 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+}
+
+/** Problems ALEMBIC would refuse a `qc.gcms.attached` wire payload for ([] = valid). `requireUrl`
+ *  is false for the queued row, whose link the relay adds at send time. */
+export function checkQcGcmsAttachedWire(w: Partial<QcGcmsAttachedWire>, opts: { requireUrl?: boolean } = {}): string[] {
+  const out: string[] = [];
+  const s = (v: unknown, max: number) => typeof v === 'string' && v.trim().length > 0 && v.length <= max;
+  if (!s(w.batch_no, 64)) out.push('batch_no');
+  if (!s(w.product_ref?.factory_sku, 200)) out.push('product_ref.factory_sku');
+  if (opts.requireUrl !== false && !(typeof w.file?.url === 'string' && /^https:\/\//.test(w.file.url))) out.push('file.url');
+  if (!(typeof w.sha256 === 'string' && /^[0-9a-f]{64}$/.test(w.sha256))) out.push('sha256');
+  if (!s(w.lab_name, 200)) out.push('lab_name');
+  if (!s(w.report_ref, 120)) out.push('report_ref');
+  if (!isYmd(w.analysed_on)) out.push('analysed_on');
+  if (!isIso(w.attached_at)) out.push('attached_at');
   return out;
 }

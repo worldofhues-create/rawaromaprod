@@ -711,6 +711,8 @@
   addAction('/v1/finished-good-batches', { label: 'Put away', perm: 'location:shelf_task:write', when: function () { return true; }, run: function (r) { assignRack(r.finishedGoodBatchId); } });
   addAction('/v1/fg-labels', { label: 'Print label', perm: 'packaging:finished_good_batch_master:read', when: function () { return true; }, run: function (r) { chooseLabelSize(r.finishedGoodBatchId); } });
   addAction('/v1/batch-coas', { label: 'Reject', perm: 'production:batch_coa:release', tone: 'bad', when: function (r) { return String(r.status || '').toUpperCase() === 'TESTED'; }, run: function (r) { rejectCoa(r); } });
+  /* FACTORY-DOCS: the lab's GC-MS PDF for a batch, sent to the sales system as qc.gcms.attached. Not on a rejected batch. */
+  addAction('/v1/batch-coas', { label: 'Attach GC-MS', perm: 'production:batch_coa:write', when: function (r) { var st = String(r.status || '').toUpperCase(); return st === 'TESTED' || st === 'RELEASED'; }, run: function (r) { attachGcms(r); } });
   /* What was filled, on the ticket: End fill alone left a finished session with no quantity on record. */
   addAction('/v1/filling-sessions', { label: 'Record fill', perm: 'packaging:filling_session:write', tone: 'accent', when: function (r) { return UP(r.status) !== 'DONE'; }, run: function (r) {
     askForm({ title: 'Record fill', submit: 'Save fill', fields: [{ n: 'filled', l: 'Filled quantity', t: 'number', req: true }, { n: 'rejected', l: 'Rejected quantity', t: 'number', req: true, value: 0 }],
@@ -792,6 +794,37 @@
         if (res.status >= 400) { toast(err(res, 'Not rejected. Try again.'), 'bad'); return; }
         toast('Rejected — sales system told, labelling blocked', 'bad'); loadView();
       }).catch(function () { toast('Can\'t connect. Try again.', 'bad'); });
+    };
+  }
+
+  /* FACTORY-DOCS: attach a lab's GC-MS report (PDF, at most 5 MB) to a batch. The same file twice sends nothing new. */
+  function attachGcms(row) {
+    var f = function (id, label, type, ph) { return '<label style="display:flex;flex-direction:column;gap:5px">' + lbl(label) + '<input id="' + id + '" type="' + type + '" class="fld"' + (ph ? ' placeholder="' + escHtml(ph) + '"' : '') + ' required></label>'; };
+    var m = openSheet({ tag: 'form', style: 'max-width:480px', title: 'Attach GC-MS · ' + (row.batchNumber || ''),
+      meta: 'The lab\'s GC-MS report for this batch. It goes to the sales system and reaches the customers who receive this batch.',
+      body: '<label style="display:flex;flex-direction:column;gap:5px">' + lbl('Report (PDF, at most 5 MB) *') + '<input id="pv-gf" type="file" accept="application/pdf,.pdf" class="fld" required></label>' +
+        f('pv-gl', 'Lab *', 'text', 'Who ran the analysis') + f('pv-gr', 'Report number *', 'text', 'The lab\'s report number') + f('pv-gd', 'Analysed on *', 'date') +
+        '<div id="pv-ge" style="min-height:16px;font:var(--w-med) var(--t-cap)/var(--lh-cap) var(--font-ui);color:var(--red)"></div>' +
+        '<button type="submit" id="pv-gs" class="btn p" style="width:100%;justify-content:center">Attach report</button>' });
+    m.sheet.onsubmit = function (e) {
+      e.preventDefault();
+      var file = $('pv-gf').files && $('pv-gf').files[0], fail = function (t) { $('pv-ge').textContent = t; };
+      if (!file) { fail('Choose the PDF.'); return; }
+      if (file.size > 5 * 1024 * 1024) { fail('That file is over 5 MB.'); return; }
+      var lab = $('pv-gl').value.trim(), ref = $('pv-gr').value.trim(), day = $('pv-gd').value;
+      if (!lab || !ref || !day) { fail('Fill in the lab, the report number and the date.'); return; }
+      var save = $('pv-gs'); save.disabled = true; save.textContent = 'Attaching…';
+      var rd = new FileReader();
+      rd.onerror = function () { save.disabled = false; save.textContent = 'Attach report'; fail('The file could not be read.'); };
+      rd.onload = function () {
+        var b64 = String(rd.result || '').replace(/^data:[^,]*,/, '');
+        tunnel('/v1/batch-coas/' + row.batchCoaId + '/gcms', { method: 'POST', body: { fileBase64: b64, fileName: file.name.slice(0, 200), labName: lab, reportRef: ref, analysedOn: day } }).then(function (res) {
+          if (res.status >= 400) { save.disabled = false; save.textContent = 'Attach report'; fail(err(res, 'Not attached. Try again.')); return; }
+          var out = data(res) || {}; m.close();
+          toast(out.emitted ? 'GC-MS attached — sent to the sales system' : 'This file is already attached to the batch; nothing new was sent', out.emitted ? 'good' : ''); loadView();
+        }).catch(function () { save.disabled = false; save.textContent = 'Attach report'; fail('Can\'t connect. Try again.'); });
+      };
+      rd.readAsDataURL(file);
     };
   }
 

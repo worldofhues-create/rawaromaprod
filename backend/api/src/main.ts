@@ -16,6 +16,7 @@ import { ConfigService, PG_CLIENT } from '@core/backend-kernel';
 import type { Sql } from 'postgres';
 import { AppModule } from './app.module.js';
 import { installRawJsonParser } from './raw-json-parser.js';
+import { installUploadBodyLimits } from './upload-body-limits.js';
 import { WorkerModule } from './worker.module.js';
 import { assertMainRoleCannotReadVault } from './vault-isolation-check.js';
 
@@ -30,6 +31,10 @@ async function bootstrap(): Promise<void> {
    * `NestFactory.create()`. So replacing it has to happen AFTER `init()`, once Nest's own
    * parser actually exists to remove; adding one before that point collides with Nest's
    * own registration a moment later (`FST_ERR_CTP_ALREADY_PRESENT`). */
+  // FACTORY-DOCS: a GC-MS PDF upload needs more than Fastify's 1 MiB on exactly two routes; the hook
+  // must be in place before init registers the routes (upload-body-limits.ts).
+  installUploadBodyLimits(app);
+
   await app.init();
 
   // The bytes-in-hand JSON parser the bridge HMAC needs: raw-json-parser.ts (FLOOR-FIX-10).

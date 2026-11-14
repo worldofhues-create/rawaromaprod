@@ -15,11 +15,13 @@ import { ConfigAdminService } from './config-admin.service.js';
 import { RequirementsQueueService } from './requirements-queue.service.js';
 import { BridgeRelayService } from './relay.service.js';
 import { OutboxAdminService } from './outbox-admin.service.js';
+import { GcmsFileController, GcmsFileService } from './gcms-file.controller.js';
 import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
 
 @Global()
 @Module({
-  controllers: [BridgeController],
+  // FACTORY-DOCS: GcmsFileController serves a GC-MS PDF to ALEMBIC over a signed, expiring link.
+  controllers: [BridgeController, GcmsFileController],
   providers: [
     {
       provide: BRIDGE_DB,
@@ -30,6 +32,7 @@ import { BRIDGE_DB, drizzle, bridgeSchema } from './bridge.tokens.js';
     ConfigAdminService,
     RequirementsQueueService,
     OutboxAdminService,
+    GcmsFileService,
     BridgeRelayService,
   ],
   exports: [BRIDGE_DB, BridgeRelayService],

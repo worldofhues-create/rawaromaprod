@@ -47,6 +47,11 @@ export const OUTBOUND_TO_ALEMBIC = [
   // production_requirement: each is its own aggregate (the batch COA / the certificate emission).
   'qc.batch.released',
   'compliance.certificate.calculated',
+  // FACTORY-DOCS: a lab's GC-MS PDF attached to a finished oil batch (aggregate `qc_batch`, the batch
+  // COA). The file rides as a signed link the relay mints per attempt (file-url.ts). Accepted by
+  // ALEMBIC on st4/docs-auto (INBOUND_EVENT_TYPES, handleGcmsFact); until that is live there, a sent
+  // fact is refused as an unknown type and parks here, replayable under the same event id.
+  'qc.gcms.attached',
   // Lane produce (owner requirement 2026-09-29): a finished-good batch was put away on a rack —
   // ALEMBIC allocates it to the orders waiting for it. A fact about the FG batch (aggregate
   // `fg_batch`), not a requirement step. Payload: @core/contracts bridge.FgBatchReceivedPayload.

@@ -32,6 +32,7 @@
  * iam.user_master, production.production_plan_items) are raw SQL inside this cluster's own
  * transaction — the same idiom batch/planning services use; no new workspace dependency.
  */
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -44,7 +45,7 @@ import { bridge as bridgeContracts } from '@core/contracts';
 import { bridgeProductCode, emitBridgeManualEvent, emitBridgeOutbound, qcPromiseBlockOf, recordProduceAlert, type AuthPrincipal } from '@core/backend-kernel';
 import { uuidv7 } from '@core/data-kernel';
 import { PRODUCTION_DB, productionSchema, type ProductionDb } from '../production.tokens.js';
-import type { ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
+import type { AttachBatchGcms, ListCoaQuery, RecordBatchCoa, UpsertProductQcSpec } from './coa.dtos.js';
 
 const { productQcSpec, batchCoa, batchCoaPhoto, oilBatchMaster } = productionSchema;
 
@@ -74,6 +75,11 @@ export function withinSpec(value: number, min: number, max: number): boolean {
 }
 
 export interface ProductRow { product_id: string; product_code: string | null; product_name: string | null }
+
+export interface GcmsReportRow {
+  batchGcmsReportId: string; batchCoaId: string; sha256: string; byteSize: number; fileName: string | null;
+  labName: string; reportRef: string; analysedOn: string; attachedBy: string; attachedDt: Date | string;
+}
 
 @Injectable()
 export class CoaService {
@@ -361,6 +367,100 @@ export class CoaService {
       });
       return { coa: rejected, emitted };
     });
+  }
+
+  /* ── GC-MS report (FACTORY-DOCS) ─────────────────────────────────────────────────────── */
+
+  /** The GC-MS reports attached to a batch COA, newest first: what was sent, never the bytes. */
+  async listGcms(batchCoaId: string) {
+    return (await this.db.execute(sql`
+      select batch_gcms_report_id as "batchGcmsReportId", batch_coa_id as "batchCoaId", sha256,
+             byte_size as "byteSize", file_name as "fileName", lab_name as "labName", report_ref as "reportRef",
+             analysed_on::text as "analysedOn", attached_by as "attachedBy", attached_dt as "attachedDt"
+        from production.batch_gcms_report
+       where batch_coa_id = ${batchCoaId}::uuid
+       order by attached_dt desc, batch_gcms_report_id desc
+    `)) as unknown as GcmsReportRow[];
+  }
+
+  /**
+   * POST /v1/batch-coas/:id/gcms — QC attaches a lab's GC-MS PDF to the batch and, in the SAME
+   * transaction, writes `qc.gcms.attached` to the bridge outbox. The fact carries the file's SHA-256
+   * and the lab's details; its `file.url` is a signed, expiring link the relay mints at send time.
+   * The same file for the same batch again records nothing and sends nothing (`emitted: false`).
+   * A rejected batch takes no report: it ships to no one.
+   */
+  async attachGcms(batchCoaId: string, body: AttachBatchGcms, principal: AuthPrincipal, now = new Date()) {
+    const bytes = Buffer.from(body.fileBase64, 'base64');
+    if (bytes.length === 0 || bytes.length > bridgeContracts.GCMS_MAX_BYTES) {
+      throw new BadRequestException('The GC-MS report must be a PDF of at most 5 MB.');
+    }
+    if (!bridgeContracts.isPdfBytes(bytes)) {
+      throw new BadRequestException('That file is not a PDF. Attach the lab\'s GC-MS report as a PDF.');
+    }
+    if (body.analysedOn > ymd(now)) throw new BadRequestException('The analysis date cannot be in the future.');
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+
+    return this.db.transaction(async (tx) => {
+      const coa = (await tx.select().from(batchCoa).where(eq(batchCoa.batchCoaId, batchCoaId)).for('update').limit(1))[0];
+      if (!coa) throw new NotFoundException(`batch COA not found: ${batchCoaId}`);
+      if (coa.status === 'REJECTED') {
+        throw new ConflictException('This batch was rejected by QC; it ships to no one, so a GC-MS report is not attached or sent.');
+      }
+      const batch = (await tx.select().from(oilBatchMaster).where(eq(oilBatchMaster.oilBatchId, coa.oilBatchId)).limit(1))[0];
+      if (!batch?.batchNumber) throw new ConflictException('The oil batch has no batch number; the sales system matches a GC-MS report on it.');
+
+      const existing = await this.gcmsBySha(tx, coa.oilBatchId, sha256);
+      if (existing) return { report: existing, emitted: false };
+
+      const product = await this.product(tx, coa.productId);
+      const skuCodes = ((await tx.execute(sql`
+        select sku_code from packaging.product_sku where product_id = ${coa.productId} and sku_code is not null order by sku_code
+      `)) as unknown as { sku_code: string }[]).map((r) => r.sku_code);
+      const factorySku = product ? await this.factorySku(tx, coa.oilBatchId, skuCodes, coa.productId) : null;
+      if (!factorySku) throw new ConflictException('The product has no SKU code; the sales system cannot map a GC-MS report without one.');
+
+      const reportId = uuidv7();
+      const inserted = (await tx.execute(sql`
+        insert into production.batch_gcms_report
+          (batch_gcms_report_id, batch_coa_id, oil_batch_id, sha256, pdf, byte_size, file_name, lab_name, report_ref,
+           analysed_on, attached_by, attached_dt)
+        values (${reportId}::uuid, ${batchCoaId}::uuid, ${coa.oilBatchId}::uuid, ${sha256}, ${bytes}, ${bytes.length},
+                ${body.fileName ?? null}, ${body.labName}, ${body.reportRef}, ${body.analysedOn}::date, ${principal.userId}, ${now.toISOString()}::timestamptz)
+        on conflict (oil_batch_id, sha256) do nothing
+        returning batch_gcms_report_id
+      `)) as unknown as unknown[];
+      if (inserted.length === 0) {
+        // Another request attached the same file a moment earlier: that one sent the fact.
+        return { report: (await this.gcmsBySha(tx, coa.oilBatchId, sha256))!, emitted: false };
+      }
+
+      const wire = {
+        batch_no: batch.batchNumber,
+        product_ref: { factory_sku: factorySku },
+        sha256,
+        lab_name: body.labName,
+        report_ref: body.reportRef,
+        analysed_on: body.analysedOn,
+        attached_at: now.toISOString(),
+      };
+      const problems = bridgeContracts.checkQcGcmsAttachedWire(wire, { requireUrl: false });
+      if (problems.length > 0) throw new ConflictException(`The GC-MS report could not be sent: ${problems.join(', ')}.`);
+      bridgeContracts.assertNoFormulaContent(wire);
+      await emitBridgeManualEvent(tx, bridgeContracts.QC_GCMS_ATTACHED, batchCoaId, {
+        ...wire, [bridgeContracts.GCMS_REPORT_META_KEY]: reportId,
+      });
+      return { report: (await this.gcmsBySha(tx, coa.oilBatchId, sha256))!, emitted: true };
+    });
+  }
+
+  private async gcmsBySha(tx: Tx, oilBatchId: string, sha256: string): Promise<GcmsReportRow | null> {
+    return ((await tx.execute(sql`
+      select batch_gcms_report_id as "batchGcmsReportId", batch_coa_id as "batchCoaId", sha256,
+             byte_size as "byteSize", file_name as "fileName", lab_name as "labName", report_ref as "reportRef",
+             analysed_on::text as "analysedOn", attached_by as "attachedBy", attached_dt as "attachedDt"
+        from production.batch_gcms_report where oil_batch_id = ${oilBatchId}::uuid and sha256 = ${sha256}
+    `)) as unknown as GcmsReportRow[])[0] ?? null;
   }
 
   /* ── helpers ─────────────────────────────────────────────────────────────────────────── */

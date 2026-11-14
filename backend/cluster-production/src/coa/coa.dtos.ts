@@ -55,3 +55,15 @@ export const rejectBatchCoa = z.object({
   reason: z.string().trim().min(3).max(1000),
 });
 export type RejectBatchCoa = z.infer<typeof rejectBatchCoa>;
+
+/** FACTORY-DOCS: a lab's GC-MS PDF for one batch (`qc.gcms.attached`). The file rides the console's
+ *  encrypted JSON channel as base64; 7 MB of base64 is the 5 MB PDF limit (GCMS_MAX_BYTES), checked
+ *  again on the decoded bytes. Every field the fact carries is entered here by QC. */
+export const attachBatchGcms = z.object({
+  fileBase64: z.string().min(8).max(7 * 1024 * 1024 + 16).regex(/^[A-Za-z0-9+/]+={0,2}$/, 'fileBase64 must be base64'),
+  fileName: z.string().trim().min(1).max(200).optional(),
+  labName: z.string().trim().min(1).max(200),
+  reportRef: z.string().trim().min(1).max(120),
+  analysedOn: ymd,
+});
+export type AttachBatchGcms = z.infer<typeof attachBatchGcms>;
