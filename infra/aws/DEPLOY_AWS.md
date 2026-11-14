@@ -213,6 +213,20 @@ and it hides the result. Run the target's own script:
 `git -C /srv/rawprod/app show <sha>:infra/aws/deploy.sh > /tmp/rawprod-deploy.sh`, then
 `RAWPROD_ROLE=vault bash /tmp/rawprod-deploy.sh <sha>`.
 
+**Wrapper version 4 (VAULT-FIT, 14 Nov 2026).** The vault box has no `/usr/bin/node` or `/usr/bin/pnpm`
+(both are in `/opt/node-v22.12.0/bin`, outside sudo's secure_path), and version 3 died there with exit
+127 after it had already checked the new commit out under the running `vault-api`. The wrapper now finds
+node 22 and pnpm as a pair (PATH, `/usr/bin`, `/usr/local/bin`, `/opt/node-v22*/bin`; `RAWPROD_NODE_BIN`
+and `RAWPROD_PNPM` override), runs pnpm with node's directory on PATH and from the tree it works on (a
+corepack pnpm takes its version from the current directory), and proves it runs before changing
+anything. On `vault` it deploys STAGED (`RAWPROD_STAGED`, default 1 there, 0 on `main`): clone to
+`/srv/rawprod/.stage-<sha>`, install, build, `db:migrate` from the clone through `systemd-run` with
+`vault-migrate.env`, then swap the directories (`app` -> `app.prev`, stage -> `app`), restart, health.
+Before the swap a failure leaves `app` and the service untouched; a red health check swaps back and
+restarts the old tree, keeping the failed one as `app.failed`. Nothing is `git checkout`-ed in the live
+tree, so modified tracked files there (the `.next` above) no longer block. It needs 1500 MB free on
+`/srv/rawprod` (`RAWPROD_MIN_FREE_MB`). The demo vault (`/srv/rawprod-demo/app`) is not touched.
+
 ## 7a. `infra/aws/ship.sh`: one command from a pushed commit to production
 
 Section 7 is what runs ON the box. This is what the operator runs on the laptop, and it is the way to
