@@ -163,6 +163,10 @@ Contract: ALEMBIC `docs/plan/program/documents-automation.md` > "What RawProd mu
 (confirmed by the lead 14 Nov 2026; ALEMBIC side `handleGcmsFact`, st4/docs-auto). Sent when QC attaches a
 lab's GC-MS PDF to a batch on the batch certificates screen (row action **Attach GC-MS**,
 `POST /v1/batch-coas/:id/gcms`, permission `production:batch_coa:write`; not on a rejected batch).
+The upload is the PDF itself (`content-type: application/pdf`, the lab's details in the query string) on
+that route directly, OUTSIDE the console's `/rpc` tunnel, with the session's bearer token. The token is
+verified before any of the body is read (api `upload-body-limits.ts`); only then may the body exceed 1 MiB
+(8 MiB, so a 6 MB file reaches the service and is refused in plain words). `/rpc` keeps 1 MiB.
 
 ```jsonc
 "aggregate": { "type": "qc_batch", "id": "<RawProd batch COA uuid>" },   // same aggregate as the batch's QC verdict

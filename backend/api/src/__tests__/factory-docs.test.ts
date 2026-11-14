@@ -30,7 +30,8 @@ import { GcmsFileService } from '../bridge/gcms-file.controller.js';
 import { sealSecret } from '../bridge/secret-box.js';
 import { verifyBody } from '../bridge/signing.js';
 import { ComplianceCertificateSyncService, CERTIFICATE_CURSOR_ID } from '../vault-bridge/compliance-certificate-sync.service.js';
-import { installUploadBodyLimitsOn, UPLOAD_BODY_LIMIT_BYTES } from '../upload-body-limits.js';
+import Fastify from 'fastify';
+import { installGcmsUploadOn, GCMS_UPLOAD_BODY_LIMIT_BYTES, GCMS_UPLOAD_ROUTE } from '../upload-body-limits.js';
 import { ensureSchema, productionDb, bridgeDb, testClient, principal, closeTestClient } from '../../../test-support/db.js';
 import { alembicSkipReason, alembicVerdicts } from '../../../test-support/alembic-checkout.js';
 
@@ -124,7 +125,7 @@ function pdf(tag: string): Buffer {
 }
 const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
 const GCMS = (file: Buffer, over: Record<string, string> = {}) => ({
-  fileBase64: file.toString('base64'), fileName: 'gcms.pdf', labName: 'Indore Analytical Lab', reportRef: 'IAL/26/0412', analysedOn: '2026-02-15', ...over,
+  bytes: file, fileName: 'gcms.pdf', labName: 'Indore Analytical Lab', reportRef: 'IAL/26/0412', analysedOn: '2026-02-15', ...over,
 });
 
 /* ── qc.gcms.attached ────────────────────────────────────────────────────────────────────── */
@@ -163,8 +164,9 @@ test('a file that is not a PDF, an oversized file, a future analysis date and a 
   const f = await fixture();
   await assert.rejects(() => coa.attachGcms(f.coaId, GCMS(Buffer.from('PK\u0003\u0004 a zip, not a pdf')), qc),
     (e: unknown) => e instanceof BadRequestException && /not a PDF/.test((e as Error).message));
-  const big = Buffer.concat([pdf('big'), Buffer.alloc(contracts.GCMS_MAX_BYTES)]);
-  await assert.rejects(() => coa.attachGcms(f.coaId, GCMS(big), qc), BadRequestException);
+  const big = Buffer.concat([pdf('big'), Buffer.alloc(6 * 1024 * 1024 - 100)]);
+  await assert.rejects(() => coa.attachGcms(f.coaId, GCMS(big), qc),
+    (e: unknown) => e instanceof BadRequestException && /That file is 6\.0 MB\. A GC-MS report can be at most 5 MB/.test((e as Error).message));
   await assert.rejects(() => coa.attachGcms(f.coaId, GCMS(pdf('x'), { analysedOn: '2999-01-01' }), qc), BadRequestException);
   await coa.rejectCoa(f.coaId, 'off odour on the retained sample', qc);
   await assert.rejects(() => coa.attachGcms(f.coaId, GCMS(pdf('rej')), qc), ConflictException);
@@ -227,17 +229,40 @@ test('with no BRIDGE_FILE_BASE_URL a GC-MS fact is not sent: it stays queued wit
   assert.equal(o!.published_at, null);
 });
 
-test('the GC-MS upload route and the console channel get the larger body limit, and no other route does', () => {
-  let hook: ((o: { method: string | string[]; url: string; bodyLimit?: number }) => void) | undefined;
-  installUploadBodyLimitsOn({ addHook: (_n, fn) => { hook = fn; } });
-  const route = (method: string, url: string) => { const o: { method: string; url: string; bodyLimit?: number } = { method, url }; hook!(o); return o.bodyLimit; };
-  assert.equal(route('POST', '/v1/batch-coas/:id/gcms'), UPLOAD_BODY_LIMIT_BYTES);
-  assert.equal(route('POST', '/rpc'), UPLOAD_BODY_LIMIT_BYTES);
-  assert.equal(route('POST', '/v1/batch-coas'), undefined);
-  assert.equal(route('GET', '/rpc'), undefined);
-  // 5 MB of PDF, base64 in JSON, sealed and base64'd again, fits; and the limit is under nginx's 12m.
-  assert.ok(Math.ceil(contracts.GCMS_MAX_BYTES * 4 / 3) * 4 / 3 + 4096 < UPLOAD_BODY_LIMIT_BYTES);
-  assert.ok(UPLOAD_BODY_LIMIT_BYTES < 12 * 1024 * 1024);
+test('the body gate: /rpc keeps 1 MiB; the upload route reads a body only after its bearer token verifies, then takes 5 MB and hands 6 MB to the service', async () => {
+  const app = Fastify();
+  const verified: string[] = [];
+  installGcmsUploadOn(app as never, async (t) => { if (t !== 'good-token') throw new Error('bad'); verified.push(t); });
+  let handlerSaw = -1;
+  app.post('/rpc', async (req) => ({ ok: true, n: JSON.stringify(req.body).length }));
+  app.post(GCMS_UPLOAD_ROUTE, async (req) => { handlerSaw = (req.body as Buffer).length; return { ok: true }; });
+  await app.ready();
+  try {
+    const twoMiB = JSON.stringify({ enc: 'A'.repeat(2 * 1024 * 1024) });
+    const rpc = await app.inject({ method: 'POST', url: '/rpc', headers: { 'content-type': 'application/json' }, payload: twoMiB });
+    assert.equal(rpc.statusCode, 413, 'an unauthenticated 2 MiB body to /rpc is refused at the old limit');
+    const small = await app.inject({ method: 'POST', url: '/rpc', headers: { 'content-type': 'application/json' }, payload: '{"enc":"x"}' });
+    assert.equal(small.statusCode, 200);
+
+    const five = Buffer.concat([pdf('five'), Buffer.alloc(5 * 1000 * 1000)]);
+    const anon = await app.inject({ method: 'POST', url: '/v1/batch-coas/0199a1b2-0000-7000-8000-000000000001/gcms', headers: { 'content-type': 'application/pdf' }, payload: five });
+    assert.equal(anon.statusCode, 401);
+    assert.match(anon.payload, /Sign in again to attach a GC-MS report/);
+    assert.equal(handlerSaw, -1, 'no handler ran');
+    const forged = await app.inject({ method: 'POST', url: '/v1/batch-coas/0199a1b2-0000-7000-8000-000000000001/gcms', headers: { 'content-type': 'application/pdf', authorization: 'Bearer forged' }, payload: five });
+    assert.equal(forged.statusCode, 401);
+
+    const ok = await app.inject({ method: 'POST', url: '/v1/batch-coas/0199a1b2-0000-7000-8000-000000000001/gcms', headers: { 'content-type': 'application/pdf', authorization: 'Bearer good-token' }, payload: five });
+    assert.equal(ok.statusCode, 200);
+    assert.equal(handlerSaw, five.length, 'an authenticated 5 MB PDF is read whole');
+    const six = Buffer.concat([pdf('six'), Buffer.alloc(6 * 1024 * 1024)]);
+    const big = await app.inject({ method: 'POST', url: '/v1/batch-coas/0199a1b2-0000-7000-8000-000000000001/gcms', headers: { 'content-type': 'application/pdf', authorization: 'Bearer good-token' }, payload: six });
+    assert.equal(big.statusCode, 200, 'a 6 MB file reaches the service, which refuses it in plain words (test above)');
+    assert.equal(handlerSaw, six.length);
+    assert.ok(GCMS_UPLOAD_BODY_LIMIT_BYTES < 12 * 1024 * 1024, 'under nginx client_max_body_size 12m');
+  } finally {
+    await app.close();
+  }
 });
 
 /* ── ALEMBIC's own receiver, on what the relay actually sent ─────────────────────────────── */

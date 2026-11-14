@@ -391,9 +391,10 @@ export class CoaService {
    * A rejected batch takes no report: it ships to no one.
    */
   async attachGcms(batchCoaId: string, body: AttachBatchGcms, principal: AuthPrincipal, now = new Date()) {
-    const bytes = Buffer.from(body.fileBase64, 'base64');
-    if (bytes.length === 0 || bytes.length > bridgeContracts.GCMS_MAX_BYTES) {
-      throw new BadRequestException('The GC-MS report must be a PDF of at most 5 MB.');
+    const bytes = body.bytes;
+    if (bytes.length === 0) throw new BadRequestException('The GC-MS file is empty. Attach the lab\'s report as a PDF.');
+    if (bytes.length > bridgeContracts.GCMS_MAX_BYTES) {
+      throw new BadRequestException(`That file is ${(bytes.length / 1024 / 1024).toFixed(1)} MB. A GC-MS report can be at most 5 MB; ask the lab for a smaller PDF.`);
     }
     if (!bridgeContracts.isPdfBytes(bytes)) {
       throw new BadRequestException('That file is not a PDF. Attach the lab\'s GC-MS report as a PDF.');

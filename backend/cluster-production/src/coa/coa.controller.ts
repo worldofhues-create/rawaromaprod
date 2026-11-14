@@ -4,12 +4,12 @@
  * emits `qc.batch.released` to ALEMBIC. Specs and results are QC work (`qc` role); release has its
  * own permission so it can be granted separately from data entry.
  */
-import { Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
+import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
 import { CurrentUser, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
 import { CoaService } from './coa.service.js';
 import {
-  attachBatchGcms,
-  type AttachBatchGcms,
+  attachBatchGcmsQuery,
+  type AttachBatchGcmsQuery,
   listCoaQuery,
   recordBatchCoa,
   rejectBatchCoa,
@@ -100,14 +100,19 @@ export class CoaController {
   }
 
   /** FACTORY-DOCS: attach a lab's GC-MS PDF and send `qc.gcms.attached`. QC data entry, so the same
-   *  permission as recording the batch's results. */
+   *  permission as recording the batch's results. The body is the PDF itself (`application/pdf`),
+   *  accepted larger than 1 MiB only after the bearer token verified (api upload-body-limits.ts). */
   @Permissions('production:batch_coa:write')
   @Post('v1/batch-coas/:id/gcms')
   attachGcms(
     @Param('id', ParseUUIDPipe) id: string,
-    @Body(new ZodValidationPipe(attachBatchGcms)) body: AttachBatchGcms,
+    @Query(new ZodValidationPipe(attachBatchGcmsQuery)) query: AttachBatchGcmsQuery,
+    @Body() body: unknown,
     @CurrentUser() principal: AuthPrincipal,
   ) {
-    return this.coa.attachGcms(id, body, principal);
+    if (!Buffer.isBuffer(body)) {
+      throw new BadRequestException('Send the GC-MS report as the PDF file itself (content-type application/pdf).');
+    }
+    return this.coa.attachGcms(id, { ...query, bytes: body }, principal);
   }
 }

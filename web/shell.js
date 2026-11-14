@@ -123,6 +123,25 @@
     if (window.RaRuh && RaRuh.needsConfirm(out) && !opts.ruhConfirmed) return RaRuh.guard(out, opts, function (o) { return tunnel(path, o); });
     return out;
   }
+  // FACTORY-DOCS: a file upload (today only the GC-MS PDF) goes OUTSIDE the tunnel, on its own route, as the
+  // file itself with the session's bearer token: the tunnel keeps the 1 MiB body limit, and the upload route
+  // accepts more only after the token verifies, before the body is read (api upload-body-limits.ts). The
+  // token is the one this tab already holds; an expired one is refreshed once, as tunnel() does.
+  async function uploadFile(path, file, _retried) {
+    if (!session) return { status: 401, json: { error: { message: 'Sign in again.' } } };
+    var r;
+    try {
+      r = await fetch(API + path, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream', authorization: 'Bearer ' + session.token }, body: file });
+    } catch (e) { throw new Error('channel'); }
+    var json = null; try { json = await r.json(); } catch (e) { json = null; }
+    if (r.status === 401 && !_retried) {
+      var rr = await tunnel('/auth/refresh', { method: 'POST' }, true);
+      var d = rr.json && rr.json.data;
+      if (rr.status < 400 && d && d.accessToken) { session.token = d.accessToken; return uploadFile(path, file, true); }
+    }
+    if (r.status === 413) json = { error: { message: 'That file is too large to send.' } };
+    return { status: r.status, json: json };
+  }
   // Tiny registration API for the ws-*.js workspace modules (scaffolding for future lanes —
   // U2/U3/U4 restyling Procurement/Receiving/Warehouse, QC/Production/Packaging/Dispatch, and
   // Platform/Vault respectively). Not wired into the render path yet: today's view dispatch is
@@ -131,7 +150,7 @@
   // non-colliding place to declare per-workspace view renderers as they build them.
   var RA_VIEWS = {};
   function registerViews(map) { Object.keys(map || {}).forEach(function (k) { RA_VIEWS[k] = map[k]; }); }
-  window.RA = { tunnel: tunnel, registerViews: registerViews, views: RA_VIEWS };
+  window.RA = { tunnel: tunnel, uploadFile: uploadFile, registerViews: registerViews, views: RA_VIEWS };
 
   /* ---------------- design system ----------------
    * RawProd previously offered a neumorphic/glass/skeuomorphic "skin" picker plus a light/dark

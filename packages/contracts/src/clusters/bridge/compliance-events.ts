@@ -206,8 +206,8 @@ export function validateComplianceCertificate(p: ComplianceCertificatePayload): 
 
 /* ── qc.gcms.attached (FACTORY-DOCS) ───────────────────────────────────────────────────────── */
 
-/** The largest GC-MS PDF QC may attach: it rides the console's encrypted channel as base64 inside
- *  JSON (about 1.8x on the wire), which has to stay under nginx's 12 MB client_max_body_size. */
+/** The largest GC-MS PDF QC may attach (5 MB). It is uploaded as itself, outside the console tunnel,
+ *  on its own authenticated route (api upload-body-limits.ts). */
 export const GCMS_MAX_BYTES = 5 * 1024 * 1024;
 
 /** How long a signed GC-MS file link lives. ALEMBIC asks for at least 15 minutes and fetches the

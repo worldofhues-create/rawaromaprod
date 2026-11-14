@@ -813,18 +813,16 @@
       if (file.size > 5 * 1024 * 1024) { fail('That file is over 5 MB.'); return; }
       var lab = $('pv-gl').value.trim(), ref = $('pv-gr').value.trim(), day = $('pv-gd').value;
       if (!lab || !ref || !day) { fail('Fill in the lab, the report number and the date.'); return; }
+      if (file.type && file.type !== 'application/pdf') { fail('That file is not a PDF. Attach the lab\'s GC-MS report as a PDF.'); return; }
       var save = $('pv-gs'); save.disabled = true; save.textContent = 'Attaching…';
-      var rd = new FileReader();
-      rd.onerror = function () { save.disabled = false; save.textContent = 'Attach report'; fail('The file could not be read.'); };
-      rd.onload = function () {
-        var b64 = String(rd.result || '').replace(/^data:[^,]*,/, '');
-        tunnel('/v1/batch-coas/' + row.batchCoaId + '/gcms', { method: 'POST', body: { fileBase64: b64, fileName: file.name.slice(0, 200), labName: lab, reportRef: ref, analysedOn: day } }).then(function (res) {
-          if (res.status >= 400) { save.disabled = false; save.textContent = 'Attach report'; fail(err(res, 'Not attached. Try again.')); return; }
-          var out = data(res) || {}; m.close();
-          toast(out.emitted ? 'GC-MS attached — sent to the sales system' : 'This file is already attached to the batch; nothing new was sent', out.emitted ? 'good' : ''); loadView();
-        }).catch(function () { save.disabled = false; save.textContent = 'Attach report'; fail('Can\'t connect. Try again.'); });
-      };
-      rd.readAsDataURL(file);
+      var q = '?labName=' + encodeURIComponent(lab) + '&reportRef=' + encodeURIComponent(ref) + '&analysedOn=' + encodeURIComponent(day) + '&fileName=' + encodeURIComponent(file.name.slice(0, 200));
+      // The PDF goes as itself on its own route (shell.js uploadFile), never inside the tunnel.
+      var pdf = new Blob([file], { type: 'application/pdf' });
+      uploadFile('/v1/batch-coas/' + row.batchCoaId + '/gcms' + q, pdf).then(function (res) {
+        if (res.status >= 400) { save.disabled = false; save.textContent = 'Attach report'; fail(err(res, 'Not attached. Try again.')); return; }
+        var out = data(res) || {}; m.close();
+        toast(out.emitted ? 'GC-MS attached — sent to the sales system' : 'This file is already attached to the batch; nothing new was sent', out.emitted ? 'good' : ''); loadView();
+      }).catch(function () { save.disabled = false; save.textContent = 'Attach report'; fail('Can\'t connect. Try again.'); });
     };
   }
 

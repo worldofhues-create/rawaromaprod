@@ -59,6 +59,6 @@ test('the Vault mounts formulas, and only formulas, on Recipes needed; a formula
 
 test('installed consoles get the panel: the cache is v144 (one number for the whole release; the lane took v143) and precaches both files', () => {
   const sw = read('web/sw.js');
-  assert.match(sw, /const CACHE = 'ra-shell-v145'/);
+  assert.match(sw, /const CACHE = 'ra-shell-v146'/);
   for (const f of ['/import-panel.js', '/ws-imports.js']) assert.ok(sw.includes(`'${f}'`), f);
 });
