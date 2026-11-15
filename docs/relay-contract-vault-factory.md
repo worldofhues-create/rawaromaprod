@@ -1,6 +1,6 @@
 # Relay contract: the RAC OS Vault and Factory consoles over RawProd (RP-BE-1)
 
-RESUME NOTE (keep at the top): see "State" at the end of this file.
+RESUME NOTE (keep at the top): all 52 rows have their status; see "State" at the end for what is built, the suite result and what is left.
 
 Branch `fd/vault-factory-api`. The work list is ALEMBIC `docs/plan/program/rp-relay.md` Part 4.3 (on
 `origin/st5/consoles-f`): 24 reads (6 Vault + 18 Factory) and 28 writes (7 Vault + 21 Factory). Each of the
@@ -136,5 +136,18 @@ and the relay mark (LD-261). Code: `backend/api/src/factory-desk/`, `backend/clu
 `backend/backend-kernel/src/decorators/no-relay.decorator.ts`; migration `scripts/migrations/2026-11-28-vault-factory-api.sql`
 + rollback. Tests: `backend/api/src/__tests__/factory-desk.test.ts`, `backend/cluster-formula/src/__tests__/vault-desk.test.ts`,
 4 LD-261 tests at the end of `backend/cluster-org/src/__tests__/auth-service-assertion.test.ts`.
-Totals: 23 BUILT (16 reads + 7 writes; F11 and V4 are one route), 25 REUSED, 4 NOT BUILT (V3, V6: LD-261;
-F16/F17 are reused under the station paths). Left: the whole suite once.
+Totals over the 52 rows: 29 BUILT (19 reads + 10 writes; F11 and V4 are one route, so 28 new routes),
+21 REUSED (F16, F17, 12 Factory writes, V5, 6 Vault writes), 2 NOT BUILT (V3, V6: LD-261).
+
+Whole suite (`node backend/test-support/run-tests.mjs`, one run, fresh database `zrp_suite`, since dropped):
+5,129 tests, 5,099 pass, 29 fail, 1 skipped. 28 of the 29 are four files that need PostGIS and refuse the local
+Postgres on 5432 by design ("use the Docker PostGIS (127.0.0.1:5433)"; no Docker on this machine):
+automation-app-role-grants, formula-setup-e2e, vault-isolation-harness, auto-draft-list-order. The 29th is STK-7 in
+stk-9-reserve-at-planning: it passes 9/9 alone on a fresh database and fails only after other files have left an
+upper-case `G` unit row (planning.service.ts picks the gram unit `order by uom_code limit 1`, so `G` wins over `g`).
+This branch adds no `G` row; it is an order-dependence that predates it.
+
+Left for the next unit (ALEMBIC side): allow-list rows and adapters for the BUILT and REUSED paths above (note the
+path and field renames: F6, F17, V5, W-F1, W-F3, W-F6, W-F13, W-F15 `toRole`, W-F18, W-V3, W-V5), the write relay,
+and `via: "relay"` on every relay assertion.
+
