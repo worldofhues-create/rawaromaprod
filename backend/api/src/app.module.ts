@@ -64,6 +64,7 @@ import { FactorySetupModule } from './factory-setup/factory-setup.module.js';
 import { FormulaSetupModule } from './formula-setup/formula-setup.module.js';
 import { RuhModule } from './ruh/ruh.module.js';
 import { PolicyModule } from './policy/policy.module.js';
+import { FactoryDeskModule } from './factory-desk/factory-desk.module.js';
 import { FloorModule } from './floor/floor.module.js';
 import { ImportsModule } from './imports/imports.module.js';
 import { ProdfloorModule } from './prodfloor/prodfloor.module.js';
@@ -115,6 +116,8 @@ import { FloorOpsModule } from './floor-ops/floor-ops.module.js';
     // Always-on Ruh (owner rulings 2026-10-06): the panel's routes, and the guard interceptor that
     // warns (never blocks) on the factory's guarded actions. Its APP_INTERCEPTOR is registered there.
     PolicyModule,
+    // RP-BE-1: the RAC OS Factory console's missing reads and writes.
+    FactoryDeskModule,
     FloorModule,
     // IMPORT-RP: spreadsheet templates, preview and commit for the lists the factory keeps.
     ImportsModule,
