@@ -14,6 +14,9 @@ import { FactoryDeskWritesService } from './factory-desk-writes.service.js';
 
 type Body = Record<string, unknown>;
 
+/** RawProd's existing rule for showing a product's name (dashboard.service.ts, the trace): formula:actual:read. */
+const seesProduct = (user?: AuthPrincipal) => (user?.permissions ?? []).includes('formula:actual:read');
+
 @Controller()
 export class FactoryDeskController {
   constructor(private readonly reads: FactoryDeskService, private readonly writes: FactoryDeskWritesService) {}
@@ -22,16 +25,19 @@ export class FactoryDeskController {
 
   @Permissions('production:production_order:read')
   @Get('v1/factory/today')
-  today() { return this.reads.today(); }
+  today(@CurrentUser() user?: AuthPrincipal) { return this.reads.today({ seeProduct: seesProduct(user) }); }
 
   @Permissions('production:floor_queue:read')
   @Get('v1/floor/board')
-  board() { return this.reads.board(); }
+  /* LD-272b: each row carries the batch's output; its product name follows RawProd's own label rule. */
+  board(@CurrentUser() user?: AuthPrincipal) { return this.reads.board({ seeProduct: seesProduct(user) }); }
 
   @Permissions('production:floor_queue:read')
   @Get('v1/floor/batches/:ref')
   /* LD-272: a relay token (`via: "relay"`) gets no quantity; see FactoryDeskService.batch. */
-  batch(@Param('ref') ref: string, @CurrentUser() user?: AuthPrincipal) { return this.reads.batch(ref, { relay: user?.via === 'relay' }); }
+  batch(@Param('ref') ref: string, @CurrentUser() user?: AuthPrincipal) {
+    return this.reads.batch(ref, { relay: user?.via === 'relay', seeProduct: seesProduct(user) });
+  }
 
   @Permissions('production:floor_queue:read')
   @Get('v1/floor/batches/:ref/route')

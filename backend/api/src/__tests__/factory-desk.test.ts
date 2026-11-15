@@ -192,6 +192,63 @@ test('LD-272: one batch for a person signed in on RawProd: the floor\'s batch sh
   assert.equal(line.by, null, 'nobody has picked it');
 });
 
+/* LD-272b: what a batch MAKES (product, grade, planned and produced mass of output) is production
+ * volume, not recipe content: it reaches a relay token on the batch and on the board. The per-line
+ * quantities stay out exactly as LD-272 says. The product's name follows RawProd's own rule for it
+ * (formula:actual:read, as the dashboard and the trace show it); without that it is said, not blanked. */
+async function withOutput(b: { jobId: string; oilBatchId: string }, opts: { plannedKg: string; producedKg: string }) {
+  const kg = await uom('KG');
+  const formulaId = randomUUID();
+  const planItemId = randomUUID();
+  const productId = randomUUID();
+  const productCode = `PRT-${productId.slice(0, 6)}`;
+  await sql()`insert into production.production_plan_items (production_plan_item_id, formula_id, planned_qty, uom_id, status) values (${planItemId}, ${formulaId}, ${opts.plannedKg}, ${kg}, 'PLANNED')`;
+  const [j] = await sql()`select production_order_id::text as id from production.floor_job where floor_job_id = ${b.jobId}::uuid`;
+  await sql()`insert into production.production_order (production_order_id, production_plan_item_id, order_qty, uom_id, status) values (${String(j!.id)}::uuid, ${planItemId}, ${opts.plannedKg}, ${kg}, 'RELEASED')`;
+  await sql()`update production.oil_batch_master set produced_qty = ${opts.producedKg}, uom_id = ${kg} where oil_batch_id = ${b.oilBatchId}::uuid`;
+  await sql()`insert into packaging.product_master (product_id, formula_id, product_code, product_name, status) values (${productId}, ${formulaId}, ${productCode}, 'Test Output Oil', 'ACTIVE')`;
+  await sql()`insert into bridge.catalogue_item (alembic_sku_id, sku_code, name, classification, classification_basis, grade, product_id, synced_by)
+              values (${randomUUID()}, ${'SKU-' + productId.slice(0, 6)}, 'Test Output Oil', 'blend', 'test', 'Test Grade A', ${productId}, 'test')`;
+  return { productCode };
+}
+
+test('LD-272b: a batch\'s OUTPUT reaches a relay token on the batch and the board; no per-line quantity does', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 25, '5', null);
+  const b = await mixedBatch(m, 'APPROVE');
+  const { productCode } = await withOutput(b, { plannedKg: '12.5', producedKg: '12.25' });
+  const ctl = new FactoryDeskController(reads(), writes());
+  const relayToken = principal({ userId: me.userId, via: 'relay', permissions: ['production:floor_queue:read', 'formula:actual:read'] });
+  const relayed = await ctl.batch(b.batchNo, relayToken);
+  assert.deepEqual(quantityKeysIn(relayed), [], 'per-line target, tolerance, picked, actual (and the raw produced_qty) stay out');
+  assert.deepEqual(relayed.output, {
+    productCode, productName: 'Test Output Oil', grade: 'Test Grade A', plannedMg: 12_500_000, producedMg: 12_250_000, unconverted: false, productNote: null,
+  });
+  const row = (await ctl.board(relayToken)).items.find((r) => r.oilBatchId === b.oilBatchId)!;
+  assert.deepEqual(row.output, relayed.output, 'the board row carries the same output');
+  // RawProd's own rule for a product's name: without formula:actual:read it is not shown, and the answer says so.
+  const plain = principal({ userId: me.userId, via: 'relay', permissions: ['production:floor_queue:read'] });
+  const hidden = (await ctl.batch(b.batchNo, plain)).output as Record<string, unknown>;
+  assert.equal(hidden.productName, null);
+  assert.equal(hidden.productCode, null);
+  assert.equal(hidden.plannedMg, 12_500_000, 'volume is not the product\'s name: it is still served');
+  assert.match(String(hidden.productNote), /not shown/i);
+});
+
+test('LD-272b: output the factory does not hold is null with the reason, never 0 and never guessed', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 26, '5', null);
+  const b = await mixedBatch(m, null);
+  await sql()`update production.oil_batch_master set produced_qty = null where oil_batch_id = ${b.oilBatchId}::uuid`;
+  const ctl = new FactoryDeskController(reads(), writes());
+  const out = (await ctl.batch(b.batchNo, principal({ userId: me.userId, via: 'relay', permissions: ['formula:actual:read'] }))).output as Record<string, unknown>;
+  assert.equal(out.plannedMg, null, 'no production order on file: planned is not known');
+  assert.equal(out.producedMg, null, 'not produced yet: null, not 0');
+  assert.equal(out.productName, null);
+  assert.equal(out.grade, null);
+  assert.match(String(out.productNote), /not recorded/i);
+});
+
 test('QC queue: a batch with no approving round and a quarantined raw lot, one list, oldest first', async () => {
   const f = await family();
   const m = await codedMaterial(f, 31, '5', null);

@@ -62,7 +62,7 @@ export class FactoryDeskService {
 
   /* ── Today (FAC-BE-15) ───────────────────────────────────────────────────────────────────── */
 
-  async today() {
+  async today(opts: { seeProduct?: boolean } = {}) {
     const sql = this.sql;
     const [c] = await sql<Row[]>`
       select
@@ -77,7 +77,7 @@ export class FactoryDeskService {
         (select count(*)::int from production.floor_job where (mixed_dt at time zone ${TZ})::date = (now() at time zone ${TZ})::date) as "mixedToday"`;
     const qc = await this.qcQueue({});
     const cover = await this.coverRows();
-    const board = await this.board();
+    const board = await this.board(opts);
     return {
       day: (await sql<{ d: string }[]>`select (now() at time zone ${TZ})::date::text as d`)[0]!.d,
       tiles: {
@@ -112,7 +112,7 @@ export class FactoryDeskService {
    * APPROVED, anything else is QC. A batch released, rejected or closed leaves the board. Packed and
    * shipped are not derived here: a finished-good batch is not linked to its oil batch in this data.
    */
-  async board() {
+  async board(opts: { seeProduct?: boolean } = {}) {
     const rows = await this.sql<Row[]>`
       select j.floor_job_id::text as "floorJobId", j.job_no as "jobNo", j.batch_no as "batchNo", j.oil_batch_id::text as "oilBatchId",
              case when j.oil_batch_id is null then j.stage
@@ -135,7 +135,63 @@ export class FactoryDeskService {
        limit 500`;
     const counts: Record<string, number> = {};
     for (const r of rows) counts[String(r.stage)] = (counts[String(r.stage)] ?? 0) + 1;
-    return { items: rows, nextCursor: null, total: rows.length, counts };
+    const outputs = await this.outputs(rows.map((r) => String(r.floorJobId)), opts.seeProduct === true);
+    const items = rows.map((r): Row => ({ ...r, output: outputs.get(String(r.floorJobId)) ?? null }));
+    return { items, nextCursor: null, total: rows.length, counts };
+  }
+
+  /**
+   * LD-272b: what each batch MAKES, as production volume: the product and its grade, the planned mass
+   * (the production order) and the produced mass (the oil batch), in integer milligrams. This is not
+   * recipe content and reaches a relay token; the per-line quantities never do (LD-272).
+   *   - The product is the one product row made from the order's formula; none, or more than one, is
+   *     said in `productNote` rather than guessed. Grade is that product's catalogue grade.
+   *   - The product's name and grade follow RawProd's own rule for a product label (formula:actual:read,
+   *     as the dashboard and the trace apply it); without it they are null and the note says so.
+   *   - A mass held in a unit that is not a mass is null with `unconverted`; nothing absent is 0.
+   */
+  private async outputs(jobIds: string[], seeProduct: boolean) {
+    const out = new Map<string, Row>();
+    if (!jobIds.length) return out;
+    const rows = await this.sql<Row[]>`
+      select j.floor_job_id::text as "jobId",
+             po.order_qty::text as "plannedQty", pu.uom_code as "plannedUom",
+             b.produced_qty::text as "producedQty", bu.uom_code as "producedUom",
+             p.n as "products", p.product_code as "productCode", p.product_name as "productName",
+             g.grade, g.grades
+        from production.floor_job j
+        left join production.production_order po on po.production_order_id = j.production_order_id
+        left join platform.uom_master pu on pu.uom_id = po.uom_id
+        left join production.production_plan_items pi on pi.production_plan_item_id = po.production_plan_item_id
+        left join production.oil_batch_master b on b.oil_batch_id = j.oil_batch_id
+        left join platform.uom_master bu on bu.uom_id = b.uom_id
+        left join lateral (select pm.product_id, pm.product_code, pm.product_name, (count(*) over ())::int as n
+                             from packaging.product_master pm where pi.formula_id is not null and pm.formula_id = pi.formula_id
+                            order by pm.product_code limit 1) p on true
+        left join lateral (select min(ci.grade) as grade, (count(distinct ci.grade))::int as grades
+                             from bridge.catalogue_item ci where ci.product_id = p.product_id and ci.grade is not null) g on true
+       where j.floor_job_id in ${this.sql(jobIds)}`;
+    for (const r of rows) {
+      const planned = r.plannedQty == null ? null : qtyToMg(String(r.plannedQty), (r.plannedUom as string | null) ?? null);
+      const produced = r.producedQty == null ? null : qtyToMg(String(r.producedQty), (r.producedUom as string | null) ?? null);
+      const one = r.products === 1;
+      const productNote = !r.products
+        ? 'Product not recorded for this batch.'
+        : !one
+          ? 'More than one product is made from this formula; which one this batch is, is not recorded.'
+          : !seeProduct ? 'The product is not shown to you in the factory system.' : null;
+      const show = one && seeProduct;
+      out.set(String(r.jobId), {
+        productCode: show ? r.productCode ?? null : null,
+        productName: show ? r.productName ?? null : null,
+        grade: show && r.grades === 1 ? r.grade ?? null : null,
+        plannedMg: planned,
+        producedMg: produced,
+        unconverted: (r.plannedQty != null && planned === null) || (r.producedQty != null && produced === null),
+        productNote,
+      });
+    }
+    return out;
   }
 
   /* ── One batch, coded, and its route (FAC-BE-14, FAC-BE-31) ─────────────────────────────── */
@@ -156,7 +212,7 @@ export class FactoryDeskService {
    *  produced quantity): grams by code are the recipe by another name and never pass through ALEMBIC.
    *  Each line keeps its code, its state, and who moved it there and when. A person signed in on
    *  RawProd itself (`relay` false) gets the floor's batch sheet as the floor does. */
-  async batch(ref: string, opts: { relay?: boolean } = {}) {
+  async batch(ref: string, opts: { relay?: boolean; seeProduct?: boolean } = {}) {
     const j = await this.jobFor(ref);
     const jobId = String(j.floor_job_id);
     const oilBatchId = (j.oil_batch_id as string | null) ?? null;
@@ -185,9 +241,13 @@ export class FactoryDeskService {
                                 where subject_type = 'OIL_BATCH' and subject_id = ${oilBatchId}::uuid and released_dt is null`)[0] ?? null
       : null;
     const relay = opts.relay === true;
+    const output = (await this.outputs([jobId], opts.seeProduct === true)).get(jobId) ?? null;
     return {
       floorJobId: jobId, jobNo: j.job_no, batchNo: j.batch_no, oilBatchId, stage: j.stage, expedite: j.expedite,
       orderRef: j.order_ref, promiseDt: j.promise_dt ? new Date(String(j.promise_dt)).toISOString() : null,
+      // LD-272b: the batch's output (product, grade, planned and produced mass) for everyone; the raw
+      // `producedQty` stays off a relay answer only because `output.producedMg` already says it in mg.
+      output,
       batch: batch && relay ? (({ producedQty: _q, ...rest }) => rest)(batch) : batch,
       hold, qcRounds: rounds,
       lines: lines.map(({ colourName, codeNumber, targetMg, tolerancePpm, pickedMg, actualMg, at, ...l }): Row => ({
