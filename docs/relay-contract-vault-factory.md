@@ -62,6 +62,13 @@ read in the factory system.
 Note G1: the values are stored and served; NOTHING in RawProd reads them yet (FAC-BE-03's money rule and
 contract are an owner gate). A saved rule changes no behaviour until a consumer is built and approved.
 
+Note G2 (RELAY-W4): F13 and F14 answer rows, never a `{ruleKey: value}` map, and carry NO permission flag.
+Who may save is `platform:policy:write` (W-F11, @FreshAuth: a fresh code on EVERY save) and
+`production:maceration_setting:write` (W-F12, no step-up), decided by these routes on the save; a caller
+without it gets the 403 naming the permission, which the console shows in these words. W-F12's body is
+`{values:[{productClass, minDays, maxDays}], reason}`; there are no fixed product classes here (the console
+draws the prototype's two, `FRAGRANCE_OIL` and `ATTAR`, plus any class already held).
+
 ## Factory writes (21)
 
 | # | Console call | Method + RawProd path | Permission | Step-up | Idem. | Request | Response (`data`) | Status |
