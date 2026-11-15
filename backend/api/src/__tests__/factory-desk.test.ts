@@ -282,6 +282,63 @@ test('trace list: a batch with how many raw lots went into it', async () => {
   assert.equal(t.items[0]!.rawLots, 1);
 });
 
+/* RELAY-W2 · 3(a): data the factory system HOLDS that the relay-facing reads did not send. Lots are the
+ * system's own (finished-good batch numbers), never made up; nothing held is invented. */
+async function filledAndDispatched(oilBatchId: string) {
+  const pkg = randomUUID(), fg = randomUUID(), so = randomUUID(), disp = randomUUID();
+  const fgLot = `FGT-${fg.slice(0, 8)}`, soNo = `SOT-${so.slice(0, 8)}`;
+  await sql()`insert into packaging.package_order (package_order_id, oil_batch_id) values (${pkg}, ${oilBatchId}::uuid)`;
+  await sql()`insert into packaging.finished_good_batch_master (finished_good_batch_id, package_order_id, batch_number, manufacturing_date) values (${fg}, ${pkg}, ${fgLot}, '2026-11-10')`;
+  await sql()`insert into sales.sales_order (sales_order_id, so_number) values (${so}, ${soNo})`;
+  await sql()`insert into sales.dispatch_master (dispatch_id, sales_order_id, dispatch_date) values (${disp}, ${so}, '2026-11-12')`;
+  await sql()`insert into sales.dispatch_items (dispatch_item_id, dispatch_id, finished_good_batch_id) values (${randomUUID()}, ${disp}, ${fg})`;
+  return { fgLot, soNo };
+}
+
+test('RELAY-W2 3(a): a QC round carries its checkpoint rows (name, range, result) from the round itself', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 51, '5', null);
+  const b = await mixedBatch(m, null);
+  const set = randomUUID(), cp1 = randomUUID(), cp2 = randomUUID();
+  await sql()`insert into quality.qc_checkpoint_set (qc_checkpoint_set_id, product_id, version, reason) values (${set}, ${randomUUID()}, 1, 'test')`;
+  await sql()`insert into quality.qc_checkpoint (qc_checkpoint_id, qc_checkpoint_set_id, seq, name, check_type, min_value, max_value, critical) values
+              (${cp1}, ${set}, 1, 'Test density', 'RANGE', 0.95, 1.05, true), (${cp2}, ${set}, 2, 'Test odour', 'PASS_FAIL', null, null, false)`;
+  const results = [{ checkpointId: cp1, pass: true, value: 0.99 }, { checkpointId: cp2, pass: false, note: 'flat' }];
+  await sql()`insert into quality.batch_qc_round (batch_qc_round_id, oil_batch_id, round_no, qc_checkpoint_set_id, inspector_id, results, decision, reasons, policy_version)
+              values (${randomUUID()}, ${b.oilBatchId}, 1, ${set}, 'qc-1', ${JSON.stringify(results)}::jsonb, 'REWORK', '[]'::jsonb, 1)`;
+  const ctl = new FactoryDeskController(reads(), writes());
+  const one = await ctl.batch(b.batchNo, principal({ userId: me.userId, via: 'relay' }));
+  assert.deepEqual(one.qcRounds[0]!.checkpoints, [
+    { seq: 1, name: 'Test density', checkType: 'RANGE', min: '0.950000', max: '1.050000', critical: true, pass: true, value: 0.99, note: null },
+    { seq: 2, name: 'Test odour', checkType: 'PASS_FAIL', min: null, max: null, critical: false, pass: false, value: null, note: 'flat' },
+  ]);
+  assert.deepEqual(quantityKeysIn(one), [], 'a checkpoint is a product check, not a per-line quantity');
+});
+
+test('RELAY-W2 3(a): the trace list names each fill (the system\'s finished-good lot and its fill day); none is invented', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 52, '5', null);
+  const b = await mixedBatch(m, null);
+  const none = await reads().traceBatches({ q: b.batchNo });
+  assert.deepEqual(none.items[0]!.fills, [], 'not filled yet: no lot');
+  const { fgLot } = await filledAndDispatched(b.oilBatchId);
+  const t = await reads().traceBatches({ q: b.batchNo });
+  assert.deepEqual(t.items[0]!.fills, [{ lot: fgLot, filledOn: '2026-11-10' }]);
+});
+
+test('RELAY-W2 3(a): a recall names the factory system\'s orders it reaches, from dispatch records', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 53, '5', null);
+  const b = await mixedBatch(m, null);
+  const { soNo } = await filledAndDispatched(b.oilBatchId);
+  const rcl = randomUUID();
+  await sql()`insert into quality.recall_review (recall_review_id, recall_no, subject_type, subject_id, lot_ref, reason, started_by)
+              values (${rcl}, ${'RCLT-' + rcl.slice(0, 6)}, 'RM_LOT', ${m.rmBatchId}, ${m.lot}, 'test recall', 'qc-1')`;
+  const list = await reads().recalls({ limit: '100' });
+  const row = list.items.find((r) => r.recallReviewId === rcl)!;
+  assert.deepEqual(row.ordersReached, [{ soNumber: soNo, dispatchedOn: '2026-11-12' }], 'raw lot -> the batch it went into -> its fill -> the dispatch');
+});
+
 /* ── writes ────────────────────────────────────────────────────────────────────────────────── */
 
 test('QC call: CONFIRM takes the proposal; a call against it needs a reason; a round takes one call; nothing is released', async () => {

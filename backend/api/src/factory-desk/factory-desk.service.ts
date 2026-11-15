@@ -260,12 +260,35 @@ export class FactoryDeskService {
     };
   }
 
-  private rounds(oilBatchId: string) {
-    return this.sql<Row[]>`
+  /** Each QC round, with its checkpoint rows (RELAY-W2 3(a)): the round's own checkpoint set (name, kind,
+   *  range, critical) beside what was booked against each (pass, value, note). A product check, not
+   *  recipe content; a checkpoint with nothing booked shows null, never a pass. */
+  private async rounds(oilBatchId: string) {
+    const rows = await this.sql<Row[]>`
       select round_no as "roundNo", decision as "proposal", decided_decision as "decision", overrides_proposal as "overridesProposal",
              decision_reason as "decisionReason", decided_by as "decidedBy", decided_dt::text as "decidedDt",
-             inspector_id as "bookedBy", created_dt::text as "bookedDt"
+             inspector_id as "bookedBy", created_dt::text as "bookedDt", qc_checkpoint_set_id::text as "setId", results
         from quality.batch_qc_round where oil_batch_id = ${oilBatchId}::uuid order by round_no`;
+    const setIds = [...new Set(rows.map((r) => r.setId).filter((x): x is string => typeof x === 'string'))];
+    const cps = setIds.length
+      ? await this.sql<Row[]>`select qc_checkpoint_id::text as id, qc_checkpoint_set_id::text as "setId", seq, name, check_type as "checkType",
+                                     min_value::text as min, max_value::text as max, critical
+                                from quality.qc_checkpoint where qc_checkpoint_set_id in ${this.sql(setIds)} order by seq`
+      : [];
+    return rows.map(({ setId, results, ...r }): Row & { checkpoints: Row[] } => {
+      const raw = typeof results === 'string' ? JSON.parse(results) : results;
+      const booked = new Map<string, Row>((Array.isArray(raw) ? raw : []).map((x: Row) => [String(x.checkpointId), x]));
+      const checkpoints = cps.filter((c) => c.setId === setId).map((c) => {
+        const b = booked.get(String(c.id));
+        return {
+          seq: c.seq, name: c.name, checkType: c.checkType, min: c.min ?? null, max: c.max ?? null, critical: c.critical === true,
+          pass: typeof b?.pass === 'boolean' ? b.pass : null,
+          value: typeof b?.value === 'number' ? b.value : null,
+          note: typeof b?.note === 'string' ? b.note : null,
+        };
+      });
+      return { ...r, checkpoints };
+    });
   }
 
   async batchRoute(ref: string) {
@@ -434,7 +457,11 @@ export class FactoryDeskService {
       select b.oil_batch_id::text as "oilBatchId", b.batch_number as "batchNumber", b.status, b.produced_dt::text as "producedDt",
              j.job_no as "jobNo", j.order_ref as "orderRef",
              (select count(distinct ib.rm_batch_id)::int from production.floor_line l join inventory.inventory_batch ib on ib.inventory_batch_id = l.picked_batch_id
-               where l.floor_job_id = j.floor_job_id) as "rawLots"
+               where l.floor_job_id = j.floor_job_id) as "rawLots",
+             -- RELAY-W2 3(a): each fill is the system's own finished-good lot and its fill day; none, none.
+             coalesce((select json_agg(json_build_object('lot', fg.batch_number, 'filledOn', fg.manufacturing_date::text) order by fg.manufacturing_date, fg.batch_number)
+                         from packaging.package_order po join packaging.finished_good_batch_master fg on fg.package_order_id = po.package_order_id
+                        where po.oil_batch_id = b.oil_batch_id), '[]'::json) as "fills"
         from production.oil_batch_master b
         left join production.floor_job j on j.oil_batch_id = b.oil_batch_id
        where ${needle ? this.sql`(b.batch_number ilike ${'%' + needle + '%'} or j.job_no ilike ${'%' + needle + '%'})` : this.sql`true`}
@@ -451,8 +478,24 @@ export class FactoryDeskService {
     const rows = await this.sql<Row[]>`
       select recall_review_id::text as "recallReviewId", recall_no as "recallNo", subject_type as "subjectType", subject_id::text as "subjectId",
              lot_ref as "lot", lot_hold_id::text as "lotHoldId", state, reason, started_by as "startedBy", started_dt::text as "startedDt",
-             decided_by as "decidedBy", decided_dt::text as "decidedDt", decision, decision_reason as "decisionReason"
-        from quality.recall_review order by started_dt desc limit ${limit + 1} offset ${offset}`;
+             decided_by as "decidedBy", decided_dt::text as "decidedDt", decision, decision_reason as "decisionReason",
+             -- RELAY-W2 3(a): the factory system's own sales orders this recall reaches, from dispatch records:
+             -- the lot (a raw lot through the batches it was picked into, or the oil batch itself) -> its fills
+             -- -> the dispatches that carried them. RAC OS orders are not known here.
+             coalesce((select json_agg(distinct jsonb_build_object('soNumber', so.so_number, 'dispatchedOn', dm.dispatch_date::text))
+                         from packaging.package_order po
+                         join packaging.finished_good_batch_master fg on fg.package_order_id = po.package_order_id
+                         join sales.dispatch_items di on di.finished_good_batch_id = fg.finished_good_batch_id
+                         join sales.dispatch_master dm on dm.dispatch_id = di.dispatch_id
+                         left join sales.sales_order so on so.sales_order_id = dm.sales_order_id
+                        where po.oil_batch_id in (
+                          select rr.subject_id where rr.subject_type = 'OIL_BATCH'
+                          union
+                          select j.oil_batch_id from production.floor_line l
+                            join production.floor_job j on j.floor_job_id = l.floor_job_id
+                            join inventory.inventory_batch ib on ib.inventory_batch_id = l.picked_batch_id
+                           where rr.subject_type = 'RM_LOT' and ib.rm_batch_id = rr.subject_id and j.oil_batch_id is not null)), '[]'::json) as "ordersReached"
+        from quality.recall_review rr order by started_dt desc limit ${limit + 1} offset ${offset}`;
     const [t] = await this.sql<{ n: number }[]>`select count(*)::int as n from quality.recall_review`;
     return { items: rows.slice(0, limit), nextCursor: rows.length > limit ? String(offset + limit) : null, total: t!.n };
   }
