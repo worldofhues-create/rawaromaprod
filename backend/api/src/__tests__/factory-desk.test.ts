@@ -421,6 +421,10 @@ test('operating rules and maceration defaults: append-only, newest wins, a reaso
   await writes().saveOperatingRules({ site, values: { 'kiosk.idle_lock_min': 2 }, reason: 'first setting' }, me);
   const r = await writes().saveOperatingRules({ site, values: { 'kiosk.idle_lock_min': 5 }, reason: 'night shift asked' }, me);
   assert.deepEqual(r.items.map((i) => [i.key, i.value, i.versions, i.reason]), [['kiosk.idle_lock_min', 5, 2, 'night shift asked']]);
+  /* RELAY-W4: a short text and a yes/no are rule values too (ruleValue, contract W-F11); a text value
+     used to fail the insert (22P02, "Malformed value"), so RAC OS could save no text rule at all. */
+  const t = await writes().saveOperatingRules({ site, values: { mc_every: '2 h', 'qc.auto': true }, reason: 'walk: text and yes/no' }, me);
+  assert.deepEqual(t.items.filter((i) => i.key !== 'kiosk.idle_lock_min').map((i) => [i.key, i.value]), [['mc_every', '2 h'], ['qc.auto', true]]);
   await assert.rejects(writes().saveMacerationDefaults(site, { values: [{ productClass: 'EDP', minDays: 9, maxDays: 3 }], reason: 'x'.repeat(4) }, me), /at least the fewest/);
   const m = await writes().saveMacerationDefaults(site, { values: [{ productClass: 'EDP', minDays: 14, maxDays: 28 }], reason: 'house standard' }, me);
   assert.deepEqual(m.items.map((i) => [i.productClass, i.minDays, i.maxDays]), [['EDP', 14, 28]]);

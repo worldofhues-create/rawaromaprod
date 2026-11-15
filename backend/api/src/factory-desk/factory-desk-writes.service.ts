@@ -171,7 +171,7 @@ export class FactoryDeskWritesService {
     await this.sql.begin(async (tx) => {
       for (const [k, v] of clean) {
         await tx`insert into platform.operating_rule (operating_rule_id, site, rule_key, value, reason, set_by)
-                 values (${uuidv7()}::uuid, ${site}, ${k}, ${tx.json(v as never)}, ${reason}, ${p.userId})`;
+                 values (${uuidv7()}::uuid, ${site}, ${k}, ${JSON.stringify(v)}::text::jsonb, ${reason}, ${p.userId})`; // RELAY-W4: JSON text cast in SQL; tx.json() passed a short text through unquoted on the app's client (22P02, 'Malformed value'), so no text rule could be saved
       }
     });
     return this.reads.operatingRules(site);
