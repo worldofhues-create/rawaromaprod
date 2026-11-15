@@ -30,7 +30,8 @@ export class FactoryDeskController {
 
   @Permissions('production:floor_queue:read')
   @Get('v1/floor/batches/:ref')
-  batch(@Param('ref') ref: string) { return this.reads.batch(ref); }
+  /* LD-272: a relay token (`via: "relay"`) gets no quantity; see FactoryDeskService.batch. */
+  batch(@Param('ref') ref: string, @CurrentUser() user?: AuthPrincipal) { return this.reads.batch(ref, { relay: user?.via === 'relay' }); }
 
   @Permissions('production:floor_queue:read')
   @Get('v1/floor/batches/:ref/route')

@@ -151,7 +151,12 @@ export class FactoryDeskService {
     return rows[0]!;
   }
 
-  async batch(ref: string) {
+  /** One batch. `relay` (LD-272): the caller came through the ALEMBIC relay (`via: "relay"`), so every
+   *  quantity is left out (target, tolerance, picked and actual grams per floor code, and the batch's
+   *  produced quantity): grams by code are the recipe by another name and never pass through ALEMBIC.
+   *  Each line keeps its code, its state, and who moved it there and when. A person signed in on
+   *  RawProd itself (`relay` false) gets the floor's batch sheet as the floor does. */
+  async batch(ref: string, opts: { relay?: boolean } = {}) {
     const j = await this.jobFor(ref);
     const jobId = String(j.floor_job_id);
     const oilBatchId = (j.oil_batch_id as string | null) ?? null;
@@ -159,7 +164,9 @@ export class FactoryDeskService {
       select l.seq, f.family_code as "familyCode", f.colour_name as "colourName", f.colour_hex as "colourHex", c.number as "codeNumber",
              l.target_mg::text as "targetMg", l.tolerance_ppm as "tolerancePpm", l.picked_mg::text as "pickedMg", l.actual_mg::text as "actualMg",
              rb.batch_number as "pickedLot", sl.storage_location_code as "bin",
-             case when l.verified_dt is not null then 'VERIFIED' when l.picked_dt is not null then 'PICKED' else 'OPEN' end as "state"
+             case when l.verified_dt is not null then 'VERIFIED' when l.picked_dt is not null then 'PICKED' else 'OPEN' end as "state",
+             coalesce(l.verified_by, l.picked_by) as "by",
+             coalesce(l.verified_dt, l.picked_dt) as "at"
         from production.floor_line l
         left join masterdata.floor_code c on c.material_id = l.material_id
         left join masterdata.floor_family_colour f on f.family_code = c.family_code
@@ -177,12 +184,16 @@ export class FactoryDeskService {
       ? (await this.sql<Row[]>`select lot_hold_id::text as "lotHoldId", reason, held_by as "heldBy", held_dt::text as "heldDt" from inventory.lot_hold
                                 where subject_type = 'OIL_BATCH' and subject_id = ${oilBatchId}::uuid and released_dt is null`)[0] ?? null
       : null;
+    const relay = opts.relay === true;
     return {
       floorJobId: jobId, jobNo: j.job_no, batchNo: j.batch_no, oilBatchId, stage: j.stage, expedite: j.expedite,
       orderRef: j.order_ref, promiseDt: j.promise_dt ? new Date(String(j.promise_dt)).toISOString() : null,
-      batch, hold, qcRounds: rounds,
-      lines: lines.map(({ colourName, codeNumber, ...l }): Row => ({
+      batch: batch && relay ? (({ producedQty: _q, ...rest }) => rest)(batch) : batch,
+      hold, qcRounds: rounds,
+      lines: lines.map(({ colourName, codeNumber, targetMg, tolerancePpm, pickedMg, actualMg, at, ...l }): Row => ({
         ...l,
+        ...(relay ? {} : { targetMg, tolerancePpm, pickedMg, actualMg }),
+        at: at ? new Date(String(at)).toISOString() : null,
         code: colourName && codeNumber != null ? codeText(String(colourName), Number(codeNumber)) : null,
         colourName: colourName ?? null,
       })),

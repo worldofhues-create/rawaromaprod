@@ -36,7 +36,7 @@ Branch `fd/vault-factory-api`. The work list is ALEMBIC `docs/plan/program/rp-re
 |---|---|---|---|---|---|---|---|---|
 | F1 | readToday | GET `/v1/factory/today` | production:production_order:read | no | n/a | none | `{day, tiles:{onTheFloor, macerating, qcWaiting:{batches, rmLots}, shortStock}, needsAPerson:{openAlerts, poAwaitingApproval, openProblems, belowReorder}, stationsToday:[{station, done}], planned:null, history:null, batchesMoving:[board row]}` (planned per station and the seven-day bars are not held: null) | BUILT |
 | F2 | readBoard | GET `/v1/floor/board` | production:floor_queue:read | no | n/a | none | `[{floorJobId, jobNo, batchNo, oilBatchId, stage (PICK, VERIFY, MIX, MACERATION, QC, APPROVED), expedite, orderRef, promiseDt, lines, macerationDay, macerationNeedDays, qcRound, createdDt}]`, `meta.total`; stage counts in the body's `counts` are not lifted by the envelope (count the rows). Packed and Shipped are not derived (no oil-batch link on a finished-good batch) | BUILT |
-| F3 | readBatch | GET `/v1/floor/batches/:ref` (ref = batch no, job no, or either uuid) | production:floor_queue:read | no | n/a | none | `{floorJobId, jobNo, batchNo, oilBatchId, stage, expedite, orderRef, promiseDt, batch:{batchNumber, status, producedQty, producedDt}, hold, qcRounds:[{roundNo, proposal, decision, overridesProposal, decisionReason, decidedBy, decidedDt, bookedBy, bookedDt}], lines:[{seq, code, familyCode, colourName, colourHex, targetMg, tolerancePpm, pickedMg, actualMg, pickedLot, bin, state}]}` | BUILT (see note L1) |
+| F3 | readBatch | GET `/v1/floor/batches/:ref` (ref = batch no, job no, or either uuid) | production:floor_queue:read | no | n/a | none | `{floorJobId, jobNo, batchNo, oilBatchId, stage, expedite, orderRef, promiseDt, batch:{batchNumber, status, producedQty, producedDt}, hold, qcRounds:[{roundNo, proposal, decision, overridesProposal, decisionReason, decidedBy, decidedDt, bookedBy, bookedDt}], lines:[{seq, code, familyCode, colourName, colourHex, targetMg, tolerancePpm, pickedMg, actualMg, pickedLot, bin, state, by, at}]}`. For a RELAY token (`via: "relay"`, LD-272) `targetMg`, `tolerancePpm`, `pickedMg`, `actualMg` and `batch.producedQty` are absent: each line is its code, state, `by` and `at` | BUILT (LD-272, RELAY-W) |
 | F4 | readBatchRoute | GET `/v1/floor/batches/:ref/route` | production:floor_queue:read | no | n/a | none | `{floorJobId, batchNo, steps:[{station, state (DONE, CURRENT, WAITING, BOOKED), by, at, note}]}` station by station: PICK, VERIFY, MIX, MACERATION (each run), QC ROUND n | BUILT |
 | F5 | readStockCover | GET `/v1/floor/stock-cover` | procurement:stock_requirement:read | no | n/a | `q` (code, colour or bin), `state` (all, low, covered), `cursor`, `limit` | `[{code, materialId, familyCode, colourName, colourHex, bins[], onHandMg, unconverted, reorderAtMg, belowReorder (null when either figure is missing), requestOpen, coverDays:null}]`, `meta.total`; body `coverNote` says why cover is null | BUILT |
 | F6 | readCode | GET `/v1/floor/codes/:code/summary` (code like `YELLOW-0417`) | masterdata:floor_code:read | no | n/a | none | one stock-cover row + `lots` (count) + `coverNote` | BUILT at a DIFFERENT PATH: `GET /v1/floor/codes/:materialId` already exists (write permission, by material id), so the console's `floor/codes/:code` becomes `floor/codes/:code/summary` |
@@ -53,9 +53,11 @@ Branch `fd/vault-factory-api`. The work list is ALEMBIC `docs/plan/program/rp-re
 | F17 | readMixSteps | GET `/v1/floor/jobs/:id/mix` | production:floor_mix:write | no | n/a | none | the mixer's coded steps | REUSED (console path `floor/jobs/:id/mix/steps` becomes `floor/jobs/:id/mix`) |
 | F18 | deviceTest | GET `/v1/devices/:id/test` | platform:device:read | no | n/a | none | `{deviceId, kind, station, name, status, pairedAt, lastSeenAt, revokedAt, paired, test:{deviceTestId, state (REQUESTED, PASSED, FAILED), result, requestedBy, requestedAt, testedAt} or null}` | BUILT (the device's own report route is NOT BUILT: see the note under Factory writes) |
 
-Note L1 (for the lead): F3 carries each line's target grams by FLOOR CODE (never a material name), which is
-the factory's batch sheet; RawProd already serves the same to the floor at `/v1/floor/jobs/:id/pick`. LD-261
-governs Vault reads (no decrypted formula); whether the relay may carry floor-coded grams is the lead's call.
+Note L1, RULED (LD-272): the relay never carries target grams per floor code. F3 strips every quantity for a
+relay token (RawProd side, `FactoryDeskService.batch(ref, {relay})`) and ALEMBIC's relay strips them again (second
+lock). A person signed in on RawProd itself still gets the floor's batch sheet with grams. F16 and F17 (the
+stations' own views, which carry target grams) are NOT relayed for the same reason: the console says they are
+read in the factory system.
 
 Note G1: the values are stored and served; NOTHING in RawProd reads them yet (FAC-BE-03's money rule and
 contract are an owner gate). A saved rule changes no behaviour until a consumer is built and approved.
@@ -128,6 +130,24 @@ The relay must add `via: "relay"` to every assertion it mints (rp-relay.md 2.1 s
   `GET /v1/compliance/missing`.
 Until the relay sends the mark, its token is indistinguishable from a hand-off and only Alembic's own allow-list
 keeps the decrypt out; with the mark, RawProd refuses it as well (two independent checks).
+
+## Verified by RELAY-W (15 Nov)
+
+- Migration `2026-11-28-vault-factory-api.sql` through `pnpm db:migrate` on an EMPTY database (Postgres 17.11 with
+  PostGIS; the local 14 has no PostGIS, which `0000_prerequisites.sql` needs): exit 0, 68 blocks applied. Its
+  rollback (`psql -v ON_ERROR_STOP=1 -f scripts/migrations/rollback/2026-11-28-vault-factory-api.down.sql`): exit 0;
+  the schema difference is exactly the migration's objects (7 tables, 1 sequence, their indexes and grants to
+  `DB_APP_ROLE`, 3 `purchase_order` columns, 5 `batch_qc_round` columns, its ledger row), nothing added. Forward
+  again: exit 0, 1 block applied, and the schema (columns, indexes, sequences, grants, ledger) is IDENTICAL to the
+  first forward.
+- LIVE HTTP (real `src/main.ts` on :4671 and `src/vault-main.ts` on :4672, fresh databases, dev key pair): the
+  assertion exchange (main box `POST /auth/alembic-assertion`) with `via: "relay"` answers 201 with
+  `refreshToken: ""`; an unknown `via` is 401 `AUTH_ASSERTION_INVALID`. As `formulator` (holds every permission
+  the ten routes name) with a fresh `auth_time`, the relay token gets 403 "This is opened only on the Vault
+  itself, never through RAC OS." on all ten `@NoRelay` routes, the decrypt included; the same person's own
+  RawProd session (the hand-off; password sign-in is retired) passes the guard on every one (404 no such
+  version, 422 validation, 200 for `compliance/missing`). Password sign-in answers 403 "Password sign-in is
+  retired", so the hand-off is the only RawProd session there is.
 
 ## State
 

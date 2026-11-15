@@ -146,6 +146,52 @@ test('board, one batch and its route: stage from what the batch has, lines coded
   await assert.rejects(reads().batch('NO-SUCH-BATCH'), /No batch or job/);
 });
 
+/* LD-272: the one-batch read through the ALEMBIC relay carries each coded line's code, state, who and
+ * when, and NO quantity: target grams per floor code are the recipe by another name, so a relay token
+ * never receives them. A person signed in on RawProd itself still gets the floor's batch sheet. */
+const QUANTITY_KEYS = ['targetMg', 'tolerancePpm', 'pickedMg', 'actualMg', 'producedQty'];
+function quantityKeysIn(v: unknown, out: string[] = []): string[] {
+  if (Array.isArray(v)) v.forEach((x) => quantityKeysIn(x, out));
+  else if (v && typeof v === 'object') {
+    for (const [k, x] of Object.entries(v)) { if (QUANTITY_KEYS.includes(k)) out.push(k); quantityKeysIn(x, out); }
+  }
+  return out;
+}
+
+test('LD-272: one batch through the relay: each line coded with state, who and when, and no quantity anywhere', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 22, '5', null);
+  const b = await mixedBatch(m, 'APPROVE');
+  await sql()`update production.floor_line set picked_by = 'picker-7', picked_dt = now() - interval '90 minutes' where floor_job_id = ${b.jobId}`;
+  const ctl = new FactoryDeskController(reads(), writes());
+  const relayed = await ctl.batch(b.batchNo, principal({ userId: me.userId, via: 'relay' }));
+  assert.deepEqual(quantityKeysIn(relayed), [], 'no target, tolerance, picked, actual or produced quantity reaches a relay token');
+  const line = relayed.lines[0] as Record<string, unknown>;
+  assert.equal(line.code, m.code);
+  assert.equal(line.state, 'PICKED');
+  assert.equal(line.by, 'picker-7');
+  assert.match(String(line.at), /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(relayed.batchNo, b.batchNo, 'the rest of the batch (stage, rounds, hold) is still served');
+  assert.equal(relayed.qcRounds[0]!.proposal, 'APPROVE');
+  assert.ok(!JSON.stringify(relayed).includes('SECRET MATERIAL NAME'));
+});
+
+test('LD-272: one batch for a person signed in on RawProd: the floor\'s batch sheet with its grams, as before', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 23, '5', null);
+  const b = await mixedBatch(m, null);
+  const ctl = new FactoryDeskController(reads(), writes());
+  const own = await ctl.batch(b.batchNo, principal({ userId: me.userId }));
+  const line = own.lines[0] as Record<string, unknown>;
+  assert.equal(line.targetMg, '250000');
+  assert.equal(line.tolerancePpm, 5000);
+  assert.equal(line.pickedMg, '250100');
+  assert.equal(line.actualMg, '250050');
+  assert.equal(Number(own.batch!.producedQty), 5);
+  assert.equal(line.state, 'OPEN');
+  assert.equal(line.by, null, 'nobody has picked it');
+});
+
 test('QC queue: a batch with no approving round and a quarantined raw lot, one list, oldest first', async () => {
   const f = await family();
   const m = await codedMaterial(f, 31, '5', null);
