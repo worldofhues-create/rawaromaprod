@@ -286,11 +286,20 @@
    * does not fire `hashchange`, so this cannot loop back into itself — see the identical
    * mechanism (and the fragment-not-query-string reasoning) in web-platform/platform.js. */
   var consumingAssertion = false;
+  /* RELAY-W4 (LD-261, LD-272): RAC OS's "New version" never types a recipe line; it hands the person
+   * here, at the formula, with `&to=` beside the assertion in the same fragment. Only this console's
+   * own three screens are honoured (one formula, one version, the needed list); anything else lands
+   * on the formula list, as every hand-off did before. Read BEFORE the scrub below. */
+  function handoffDestination(hash) {
+    var m = /(?:^|[#&])to=(?:((?:formula|version)\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})|(needed))(?:&|$)/.exec(hash || '');
+    return m ? '#/' + (m[1] || m[2]) : '#/formulas';
+  }
   async function tryConsumeAssertion() {
     var m = /(?:^|[#&])assertion=([^&]+)/.exec(location.hash);
     if (!m || consumingAssertion) return false;
     consumingAssertion = true;
     var token = decodeURIComponent(m[1]);
+    var landing = handoffDestination(location.hash);
     // Scrub the fragment BEFORE the exchange, not after — a single-use token must not sit in
     // the address bar even for the duration of one network round trip, and this also means a
     // later `location.hash = '#/formulas'` below cannot be clobbered by a stale scrub.
@@ -301,7 +310,7 @@
         toast('This account has no Vault access. Ask an admin for a formulator or approver role.', true);
         logout();
       } else {
-        location.hash = '#/formulas';
+        location.hash = landing;
       }
     } catch (e) {
       toast('Sign-in didn\'t complete. ' + ((e instanceof VaultError) ? e.message : 'Try again.'), true);

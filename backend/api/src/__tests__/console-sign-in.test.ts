@@ -53,3 +53,26 @@ test('vault: never asks to persist; the step-up round trip returns in the same t
   assert.match(src.vault, /location\.assign\(alembicSignInUrl\('vault'\)\)/);
   assert.doesNotMatch(src.vault, /window\.open\(ALEMBIC_CONSOLE_URL/);
 });
+
+/* RELAY-W4 (LD-261, LD-272): RAC OS's "New version" hands the person to THIS console at the formula,
+ * never to a form of its own. The destination rides beside the assertion as `&to=`; only the Vault's
+ * own screens are honoured, anything else lands on the formula list as before. */
+test('vault: a hand-off lands on the formula, version or needed list it names, and nowhere else', () => {
+  const fn = /function handoffDestination\(hash\) \{[\s\S]*?\n  \}\n/.exec(src.vault);
+  assert.ok(fn, 'handoffDestination is defined');
+  const at = (hash: string): string => {
+    const ctx = { out: '' };
+    vm.runInNewContext(`${fn[0]}; out = handoffDestination(${JSON.stringify(hash)});`, ctx);
+    return ctx.out;
+  };
+  const F = '0199a2b4-1c2d-7e3f-8a9b-0c1d2e3f4a5b';
+  assert.equal(at(`#assertion=a.b.c&to=formula/${F}`), `#/formula/${F}`);
+  assert.equal(at(`#assertion=a.b.c&to=version/${F}`), `#/version/${F}`);
+  assert.equal(at('#assertion=a.b.c&to=needed'), '#/needed');
+  assert.equal(at('#assertion=a.b.c'), '#/formulas');
+  for (const bad of ['to=formula/x', `to=formula/${F}/actual`, 'to=audit-access', 'to=javascript:alert(1)', `to=version/${F.toUpperCase()}`]) {
+    assert.equal(at(`#assertion=a.b.c&${bad}`), '#/formulas', bad);
+  }
+  assert.match(src.vault, /var landing = handoffDestination\(location\.hash\);\s*\/\/ Scrub/, 'read before the fragment is scrubbed');
+  assert.match(src.vault, /location\.hash = landing;/);
+});
