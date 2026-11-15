@@ -639,3 +639,54 @@ test('LANE D1 — the showcase role never signs in with a password, in any envir
     });
   }
 });
+
+/* ── RP-BE-1 (ALEMBIC LD-261): a relay assertion can never open the decrypted recipe ─────────── */
+
+test('LD-261: an assertion marked via "relay" mints a token marked relay, with no refresh token', async () => {
+  const email = `relay-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const result = await makeService().loginWithAssertion(signAssertion(claimsFor(email, { via: 'relay' })));
+  const claims = await new JwtService(testConfig()).verifyAccess(result.accessToken);
+  assert.equal(claims.via, 'relay');
+  assert.equal(result.refreshToken, '', 'a relay session is never refreshed into an unmarked one');
+});
+
+test('LD-261: a hand-off assertion (no via, or via "handoff") mints an unmarked token, as before', async () => {
+  const email = `handoff-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const a = await makeService().loginWithAssertion(signAssertion(claimsFor(email)));
+  const b = await makeService().loginWithAssertion(signAssertion(claimsFor(email, { via: 'handoff' })));
+  assert.equal((await new JwtService(testConfig()).verifyAccess(a.accessToken)).via, undefined);
+  assert.equal((await new JwtService(testConfig()).verifyAccess(b.accessToken)).via, undefined);
+  assert.ok(a.refreshToken);
+});
+
+test('LD-261: an unknown via is refused, never read as a hand-off', async () => {
+  const email = `via-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  await assert.rejects(makeService().loginWithAssertion(signAssertion(claimsFor(email, { via: 'browser' }))), /missing a required claim|AUTH_ASSERTION_INVALID/);
+});
+
+test('LD-261: the relay token alone cannot open POST /v1/formula-versions/:id/actual, even with the permission and a fresh step-up', async () => {
+  const { NoRelayGuard, META_NO_RELAY } = await import('../../../backend-kernel/src/decorators/no-relay.decorator.js');
+  const { FormulasController } = await import('../../../cluster-formula/src/formulas/formulas.controller.js');
+  const email = `relay-dec-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const nowSec = Math.floor(Date.now() / 1000);
+  const result = await makeService().loginWithAssertion(signAssertion(claimsFor(email, { via: 'relay', target: 'vault', auth_time: nowSec })));
+  const claims = await new JwtService(testConfig()).verifyAccess(result.accessToken);
+  // The principal exactly as JwtAuthGuard builds it, holding the decrypt permission and a step-up from now.
+  const principalFrom = (via: unknown) => ({
+    userId: claims.sub, portal: claims.portal, roles: claims.roles, permissions: ['formula:actual:read'],
+    permVersion: claims.pv, sessionId: claims.sid, iat: claims.iat, authTime: claims.authTime, ...(via ? { via } : {}),
+  });
+  const handler = (FormulasController.prototype as unknown as Record<string, object>).actual
+    ?? Object.values(Object.getOwnPropertyDescriptors(FormulasController.prototype)).map((d) => d.value).find((v) => typeof v === 'function' && Reflect.getMetadata('path', v) === 'v1/formula-versions/:id/actual');
+  assert.ok(handler, 'the decrypt handler is found');
+  assert.equal(Reflect.getMetadata(META_NO_RELAY, handler!), true, 'the decrypt route is marked @NoRelay');
+  const guards = (Reflect.getMetadata('__guards__', handler!) ?? []) as unknown[];
+  assert.ok(guards.includes(NoRelayGuard), 'and carries the guard that enforces it');
+  const ctx = (user: unknown) => ({ switchToHttp: () => ({ getRequest: () => ({ user }) }) }) as never;
+  assert.throws(() => new NoRelayGuard().canActivate(ctx(principalFrom(claims.via))), (e: unknown) => (e as { status?: number }).status === 403);
+  assert.equal(new NoRelayGuard().canActivate(ctx(principalFrom(undefined))), true, 'a hand-off session is judged by the route as before');
+});

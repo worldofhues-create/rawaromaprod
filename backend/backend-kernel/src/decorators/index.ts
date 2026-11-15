@@ -8,6 +8,7 @@ export { SelfService } from './self-service.decorator.js';
 export { DynamicPermission } from './dynamic-permission.decorator.js';
 export { AnyAuthenticated } from './any-authenticated.decorator.js';
 export { NoStoredReply } from './no-stored-reply.decorator.js';
+export { NoRelay, NoRelayGuard, META_NO_RELAY, NO_RELAY_MESSAGE } from './no-relay.decorator.js';
 export {
   META_PUBLIC,
   META_PERMISSIONS,

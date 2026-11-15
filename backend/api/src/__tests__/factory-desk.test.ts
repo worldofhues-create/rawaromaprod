@@ -133,9 +133,9 @@ test('board, one batch and its route: stage from what the batch has, lines coded
   assert.equal(one.batchNo, b.batchNo);
   assert.equal(one.lines.length, 1);
   assert.equal(one.lines[0]!.code, m.code);
-  assert.equal(one.lines[0]!.targetMg, '250000');
-  assert.equal(one.lines[0]!.pickedLot, m.lot);
-  assert.equal(one.lines[0]!.state, 'OPEN');
+  assert.equal((one.lines[0] as Record<string, unknown>).targetMg, '250000');
+  assert.equal((one.lines[0] as Record<string, unknown>).pickedLot, m.lot);
+  assert.equal((one.lines[0] as Record<string, unknown>).state, 'OPEN');
   assert.equal(one.qcRounds[0]!.proposal, 'APPROVE');
   assert.equal(one.qcRounds[0]!.decision, null, 'no person has made the call yet');
   assert.ok(!JSON.stringify(one).includes('SECRET MATERIAL NAME'));
@@ -290,7 +290,7 @@ test('kiosk problem: raises a supervisor alert in the same step; OTHER needs a n
   await assert.rejects(writes().raiseProblem({ station, kind: 'NOPE' }, me), /one of/);
   const r = await writes().raiseProblem({ station, kind: 'SCALE_NOT_READING' }, me);
   assert.equal(r.alertRaised, true);
-  const [a] = await sql()`select title, station from platform.floor_alert where floor_alert_id = ${r.floorAlertId as string}`;
+  const [a] = await sql()`select title, station from platform.floor_alert where floor_alert_id = ${(r as Record<string, unknown>).floorAlertId as string}`;
   assert.equal(a!.station, station);
   assert.match(String(a!.title), /Scale not reading/);
 });
@@ -300,7 +300,7 @@ test('reveal behind a floor code: reason recorded before the name is returned', 
   const m = await codedMaterial(f, 71, '1', null);
   await assert.rejects(writes().revealCode(m.code, {}, me), /Say why/);
   const r = await writes().revealCode(m.code, { reason: 'supplier asked which material' }, me);
-  assert.equal(r.materialName, 'SECRET MATERIAL NAME');
+  assert.equal((r as Record<string, unknown>).materialName, 'SECRET MATERIAL NAME');
   const [row] = await sql()`select reason, revealed_by from masterdata.floor_code_reveal where code = ${m.code}`;
   assert.equal(row!.reason, 'supplier asked which material');
   assert.equal(row!.revealed_by, me.userId);

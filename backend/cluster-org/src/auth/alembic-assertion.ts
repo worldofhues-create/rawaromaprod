@@ -61,6 +61,10 @@ export interface AlembicAssertionClaims {
    *  actually PROVED (OIDC `auth_time` semantics), never when the assertion was minted. See
    *  `rawprod-assertion.ts`'s own claim doc for how ALEMBIC computes it. */
   readonly auth_time: number;
+  /** RP-BE-1 (LD-261): `relay` when ALEMBIC's server-side relay minted this assertion to call a
+   *  route on the person's behalf; absent or `handoff` for the browser hand-off. A relay token can
+   *  never open a route marked @NoRelay (the decrypted recipe, new formula lines). */
+  readonly via?: 'relay' | 'handoff';
   /** LANE D1 — which kind of ALEMBIC deployment minted this: `demo` or `production`.
    *  Absent reads as `production` (an issuer from before the claim existed was a production
    *  one). Must equal this deployment's own `RAWPROD_ENVIRONMENT` — see `expectedEnvironment`. */
@@ -177,6 +181,8 @@ export function verifyAlembicAssertion(opts: {
     // token minted without it (an older/misconfigured issuer) is malformed, the same as a
     // missing sub/email, rather than silently treated as "no fresh-auth information".
     || typeof p.auth_time !== 'number'
+    // RP-BE-1: an unknown `via` is refused rather than read as a hand-off.
+    || (p.via !== undefined && p.via !== 'relay' && p.via !== 'handoff')
   ) {
     return { ok: false, refusal: 'MALFORMED', detail: 'The assertion is missing a required claim.' };
   }
@@ -231,6 +237,7 @@ export function verifyAlembicAssertion(opts: {
       iss: p.iss, aud: p.aud, sub: p.sub, tenant_id: p.tenant_id, org_id: p.org_id,
       email: p.email, roles: p.roles, target: p.target, jti: p.jti, iat: p.iat, exp: p.exp,
       auth_time: p.auth_time, env,
+      ...(p.via === 'relay' || p.via === 'handoff' ? { via: p.via } : {}),
     },
   };
 }

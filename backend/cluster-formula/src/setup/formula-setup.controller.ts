@@ -15,7 +15,7 @@
  * window the client can stretch.
  */
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { CurrentUser, DomainError, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, DomainError, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal, NoRelay } from '@core/backend-kernel';
 import { ComplianceService } from '../compliance/compliance.service.js';
 import {
   approveBatchBody,
@@ -57,6 +57,7 @@ export class FormulaSetupController {
   // nowhere. A re-sent commit runs again and is refused by the seal ("already has sealed ingredients").
   @NoStoredReply()
   @Permissions('formula:formula_ingredients:write')
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/formula-recipes/import')
   importRecipes(@Body(new ZodValidationPipe(recipeImportBody)) body: RecipeImportBody, @CurrentUser() principal: AuthPrincipal) {
     return this.setup.importRecipes(body, principal);

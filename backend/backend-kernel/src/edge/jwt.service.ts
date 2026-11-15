@@ -42,6 +42,8 @@ export interface AccessClaims {
    * header for why `iat` was the wrong field to have used.
    */
   authTime: number;
+  /** RP-BE-1 (LD-261): 'relay' on a token minted from an ALEMBIC relay assertion. Absent otherwise. */
+  via?: 'relay';
 }
 
 export interface RefreshClaims {
@@ -86,6 +88,7 @@ export class JwtService {
       pv: claims.pv,
       sid: claims.sid,
       authTime: claims.authTime,
+      ...(claims.via === 'relay' ? { via: 'relay' } : {}),
     })
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(claims.sub)
@@ -131,6 +134,7 @@ export class JwtService {
       // elsewhere (or signed before this claim existed) must never pass a step-up check by
       // omission (S3 security review item 2).
       authTime: typeof payload.authTime === 'number' ? payload.authTime : 0,
+      ...(payload.via === 'relay' ? { via: 'relay' as const } : {}),
     };
   }
 

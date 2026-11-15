@@ -181,7 +181,7 @@ export class FactoryDeskService {
       floorJobId: jobId, jobNo: j.job_no, batchNo: j.batch_no, oilBatchId, stage: j.stage, expedite: j.expedite,
       orderRef: j.order_ref, promiseDt: j.promise_dt ? new Date(String(j.promise_dt)).toISOString() : null,
       batch, hold, qcRounds: rounds,
-      lines: lines.map(({ colourName, codeNumber, ...l }) => ({
+      lines: lines.map(({ colourName, codeNumber, ...l }): Row => ({
         ...l,
         code: colourName && codeNumber != null ? codeText(String(colourName), Number(codeNumber)) : null,
         colourName: colourName ?? null,
@@ -270,7 +270,7 @@ export class FactoryDeskService {
              f.colour_hex as "colourHex", c.number, c.created_by as "createdBy", c.created_dt::text as "createdDt"
         from masterdata.floor_code c join masterdata.floor_family_colour f on f.family_code = c.family_code
        order by f.colour_name, c.number`;
-    const items = rows.map((r) => ({ code: codeText(String(r.colourName), Number(r.number)), ...r }));
+    const items: Row[] = rows.map((r) => ({ code: codeText(String(r.colourName), Number(r.number)), ...r }));
     return { items, nextCursor: null, total: items.length };
   }
 
@@ -304,7 +304,7 @@ export class FactoryDeskService {
         left join location.storage_location_master sl on sl.storage_location_id = ib.storage_location_id
        where ib.material_id = ${head.materialId}::uuid and ib.quantity_on_hand > 0
        order by rb.expiry_date asc nulls last, ib.created_dt asc`;
-    const items = rows.map(({ qty, uom, ...r }) => ({ ...r, onHandMg: qtyToMg(qty as string, (uom as string) ?? null) }));
+    const items: Row[] = rows.map(({ qty, uom, ...r }) => ({ ...r, onHandMg: qtyToMg(qty as string, (uom as string) ?? null) }));
     return { code: head.code, items, nextCursor: null, total: items.length };
   }
 

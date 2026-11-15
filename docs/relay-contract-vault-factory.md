@@ -89,13 +89,52 @@ contract are an owner gate). A saved rule changes no behaviour until a consumer 
 Not relayed (device credentials, never a person): `pairDevice`, `stationSignOn`, `selfTest`, `readKioskDevice`.
 The device's test report (`POST /v1/device-agent/self-test`) is NOT BUILT here: a device-token route, outside the relay.
 
-## Vault reads (6) and Vault writes (7)
+## Vault reads (6)
 
-(filled in as built; see State)
+V = Vault box (the relay's `/api/v1/vault/rp/<path>`), M = main box (`/api/v1/vault/rp/main/<path>`).
+LD-261: every Vault read for the relay is METADATA ONLY (code, name, version, status, who, when, counts). The
+decrypted recipe is `POST /v1/formula-versions/:id/actual`, now `@NoRelay` (see "Relay mark" below).
+
+| # | Console call | Method + RawProd path | Permission | Step-up | Idem. | Request | Response (`data`) | Status |
+|---|---|---|---|---|---|---|---|---|
+| V1 | readOverview | V GET `/v1/vault/overview` | formula:formula_version:read | no (the relay asks a fresh RAC OS step-up for every Vault call) | n/a | none | `{tiles:{approved, waiting, drafts, needed:null}, neededNote, waiting:[{formulaVersionId, formulaId, formulaCode, formulaName, versionNumber, status, submittedBy, submittedDt, createdBy, sealedLines}], formulas:[{formulaId, formulaCode, formulaName, status, latestVersionNumber, latestVersionStatus, latestVersionUpdatedDt, approvedVersionId, approvedVersionNumber}]}`; `needed` is main-box data (`GET /v1/produce/formula-needs`, M) and stays null here. Writes one `formula.audit_events` row (`formula.vault.overview_read`) before answering | BUILT |
+| V2 | readDraftStart | V GET `/v1/vault/version-draft?base=` | formula:formula_version:write | no | n/a | `base` (a version uuid, optional) | `{bases:[{formulaVersionId, formulaId, formulaCode, formulaName, versionNumber, status, approvedBy, approvedDt}], materials:null, materialsNote}` (materials are searched at `GET /v1/vault/materials?q=`). Audited (`formula.vault.version_draft_read`, entity = base) | BUILT |
+| V3 | readRoute | (V GET `/v1/vault/route`) | | | | | | NOT BUILT: LD-261. Its answer is each line's floor code with milligrams for a batch size, i.e. the recipe's quantities; that is the decrypted formula and never goes to ALEMBIC. The drawer's line and step COUNTS come from V1's `sealedLines`; the route itself is read in the Vault (hand-off) |
+| V4 | readCodes | M GET `/v1/floor/codes` | masterdata:floor_code:read | no | n/a | none | as F11 | BUILT (same route as F11) |
+| V5 | readMaterial | V GET `/v1/compliance/materials/:materialId` | vault:rm_compliance:read | no | n/a | none | `{allergenComplete, ifraComplete, ifraAmendment, sourceRef, allergens[], ifra:[{category, restrictionType, maxPct, amendment}], ...}`: per-material and sourced; `ifraComplete:false` means NOT KNOWN, never "unrestricted". Name and code come from the search row (`GET /v1/vault/materials?q=`) | REUSED (console path `vault/materials/:id` becomes `compliance/materials/:id`) |
+| V6 | readImpact | (M GET `/v1/vault/impact`) | | | | | | NOT BUILT: LD-261. Need per floor code for a batch size is the recipe's quantities by another name, and the main box cannot compute it without the decrypt. Nearest held figure: `GET /v1/reorder-suggestions` (M) and F5 |
+
+## Vault writes (7)
+
+| # | Console call | Method + RawProd path | Permission | Step-up | Idem. | Request | Response | Status |
+|---|---|---|---|---|---|---|---|---|
+| W-V1 | createVersion | V POST `/v1/formula-versions` | formula:formula_version:write | no | yes (Vault) | as RawProd's | the version | REUSED on RawProd's own Vault only: now `@NoRelay` (its body carries recipe lines; LD-261). A relay token gets 403. The console sends the person to the Vault (hand-off) to write a version |
+| W-V2 | submitForReview | V POST `/v1/formula-versions/:id/submit-for-review` | formula:formula_version:write | no | yes (Vault) | `{remarks?}` | the version | REUSED |
+| W-V3 | approveVersion | V POST `/v1/formula-versions/:id/approve` | formula:formula_approval:write | yes | yes (Vault) | `{remarks?, approvalLevel?}` (console sends `reason`: map to `remarks`) | the version | REUSED (SoD: the author never approves) |
+| W-V4 | sendBack | V POST `/v1/formula-versions/:id/reject` | formula:formula_approval:write | yes | yes (Vault) | `{remarks}` (3-2000 chars, required) | the version | REUSED |
+| W-V5 | issueCode | M POST `/v1/floor/codes` | masterdata:floor_code:write | no | yes | `{materialId, familyCode}` (console sends `family`: rename to `familyCode`) | the floor code | REUSED |
+| W-V6 | revealCode | M POST `/v1/floor/codes/:code/reveal` | masterdata:material:reveal | yes | yes, with no stored reply (the answer names a material) | `{reason}` (3-500 chars) | `{code, materialId, materialCode, materialName, revealedBy}`; a `masterdata.floor_code_reveal` row (who, why, when) is written before the name is returned. Identity only, no formula | BUILT |
+| W-V7 | raisePurchaseRequest | M POST `/v1/purchase-requests` then POST `/v1/purchase-request-items` | procurement:purchase_request:write / purchase_request_items:write | no | yes | header `{priority?, expectedDeliveryDate?, ...}`, then items `{purchaseRequestId, materialId, requiredQty, uomId}` | the request | REUSED (Part 4.3 listed it as missing; it exists, in two steps) |
+
+## Relay mark (LD-261): what the next unit must send
+
+The relay must add `via: "relay"` to every assertion it mints (rp-relay.md 2.1 step 4). RawProd then:
+- refuses an unknown `via` value (401 `AUTH_ASSERTION_INVALID`); absent or `"handoff"` = the browser hand-off, as before;
+- marks the access token `via: "relay"` and returns `refreshToken: ""` (a relay session is never refreshed);
+- refuses that token with 403 on every `@NoRelay` route, whatever its permissions and step-up:
+  `POST /v1/formula-versions/:id/actual` (the decrypt), `POST /v1/formula-versions`, `POST /v1/formula-versions/:id/ingredients`,
+  `POST /v1/formula-stages/:id/ingredients`, `POST /v1/formula-recipes/import`, `POST /v1/imports/:kind/preview`,
+  `POST /v1/imports/jobs/:id/commit`, `POST /v1/imports/jobs/:id/problems` (Vault box), `GET /v1/compliance/preview/:formulaId`,
+  `GET /v1/compliance/missing`.
+Until the relay sends the mark, its token is indistinguishable from a hand-off and only Alembic's own allow-list
+keeps the decrypt out; with the mark, RawProd refuses it as well (two independent checks).
 
 ## State
 
-Built and tested so far: F1-F15, F18, W-F2, W-F4, W-F5, W-F8, W-F10, W-F11, W-F12, W-F15, W-F19 (main box,
-`backend/api/src/factory-desk/`, test `backend/api/src/__tests__/factory-desk.test.ts` 17/17), migration
-`scripts/migrations/2026-11-28-vault-factory-api.sql` + rollback. Left, in order: Vault reads, LD-261 tests,
-Vault writes, whole suite.
+Built and tested: F1-F15, F18, W-F2, W-F4, W-F5, W-F8, W-F10, W-F11, W-F12, W-F15, W-F19, V1, V2, V4 (=F11), W-V6,
+and the relay mark (LD-261). Code: `backend/api/src/factory-desk/`, `backend/cluster-formula/src/vault-desk/`,
+`backend/backend-kernel/src/decorators/no-relay.decorator.ts`; migration `scripts/migrations/2026-11-28-vault-factory-api.sql`
++ rollback. Tests: `backend/api/src/__tests__/factory-desk.test.ts`, `backend/cluster-formula/src/__tests__/vault-desk.test.ts`,
+4 LD-261 tests at the end of `backend/cluster-org/src/__tests__/auth-service-assertion.test.ts`.
+Totals: 23 BUILT (16 reads + 7 writes; F11 and V4 are one route), 25 REUSED, 4 NOT BUILT (V3, V6: LD-261;
+F16/F17 are reused under the station paths). Left: the whole suite once.

@@ -68,6 +68,7 @@ export class JwtAuthGuard implements CanActivate {
       sessionId: claims.sid,
       iat: claims.iat,
       authTime: claims.authTime,
+      ...(claims.via === 'relay' ? { via: 'relay' as const } : {}),
     };
     request.user = principal;
     return true;

@@ -29,6 +29,8 @@ const { ApprovalsController } = await import('../approvals/approvals.controller.
 const { ComplianceController } = await import('../compliance/compliance.controller.js');
 const { FormulaSetupController } = await import('../setup/formula-setup.controller.js');
 const { FormulaImportController } = await import('../imports/formula-import.controller.js');
+// RP-BE-1: the RAC OS Vault console's Overview and Version draft (metadata only, LD-261).
+const { VaultDeskController } = await import('../vault-desk/vault-desk.controller.js');
 const { MaterialCatalogue } = await import('../facts-bridge/material-catalogue.js');
 const { FormulaModule, isVaultMode } = await import('../formula.module.js');
 const { MASTERDATA_LOOKUP } = await import('@ra/cluster-masterdata');
@@ -42,9 +44,9 @@ test('VAULT_MODE=true is actually in effect for this process', () => {
 // (2026-10-05) added the fifth: formula shells, the recipe import, the review queue and the bulk
 // approval — they seal and approve recipes, so they are Vault-box-only too. IMPORT-RP (2026-11-13)
 // added the sixth: the formulas import (a spreadsheet of a recipe, sealed through the same path).
-test('VAULT_MODE=true: FormulaModule mounts the three formula plaintext controllers + the compliance + formula-setup + formula-import controllers', () => {
+test('VAULT_MODE=true: FormulaModule mounts the three formula plaintext controllers + the compliance + formula-setup + formula-import + vault-desk controllers', () => {
   const controllers = Reflect.getMetadata('controllers', FormulaModule) as unknown[];
-  assert.deepEqual(controllers, [CatalogController, FormulasController, ApprovalsController, ComplianceController, FormulaSetupController, FormulaImportController]);
+  assert.deepEqual(controllers, [CatalogController, FormulasController, ApprovalsController, ComplianceController, FormulaSetupController, FormulaImportController, VaultDeskController]);
 });
 
 test('VAULT_MODE=true: FormulaModule does NOT import ClusterMasterdataModule (no main-DB credential)', () => {

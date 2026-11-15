@@ -12,6 +12,7 @@ import {
   Permissions,
   ZodValidationPipe,
   type AuthPrincipal,
+  NoRelay,
 } from '@core/backend-kernel';
 import { FormulasService } from './formulas.service.js';
 import { FormulaDirectoryService, auditKind } from '../formula-directory.service.js';
@@ -106,6 +107,7 @@ export class FormulasController {
   }
 
   @Permissions('formula:formula_version:write')
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/formula-versions')
   createVersion(
     @Body(new ZodValidationPipe(createVersion)) body: CreateVersion,
@@ -117,6 +119,7 @@ export class FormulasController {
   /* ── seal flow: version ingredients ──────────────────────────────── */
 
   @Permissions('formula:formula_ingredients:write')
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/formula-versions/:id/ingredients')
   addIngredients(
     @Param('id') id: string,
@@ -150,6 +153,7 @@ export class FormulasController {
   // in the system.
   @Permissions('formula:actual:read')
   @FreshAuth()
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/formula-versions/:id/actual')
   getActualFormula(
     @Param('id') id: string,
@@ -177,6 +181,7 @@ export class FormulasController {
   }
 
   @Permissions('formula:formula_stage_ingredients:write')
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/formula-stages/:id/ingredients')
   addStageIngredients(
     @Param('id') id: string,

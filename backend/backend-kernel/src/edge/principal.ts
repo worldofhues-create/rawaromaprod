@@ -36,6 +36,8 @@ export interface AuthPrincipal {
    * they are".
    */
   authTime: number;
+  /** RP-BE-1 (LD-261): 'relay' when this session came from ALEMBIC's server-side relay. */
+  via?: 'relay';
 }
 
 /** A Fastify request augmented with the verified principal. */

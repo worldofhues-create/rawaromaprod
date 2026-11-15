@@ -23,7 +23,7 @@
  * names row numbers, formula codes, version numbers and fixed phrases only.
  */
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { CurrentUser, NoStoredReply, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, NoStoredReply, Permissions, type AuthPrincipal, NoRelay } from '@core/backend-kernel';
 import { FormulaImportService, contextOf, fileBytes } from './formula-import.service.js';
 
 const PERMISSION = 'vault:formula_import:write';
@@ -52,6 +52,7 @@ export class FormulaImportController {
   }
 
   @Permissions(PERMISSION)
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/imports/jobs/:id/commit')
   commit(@Param('id') id: string, @Body() body: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.imports.engine.commit(id, { bytes: fileBytes(body?.fileBase64), mode: body?.mode }, contextOf(p));
@@ -59,6 +60,7 @@ export class FormulaImportController {
 
   @Permissions(PERMISSION)
   @NoStoredReply()
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/imports/jobs/:id/problems')
   problems(@Param('id') id: string, @Body() body: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.imports.engine.problems(id, { format: s(body?.format), bytes: fileBytes(body?.fileBase64) }, contextOf(p));
@@ -71,6 +73,7 @@ export class FormulaImportController {
   }
 
   @Permissions(PERMISSION)
+  @NoRelay() // RP-BE-1 (LD-261): recipe lines never pass through the RAC OS relay
   @Post('v1/imports/:kind/preview')
   preview(@Param('kind') kind: string, @Body() body: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.imports.engine.preview(kind, { bytes: fileBytes(body?.fileBase64), fileName: s(body?.fileName) }, contextOf(p));

@@ -518,8 +518,11 @@ export class AuthService {
       pv: 1,
       sid,
       authTime: claims.auth_time,
+      ...(claims.via === 'relay' ? { via: 'relay' as const } : {}),
     });
-    const refreshToken = await this.jwt.signRefresh({ sub: row.userId, sid, authTime: claims.auth_time });
+    // RP-BE-1 (LD-261): a relay session is one request long and never refreshed: a refresh would
+    // re-mint an access token without the relay mark. The relay discards this value anyway.
+    const refreshToken = claims.via === 'relay' ? '' : await this.jwt.signRefresh({ sub: row.userId, sid, authTime: claims.auth_time });
     return {
       user: { userId: row.userId, userName: row.userName, email: row.email },
       accessToken,

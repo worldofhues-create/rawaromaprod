@@ -11,7 +11,7 @@
  */
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put } from '@nestjs/common';
 import { z } from 'zod';
-import { CurrentUser, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, FreshAuth, NoStoredReply, Permissions, ZodValidationPipe, type AuthPrincipal, NoRelay } from '@core/backend-kernel';
 import { ComplianceService } from './compliance.service.js';
 import { IFRA_RESTRICTION_TYPES } from './compliance-calc.js';
 
@@ -121,6 +121,7 @@ export class ComplianceController {
 
   @Permissions('vault:compliance_calc:read')
   @FreshAuth()
+  @NoRelay() // RP-BE-1 (LD-261): a formula's per-material shares never pass through the RAC OS relay
   @Get('v1/compliance/preview/:formulaId')
   preview(@Param('formulaId', ParseUUIDPipe) formulaId: string, @CurrentUser() principal: AuthPrincipal) {
     return this.compliance.preview(formulaId, principal);
@@ -128,6 +129,7 @@ export class ComplianceController {
 
   @Permissions('vault:compliance_calc:read')
   @FreshAuth()
+  @NoRelay() // RP-BE-1 (LD-261): a formula's per-material shares never pass through the RAC OS relay
   @Get('v1/compliance/missing')
   missing(@CurrentUser() principal: AuthPrincipal) {
     return this.compliance.missingDataReport(principal);
