@@ -315,6 +315,41 @@ test('RELAY-W2 3(a): a QC round carries its checkpoint rows (name, range, result
   assert.deepEqual(quantityKeysIn(one), [], 'a checkpoint is a product check, not a per-line quantity');
 });
 
+/* RELAY-W5: a round as QcFloorService.recordRound really writes it ({ failed, results }, a RANGE booked
+ * as a value with no pass flag) read back every checkpoint as "nothing booked": the walk's batch read
+ * "Not tested" on all three rows although QC had booked all three. */
+test('RELAY-W5: a round booked by recordRound ({ failed, results }) reads back what was booked; a failed value reads as a fail', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 52, '5', null);
+  const b = await mixedBatch(m, null);
+  const set = randomUUID(), cp1 = randomUUID(), cp2 = randomUUID(), cp3 = randomUUID();
+  await sql()`insert into quality.qc_checkpoint_set (qc_checkpoint_set_id, product_id, version, reason) values (${set}, ${randomUUID()}, 1, 'test')`;
+  await sql()`insert into quality.qc_checkpoint (qc_checkpoint_id, qc_checkpoint_set_id, seq, name, check_type, min_value, max_value, critical) values
+              (${cp1}, ${set}, 1, 'Test density', 'RANGE', 0.95, 1.05, false), (${cp2}, ${set}, 2, 'Test look', 'PASS_FAIL', null, null, true),
+              (${cp3}, ${set}, 3, 'Test clarity', 'RANGE', 0, 10, false)`;
+  const stored = { failed: [cp1], results: [{ checkpointId: cp1, value: 1.12, note: 'high' }, { checkpointId: cp2, pass: true }, { checkpointId: cp3, value: 4 }] };
+  await sql()`insert into quality.batch_qc_round (batch_qc_round_id, oil_batch_id, round_no, qc_checkpoint_set_id, inspector_id, results, decision, reasons, policy_version)
+              values (${randomUUID()}, ${b.oilBatchId}, 1, ${set}, 'qc-1', ${JSON.stringify(stored)}::jsonb, 'REWORK', '[]'::jsonb, 1)`;
+  const one = await reads().batch(b.batchNo, { relay: true });
+  assert.deepEqual(one.qcRounds[0]!.checkpoints.map((c) => [c.name, c.pass, c.value, c.note]), [
+    ['Test density', false, 1.12, 'high'], ['Test look', true, null, null], ['Test clarity', true, 4, null]]);
+});
+
+/* RELAY-W5: the board derived an oil batch's stage (QC, MACERATION, APPROVED) but the one-batch read sent
+ * the floor job's own stage (DONE once mixed), so RAC OS drew no stage and never offered the QC call. */
+test('RELAY-W5: one batch carries the same stage as its board row (a mixed batch with an uncalled round is at QC)', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 53, '5', null);
+  const b = await mixedBatch(m, 'REWORK');
+  await sql()`update production.floor_job set stage = 'DONE' where floor_job_id = ${b.jobId}`;
+  const row = (await reads().board()).items.find((r) => r.oilBatchId === b.oilBatchId)!;
+  const one = await reads().batch(b.batchNo, { relay: true });
+  assert.equal(row.stage, 'QC');
+  assert.equal(one.stage, row.stage);
+  const noOil = await reads().batch(b.jobNo === undefined ? b.batchNo : b.jobNo);
+  assert.equal(noOil.stage, 'QC', 'found by its job number, the same batch');
+});
+
 test('RELAY-W2 3(a): the trace list names each fill (the system\'s finished-good lot and its fill day); none is invented', async () => {
   const f = await family();
   const m = await codedMaterial(f, 52, '5', null);

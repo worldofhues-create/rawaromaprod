@@ -231,6 +231,16 @@ export class FactoryDeskService {
         left join location.storage_location_master sl on sl.storage_location_id = ib.storage_location_id
        where l.floor_job_id = ${jobId}::uuid
        order by l.seq`;
+    /* RELAY-W5: the stage the board shows for this batch (board() above, same rule): once mixed, the floor
+       job reads DONE, so the batch is at MACERATION, APPROVED or QC by its runs and rounds. Sending the
+       job's own DONE left RAC OS with no stage on the batch, and so with no QC call to offer. */
+    const [sg] = oilBatchId
+      ? await this.sql<Row[]>`
+          select case when (select status from production.maceration_run where oil_batch_id = ${oilBatchId}::uuid order by started_at desc limit 1) = 'MACERATING' then 'MACERATION'
+                      when (select decision from quality.batch_qc_round where oil_batch_id = ${oilBatchId}::uuid order by round_no desc limit 1) = 'APPROVE' then 'APPROVED'
+                      else 'QC' end as stage`
+      : [{ stage: j.stage }];
+    const stage = sg!.stage;
     const batch = oilBatchId
       ? (await this.sql<Row[]>`select batch_number as "batchNumber", status, produced_qty::text as "producedQty", produced_dt::text as "producedDt"
                                 from production.oil_batch_master where oil_batch_id = ${oilBatchId}::uuid`)[0] ?? null
@@ -243,7 +253,7 @@ export class FactoryDeskService {
     const relay = opts.relay === true;
     const output = (await this.outputs([jobId], opts.seeProduct === true)).get(jobId) ?? null;
     return {
-      floorJobId: jobId, jobNo: j.job_no, batchNo: j.batch_no, oilBatchId, stage: j.stage, expedite: j.expedite,
+      floorJobId: jobId, jobNo: j.job_no, batchNo: j.batch_no, oilBatchId, stage, expedite: j.expedite,
       orderRef: j.order_ref, promiseDt: j.promise_dt ? new Date(String(j.promise_dt)).toISOString() : null,
       // LD-272b: the batch's output (product, grade, planned and produced mass) for everyone; the raw
       // `producedQty` stays off a relay answer only because `output.producedMg` already says it in mg.
@@ -277,12 +287,16 @@ export class FactoryDeskService {
       : [];
     return rows.map(({ setId, results, ...r }): Row & { checkpoints: Row[] } => {
       const raw = typeof results === 'string' ? JSON.parse(results) : results;
-      const booked = new Map<string, Row>((Array.isArray(raw) ? raw : []).map((x: Row) => [String(x.checkpointId), x]));
+      /* RELAY-W5: QcFloorService.recordRound writes { failed: [checkpointId], results: [...] }; a bare array
+         is the older shape. A value booked with no pass flag passed unless the round lists it as failed. */
+      const list: Row[] = Array.isArray(raw) ? raw : raw && Array.isArray(raw.results) ? raw.results : [];
+      const failedIds = raw && !Array.isArray(raw) && Array.isArray(raw.failed) ? new Set((raw.failed as unknown[]).map(String)) : null;
+      const booked = new Map<string, Row>(list.map((x: Row) => [String(x.checkpointId), x]));
       const checkpoints = cps.filter((c) => c.setId === setId).map((c) => {
         const b = booked.get(String(c.id));
         return {
           seq: c.seq, name: c.name, checkType: c.checkType, min: c.min ?? null, max: c.max ?? null, critical: c.critical === true,
-          pass: typeof b?.pass === 'boolean' ? b.pass : null,
+          pass: typeof b?.pass === 'boolean' ? b.pass : b && failedIds ? !failedIds.has(String(c.id)) : null,
           value: typeof b?.value === 'number' ? b.value : null,
           note: typeof b?.note === 'string' ? b.note : null,
         };
