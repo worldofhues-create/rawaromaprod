@@ -1,6 +1,7 @@
 /**
  * RP-BE-1 — two reads the RAC OS Vault console draws that the Vault box had no route for (ALEMBIC
- * rp-relay.md Part 4.3: Overview, Version draft). Vault box only (VAULT_MODE=true).
+ * rp-relay.md Part 4.3: Overview, Version draft), and VF-FIX's third: one formula's versions (the formula
+ * drawer's Versions tab). Vault box only (VAULT_MODE=true).
  *
  * LD-261: these are METADATA ONLY. A formula is its code, name, version number, status, who and when;
  * an ingredient line, a material id inside a recipe, a percentage, a quantity or a sealed payload is
@@ -11,7 +12,7 @@
  * own trail, VaultService.writeStandaloneAudit), so a Vault view through the relay is recorded on the
  * Vault itself as well as by ALEMBIC.
  */
-import { Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { sql } from 'drizzle-orm';
 import type { AuthPrincipal } from '@core/backend-kernel';
 import { FORMULA_DB, type FormulaDb } from '../formula.tokens.js';
@@ -90,5 +91,28 @@ export class VaultDeskService {
        order by m.formula_code nulls last, v.version_number desc
        limit 200`));
     return { bases, materials: null, materialsNote: MATERIALS_BY_SEARCH };
+  }
+
+  /**
+   * VF-FIX: one formula's versions, newest first: number, state, who created it and who approved it, and when.
+   * Nothing else: no line, no count of lines, no quantity, no ingredient or material (LD-261). `createdBy` is the
+   * creator as the version row holds it, `approvedBy` the approver's user id; the Vault box holds no names.
+   * Audited (`formula.vault.versions_read`, entity = the formula) before it answers.
+   */
+  async formulaVersions(p: AuthPrincipal, idRaw: unknown, req?: { requestId?: string | null; ip?: string | null }) {
+    const formulaId = typeof idRaw === 'string' && UUID.test(idRaw) ? idRaw : null;
+    if (!formulaId) throw new BadRequestException('Give a formula id (a uuid).');
+    await this.audit(p, 'formula.vault.versions_read', formulaId, req);
+    const [f] = rows(await this.db.execute(sql`select 1 as one from formula.formula_master where formula_id = ${formulaId}::uuid`));
+    if (!f) throw new NotFoundException(`No formula ${formulaId} on file.`);
+    const items = rows(await this.db.execute(sql`
+      select v.formula_version_id::text as "formulaVersionId", v.version_number as "versionNumber", v.status,
+             v.created_by as "createdBy", v.created_dt::text as "createdDt",
+             v.approved_by::text as "approvedBy", v.approved_dt::text as "approvedDt"
+        from formula.formula_version v
+       where v.formula_id = ${formulaId}::uuid
+       order by v.version_number desc nulls last, v.formula_version_id desc
+       limit 200`));
+    return { items, nextCursor: null, total: items.length };
   }
 }
