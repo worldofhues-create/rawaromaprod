@@ -244,7 +244,12 @@ export class RuhFactsService {
                     from inventory.stock_reservation sr left join platform.uom_master ru on ru.uom_id = sr.uom_id
                    where sr.inventory_batch_id = ib.inventory_batch_id and sr.released_dt is null and coalesce(sr.status, 'ACTIVE') <> 'RELEASED'
                    group by 2) x) r on true
-       where ib.material_id is not null and coalesce(rb.status, '') <> 'QUARANTINE'`) as unknown as Array<{ id: string; qty: string; uom: string | null; held: QtyPart[] }>;
+       where ib.material_id is not null and coalesce(rb.status, '') <> 'QUARANTINE'
+       -- The first lot's unit is the unit a material is totalled in and the unit its "not totalled"
+       -- sentence names first. With no ORDER BY that was whatever order the heap gave back, so one
+       -- material could read "kg and L" on one read and "L and kg" on the next. Oldest lot first;
+       -- lower() so the tie-break does not depend on the database's collation.
+       order by ib.material_id, ib.created_dt, lower(um.uom_code) nulls last, ib.inventory_batch_id`) as unknown as Array<{ id: string; qty: string; uom: string | null; held: QtyPart[] }>;
     const free = new Map<string, QtyPart[]>();
     const unsure = new Map<string, Refused>();
     for (const l of lots) {

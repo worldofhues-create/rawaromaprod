@@ -311,6 +311,22 @@ test('STOCK3-5 a material in kg and L is named as not totalled, not left out', a
   assert.match(n.reason, /kg and L/);
 });
 
+test('STOCK3-5 the unit named first is the oldest lot\'s, whatever order the database hands the lots back in', async () => {
+  // The lots were read with no ORDER BY and the first row's unit led the sentence (and was the unit a
+  // total is shown in). Postgres promises no order without one: a rehearsal read "L and kg" for lots
+  // received kg first. Here the L lot is written first and the kg lot is the older one by its date.
+  const m = await material();
+  await lot(m, '1.0000', 'L');
+  const kg = await lot(m, '1.0000', 'kg');
+  await sql()`update inventory.inventory_batch set created_dt = now() - interval '1 day' where inventory_batch_id = ${kg.id}`;
+  await order(m, '100');
+  const facts = new RuhFactsService(sql() as never, {} as never, new ProduceQueueService(productionDb()));
+  const f = await facts.materials(RUH_DEFAULTS);
+  const n = f.notTotalled.find((x) => x.materialId === m)!;
+  assert.ok(n, 'it is on the list');
+  assert.match(n.reason, /^kg and L: not totalled\./);
+});
+
 test('STOCK3-5 the insight says it cannot total the material and why, with no figure', () => {
   const drafts = detectMaterials({
     noFloorCode: { count: 0, sample: [] }, stock: [],
