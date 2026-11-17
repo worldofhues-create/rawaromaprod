@@ -430,8 +430,14 @@ export class FactoryDeskService {
         from location.rack_master r
         left join location.rack_walk_order w on w.rack_id = r.rack_id
        order by w.walk_seq asc nulls last, r.rack_code`;
-    const fam = await this.sql<Row[]>`select family_code as "familyCode", colour_name as "colourName", colour_hex as "colourHex" from masterdata.floor_family_colour order by family_code`;
-    return { items: rows, nextCursor: null, total: rows.length, families: fam };
+    // VF-FIX: the colour zones painted on the racks (family code, colour name and hex, the initial printed beside
+    // the colour), and nothing else: no family name, no count of codes, no material. ALEMBIC's relay may not read
+    // /v1/floor/families for the factory door (that read also carries a count of codes and who changed it), so the
+    // zones travel here. NOT a cursor page: the global envelope lifts { items, nextCursor } into `data` and drops
+    // every other key, which is how `families` never reached RAC OS (its rack layout drew no zone at all).
+    const fam = await this.sql<Row[]>`select family_code as "familyCode", colour_name as "colourName", colour_hex as "colourHex", initial
+                                        from masterdata.floor_family_colour order by family_code`;
+    return { items: rows, total: rows.length, families: fam };
   }
 
   /* ── QC queue, lot trace, recalls ────────────────────────────────────────────────────────── */

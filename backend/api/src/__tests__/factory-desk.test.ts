@@ -494,6 +494,25 @@ test('kiosk problem: raises a supervisor alert in the same step; OTHER needs a n
   assert.match(String(a!.title), /Scale not reading/);
 });
 
+test('VF-FIX: racks carry their colour zones past the envelope: family code, colour name, colour hex and initial, and no material or quantity', async () => {
+  const f = await family();
+  const m = await codedMaterial(f, 88, '2', '1');
+  const rackId = randomUUID(), shelfId = randomUUID();
+  await sql()`insert into location.rack_master (rack_id, rack_code, status) values (${rackId}, ${'RK-' + rackId.slice(0, 6)}, 'ACTIVE')`;
+  await sql()`insert into location.shelf_master (shelf_id, rack_id, shelf_code, status) values (${shelfId}, ${rackId}, ${'S-' + shelfId.slice(0, 6)}, 'ACTIVE')`;
+  await sql()`insert into location.bin_master (bin_id, shelf_id, bin_code, status) values (${randomUUID()}, ${shelfId}, ${m.bin}, 'ACTIVE')`;
+  const r = await reads().racks() as unknown as Record<string, unknown>;
+  // The global envelope lifts { items, nextCursor } into data and DROPS every other key: the families never reached RAC OS.
+  assert.ok(!('nextCursor' in r), 'not a cursor page, so the envelope passes families through');
+  const fam = (r.families as Record<string, unknown>[]).find((x) => x.familyCode === f.fam)!;
+  assert.deepEqual(Object.keys(fam).sort(), ['colourHex', 'colourName', 'familyCode', 'initial'], 'the colour zone and nothing else');
+  assert.equal(fam.initial, 'T');
+  const rack = (r.items as Record<string, unknown>[]).find((x) => x.rackId === rackId)!;
+  assert.deepEqual((rack.bins as Record<string, unknown>[])[0]!.families, [f.fam]);
+  const all = JSON.stringify(r);
+  for (const leak of ['SECRET MATERIAL NAME', 'MAT-', m.materialId, 'quantity', 'Mg"', 'codes"']) assert.ok(!all.includes(leak), `no ${leak} in the racks read`);
+});
+
 test('reveal behind a floor code: reason recorded before the name is returned', async () => {
   const f = await family();
   const m = await codedMaterial(f, 71, '1', null);
