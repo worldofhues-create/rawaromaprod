@@ -5,7 +5,7 @@
  * own permission so it can be granted separately from data entry.
  */
 import { BadRequestException, Body, Controller, Get, NotFoundException, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, Permissions, ZodValidationPipe, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, Permissions, ZodValidationPipe, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { CoaService } from './coa.service.js';
 import {
   attachBatchGcmsQuery,
@@ -76,6 +76,7 @@ export class CoaController {
   }
 
   @Permissions('production:batch_coa:release')
+  @RequiredFlag('qc.release') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/batch-coas/:id/release')
   release(@Param('id') id: string, @CurrentUser() principal: AuthPrincipal) {
     return this.coa.releaseCoa(id, principal);

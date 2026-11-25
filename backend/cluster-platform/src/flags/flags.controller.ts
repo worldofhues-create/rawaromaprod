@@ -10,6 +10,7 @@
  * said "layered on top later"; it is here now). It is checked per key rather than with the
  * route decorator, so changing an ordinary switch does not ask for a fresh code. Reached from
  * RAC OS through the relay, the relay asks a step-up first and the assertion carries its time.
+ * `admin.flags.write` off refuses every change except turning it back on.
  */
 import { Body, Controller, Get, Param, Put } from '@nestjs/common';
 import {
@@ -20,7 +21,7 @@ import {
   ZodValidationPipe,
   type AuthPrincipal,
 } from '@core/backend-kernel';
-import { platform, type FlagSnapshot } from '@core/contracts';
+import { flagOffSentence, platform, type FlagSnapshot } from '@core/contracts';
 import { z } from 'zod';
 import { PlatformFlagsService, type AdminFlagsResponse, type SetFlagInput, type SetFlagResult } from './flags.service.js';
 
@@ -63,6 +64,11 @@ export class FlagsController {
     @Body(new ZodValidationPipe(platform.flags.setFlagRequest)) body: SetFlagBody,
     @CurrentUser() user: AuthPrincipal,
   ): Promise<SetFlagResult> {
+    /* `admin.flags.write` off: no switch may be changed, except turning that one back on (guard the
+       guard). Read from this process's own snapshot, the same one the edge enforces. */
+    if (!this.flags.enabled('admin.flags.write') && !(key === 'admin.flags.write' && body.state !== 'off')) {
+      throw DomainError.featureDisabled(flagOffSentence('admin.flags.write'));
+    }
     const critical = await this.flags.critical(key);
     if (critical === null) throw DomainError.notFound(`There is no switch called "${key}" on this system, so nothing was changed.`);
     if (critical) {

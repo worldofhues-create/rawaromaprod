@@ -9,8 +9,7 @@ import {
   CurrentUser,
   Permissions,
   ZodValidationPipe,
-  type AuthPrincipal,
-} from '@core/backend-kernel';
+  type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { InspectionsService } from './inspections.service.js';
 import {
   addResults,
@@ -67,6 +66,7 @@ export class InspectionsController {
   /* ── flow: disposition ────────────────────────────────────────────── */
 
   @Permissions('quality:qc_inspections:write')
+  @RequiredFlag('qc.release') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/qc-inspections/:id/disposition')
   dispose(
     @Param('id') id: string,
@@ -105,6 +105,7 @@ export class InspectionsController {
   }
 
   @Permissions('quality:qc_attachments:write')
+  @RequiredFlag('all.uploads') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/qc-attachments')
   createAttachment(
     @Body(new ZodValidationPipe(createQcAttachment)) body: CreateQcAttachment,

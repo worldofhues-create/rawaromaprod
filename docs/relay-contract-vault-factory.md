@@ -188,6 +188,24 @@ hash-chained `platform.audit_events` row (`action = 'flag.update'`, `chain_seq`/
 registered by `scripts/migrations/2026-11-29-flags-register.sql`, every key `on` (an unregistered key already read
 as on at the edge, so registering changes nothing). Tests: `backend/api/src/__tests__/flags-admin.test.ts`.
 
+Every key guards real code (owner, 26 Nov: "nothing should be a stub"); the template keys of another product are gone.
+Off, each refuses 503 `FEATURE_DISABLED` with its registry sentence (`whenOff`):
+
+| Key | Critical | Stops |
+|---|---|---|
+| `all.auth` | yes | Factory and Vault sign-in (hand-off and refresh); the Platform hand-off stays open to switch it back |
+| `all.payments` | yes | supplier payment approve and release |
+| `all.uploads` | no | QC attachments, gate-entry documents, documents, the document registry |
+| `all.search` | no | `GET /v1/search` |
+| `admin.flags.write` | yes | every switch change except turning it back on |
+| `production.batch.start` | yes | `POST /v1/floor/jobs` (batches already started carry on) |
+| `floor.kiosk.writes` | yes | the kiosk steps: pick, verify, mix, leftover, over-pick, resume (kiosks read-only) |
+| `qc.release` | yes | GRN disposition, batch QC decision, finished-goods QC, CoA and raw-material lot release |
+| `procurement.po.approve` | no | `POST /v1/purchase-orders/:id/approve` |
+
+Not added: an outbound-bridge switch (the bridge connector's own `enabled` setting already holds events queued, not
+dropped; a second switch would be a second rule). Proved by `backend/api/src/__tests__/flags-wired.test.ts`.
+
 ## State
 
 Built and tested: F1-F15, F18, W-F2, W-F4, W-F5, W-F8, W-F10, W-F11, W-F12, W-F15, W-F19, V1, V2, V4 (=F11), W-V6,

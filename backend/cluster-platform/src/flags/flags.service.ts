@@ -230,6 +230,11 @@ export class PlatformFlagsService implements OnModuleInit {
     return { ...updated, env: input.env, unchanged: false };
   }
 
+  /** Whether this process's edge lets `key` through (the snapshot FlagGuard reads). */
+  enabled(key: string): boolean {
+    return this.snapshot.isEnabled(key);
+  }
+
   /** Whether a registered key is critical (null when the key is not registered). */
   async critical(key: string): Promise<boolean | null> {
     const { flags } = platformSchema;

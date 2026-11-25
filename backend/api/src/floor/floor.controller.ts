@@ -5,7 +5,7 @@
  * their own pick.
  */
 import { BadRequestException, Body, Controller, Get, Header, Param, ParseIntPipe, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, NoStoredReply, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, NoStoredReply, Permissions, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { FloorCodeService } from './floor-code.service.js';
 import { FloorStationService, type LabelKind } from './floor-station.service.js';
 import { FloorQueueService } from './floor-queue.service.js';
@@ -118,6 +118,7 @@ export class FloorController {
   candidates() { return this.stations.jobCandidates(); }
 
   @Permissions('production:floor_job:write')
+  @RequiredFlag('production.batch.start') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs')
   create(@Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     const id = s(b?.productionOrderId);
@@ -135,12 +136,14 @@ export class FloorController {
   }
 
   @Permissions('production:floor_pick:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/pick/lines/:line')
   pickLine(@Param('id', ParseUUIDPipe) id: string, @Param('line', ParseUUIDPipe) line: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.stations.pickLine(id, line, { bin: s(b?.bin), barcode: s(b?.barcode), reason: s(b?.reason) }, p);
   }
 
   @Permissions('production:floor_pick:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/pick/complete')
   completePick(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.stations.completePick(id, { tote: s(b?.tote) }, p);
@@ -153,6 +156,7 @@ export class FloorController {
   }
 
   @Permissions('production:floor_verify:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/verify/lines/:line')
   verifyLine(@Param('id', ParseUUIDPipe) id: string, @Param('line', ParseUUIDPipe) line: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.stations.verifyLine(id, line, { actualMg: b?.actualMg, source: b?.source === undefined ? undefined : s(b.source), scaleRef: b?.scaleRef ? s(b.scaleRef) : undefined, weightCheckId: b?.weightCheckId ? s(b.weightCheckId) : undefined }, p);
@@ -161,6 +165,7 @@ export class FloorController {
   // FLOOR-LOT-STOP-1: the supervisor's permission (the one that answers for a held reading) resumes a
   // stopped line. The service refuses the person whose scan stopped it.
   @Permissions('production:floor_job:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/stop/resume')
   resumeLine(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.stations.clearStop(id, { reason: b?.reason }, p);
@@ -168,12 +173,14 @@ export class FloorController {
 
   // STOCK2-1: the permission that puts a job on the floor is the one that answers for a held reading.
   @Permissions('production:floor_job:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/lines/:line/over-pick')
   approveOverPick(@Param('line', ParseUUIDPipe) line: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.stations.approveOverPick(line, { reason: b?.reason }, p);
   }
 
   @Permissions('production:floor_verify:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/verify/complete')
   completeVerify(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() p: AuthPrincipal) {
     return this.stations.completeVerify(id, p);
@@ -187,6 +194,7 @@ export class FloorController {
   }
 
   @Permissions('production:floor_verify:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/leftover')
   leftover(@Param('id', ParseUUIDPipe) id: string, @Body() b: Record<string, unknown>, @CurrentUser() p: AuthPrincipal) {
     return this.splits.returnLeftover(id, { lot: b?.lot, qtyMg: b?.qtyMg, bin: b?.bin }, p);
@@ -212,6 +220,7 @@ export class FloorController {
   }
 
   @Permissions('production:floor_mix:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/mix/steps/:seq')
   step(@Param('id', ParseUUIDPipe) id: string, @Param('seq', ParseIntPipe) seq: number, @CurrentUser() p: AuthPrincipal) {
     return this.stations.doStep(id, seq, p);
@@ -219,6 +228,7 @@ export class FloorController {
 
   /** STOCK-FIX-RP (STK-15, D-1): assign the batch to one mixer, by name (a supervisor). */
   @Permissions('production:floor_job:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/mix/assign')
   assignMixer(@Param('id', ParseUUIDPipe) id: string, @Body() body: { userId?: string }, @CurrentUser() p: AuthPrincipal) {
     return this.stations.assignMixer(id, String(body?.userId ?? ''), p);
@@ -256,6 +266,7 @@ export class FloorController {
   }
 
   @Permissions('production:floor_mix:write')
+  @RequiredFlag('floor.kiosk.writes') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/floor/jobs/:id/mix/complete')
   completeMix(@Param('id', ParseUUIDPipe) id: string, @CurrentUser() p: AuthPrincipal) {
     return this.stations.completeMix(id, p);

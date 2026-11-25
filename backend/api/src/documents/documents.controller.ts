@@ -1,6 +1,6 @@
 /** DocumentsController — M01 document registry. Gated by the existing platform document perms. */
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, Permissions, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { DocumentsService } from './documents.service.js';
 
 @Controller()
@@ -20,6 +20,7 @@ export class DocumentsController {
   }
 
   @Permissions('platform:document_master:write')
+  @RequiredFlag('all.uploads') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/document-registry')
   create(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.create(body, principal);

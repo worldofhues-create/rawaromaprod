@@ -14,6 +14,7 @@ import {
 import { Reflector } from '@nestjs/core';
 import { META_FLAG } from '../decorators/metadata.keys.js';
 import { FlagsService } from '../flags/flags.service.js';
+import { flagOffSentence } from '@core/contracts';
 import { DomainError } from './domain-error.js';
 
 @Injectable()
@@ -30,7 +31,8 @@ export class FlagGuard implements CanActivate {
     ]);
     if (!flagKey) return true;
     if (!this.flags.isEnabled(flagKey)) {
-      throw DomainError.featureDisabled(`Feature "${flagKey}" is currently disabled`);
+      // FEATURE-SWITCHES: the registry's own sentence for this switch, so the refusal says what stopped.
+      throw DomainError.featureDisabled(flagOffSentence(flagKey));
     }
     return true;
   }

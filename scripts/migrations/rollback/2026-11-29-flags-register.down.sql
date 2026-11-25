@@ -5,7 +5,7 @@
 -- state it was registered in. The grants stay: they give nothing the code does not use.
 -- @target: main
 delete from platform.flags f
- where f.key in ('all.auth', 'all.payments', 'all.uploads', 'all.search', 'buyer.search.ai', 'buyer.offers.counter', 'owner.listings.submit', 'builder.projects.import', 'ops.assignment.auto', 'admin.flags.write')
+ where f.key in ('all.auth', 'all.payments', 'all.uploads', 'all.search', 'admin.flags.write', 'production.batch.start', 'floor.kiosk.writes', 'qc.release', 'procurement.po.approve')
    and not exists (select 1 from platform.flag_states s where s.flag_id = f.id)
    and not exists (select 1 from platform.flag_audit a where a.flag_id = f.id);
 delete from public.schema_migrations where id like '2026-11-29-flags-register%';

@@ -7,8 +7,7 @@ import {
   CurrentUser,
   Permissions,
   ZodValidationPipe,
-  type AuthPrincipal,
-} from '@core/backend-kernel';
+  type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { GateService } from './gate.service.js';
 import {
   createGateEntry,
@@ -61,6 +60,7 @@ export class GateController {
   }
 
   @Permissions('inventory:gate_entry_documents:write')
+  @RequiredFlag('all.uploads') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/gate-entry-documents')
   createGateEntryDocument(
     @Body(new ZodValidationPipe(createGateEntryDocument)) body: CreateGateEntryDocument,

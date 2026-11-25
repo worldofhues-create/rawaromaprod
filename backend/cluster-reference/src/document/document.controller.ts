@@ -7,8 +7,7 @@ import {
   CurrentUser,
   Permissions,
   ZodValidationPipe,
-  type AuthPrincipal,
-} from '@core/backend-kernel';
+  type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { DocumentService } from './document.service.js';
 import {
   createDocument,
@@ -61,6 +60,7 @@ export class DocumentController {
   }
 
   @Permissions('platform:document_master:write')
+  @RequiredFlag('all.uploads') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/documents')
   createDocument(
     @Body(new ZodValidationPipe(createDocument)) body: CreateDocument,

@@ -10,13 +10,13 @@
  * MVP note: no server-side session store yet (the dictionary has no sessions table), so
  * refresh is stateless re-mint without reuse-detection — a hardening follow-up.
  */
-import { HttpException, HttpStatus, Inject, Injectable, Logger } from "@nestjs/common";
+import { HttpException, HttpStatus, Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import { and, eq, gt, lt } from "drizzle-orm";
 import * as argon2 from "argon2";
 import { randomUUID } from "node:crypto";
 import type { Sql } from "postgres";
-import { DomainError, JwtService, PG_CLIENT, ConfigService, type AuthPrincipal } from "@core/backend-kernel";
-import type { Portal } from "@core/contracts";
+import { DomainError, FlagsService, JwtService, PG_CLIENT, ConfigService, type AuthPrincipal } from "@core/backend-kernel";
+import { flagOffSentence, type Portal } from "@core/contracts";
 import { ORG_DB, orgSchema, type OrgDb } from "../cluster-org.tokens.js";
 import { verifyAlembicAssertion } from "./alembic-assertion.js";
 
@@ -108,7 +108,19 @@ export class AuthService {
     @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(PG_CLIENT) private readonly sql: Sql,
     @Inject(ConfigService) private readonly config: ConfigService,
+    /* FEATURE-SWITCHES: `all.auth`, the sign-in kill-switch. Optional: the Vault process holds no
+       flag snapshot (vault-app.module.ts), and a test that builds this service by hand has none. */
+    @Optional() @Inject(FlagsService) private readonly flags?: FlagsService,
   ) {}
+
+  /** FEATURE-SWITCHES: `all.auth` off refuses every new Factory and Vault session (the hand-off and
+   *  a refresh). The Platform console's hand-off still passes: it is where the switch is turned back
+   *  on, and a sign-in switch nobody can reach to undo would need the database to recover. The
+   *  decorator on the retired @core identity routes never ran: that module is not mounted here. */
+  private refuseWhenAuthOff(target: string | null): void {
+    if (target === "platform" || !this.flags || this.flags.isEnabled("all.auth")) return;
+    throw DomainError.featureDisabled(flagOffSentence("all.auth"));
+  }
 
   // Password sign-in is RETIRED for launch (FINAL_OS §2.4/§9). Production refuses it
   // UNCONDITIONALLY; PASSWORD_LOGIN_ENABLED (default OFF) is a non-prod escape hatch for a
@@ -403,6 +415,7 @@ export class AuthService {
     attempt.console = claims.target;
     attempt.method = claims.target === "vault" ? "VAULT_STEP_UP" : "ALEMBIC_SSO";
     attempt.email = claims.email;
+    this.refuseWhenAuthOff(claims.target);
 
     // SINGLE-USE, CHECKED RIGHT AFTER CRYPTOGRAPHIC VALIDITY — before any DB lookup,
     // so a replayed token is refused as a replay even if the account it names has since
@@ -534,6 +547,7 @@ export class AuthService {
   /** Stateless refresh — verify the refresh token, re-load roles/perms, re-mint the access token
    * (so the portal survives a reload / 15-min access-token expiry). No reuse-detection yet (MVP). */
   async refresh(refreshToken: string): Promise<LoginResult> {
+    this.refuseWhenAuthOff(null);
     let claims: { sub: string; sid: string; authTime: number };
     try {
       claims = await this.jwt.verifyRefresh(refreshToken);

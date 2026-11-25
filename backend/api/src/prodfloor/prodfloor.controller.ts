@@ -4,7 +4,7 @@
  * it acts on; payment release has its own (procurement:po_payment_release:*).
  */
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, Permissions, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { ReceivingService } from './receiving.service.js';
 import { PaymentReleaseService } from './payment-release.service.js';
 import { QcFloorService } from './qc-floor.service.js';
@@ -48,10 +48,12 @@ export class ProdfloorController {
   payRequest(@Body() b: B, @CurrentUser() p: AuthPrincipal) { return this.pay.request(b, p); }
 
   @Permissions('procurement:po_payment_release:write')
+  @RequiredFlag('all.payments') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/prodfloor/payments/:id/approve')
   payApprove(@Param('id') id: string, @CurrentUser() p: AuthPrincipal) { return this.pay.approve(id, p); }
 
   @Permissions('procurement:po_payment_release:write')
+  @RequiredFlag('all.payments') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/prodfloor/payments/:id/release')
   payRelease(@Param('id') id: string, @Body() b: B, @CurrentUser() p: AuthPrincipal) { return this.pay.release(id, b, p); }
 

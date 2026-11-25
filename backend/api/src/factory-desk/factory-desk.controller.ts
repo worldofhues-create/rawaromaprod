@@ -8,7 +8,7 @@
  * older than five minutes; through the ALEMBIC relay that is the RAC OS step-up time).
  */
 import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, FreshAuth, NoStoredReply, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, FreshAuth, NoStoredReply, Permissions, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { FactoryDeskService } from './factory-desk.service.js';
 import { FactoryDeskWritesService } from './factory-desk-writes.service.js';
 
@@ -109,6 +109,7 @@ export class FactoryDeskController {
 
   @Permissions('quality:qc_inspections:write')
   @FreshAuth()
+  @RequiredFlag('qc.release') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/prodfloor/qc/batches/:id/rounds/:round/decision')
   decideQc(@Param('id', ParseUUIDPipe) id: string, @Param('round') round: string, @Body() b: Body, @CurrentUser() p: AuthPrincipal) {
     return this.writes.decideQc(id, round, b, p);

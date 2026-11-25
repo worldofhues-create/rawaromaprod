@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { randomUUID, generateKeyPairSync, sign as edSign } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { uuidv7 } from '@core/data-kernel';
-import { ConfigService, JwtService } from '@core/backend-kernel';
+import { ConfigService, DomainError, FlagsService, JwtService } from '@core/backend-kernel';
 import { AuthService } from '../auth/auth.service.js';
 import { RolePermissionResolver } from '../auth/role-permission.resolver.js';
 import { ensureSchema, orgDb, orgSchema, testClient, closeTestClient, principal } from '../../../test-support/db.js';
@@ -689,4 +689,28 @@ test('LD-261: the relay token alone cannot open POST /v1/formula-versions/:id/ac
   const ctx = (user: unknown) => ({ switchToHttp: () => ({ getRequest: () => ({ user }) }) }) as never;
   assert.throws(() => new NoRelayGuard().canActivate(ctx(principalFrom(claims.via))), (e: unknown) => (e as { status?: number }).status === 403);
   assert.equal(new NoRelayGuard().canActivate(ctx(principalFrom(undefined))), true, 'a hand-off session is judged by the route as before');
+});
+
+/* FEATURE-SWITCHES: `all.auth` is the sign-in kill-switch. Off: a Factory or Vault hand-off and every
+   refresh are refused, in words, before a jti is spent; the Platform console's hand-off still signs in
+   (it is where the switch is turned back on). On again: the same kind of assertion signs in. */
+test('all.auth off refuses a Factory sign-in and a refresh in words; the Platform console still signs in; on restores', async () => {
+  const email = `auth-switch-${sid()}@rawaroma.local`;
+  await makeActiveUser({ email, roleCode: `role-${sid()}` });
+  const config = testConfig();
+  const flags = new FlagsService();
+  flags.load([{ key: 'all.auth', state: 'off', targeting: null }]);
+  const svc = new AuthService(db, new JwtService(config), testClient(), config, flags);
+  const off = (e: unknown) => e instanceof DomainError && e.status === 503 && /Sign-in to the Factory and the Vault is switched off/.test(e.message);
+
+  const factory = signAssertion(claimsFor(email));
+  await assert.rejects(svc.loginWithAssertion(factory), off);
+  await assert.rejects(svc.refresh('any-refresh-token'), off);
+  const platform = await svc.loginWithAssertion(signAssertion(claimsFor(email, { target: 'platform' })));
+  assert.ok(platform.accessToken, 'the Platform console must stay reachable to switch sign-in back on');
+
+  flags.set({ key: 'all.auth', state: 'on', targeting: null });
+  const back = await svc.loginWithAssertion(signAssertion(claimsFor(email)));
+  assert.ok(back.accessToken);
+  await assert.rejects(svc.refresh('any-refresh-token'), (e: unknown) => e instanceof DomainError && e.status === 401, 'on again: a refresh reaches the token check');
 });

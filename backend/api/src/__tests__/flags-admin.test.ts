@@ -98,7 +98,7 @@ test('the admin list: every switch, per environment, with no history it does not
   assert.equal(list.flags.length, FLAGS.length);
   const auth = list.flags.find((f) => f.key === 'all.auth')!;
   assert.equal(auth.critical, true);
-  assert.equal(auth.description, 'Master auth kill-switch');
+  assert.match(auth.description!, /^Sign-in to the Factory and the Vault/);
   assert.deepEqual(auth.envs.map((e) => [e.env, e.state, e.set, e.changedAt, e.changedBy]), [['staging', 'on', false, null, null], ['prod', 'on', false, null, null]]);
 });
 
@@ -160,9 +160,24 @@ test('a critical switch needs a sign-in from the last five minutes', async () =>
   );
   assert.deepEqual(await counts(), before);
   // An ordinary switch asks no fresh sign-in.
-  await ctl.setFlag('ops.assignment.auto', { env: 'prod', state: 'off', reason: 'Not a RAC feature' } as never, stale);
+  await ctl.setFlag('procurement.po.approve', { env: 'prod', state: 'off', reason: 'Year-end freeze' } as never, stale);
   const fresh = await ctl.setFlag('all.auth', { env: 'prod', state: 'degraded', reason: 'Incident' } as never, principal({ userId }));
   assert.equal(fresh.unchanged, false);
+});
+
+test('admin.flags.write off refuses every change in words, except turning it back on; on restores', async () => {
+  const fresh = principal({ userId });
+  await ctl.setFlag('admin.flags.write', { env: 'staging', state: 'off', reason: 'Change freeze' } as never, fresh);
+  const before = await counts();
+  await assert.rejects(
+    ctl.setFlag('all.search', { env: 'staging', state: 'off', reason: 'Testing' } as never, fresh),
+    (e: unknown) => e instanceof DomainError && e.status === 503 && /Changing switches is itself switched off/.test(e.message),
+  );
+  assert.deepEqual(await counts(), before, 'a refused change writes nothing');
+  await ctl.setFlag('admin.flags.write', { env: 'staging', state: 'on', reason: 'Freeze over' } as never, fresh);
+  const back = await ctl.setFlag('all.search', { env: 'staging', state: 'off', reason: 'Testing again' } as never, fresh);
+  assert.equal(back.unchanged, false);
+  await ctl.setFlag('all.search', { env: 'staging', state: 'on', reason: 'Done testing' } as never, fresh);
 });
 
 test('the hash chain verifies, and an edited row is named as the first break', async () => {
@@ -191,7 +206,7 @@ test('the rollback removes only keys nobody has set', async () => {
     await tx`create table if not exists public.schema_migrations (id text primary key)`;
     await tx.unsafe(readFileSync(ROLLBACK, 'utf8'));
     const left = (await tx<{ key: string }[]>`select key from platform.flags order by key`).map((r) => r.key);
-    assert.deepEqual(left, ['all.auth', 'all.search', 'all.uploads', 'ops.assignment.auto']);
+    assert.deepEqual(left, ['admin.flags.write', 'all.auth', 'all.search', 'all.uploads', 'procurement.po.approve']);
     throw new Error('rollback-the-rollback');
   }).catch((e: Error) => { if (e.message !== 'rollback-the-rollback') throw e; });
   assert.equal((await sql`select count(*)::int as n from platform.flags`)[0]!.n, FLAGS.length);

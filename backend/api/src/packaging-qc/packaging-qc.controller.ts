@@ -3,7 +3,7 @@
  * finished-good permissions (the packaging role + owner hold them), so no new permission seed.
  */
 import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
-import { CurrentUser, Permissions, type AuthPrincipal } from '@core/backend-kernel';
+import { CurrentUser, Permissions, type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { PackagingQcService } from './packaging-qc.service.js';
 import { FgLabelService } from './fg-label.service.js';
 import { ProductDgService } from './product-dg.service.js';
@@ -29,6 +29,7 @@ export class PackagingQcController {
   }
 
   @Permissions('packaging:finished_good_batch_master:write')
+  @RequiredFlag('qc.release') // FEATURE-SWITCHES: a finished-goods QC result releases the batch (packaging-release.service.ts)
   @Post('v1/packaging-qc')
   create(@Body() body: Record<string, unknown>, @CurrentUser() principal: AuthPrincipal) {
     return this.svc.create(body, principal);

@@ -8,8 +8,7 @@ import {
   CurrentUser,
   Permissions,
   ZodValidationPipe,
-  type AuthPrincipal,
-} from '@core/backend-kernel';
+  type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { PoService } from './po.service.js';
 import {
   acknowledgePurchaseOrder,
@@ -60,6 +59,7 @@ export class PoController {
   }
 
   @Permissions('procurement:purchase_order:write')
+  @RequiredFlag('procurement.po.approve') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/purchase-orders/:id/approve')
   approvePurchaseOrder(
     @Param('id') id: string,

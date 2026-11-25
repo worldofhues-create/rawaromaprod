@@ -8,8 +8,7 @@ import {
   CurrentUser,
   Permissions,
   ZodValidationPipe,
-  type AuthPrincipal,
-} from '@core/backend-kernel';
+  type AuthPrincipal, RequiredFlag } from '@core/backend-kernel';
 import { BatchService } from './batch.service.js';
 import {
   createBatchContainerMapping,
@@ -52,6 +51,7 @@ export class BatchController {
   }
 
   @Permissions('inventory:rm_batch_master:write')
+  @RequiredFlag('qc.release') // FEATURE-SWITCHES: refused, in words, while the switch is off
   @Post('v1/rm-batches/:id/release')
   releaseRmBatch(
     @Param('id') id: string,
