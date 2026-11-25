@@ -170,6 +170,24 @@ keeps the decrypt out; with the mark, RawProd refuses it as well (two independen
   version, 422 validation, 200 for `compliance/missing`). Password sign-in answers 403 "Password sign-in is
   retired", so the hand-off is the only RawProd session there is.
 
+## Platform switches (FEATURE-SWITCHES, 26 Nov): the RAC OS Platform console's third door
+
+RAC OS `GET|PUT /api/v1/rawprod/*` (door `console.studio.platform`, assertion target `platform`, main box).
+Same rules as above: envelope, `IdempotencyInterceptor`, `WriteAuditInterceptor`, 403 `AUTH_STEP_UP_REQUIRED`
+mapped to 428 by the relay.
+
+| # | Console call | Method + RawProd path | Permission | Step-up | Idem. | Request | Response (`data`) | Status |
+|---|---|---|---|---|---|---|---|---|
+| P1 | readRpFlagsSnapshot | GET `/v1/flags/snapshot` | public | no | n/a | none | `{portal:"all", flags:[{key, state, targeting}], version}` for THIS process's `APP_ENV` only | REUSED |
+| P2 | readRpFlags | GET `/v1/admin/flags` | platform:flag:write (owner, platform_super_admin) | no | n/a | none | `{env, version, flags:[{key, description, critical, defaultState, envs:[{env: "staging"\|"prod", state: "on"\|"off"\|"degraded", set, changedAt, changedBy, from, reason}]}]}`; `changedBy` is the RawProd account's email (else its name), `set:false` = never set there, the default applies | BUILT |
+| P3 | flagSet | PUT `/v1/admin/flags/:key` | platform:flag:write | critical keys only (300 s, checked per key) | yes | `{env, state, reason}` (reason at least 3 characters; `targeting` is not forwarded by the relay) | `{key, state, targeting, env, unchanged}`; 404 in words for a key not registered; `unchanged: true` and nothing written when the state is already that | BUILT (was 500 on every call: the registry was never registered) |
+
+Every change is written in one transaction: `platform.flag_states`, `platform.flag_audit` (reason), a
+hash-chained `platform.audit_events` row (`action = 'flag.update'`, `chain_seq`/`prev_hash`/`row_hash`,
+`backend/cluster-platform/src/flags/flag-chain.ts`) and the `platform.flag.changed` outbox event. The registry is
+registered by `scripts/migrations/2026-11-29-flags-register.sql`, every key `on` (an unregistered key already read
+as on at the edge, so registering changes nothing). Tests: `backend/api/src/__tests__/flags-admin.test.ts`.
+
 ## State
 
 Built and tested: F1-F15, F18, W-F2, W-F4, W-F5, W-F8, W-F10, W-F11, W-F12, W-F15, W-F19, V1, V2, V4 (=F11), W-V6,

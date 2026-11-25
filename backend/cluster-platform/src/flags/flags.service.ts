@@ -14,8 +14,9 @@ import {
   Logger,
   type OnModuleInit,
 } from '@nestjs/common';
-import { and, eq } from 'drizzle-orm';
+import { and, desc, eq, isNotNull, sql } from 'drizzle-orm';
 import {
+  DomainError,
   EventBus,
   FlagsService as SnapshotService,
   PLATFORM_DB,
@@ -30,8 +31,36 @@ import {
   type FlagState,
 } from '@core/contracts';
 import { uuidv7 } from '@core/data-kernel';
+import { FLAG_CHAIN_ACTION, FLAG_CHAIN_ENTITY, FLAG_CHAIN_LOCK, chainHash, stableJson } from './flag-chain.js';
 
 type Env = 'staging' | 'prod';
+/** The environments a switch has a state in (the contract's `setFlagRequest.env`). */
+export const FLAG_ENVS: readonly Env[] = ['staging', 'prod'];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/** The set's answer: the snapshot entry, the environment it was set in, and whether anything moved. */
+export interface SetFlagResult extends FlagSnapshot {
+  env: Env;
+  unchanged: boolean;
+}
+
+export interface AdminFlagEnv {
+  env: Env;
+  state: FlagState;
+  /** false: no state was ever set in this environment, so the registry's default applies. */
+  set: boolean;
+  changedAt: string | null;
+  changedBy: string | null;
+  from: FlagState | null;
+  reason: string | null;
+}
+
+export interface AdminFlagsResponse {
+  /** The environment THIS process enforces (APP_ENV). */
+  env: Env;
+  version: string;
+  flags: Array<{ key: string; description: string | null; critical: boolean; defaultState: FlagState; envs: AdminFlagEnv[] }>;
+}
 
 export interface SetFlagInput {
   env: Env;
@@ -82,38 +111,54 @@ export class PlatformFlagsService implements OnModuleInit {
 
   /**
    * Admin mutation of a flag state (`PUT /admin/flags/:key`). Atomic upsert + audit +
-   * outbox, then synchronous in-memory push. Critical-flag 2FA step-up is enforced at
-   * the controller/guard layer (doc 05 §0.1); this assumes the caller is authorised.
+   * hash-chained audit + outbox, then synchronous in-memory push.
+   *
+   * FEATURE-SWITCHES: three things this used to get wrong, each of which reached a screen.
+   *   - An unknown key threw a bare `Error`, which the exception filter answers 500 with no
+   *     words: the RAC OS Platform console said "the factory could not answer" for what is a
+   *     plain refusal. It is a 404 naming the key now.
+   *   - Setting a switch to the state it already holds wrote a second audit row and a second
+   *     `platform.flag.changed` event for a change that did not happen. It now answers the
+   *     state as it stands with `unchanged: true` and writes nothing.
+   *   - The change was recorded only in `flag_audit`, an ordinary table. It is also appended to
+   *     the platform schema's hash chain (flag-chain.ts) in the same transaction, so a row that is
+   *     edited or deleted afterwards is detectable.
+   * A critical key (`is_critical`, the registry's `critical: true`) needs a fresh sign-in, which
+   * the controller checks before this runs (`critical()`).
    */
-  async setFlag(key: string, input: SetFlagInput, actorId: string): Promise<FlagSnapshot> {
-    const { flags, flagStates, flagAudit, outbox } = platformSchema;
+  async setFlag(key: string, input: SetFlagInput, actorId: string): Promise<SetFlagResult> {
+    const { flags, flagStates, flagAudit, outbox, auditEvents } = platformSchema;
 
     const flagRow = (
       await this.db.select({ id: flags.id }).from(flags).where(eq(flags.key, key)).limit(1)
     )[0];
     if (!flagRow) {
       // Auto-register unknown keys is intentionally NOT done here — keys come from the
-      // contracts registry seed. Surface a clear conflict instead.
-      throw new Error(`Unknown flag key: ${key}`);
+      // contracts registry (scripts/migrations/2026-11-29-flags-register.sql registers them).
+      throw DomainError.notFound(`There is no switch called "${key}" on this system, so nothing was changed.`);
     }
 
     const targeting = input.targeting ?? null;
+    const reason = input.reason.trim();
+    const actor = UUID.test(actorId) ? actorId : null;
 
-    await this.db.transaction(async (tx) => {
+    const changed = await this.db.transaction(async (tx) => {
       const existing = (
         await tx
-          .select({ id: flagStates.id, state: flagStates.state })
+          .select({ id: flagStates.id, state: flagStates.state, targeting: flagStates.targeting })
           .from(flagStates)
           .where(and(eq(flagStates.flagId, flagRow.id), eq(flagStates.env, input.env)))
           .limit(1)
+          .for('update')
       )[0];
 
       const oldState = existing?.state ?? null;
+      if (existing && oldState === input.state && stableJson(existing.targeting ?? null) === stableJson(targeting)) return false;
 
       if (existing) {
         await tx
           .update(flagStates)
-          .set({ state: input.state, targeting })
+          .set({ state: input.state, targeting, updatedAt: new Date(), updatedBy: actor })
           .where(eq(flagStates.id, existing.id));
       } else {
         await tx.insert(flagStates).values({
@@ -122,17 +167,50 @@ export class PlatformFlagsService implements OnModuleInit {
           env: input.env,
           state: input.state,
           targeting,
+          createdBy: actor,
+          updatedBy: actor,
         });
       }
 
+      const at = new Date();
       await tx.insert(flagAudit).values({
         id: uuidv7(),
         flagId: flagRow.id,
         env: input.env,
         oldState,
         newState: input.state,
-        reason: input.reason,
-        actorId,
+        reason,
+        actorId: actor,
+        at,
+      });
+
+      /* The hash chain: one lock for every append, the head read under it, the row hashed with
+         the sequence it takes. */
+      await tx.execute(sql`select pg_advisory_xact_lock(${FLAG_CHAIN_LOCK})`);
+      const head = (
+        await tx
+          .select({ chainSeq: auditEvents.chainSeq, rowHash: auditEvents.rowHash })
+          .from(auditEvents)
+          .where(isNotNull(auditEvents.chainSeq))
+          .orderBy(desc(auditEvents.chainSeq))
+          .limit(1)
+      )[0];
+      const prevHash = head?.rowHash ?? null;
+      const row = {
+        chainSeq: (head?.chainSeq ?? 0n) + 1n,
+        occurredAt: at,
+        actorId: actor,
+        action: FLAG_CHAIN_ACTION,
+        entityType: FLAG_CHAIN_ENTITY,
+        entityId: flagRow.id,
+        before: { key, env: input.env, state: oldState },
+        after: { key, env: input.env, state: input.state, reason },
+      };
+      await tx.insert(auditEvents).values({
+        id: uuidv7(),
+        ...row,
+        prevHash,
+        rowHash: chainHash(prevHash, row),
       });
 
       await recordOutbox(
@@ -142,12 +220,76 @@ export class PlatformFlagsService implements OnModuleInit {
         { key, env: input.env, state: input.state },
         flagRow.id,
       );
+      return true;
     });
 
     const updated: FlagSnapshot = { key, state: input.state, targeting };
+    if (!changed) return { ...updated, env: input.env, unchanged: true };
     // Synchronous in-memory push for THIS env so the edge reflects it immediately.
     if (input.env === this.env) this.snapshot.set(updated);
-    return updated;
+    return { ...updated, env: input.env, unchanged: false };
+  }
+
+  /** Whether a registered key is critical (null when the key is not registered). */
+  async critical(key: string): Promise<boolean | null> {
+    const { flags } = platformSchema;
+    const row = (await this.db.select({ c: flags.isCritical }).from(flags).where(eq(flags.key, key)).limit(1))[0];
+    return row ? row.c === true : null;
+  }
+
+  /**
+   * FEATURE-SWITCHES: `GET /v1/admin/flags`, every registered switch as an owner reads it. The
+   * public snapshot carries only key, state and targeting for THIS process's environment, which is
+   * what the edge needs and all a sign-in page may see; the RAC OS Platform console needs to say,
+   * per switch, what it does, whether it is critical, and per environment its state, who last
+   * changed it, when and why. Nothing here is derived: a state never set reads the registry's
+   * default with `changedAt: null`, and the screen says so rather than inventing a history.
+   */
+  async adminList(): Promise<AdminFlagsResponse> {
+    const { flags, flagStates } = platformSchema;
+    const defs = await this.db
+      .select({ id: flags.id, key: flags.key, description: flags.description, critical: flags.isCritical, defaultState: flags.defaultState })
+      .from(flags)
+      .orderBy(flags.key);
+    const states = await this.db
+      .select({ flagId: flagStates.flagId, env: flagStates.env, state: flagStates.state })
+      .from(flagStates);
+    const last = (await this.db.execute(sql`
+      select distinct on (a.flag_id, a.env)
+             a.flag_id::text as flag_id, a.env, a.old_state, a.new_state, a.reason, a.actor_id::text as actor_id,
+             a.at, u.email, u.user_name
+        from platform.flag_audit a
+        left join iam.user_master u on u.user_id = a.actor_id
+       order by a.flag_id, a.env, a.at desc, a.id desc
+    `)) as unknown as Array<{
+      flag_id: string; env: string; old_state: string | null; new_state: string; reason: string;
+      actor_id: string | null; at: Date | string; email: string | null; user_name: string | null;
+    }>;
+    const stateOf = new Map(states.map((s) => [`${s.flagId}|${s.env}`, s.state]));
+    const lastOf = new Map(last.map((a) => [`${a.flag_id}|${a.env}`, a]));
+    return {
+      env: this.env,
+      version: this.snapshot.versionTag,
+      flags: defs.map((f) => ({
+        key: f.key,
+        description: f.description ?? null,
+        critical: f.critical === true,
+        defaultState: normalizeState(f.defaultState),
+        envs: FLAG_ENVS.map((env) => {
+          const st = stateOf.get(`${f.id}|${env}`);
+          const a = lastOf.get(`${f.id}|${env}`);
+          return {
+            env,
+            state: normalizeState(st ?? f.defaultState),
+            set: st !== undefined,
+            changedAt: a ? new Date(a.at).toISOString() : null,
+            changedBy: a ? a.email || a.user_name || null : null,
+            from: a ? (a.old_state === null ? null : normalizeState(a.old_state)) : null,
+            reason: a ? a.reason : null,
+          };
+        }),
+      })),
+    };
   }
 
   /**

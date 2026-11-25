@@ -3716,3 +3716,57 @@ alter table quality.batch_qc_round add column if not exists decided_dt         t
 alter table quality.batch_qc_round add column if not exists decision_reason    text;
 alter table quality.batch_qc_round add column if not exists overrides_proposal boolean;
 
+
+-- FEATURE-SWITCHES (2026-11-29): the kill-switch control plane, scripts/migrations/0002_platform.sql's
+-- platform.flags, flag_states, flag_audit and platform.outbox (gen_random_uuid() for uuidv7(), as
+-- everywhere in this harness). The registry rows come from 2026-11-29-flags-register.sql, which the
+-- flags test applies itself.
+create table if not exists platform.flags (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid,
+  updated_by uuid,
+  key text not null,
+  description text,
+  kind text not null default 'boolean',
+  is_critical boolean not null default false,
+  default_state text not null default 'off'
+);
+create unique index if not exists flags_key_uq on platform.flags (key);
+create table if not exists platform.flag_states (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid,
+  updated_by uuid,
+  flag_id uuid not null references platform.flags (id) on delete cascade,
+  env text not null,
+  state text not null,
+  targeting jsonb
+);
+create unique index if not exists flag_states_flag_env_uq on platform.flag_states (flag_id, env);
+create table if not exists platform.flag_audit (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  created_by uuid,
+  updated_by uuid,
+  flag_id uuid not null references platform.flags (id) on delete cascade,
+  env text not null,
+  old_state text,
+  new_state text not null,
+  reason text not null,
+  actor_id uuid,
+  at timestamptz not null default now()
+);
+create table if not exists platform.outbox (
+  id uuid primary key default gen_random_uuid(),
+  type text not null,
+  payload jsonb not null,
+  aggregate_id uuid,
+  occurred_at timestamptz not null default now(),
+  published_at timestamptz,
+  attempts integer not null default 0,
+  seq bigint generated always as identity
+);
