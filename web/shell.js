@@ -142,15 +142,16 @@
     if (r.status === 413) json = { error: { message: 'That file is too large to send.' } };
     return { status: r.status, json: json };
   }
-  // Tiny registration API for the ws-*.js workspace modules (scaffolding for future lanes —
-  // U2/U3/U4 restyling Procurement/Receiving/Warehouse, QC/Production/Packaging/Dispatch, and
-  // Platform/Vault respectively). Not wired into the render path yet: today's view dispatch is
-  // still the generic endpoint-driven engine below (ROLES/COLS/ACTIONS/CREATE + loadView), so
-  // registering here is inert and changes no behaviour. It exists so those lanes have a single,
-  // non-colliding place to declare per-workspace view renderers as they build them.
+  // The ws-*.js workspace modules register their own screens here, each under the `__name__`
+  // sentinel its nav item carries (ws-floor-ops.js, ws-floorb.js, ws-floor.js, ws-formula-setup.js,
+  // ws-produce.js ...). loadView() below dispatches a sentinel nav item to its registered renderer;
+  // every other nav item goes through the generic endpoint-driven engine (ROLES/COLS/ACTIONS/CREATE).
+  // B09 (STUB-079): this used to call the registry unwired and inert, which stopped being true
+  // when loadView() began dispatching sentinels; the one registration that never could render
+  // (tutorial.js under the bare key `tutorial`) and the unread `views` export are gone.
   var RA_VIEWS = {};
   function registerViews(map) { Object.keys(map || {}).forEach(function (k) { RA_VIEWS[k] = map[k]; }); }
-  window.RA = { tunnel: tunnel, uploadFile: uploadFile, registerViews: registerViews, views: RA_VIEWS };
+  window.RA = { tunnel: tunnel, uploadFile: uploadFile, registerViews: registerViews };
 
   /* ---------------- design system ----------------
    * RawProd previously offered a neumorphic/glass/skeuomorphic "skin" picker plus a light/dark
@@ -2449,8 +2450,7 @@
     // one (index.html) — by the time this branch can actually run (a nav click, always after
     // boot()), that script has already executed and the global exists. `typeof` (never a bare
     // reference) so a build that dropped tutorial.js degrades to an honest message instead of a
-    // ReferenceError. RA_VIEWS/registerViews (this file's window.RA hook) is NOT wired into this
-    // render path yet (see that var's own comment above) — this is the real dispatch.
+    // ReferenceError. Tutorials are dispatched here, by name, not through RA_VIEWS.
     if (item[3] === '__tutorial__') { return (typeof loadTutorialView === 'function') ? loadTutorialView() : ($('ra-view').innerHTML = errBox('Tutorials are not available right now. Try again later.')); }
     // Lane produce: a workspace module (ws-produce.js) renders its own sentinel views
     // (__produce__, __shelftasks__, __racklayout__, __shelfdisplay__) through RA_VIEWS.

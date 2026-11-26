@@ -330,9 +330,6 @@
     };
   }
 
-  // Inert scaffolding hook (shell.js:83-91) — kept for the future render path that comment
-  // describes; today's actual dispatch is the explicit `__tutorial__` check loadView() carries
-  // (shell.js), since RA_VIEWS is not wired into rendering yet.
-  if (window.RA && typeof window.RA.registerViews === 'function') {
-    window.RA.registerViews({ tutorial: loadTutorialView });
-  }
+  // shell.js loadView() opens this view through its explicit `__tutorial__` check; nothing here
+  // registers with RA_VIEWS (B09, STUB-079: the bare `tutorial` key it used to register could
+  // never be dispatched, since only `__name__` sentinels are).
