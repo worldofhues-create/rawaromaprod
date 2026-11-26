@@ -206,6 +206,21 @@ Off, each refuses 503 `FEATURE_DISABLED` with its registry sentence (`whenOff`):
 Not added: an outbound-bridge switch (the bridge connector's own `enabled` setting already holds events queued, not
 dropped; a second switch would be a second rule). Proved by `backend/api/src/__tests__/flags-wired.test.ts`.
 
+## Platform readings (B09, STUB-075, 26 Nov): the five RAC OS asked for and this box did not serve
+
+Same door (`console.studio.platform`, target `platform`, main box). All five are behind `platformops:console:read`
+(owner, platform_super_admin), read only, paged where they list, and carry no secret, address, payload or person.
+Code: `backend/api/src/platform-ops/` (`platform-reads.service.ts`, `health-sampler.service.ts`, `audit-chain.ts`).
+Tests: `backend/api/src/__tests__/b09-platform-reads.test.ts`.
+
+| # | Console call | Method + RawProd path | Query | Response (`data`) |
+|---|---|---|---|---|
+| P4 | readRpVaultHealth | GET `/v1/platform/vault-health` | none | `{configured, reachable, status: "ok"\|"degraded"\|null, deps: {name: "up"\|"down"}, httpStatus, latencyMs, at, note}`: the main box asks the Vault's own `GET /health` over `VAULT_API_INTERNAL_URL` (3 s); never the address |
+| P5 | readRpHealthSamples | GET `/v1/platform/health/samples` | `limit` (7, max 2880), `cursor` (newest samples to skip) | `{intervalSeconds: 30, keptFor, since, held, at[], services[], servicesTotal[], outboxLagSeconds[], devicesOffline[], nextCursor, note}`, oldest first; held in the process's memory, a restart starts again; a figure not read is null |
+| P6 | readRpOutbox | GET `/v1/bridge/outbox` | `state` (parked\|all), `q` (event type, letters digits . _ -), `cursor` (offset), `limit` (12, max 100) | `{state, events: [{id, type, aggregateId, occurredAt, publishedAt, state, attempts, parkedAt, parkedReason, lastHttpStatus, lastError}], total, parkedTotal, nextCursor}`; `lastError` only as `http_<status>: <CODE>` or `network` |
+| P7 | readRpAuditChain | GET `/v1/platform/audit-chain` | `cursor` (offset), `limit` (12, max 60) | `{chain, algorithm, rows, headSeq, headHash, segments: [{month (IST), entries, firstSeq, lastSeq, firstAt, lastAt, firstHash, lastHash, verified, firstBadSeq, reason}], total, nextCursor, verifiedAt, note}`; each month walked on the read |
+| P8 | verifyAuditChain | POST `/v1/platform/audit-chain/verify` | none (no body, no Idempotency-Key needed) | `{ok, rows, headSeq?, firstBadSeq?, reason?, month?, verifiedAt, note}`, 200; walks from entry 1 in batches of 1000; repairs nothing |
+
 ## State
 
 Built and tested: F1-F15, F18, W-F2, W-F4, W-F5, W-F8, W-F10, W-F11, W-F12, W-F15, W-F19, V1, V2, V4 (=F11), W-V6,

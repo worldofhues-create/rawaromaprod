@@ -7,14 +7,18 @@
 import { Module } from '@nestjs/common';
 import { ClusterOrgModule } from '@ra/cluster-org';
 import { BridgeModule } from '../bridge/bridge.module.js';
-import { PlatformOpsController } from './platform-ops.controller.js';
+import { PlatformOpsController, PlatformOutboxController } from './platform-ops.controller.js';
 import { PlatformOpsService } from './platform-ops.service.js';
 import { BridgeHealthService } from './bridge-health.service.js';
+import { PlatformReadsService } from './platform-reads.service.js';
+import { HealthSamplerService } from './health-sampler.service.js';
 import { ShelfModule } from '../shelf/shelf.module.js';
 
 @Module({
   imports: [ClusterOrgModule, BridgeModule, ShelfModule],
-  controllers: [PlatformOpsController],
-  providers: [PlatformOpsService, BridgeHealthService],
+  controllers: [PlatformOpsController, PlatformOutboxController],
+  /* B09: PlatformReadsService (vault link, outbox list, audit chain and its verify) and the
+     in-memory health sampler behind the tiles' history. */
+  providers: [PlatformOpsService, BridgeHealthService, PlatformReadsService, HealthSamplerService],
 })
 export class PlatformOpsModule {}
